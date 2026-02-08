@@ -2,224 +2,224 @@
 
 > **FUGUE** = **F**ederated **U**nified **G**overnance for **U**niversal **E**xecution
 >
-> Distributed autonomy x Unified convergence
+> 分散自律 x 統合収束
 
-A multi-model AI orchestration framework for Claude Code that delegates tasks to specialized AI agents (Codex/GPT, GLM, Gemini, Grok) while keeping Claude as a pure orchestrator.
+Claude Code 向けのマルチモデル AI オーケストレーションフレームワーク。Claude を純粋なオーケストレーターに徹させ、タスク実行は専門 AI エージェント（Codex/GPT, GLM, Gemini, Grok）に委譲します。
 
-The name draws from the musical fugue -- multiple independent voices weaving together into a unified whole. Each AI model is a voice; the orchestrator ensures harmony.
+名前は音楽のフーガに由来します。複数の独立した声部が織り合わさり、ひとつの統一された全体を形成する。各 AI モデルが声部であり、オーケストレーターが調和を保証します。
 
-## Problem
+## 課題
 
-Claude Code's Agent Teams feature introduces rate limits that are lower than expected. Running everything through Claude (subagents, planning, execution) burns through limits quickly.
+Claude Code の Agent Teams 機能はレートリミットが想定より低い閾値で発生します。サブエージェント・計画・実行をすべて Claude で回すと、すぐにリミットに到達します。
 
-## Solution
+## 解決策
 
-**2-Layer Orchestration**: Claude Opus acts solely as an orchestrator (routing, integration, reporting). All individual task execution is delegated to external models with fixed-cost subscriptions.
-
-```
-User
-    |  instruction
-Claude Opus (Orchestrator only)
-    |  routing
-+-----------------------------------+
-| Execution Tier                    |
-| +-> Codex (code, design, security)|
-| +-> GLM   (review, summary, math) |
-| +-> Gemini (UI/UX evaluation)     |
-| +-> Grok  (X/Twitter, realtime)   |
-| +-> Pencil MCP (UI development)   |
-+-----------------------------------+
-    |  artifacts
-+-----------------------------------+
-| Evaluation Tier (auto)            |
-| +-> GLM   (code quality)          |
-| +-> Codex (security audit)        |
-| +-> Gemini (UI/UX audit)          |
-+-----------------------------------+
-    |  feedback
-Claude Opus (integrate & report)
-```
-
-## Key Principles
-
-- **Orchestrator never executes**: Claude routes, integrates, and reports. Never implements.
-- **Fixed-cost maximization**: Codex ($200/mo) and GLM ($15/mo) handle 90%+ of tasks.
-- **Subagent minimization**: Haiku/Sonnet subagents consume Claude rate limit. Only used for file exploration.
-- **Dual-tier evaluation**: Artifacts pass through automated review before reporting to user.
-
-## File Structure
+**2層オーケストレーション**: Claude Opus はオーケストレーター（ルーティング・統合・報告）に専念。個別タスクの実行は固定費サブスクリプションの外部モデルに委譲。
 
 ```
-CLAUDE.md                              <- Entry point (copy to ~/.claude/)
+ユーザー
+    |  指示
+Claude Opus（オーケストレーター専念）
+    |  ルーティング
++-----------------------------------+
+| 実行層 (Execution Tier)           |
+| +-> Codex (コード, 設計, セキュリティ) |
+| +-> GLM   (レビュー, 要約, 数学)  |
+| +-> Gemini (UI/UX評価)           |
+| +-> Grok  (X/Twitter, リアルタイム) |
+| +-> Pencil MCP (UI開発)          |
++-----------------------------------+
+    |  成果物
++-----------------------------------+
+| 評価層 (Evaluation Tier) [自動]   |
+| +-> GLM   (コード品質)           |
+| +-> Codex (セキュリティ監査)      |
+| +-> Gemini (UI/UX監査)           |
++-----------------------------------+
+    |  フィードバック
+Claude Opus（統合・報告）
+```
+
+## 基本原則
+
+- **オーケストレーターは実行しない**: Claude はルーティング・統合・報告のみ。実装は禁止。
+- **固定費の最大活用**: Codex ($200/月) と GLM ($15/月) で90%以上のタスクを処理。
+- **サブエージェント最小化**: Haiku/Sonnet サブエージェントは Claude レートリミットを消費するため、ファイル探索のみに限定。
+- **二重評価**: 成果物はユーザーに報告する前に自動レビューを通過。
+
+## ファイル構成
+
+```
+CLAUDE.md                              <- エントリーポイント（~/.claude/ にコピー）
 rules/
-  delegation-matrix.md                 <- SSOT: who handles what
-  auto-execution.md                    <- Auto-delegation triggers
-  delegation-flow.md                   <- How delegation works
-  codex-usage.md                       <- Codex-specific guide
-  dangerous-permission-consensus.md    <- 3-party consensus for risky ops
-  coding-style.md                      <- Code quality rules
-  testing.md                           <- TDD rules
-  security.md                          <- Security checklist
-  performance.md                       <- Model selection & optimization
-  secrets-management.md                <- API key management
+  delegation-matrix.md                 <- SSOT: 誰が何を担当するか
+  auto-execution.md                    <- 自動委譲トリガー
+  delegation-flow.md                   <- 委譲プロセスの詳細
+  codex-usage.md                       <- Codex 使用ガイド
+  dangerous-permission-consensus.md    <- 危険操作の3者合議制
+  coding-style.md                      <- コーディング規約
+  testing.md                           <- TDD ルール
+  security.md                          <- セキュリティチェックリスト
+  performance.md                       <- モデル選択・最適化
+  secrets-management.md                <- API キー管理
 examples/
-  delegate-stub.js                     <- Minimal delegation script (Codex/GLM/Gemini)
-  parallel-delegation.sh               <- Parallel code-review + security-audit
-  consensus-vote-stub.sh               <- 3-party consensus voting demo
+  delegate-stub.js                     <- 最小委譲スクリプト（Codex/GLM/Gemini対応）
+  parallel-delegation.sh               <- 並列コードレビュー + セキュリティ監査
+  consensus-vote-stub.sh               <- 3者合議制デモ
 docs/
-  ADR-001-why-fugue.md                 <- Architecture Decision Record: why FUGUE exists
+  ADR-001-why-fugue.md                 <- アーキテクチャ決定記録: なぜ FUGUE なのか
 ```
 
-## Prerequisites
+## 前提条件
 
-| Service | Purpose | Cost |
-|---------|---------|------|
-| Claude Code (MAX plan) | Orchestrator | Subscription |
-| OpenAI Codex / GPT Pro | Code execution, design, security | $200/mo |
-| GLM-4.7 (ZhipuAI) | Lightweight review, summary, math | $15/mo |
-| Gemini (Google AI) | UI/UX evaluation, image analysis | Pay-as-you-go |
-| Grok (xAI) | X/Twitter, realtime info | API-based |
+| サービス | 用途 | コスト |
+|---------|------|--------|
+| Claude Code (MAX プラン) | オーケストレーター | サブスクリプション |
+| OpenAI Codex / GPT Pro | コード実行, 設計, セキュリティ | $200/月 |
+| GLM-4.7 (ZhipuAI) | 軽量レビュー, 要約, 数学 | $15/月 |
+| Gemini (Google AI) | UI/UX 評価, 画像分析 | 従量課金 |
+| Grok (xAI) | X/Twitter, リアルタイム情報 | API 課金 |
 
-## Quick Start
+## クイックスタート
 
 ```bash
-# 1. Clone
+# 1. クローン
 git clone https://github.com/cursorvers/fugue-orchestrator.git
 cd fugue-orchestrator
 
-# 2. Copy rules to Claude Code config
+# 2. ルールを Claude Code 設定にコピー
 cp CLAUDE.md ~/.claude/CLAUDE.md
 cp -r rules/ ~/.claude/rules/
 
-# 3. Set API keys
+# 3. API キーを設定
 export OPENAI_API_KEY="your-openai-key"
 export GLM_API_KEY="your-glm-key"
 export GEMINI_API_KEY="your-gemini-key"
 
-# 4. Test delegation (uses examples/delegate-stub.js)
+# 4. 委譲テスト（examples/delegate-stub.js を使用）
 node examples/delegate-stub.js -a code-reviewer -t "Review this function" -p glm
 
-# 5. Test parallel evaluation
+# 5. 並列評価テスト
 chmod +x examples/parallel-delegation.sh
 ./examples/parallel-delegation.sh "Review auth module" src/auth.ts
 
-# 6. Test consensus voting
+# 6. 合議制テスト
 chmod +x examples/consensus-vote-stub.sh
 ./examples/consensus-vote-stub.sh "rm -rf ./build" "Clean build artifacts"
 ```
 
-## Delegation Scripts
+## 委譲スクリプト
 
-The `examples/` directory provides stub implementations you can use as starting points:
+`examples/` ディレクトリにスタブ実装があります:
 
-| Script | Purpose | Providers |
-|--------|---------|-----------|
-| `delegate-stub.js` | Single delegation to any provider | Codex, GLM, Gemini |
-| `parallel-delegation.sh` | Parallel code-review + security-audit | GLM + Codex |
-| `consensus-vote-stub.sh` | 3-party consensus for dangerous ops | Claude + Codex + GLM |
+| スクリプト | 用途 | プロバイダ |
+|-----------|------|-----------|
+| `delegate-stub.js` | 単一プロバイダへの委譲 | Codex, GLM, Gemini |
+| `parallel-delegation.sh` | 並列コードレビュー + セキュリティ監査 | GLM + Codex |
+| `consensus-vote-stub.sh` | 危険操作の3者合議制 | Claude + Codex + GLM |
 
-For production use, copy these to `~/.claude/skills/orchestra-delegator/scripts/` and customize:
+本番利用時は `~/.claude/skills/orchestra-delegator/scripts/` にコピーしてカスタマイズ:
 ```
 ~/.claude/skills/orchestra-delegator/scripts/
-  delegate.js        # Based on delegate-stub.js -p codex
-  delegate-glm.js    # Based on delegate-stub.js -p glm
-  delegate-gemini.js # Based on delegate-stub.js -p gemini
-  parallel-codex.js  # Based on parallel-delegation.sh
-  consensus-vote.js  # Based on consensus-vote-stub.sh
+  delegate.js        # delegate-stub.js -p codex ベース
+  delegate-glm.js    # delegate-stub.js -p glm ベース
+  delegate-gemini.js # delegate-stub.js -p gemini ベース
+  parallel-codex.js  # parallel-delegation.sh ベース
+  consensus-vote.js  # consensus-vote-stub.sh ベース
 ```
 
-## Architecture Decision
+## アーキテクチャ決定記録
 
-See [ADR-001: Why FUGUE Exists](docs/ADR-001-why-fugue.md) for the full rationale, including comparison with AutoGen, CrewAI, LangGraph, and Agent Teams.
+競合比較（AutoGen, CrewAI, LangGraph, Agent Teams）を含む設計根拠の詳細は [ADR-001: Why FUGUE Exists](docs/ADR-001-why-fugue.md) を参照。
 
-## FUGUE Orchestration vs. Claude Code Agent Teams
+## FUGUE オーケストレーション vs. Claude Code Agent Teams
 
-FUGUE and Agent Teams are complementary, not competing. The key difference is **where computation happens** and **what consumes rate limits**.
+FUGUE と Agent Teams は補完関係にあり、競合ではありません。核心的な違いは**計算がどこで行われるか**と**何がレートリミットを消費するか**です。
 
-### Fundamental Difference
+### 根本的な違い
 
-|  | FUGUE Orchestration | Agent Teams |
-|--|---------------------|-------------|
-| **Executors** | Codex / GLM / Gemini (external APIs) | Multiple Claude instances |
-| **Cost model** | Fixed-cost ($200+$15/mo) | Claude rate limit consumption |
-| **Communication** | Claude -> External -> Claude | Members communicate directly |
-| **Best for** | Daily tasks (95%) | Special parallel-coordination tasks (5%) |
+|  | FUGUE オーケストレーション | Agent Teams |
+|--|--------------------------|-------------|
+| **実行者** | Codex / GLM / Gemini（外部API） | 複数の Claude インスタンス |
+| **コストモデル** | 固定費（$200+$15/月） | Claude レートリミット消費 |
+| **通信** | Claude → 外部 → Claude | メンバー同士が直接通信 |
+| **適用場面** | 日常タスク（95%） | 特殊な並列協調タスク（5%） |
 
-### Decision Flow
+### 判断フロー
 
 ```
-Task received
+タスク受領
     |
-Does this need direct member-to-member communication?
-+- No (95%) -> FUGUE (delegate to Codex/GLM)
-+- Yes (5%) -> Further evaluation
+メンバー間の直接通信が必要？
++- No（95%）→ FUGUE（Codex/GLM に委譲）
++- Yes（5%）→ さらに判断
     |
-    Can Codex/GLM parallel execution substitute?
-    +- Yes -> FUGUE (parallel-codex.js etc.)
-    +- No  -> Agent Teams
+    Codex/GLM の並列実行で代替可能？
+    +- Yes → FUGUE（parallel-codex.js 等）
+    +- No  → Agent Teams
 ```
 
-### When to Use FUGUE (Default)
+### FUGUE を使う場面（デフォルト）
 
-- Code review -> Codex/GLM
-- Design decisions -> Codex architect
-- Security analysis -> Codex security-analyst
-- Summarization/translation -> GLM
-- UI development -> Pencil MCP
-- UI evaluation -> Gemini
+- コードレビュー → Codex/GLM
+- 設計判断 → Codex architect
+- セキュリティ分析 → Codex security-analyst
+- 要約・翻訳 → GLM
+- UI 開発 → Pencil MCP
+- UI 評価 → Gemini
 
-**Why**: Stays within fixed costs. Does not consume Claude rate limits.
+**理由**: 固定費内で収まる。Claude レートリミットを消費しない。
 
-### When to Use Agent Teams (Limited)
+### Agent Teams を使う場面（限定的）
 
-| Scenario | Why Agent Teams Wins |
-|----------|---------------------|
-| Large codebase exploration | 5 members investigate different directories simultaneously, sharing discoveries |
-| Competing hypothesis debugging | "Auth issue?" vs "DB connection?" investigated in parallel with real-time info sharing |
-| Cross-layer implementation | Frontend / backend / tests written by different members, checking consistency directly |
-| Codex + GLM both down | Fallback: Claude instances work together |
+| シナリオ | Agent Teams が有効な理由 |
+|---------|------------------------|
+| 大規模コードベース探索 | 5人が異なるディレクトリを同時に調査、発見を共有 |
+| 競合仮説デバッグ | 「認証が原因？」「DB接続が原因？」を並列検証、リアルタイム情報共有 |
+| クロスレイヤー実装 | frontend / backend / tests を別メンバーが同時に書き、整合性を直接確認 |
+| Codex + GLM 両方障害時 | フォールバック: Claude インスタンス同士で作業 |
 
-**Common thread**: Value comes from **direct member-to-member communication** during the task.
+**共通点**: **メンバー間の直接コミュニケーション**が価値を生む場面。
 
-### Concrete Examples
+### 具体例
 
-**FUGUE is sufficient:**
-> "Review this PR"
-> -> Codex code-reviewer + security-analyst in parallel
-> -> Integrate results and report
+**FUGUE で十分:**
+> 「この PR をレビューして」
+> → Codex code-reviewer + security-analyst を並列実行
+> → 結果を統合して報告
 
-**Agent Teams is valuable:**
-> "Unknown bug in the auto-registration system.
-> Investigate auth flow, DB, webhooks, and external API simultaneously.
-> Share findings in real-time to pinpoint the cause."
-> -> 4 members investigate while exchanging information
-> -> Member A: "Auth is clean" -> Member B: "Found invalid value in DB"
-> -> Member C: "Let me check the webhook payload based on that"
+**Agent Teams が有効:**
+> 「自動登録システムのバグ。原因不明。
+> 認証フロー、DB、Webhook、外部 API の4方面から同時に調査して、
+> 発見をリアルタイムで共有しながら原因を特定して」
+> → 4人のメンバーが調査しながら情報交換
+> → メンバーA「認証は正常」→ メンバーB「DB側でこの値が不正」
+> → メンバーC「それなら Webhook のペイロードを確認する」
 
-### Rate Limit Impact
+### レートリミットへの影響
 
 ```
-FUGUE:  Claude = routing only    (rate limit consumption: minimal)
-Teams:  Claude x member count    (rate limit consumption: significant)
+FUGUE:  Claude = ルーティングのみ（レートリミット消費: 最小）
+Teams:  Claude × メンバー数（レートリミット消費: 大）
 ```
 
-Agent Teams consumes a full context window per member. Apply the same caution as the "subagent prohibition" policy. Limit to 1-2 special tasks per week.
+Agent Teams はメンバー1人につきフルのコンテキストウィンドウを消費します。「サブエージェント原則禁止」と同じ注意が必要。週に1-2回の特殊タスクに限定するのが現実的です。
 
-## Rate Limit Strategy
+## レートリミット戦略
 
-| Model | Target Usage | Role |
-|-------|-------------|------|
-| **Codex** | 120-150 calls/week | All code tasks + design + complex decisions |
-| **GLM** | 120-150 calls/week | All non-code tasks + light review + classification |
-| **Subagent (Haiku)** | <=5 calls/week | File exploration only |
-| **Subagent (Sonnet)** | 0 calls/week | Prohibited (use Codex instead) |
-| **Agent Teams** | 1-2 tasks/week | Complex parallel coordination only |
-| **Claude Opus** | Minimal | Orchestration only |
+| モデル | 目標使用量 | 役割 |
+|--------|-----------|------|
+| **Codex** | 120-150回/週 | コード全般 + 設計 + 複雑判断 |
+| **GLM** | 120-150回/週 | 非コード全般 + 軽量レビュー + 分類 |
+| **Subagent (Haiku)** | <=5回/週 | ファイル探索のみ |
+| **Subagent (Sonnet)** | 0回/週 | 禁止（Codex に移管） |
+| **Agent Teams** | 1-2タスク/週 | 複雑な並列協調のみ |
+| **Claude Opus** | 最小限 | オーケストレーション専念 |
 
-## License
+## ライセンス
 
 MIT
 
-## Credits
+## クレジット
 
-Inspired by the FUGUE philosophy: Distributed autonomy x Unified convergence.
+FUGUE 哲学に基づく: 分散自律 x 統合収束
