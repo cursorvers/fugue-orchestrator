@@ -74,9 +74,9 @@ docs/
 
 | サービス | 用途 | コスト |
 |---------|------|--------|
-| Claude Code (MAX プラン) | オーケストレーター | サブスクリプション |
+| Claude Code (MAX $200) | オーケストレーター | $200/月 |
 | OpenAI Codex / GPT Pro | コード実行, 設計, セキュリティ | $200/月 |
-| GLM-4.7 (ZhipuAI) | 軽量レビュー, 要約, 数学 | $15/月 |
+| GLM-4.7 (Z.ai) | 軽量レビュー, 要約, 数学 | $15/月 |
 | Gemini (Google AI) | UI/UX 評価, 画像分析 | 従量課金 |
 | Grok (xAI) | X/Twitter, リアルタイム情報 | API 課金 |
 

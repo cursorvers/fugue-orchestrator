@@ -57,7 +57,7 @@ const PROVIDERS = {
     }),
   },
   glm: {
-    name: "GLM-4.7 (ZhipuAI)",
+    name: "GLM-4.7 (Z.ai)",
     envKey: "GLM_API_KEY",
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
     model: "glm-4-plus",

@@ -40,7 +40,7 @@ Layer 2: GLM    ($15/mo fixed)  -> All non-code + review + summary + classificat
 
 **Challenge identified in review**: "Using Opus purely for routing is financially inefficient" (GLM evaluation).
 
-**Response**: On Claude MAX subscription, Opus usage is within fixed cost. The real constraint is rate limit, not price. Opus routing consumes minimal tokens per task (~200-500 for classification). The alternative (deterministic routing code) loses the ability to handle ambiguous task classification, which accounts for ~20% of real-world inputs.
+**Response**: On Claude MAX $200 subscription, Opus usage is within fixed cost. The real constraint is rate limit, not price. Opus routing consumes minimal tokens per task (~200-500 for classification). The alternative (deterministic routing code) loses the ability to handle ambiguous task classification, which accounts for ~20% of real-world inputs.
 
 **Trade-off accepted**: Opus is overkill for clear-cut routing. It earns its keep on ambiguous inputs and integration reporting.
 
@@ -60,7 +60,7 @@ Layer 2: GLM    ($15/mo fixed)  -> All non-code + review + summary + classificat
 
 ### Risks
 - If OpenAI changes Codex/GPT Pro pricing, Layer 1 economics break
-- If ZhipuAI (GLM) has availability issues, Layer 2 needs fallback
+- If Z.ai (GLM) has availability issues, Layer 2 needs fallback
 - New Claude rate limit changes could make subagent prohibition unnecessary
 
 ## Alternatives Considered
