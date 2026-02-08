@@ -50,18 +50,24 @@ Claude Opus (integrate & report)
 ## File Structure
 
 ```
-CLAUDE.md                          <- Entry point (copy to ~/.claude/)
+CLAUDE.md                              <- Entry point (copy to ~/.claude/)
 rules/
-  delegation-matrix.md             <- SSOT: who handles what
-  auto-execution.md                <- Auto-delegation triggers
-  delegation-flow.md               <- How delegation works
-  codex-usage.md                   <- Codex-specific guide
-  dangerous-permission-consensus.md <- 3-party consensus for risky ops
-  coding-style.md                  <- Code quality rules
-  testing.md                       <- TDD rules
-  security.md                      <- Security checklist
-  performance.md                   <- Model selection & optimization
-  secrets-management.md            <- API key management
+  delegation-matrix.md                 <- SSOT: who handles what
+  auto-execution.md                    <- Auto-delegation triggers
+  delegation-flow.md                   <- How delegation works
+  codex-usage.md                       <- Codex-specific guide
+  dangerous-permission-consensus.md    <- 3-party consensus for risky ops
+  coding-style.md                      <- Code quality rules
+  testing.md                           <- TDD rules
+  security.md                          <- Security checklist
+  performance.md                       <- Model selection & optimization
+  secrets-management.md                <- API key management
+examples/
+  delegate-stub.js                     <- Minimal delegation script (Codex/GLM/Gemini)
+  parallel-delegation.sh               <- Parallel code-review + security-audit
+  consensus-vote-stub.sh               <- 3-party consensus voting demo
+docs/
+  ADR-001-why-fugue.md                 <- Architecture Decision Record: why FUGUE exists
 ```
 
 ## Prerequisites
@@ -74,28 +80,57 @@ rules/
 | Gemini (Google AI) | UI/UX evaluation, image analysis | Pay-as-you-go |
 | Grok (xAI) | X/Twitter, realtime info | API-based |
 
-## Setup
+## Quick Start
 
-1. Copy `CLAUDE.md` to `~/.claude/CLAUDE.md`
-2. Copy `rules/` to `~/.claude/rules/`
-3. Edit `CLAUDE.md` to customize the `[CONFIGURE]` sections
-4. Set up delegation scripts (see `examples/`)
-5. Configure API keys as environment variables
+```bash
+# 1. Clone
+git clone https://github.com/cursorvers/fugue-orchestrator.git
+cd fugue-orchestrator
+
+# 2. Copy rules to Claude Code config
+cp CLAUDE.md ~/.claude/CLAUDE.md
+cp -r rules/ ~/.claude/rules/
+
+# 3. Set API keys
+export OPENAI_API_KEY="your-openai-key"
+export GLM_API_KEY="your-glm-key"
+export GEMINI_API_KEY="your-gemini-key"
+
+# 4. Test delegation (uses examples/delegate-stub.js)
+node examples/delegate-stub.js -a code-reviewer -t "Review this function" -p glm
+
+# 5. Test parallel evaluation
+chmod +x examples/parallel-delegation.sh
+./examples/parallel-delegation.sh "Review auth module" src/auth.ts
+
+# 6. Test consensus voting
+chmod +x examples/consensus-vote-stub.sh
+./examples/consensus-vote-stub.sh "rm -rf ./build" "Clean build artifacts"
+```
 
 ## Delegation Scripts
 
-The framework expects delegation scripts at:
+The `examples/` directory provides stub implementations you can use as starting points:
+
+| Script | Purpose | Providers |
+|--------|---------|-----------|
+| `delegate-stub.js` | Single delegation to any provider | Codex, GLM, Gemini |
+| `parallel-delegation.sh` | Parallel code-review + security-audit | GLM + Codex |
+| `consensus-vote-stub.sh` | 3-party consensus for dangerous ops | Claude + Codex + GLM |
+
+For production use, copy these to `~/.claude/skills/orchestra-delegator/scripts/` and customize:
 ```
 ~/.claude/skills/orchestra-delegator/scripts/
-  delegate.js        # Codex delegation
-  delegate-glm.js    # GLM delegation
-  delegate-gemini.js # Gemini delegation
-  delegate-grok.js   # Grok delegation
-  parallel-codex.js  # Parallel Codex execution
-  consensus-vote.js  # 3-party consensus voting
+  delegate.js        # Based on delegate-stub.js -p codex
+  delegate-glm.js    # Based on delegate-stub.js -p glm
+  delegate-gemini.js # Based on delegate-stub.js -p gemini
+  parallel-codex.js  # Based on parallel-delegation.sh
+  consensus-vote.js  # Based on consensus-vote-stub.sh
 ```
 
-See `examples/` for reference implementations.
+## Architecture Decision
+
+See [ADR-001: Why FUGUE Exists](docs/ADR-001-why-fugue.md) for the full rationale, including comparison with AutoGen, CrewAI, LangGraph, and Agent Teams.
 
 ## FUGUE Orchestration vs. Claude Code Agent Teams
 
