@@ -97,6 +97,79 @@ The framework expects delegation scripts at:
 
 See `examples/` for reference implementations.
 
+## FUGUE Orchestration vs. Claude Code Agent Teams
+
+FUGUE and Agent Teams are complementary, not competing. The key difference is **where computation happens** and **what consumes rate limits**.
+
+### Fundamental Difference
+
+|  | FUGUE Orchestration | Agent Teams |
+|--|---------------------|-------------|
+| **Executors** | Codex / GLM / Gemini (external APIs) | Multiple Claude instances |
+| **Cost model** | Fixed-cost ($200+$15/mo) | Claude rate limit consumption |
+| **Communication** | Claude -> External -> Claude | Members communicate directly |
+| **Best for** | Daily tasks (95%) | Special parallel-coordination tasks (5%) |
+
+### Decision Flow
+
+```
+Task received
+    |
+Does this need direct member-to-member communication?
++- No (95%) -> FUGUE (delegate to Codex/GLM)
++- Yes (5%) -> Further evaluation
+    |
+    Can Codex/GLM parallel execution substitute?
+    +- Yes -> FUGUE (parallel-codex.js etc.)
+    +- No  -> Agent Teams
+```
+
+### When to Use FUGUE (Default)
+
+- Code review -> Codex/GLM
+- Design decisions -> Codex architect
+- Security analysis -> Codex security-analyst
+- Summarization/translation -> GLM
+- UI development -> Pencil MCP
+- UI evaluation -> Gemini
+
+**Why**: Stays within fixed costs. Does not consume Claude rate limits.
+
+### When to Use Agent Teams (Limited)
+
+| Scenario | Why Agent Teams Wins |
+|----------|---------------------|
+| Large codebase exploration | 5 members investigate different directories simultaneously, sharing discoveries |
+| Competing hypothesis debugging | "Auth issue?" vs "DB connection?" investigated in parallel with real-time info sharing |
+| Cross-layer implementation | Frontend / backend / tests written by different members, checking consistency directly |
+| Codex + GLM both down | Fallback: Claude instances work together |
+
+**Common thread**: Value comes from **direct member-to-member communication** during the task.
+
+### Concrete Examples
+
+**FUGUE is sufficient:**
+> "Review this PR"
+> -> Codex code-reviewer + security-analyst in parallel
+> -> Integrate results and report
+
+**Agent Teams is valuable:**
+> "Unknown bug in the auto-registration system.
+> Investigate auth flow, DB, webhooks, and external API simultaneously.
+> Share findings in real-time to pinpoint the cause."
+> -> 4 members investigate while exchanging information
+> -> Member A: "Auth is clean" -> Member B: "Found invalid value in DB"
+> -> Member C: "Let me check the webhook payload based on that"
+
+### Rate Limit Impact
+
+```
+FUGUE:  Claude = routing only    (rate limit consumption: minimal)
+Teams:  Claude x member count    (rate limit consumption: significant)
+```
+
+Agent Teams consumes a full context window per member. Apply the same caution as the "subagent prohibition" policy. Limit to 1-2 special tasks per week.
+
 ## Rate Limit Strategy
 
 | Model | Target Usage | Role |
@@ -105,6 +178,7 @@ See `examples/` for reference implementations.
 | **GLM** | 120-150 calls/week | All non-code tasks + light review + classification |
 | **Subagent (Haiku)** | <=5 calls/week | File exploration only |
 | **Subagent (Sonnet)** | 0 calls/week | Prohibited (use Codex instead) |
+| **Agent Teams** | 1-2 tasks/week | Complex parallel coordination only |
 | **Claude Opus** | Minimal | Orchestration only |
 
 ## License
