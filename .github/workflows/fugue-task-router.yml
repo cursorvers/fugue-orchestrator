@@ -131,11 +131,14 @@ jobs:
           AUTHOR="${{ steps.ctx.outputs.author }}"
           ASSOC="${{ steps.ctx.outputs.author_association }}"
 
-          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || true)"
-          PERM="$(echo "${PERM_JSON:-{}}" | jq -r '.permission // "none"')"
+          PERM="none"
+          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
+          fi
 
           TRUSTED="false"
-          if [[ "${ASSOC}" == "MEMBER" || "${ASSOC}" == "OWNER" ]]; then
+          if [[ "${ASSOC}" == "MEMBER" || "${ASSOC}" == "OWNER" || "${PERM}" == "admin" || "${PERM}" == "write" ]]; then
             TRUSTED="true"
           fi
 
