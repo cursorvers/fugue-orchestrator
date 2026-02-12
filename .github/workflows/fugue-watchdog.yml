@@ -8,6 +8,7 @@ on:
 permissions:
   issues: write
   actions: read
+  contents: read
 
 jobs:
   health:
@@ -115,7 +116,7 @@ jobs:
             echo "pending_json=${PENDING_JSON}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Restart task-router via repository_dispatch
+      - name: Trigger task-router for unprocessed issues
         if: ${{ steps.find.outputs.pending_count != '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -123,11 +124,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          DISPATCH_PAYLOAD="$(jq -n \
-            --arg event_type "fugue-task-reconcile" \
-            --argjson issues "${PENDING_JSON}" \
-            '{event_type:$event_type, client_payload:{issue_numbers:$issues}}')"
-
-          echo "${DISPATCH_PAYLOAD}" | gh api "repos/${GITHUB_REPOSITORY}/dispatches" \
-            -X POST \
-            --input -
+          echo "Found unprocessed issues: ${PENDING_JSON}"
+          for ISSUE_NUM in $(echo "${PENDING_JSON}" | jq -r '.[]'); do
+            echo "Triggering router for issue #${ISSUE_NUM}"
+            gh workflow run fugue-task-router.yml \
+              --repo "${GITHUB_REPOSITORY}" \
+              -f issue_number="${ISSUE_NUM}" || true
+            sleep 2
+          done
