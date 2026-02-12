@@ -165,8 +165,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
-          OPENAI_MODEL: gpt-4o-mini
-          ZAI_MODEL: glm-4.5
+          ZAI_MODEL: glm-4-plus
         run: |
           set -euo pipefail
 
@@ -183,13 +182,26 @@ jobs:
           Issue Body:
           ${BODY}"
 
-          if [[ "${PROVIDER}" == "codex" ]]; then
-            REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
-            RESP="$(curl -fsS https://api.openai.com/v1/chat/completions \
+          RESP=""
+          # Try OpenAI first if provider is codex
+          if [[ "${PROVIDER}" == "codex" && -n "${OPENAI_API_KEY}" ]]; then
+            REQ="$(jq -n --arg model "gpt-4o" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
+            RESP="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
               -H "Authorization: Bearer ${OPENAI_API_KEY}" \
               -H "Content-Type: application/json" \
-              -d "${REQ}")"
-          else
+              -d "${REQ}" 2>/dev/null || true)"
+            HTTP_CODE="$(echo "${RESP}" | tail -1)"
+            RESP_BODY="$(echo "${RESP}" | sed '$d')"
+            if [[ "${HTTP_CODE}" != "200" ]]; then
+              echo "OpenAI returned ${HTTP_CODE}, falling back to GLM"
+              RESP=""
+            else
+              RESP="${RESP_BODY}"
+            fi
+          fi
+
+          # GLM fallback or primary
+          if [[ -z "${RESP}" ]]; then
             REQ="$(jq -n --arg model "${ZAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
             RESP="$(curl -fsS https://api.z.ai/v1/chat/completions \
               -H "Authorization: Bearer ${ZAI_API_KEY}" \
