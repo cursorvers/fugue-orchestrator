@@ -1,0 +1,222 @@
+name: fugue-task-router
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to process"
+        required: true
+        type: string
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: fugue-task-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          else
+            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
+            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
+          fi
+
+          TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
+          BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+          AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
+          AUTHOR_ASSOC="$(echo "${issue_json}" | jq -r '.author_association // "NONE"')"
+          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
+          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
+
+          SHOULD_RUN="true"
+          SKIP_REASON=""
+          if [[ "${HAS_FUGUE}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-fugue-task-label"
+          elif [[ "${HAS_PROCESSING}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="already-processing"
+          fi
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "issue_title<<EOF"
+            echo "${TITLE}"
+            echo "EOF"
+            echo "issue_body<<EOF"
+            echo "${BODY}"
+            echo "EOF"
+            echo "author=${AUTHOR}"
+            echo "author_association=${AUTHOR_ASSOC}"
+            echo "has_fugue=${HAS_FUGUE}"
+            echo "has_processing=${HAS_PROCESSING}"
+            echo "should_run=${SHOULD_RUN}"
+            echo "skip_reason=${SKIP_REASON}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Skip when not target
+        if: ${{ steps.ctx.outputs.should_run != 'true' }}
+        run: |
+          echo "Skip reason: ${{ steps.ctx.outputs.skip_reason }}"
+
+      - name: Add processing label
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --add-label "processing"
+
+      - name: Classify intent (Node.js decision table)
+        id: classify
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const title = (process.env.ISSUE_TITLE || "").toLowerCase();
+          const body = (process.env.ISSUE_BODY || "").toLowerCase();
+          const text = `${title}\n${body}`;
+
+          const rules = [
+            { keywords: ["review", "レビュー"], provider: "glm", agent: "code-reviewer", tier: 0, intent: "review" },
+            { keywords: ["security", "セキュリティ"], provider: "codex", agent: "security-analyst", tier: 1, intent: "security" },
+            { keywords: ["設計", "architecture"], provider: "codex", agent: "architect", tier: 1, intent: "architecture" },
+            { keywords: ["修正", "fix", "bug"], provider: "codex", agent: "code-reviewer", tier: 2, intent: "fix" },
+            { keywords: ["deploy", "本番"], provider: "null", agent: "null", tier: 3, intent: "deploy" }
+          ];
+
+          let selected = { provider: "glm", agent: "general-reviewer", tier: 2, intent: "default" };
+          for (const rule of rules) {
+            if (rule.keywords.some(k => text.includes(k.toLowerCase()))) {
+              selected = rule;
+              break;
+            }
+          }
+
+          const out = (k, v) => fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`);
+          out("provider", selected.provider);
+          out("agent", selected.agent);
+          out("tier", selected.tier);
+          out("intent", selected.intent);
+          NODE
+
+      - name: Check author trust
+        id: trust
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          AUTHOR="${{ steps.ctx.outputs.author }}"
+          ASSOC="${{ steps.ctx.outputs.author_association }}"
+
+          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || true)"
+          PERM="$(echo "${PERM_JSON:-{}}" | jq -r '.permission // "none"')"
+
+          TRUSTED="false"
+          if [[ "${ASSOC}" == "MEMBER" || "${ASSOC}" == "OWNER" ]]; then
+            TRUSTED="true"
+          fi
+
+          {
+            echo "permission=${PERM}"
+            echo "trusted=${TRUSTED}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve final tier
+        id: final
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        run: |
+          BASE_TIER="${{ steps.classify.outputs.tier }}"
+          TRUSTED="${{ steps.trust.outputs.trusted }}"
+          FINAL_TIER="${BASE_TIER}"
+          if [[ "${TRUSTED}" != "true" ]]; then
+            FINAL_TIER="3"
+          fi
+          echo "tier=${FINAL_TIER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Execute agent and post result (Tier 0-2)
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.final.outputs.tier != '3' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          OPENAI_MODEL: gpt-4o-mini
+          ZAI_MODEL: glm-4.5
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ steps.ctx.outputs.issue_number }}"
+          PROVIDER="${{ steps.classify.outputs.provider }}"
+          AGENT="${{ steps.classify.outputs.agent }}"
+          TIER="${{ steps.final.outputs.tier }}"
+          TITLE="${{ steps.ctx.outputs.issue_title }}"
+          BODY="${{ steps.ctx.outputs.issue_body }}"
+
+          SYS_PROMPT="You are ${AGENT}. Provide concise, actionable guidance for this GitHub issue."
+          USER_PROMPT="Issue Title: ${TITLE}
+
+          Issue Body:
+          ${BODY}"
+
+          if [[ "${PROVIDER}" == "codex" ]]; then
+            REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
+            RESP="$(curl -fsS https://api.openai.com/v1/chat/completions \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${REQ}")"
+          else
+            REQ="$(jq -n --arg model "${ZAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
+            RESP="$(curl -fsS https://api.z.ai/v1/chat/completions \
+              -H "Authorization: Bearer ${ZAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${REQ}")"
+          fi
+
+          ANSWER="$(echo "${RESP}" | jq -r '.choices[0].message.content // "No response body returned."' )"
+
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${ANSWER}"
+
+          if [[ "${TIER}" == "0" || "${TIER}" == "1" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"
+            gh issue close "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}"
+          else
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review"
+          fi
+
+      - name: Tier 3 fallback
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.final.outputs.tier == '3' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE_NUMBER="${{ steps.ctx.outputs.issue_number }}"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "自動実行不可。人間の承認が必要です。"
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
+
+      - name: Remove processing label
+        if: ${{ always() && steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
