@@ -29,7 +29,7 @@ jobs:
             -H "Authorization: Bearer ${OPENAI_API_KEY}" >/dev/null 2>&1
           [[ $? -eq 0 ]] && OPENAI_OK="true"
 
-          curl -fsS https://api.z.ai/v1/models \
+          curl -fsS https://api.z.ai/api/coding/paas/v4/models \
             -H "Authorization: Bearer ${ZAI_API_KEY}" >/dev/null 2>&1
           [[ $? -eq 0 ]] && ZAI_OK="true"
 
