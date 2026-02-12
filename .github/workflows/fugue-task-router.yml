@@ -29,6 +29,7 @@ permissions:
 
 jobs:
   route:
+    if: ${{ github.event_name != 'issue_comment' || github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -179,6 +180,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           ZAI_MODEL: glm-4.7
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
         run: |
           set -euo pipefail
 
@@ -186,8 +189,8 @@ jobs:
           PROVIDER="${{ steps.classify.outputs.provider }}"
           AGENT="${{ steps.classify.outputs.agent }}"
           TIER="${{ steps.final.outputs.tier }}"
-          TITLE="${{ steps.ctx.outputs.issue_title }}"
-          BODY="${{ steps.ctx.outputs.issue_body }}"
+          TITLE="${ISSUE_TITLE}"
+          BODY="${ISSUE_BODY}"
 
           SYS_PROMPT="You are ${AGENT}. Provide concise, actionable guidance for this GitHub issue."
           USER_PROMPT="Issue Title: ${TITLE}
