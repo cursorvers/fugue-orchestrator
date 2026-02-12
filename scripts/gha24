@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+
+# GHA24 - Submit task to FUGUE Tutti (6-parallel agent consensus)
+# Usage: gha24 "task description" [--repo owner/repo]
+
+TASK="${1:-}"
+REPO="${2:-cursorvers/fugue-orchestrator}"
+
+if [[ -z "${TASK}" ]]; then
+  echo "Usage: gha24 \"task description\" [repo]"
+  echo "Example: gha24 \"認証フローのセキュリティレビュー\""
+  echo "Example: gha24 \"Review auth flow\" cursorvers/fugue-system-ui"
+  exit 1
+fi
+
+if ! command -v gh &>/dev/null; then
+  echo "Error: gh CLI not found" >&2
+  exit 1
+fi
+
+URL="$(gh issue create --repo "${REPO}" \
+  --title "${TASK}" \
+  --label "fugue-task,tutti" \
+  --body "${TASK}")"
+
+echo "Created: ${URL}"
+echo "6 agents will run automatically. Check results later:"
+echo "  gh issue view ${URL##*/} --repo ${REPO} --comments"
