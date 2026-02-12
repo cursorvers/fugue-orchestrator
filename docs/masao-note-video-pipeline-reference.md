@@ -63,11 +63,11 @@ Claude Code (MAX) — ディレクター兼実行者
 |------|-------------|-------------|
 | Orchestrator | Claude単体 | Claude + Codex + GLM（6並列） |
 | TTS | COEIROINK（1種） | VOICEVOX/COEIROINK + API fallback |
-| 画像生成 | Gemini + fal.ai | 複数モデル選択可 |
-| 実行環境 | ローカルのみ | GHA（Phase 1-2）+ ローカル（Phase 3-4） |
-| 品質管理 | Claude自己評価 | マルチエージェント合議 |
-| テンプレート | コード生成型 | **データ駆動型（推奨）** |
-| 夜間処理 | 不可 | GHA24でPhase 1-2は夜間自動 |
+| 画像生成 | Gemini + fal.ai | **Freepik Mystic API（課金済）** + fal.ai fallback |
+| 実行環境 | ローカルのみ | ローカルファースト（MVP）→ GHA拡張（Phase 4） |
+| 品質管理 | Claude自己評価 | マルチエージェント合議 + バイナリチェック |
+| テンプレート | コード生成型 | **ハイブリッド（データ駆動 + 動的パラメータ注入）** |
+| 夜間処理 | 不可 | GHA24でPhase 1-2は夜間自動（Phase 4以降） |
 
 ### FUGUE側の優位点
 
@@ -114,31 +114,111 @@ Claude Code (MAX) — ディレクター兼実行者
    - Failure: アセット欠損、テキストはみ出し、尺ずれ > 0.5s
    - Success: 全アセット存在 + 視覚エラーなし
 
-### セキュリティ指摘
+### セキュリティ指摘（無条件採用）
 
-- API キーの管理（fal.ai, TTS API）→ Org Secrets経由
-- ローカルTTSサーバーのポート公開範囲を制限
-
----
-
-## 4. 推奨MVP実装順序
-
-```
-Step 1: script.json スキーマ定義 + Zod バリデーション
-Step 2: Remotion テンプレート3種（Intro, Content, Outro）をデータ駆動で実装
-Step 3: 手動 script.json → Remotion レンダリング動作確認
-Step 4: TTS統合（VOICEVOX HTTPサーバー → audio files）
-Step 5: Phase 2 自動化（LLM → script.json生成）
-Step 6: Phase 1 自動化（LLM → scenario.json生成）
-Step 7: GHA24統合（Phase 1-2をクラウド化）
-Step 8: 品質ループ追加
-```
-
-**原則: 後工程（レンダリング）から先に固める。前工程（シナリオ）は後から。**
+- GHA Artifacts SHA-256署名検証 + fail-closed
+- Zod strict + enum化 + URL allowlist
+- TTS `127.0.0.1`バインド固定 + ジョブ時のみ起動
+- `spawn`配列引数、`shell:true`禁止
+- API キーの管理（Freepik, fal.ai）→ Org Secrets + ローカル keychain
 
 ---
 
-## 5. まさおノート原文の要点抽出
+## 4. 画像生成: Freepik Mystic API（課金済み）
+
+### API仕様
+
+```
+POST https://api.freepik.com/v1/ai/mystic
+Header: x-freepik-api-key: <API_KEY>
+```
+
+| パラメータ | 値 | 備考 |
+|-----------|-----|------|
+| `prompt` | テキスト | 画像説明 |
+| `resolution` | `1k` / `2k` / `4k` | 動画用は`2k`推奨 |
+| `aspect_ratio` | `widescreen_16_9` | 動画向け |
+| `model` | `realism` / `fluid` / `zen` / `editorial_portraits` 等 | 用途別選択 |
+| `creative_detailing` | 0-100 | デフォルト33 |
+| `styling.colors` | hex配列 + weight | brand.tsカラーを注入可 |
+
+### レスポンス（非同期）
+
+```json
+{
+  "data": {
+    "task_id": "UUID",
+    "status": "CREATED|IN_PROGRESS|COMPLETED|FAILED",
+    "generated": ["image_urls"]
+  }
+}
+```
+
+### 動画パイプラインでの活用
+
+| 用途 | model | aspect_ratio | resolution |
+|------|-------|-------------|-----------|
+| 解説スライド背景 | `fluid` / `zen` | `widescreen_16_9` | `2k` |
+| 人物イラスト | `realism` / `editorial_portraits` | `square_1_1` | `2k` |
+| コンセプト図 | `fluid` | `widescreen_16_9` | `1k` |
+| サムネイル | `realism` | `widescreen_16_9` | `4k` |
+
+### コスト比較
+
+| サービス | 単価 | 品質 | 速度 |
+|---------|------|------|------|
+| **Freepik Mystic（課金済み）** | サブスク内 | ◎（Flux基盤） | ○ |
+| Gemini via fal.ai（まさおノート） | ~20円/枚 | ○ | ○ |
+| fal.ai Flux直接 | ~3円/枚 | ◎ | ◎ |
+| ローカルSD | 電気代のみ | △〜○ | △ |
+
+**推奨**: Freepik Mystic を第一候補（追加コストなし）。fal.ai をフォールバック。
+
+---
+
+## 5. Tutti統合結果: 推奨アーキテクチャ（Issue #18）
+
+### 高確度合意（3+エージェント）
+
+1. **ハイブリッド方式（5/6）**: データ駆動ベース + 限定的動的パラメータ注入
+2. **テンプレート拡張必須（4/6）**: +5種（chapter-divider, concept-diagram, code-walkthrough, data-chart, recap-qa）
+3. **ローカルファースト（4/6）**: GHA夜間は後回し、まずローカル完結MVP
+4. **brand.ts集約（3/6）**: 色/フォント/モーション中央管理
+5. **Zodスキーマ厳密化（4/6）**: discriminatedUnion + 必須フィールド
+
+### 推奨MVP実装順序
+
+```
+Phase 0: 基盤整備
+  Step 1: brand.ts 新設（色/フォント/モーション集約）
+  Step 2: script.json Zodスキーマ（discriminatedUnion: intro|chapter|explain|diagram|comparison|cta|recap）
+  Step 3: 既存6テンプレートのV8準拠修正（damping統一、Audio統合）
+
+Phase 1: レンダリング基盤（後工程から）
+  Step 4: data-driven Remotion: script.json → テンプレート選択 → MP4
+  Step 5: 音声同期: @remotion/media <Audio> + 実尺ベース計算
+  Step 6: バイナリ品質チェック（アセット欠損、尺ずれ > 0.5s、テキストはみ出し）
+
+Phase 2: アセット生成統合
+  Step 7: Freepik Mystic API統合（brand.tsカラー → styling.colors注入）
+  Step 8: VOICEVOX HTTPサーバー統合（127.0.0.1、ジョブ時起動）
+  Step 9: テンプレート+5種追加（解説動画用）
+
+Phase 3: 自動生成
+  Step 10: 対話エージェント（テーマ相談→プロンプト確定）
+  Step 11: LLM → scenario.json → script.json（Zodバリデーション自動修正）
+
+Phase 4: スケール化（GHA24統合）
+  Step 12: Phase 3をGHA24に移行（夜間バッチ）
+  Step 13: Artifacts署名検証 + download-pipeline CLI
+  Step 14: FUGUE 6並列合議でシナリオ/台本品質担保
+```
+
+**原則: 後工程（レンダリング）から先に固める。ローカル完結で1本完成させてからクラウド化。**
+
+---
+
+## 6. まさおノート原文の要点抽出
 
 ### パイプライン詳細
 
@@ -166,7 +246,7 @@ Step 8: 品質ループ追加
 
 ---
 
-## 6. 既存リソース参照
+## 7. 既存リソース参照
 
 | リソース | パス | 内容 |
 |----------|------|------|
@@ -186,4 +266,5 @@ Step 8: 品質ループ追加
 ---
 
 *Last updated: 2026-02-13*
-*Based on: まさおノート (note.com/masa_wunder) + FUGUE Issue #16 agent consensus*
+*Based on: まさおノート (note.com/masa_wunder) + FUGUE Issue #16 & #18 agent consensus*
+*Freepik Mystic API: https://docs.freepik.com/api-reference/mystic/post-mystic*
