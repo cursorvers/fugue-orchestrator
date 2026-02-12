@@ -1,6 +1,17 @@
 name: fugue-task-router
 
 on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: "Issue number to process"
+        required: true
+        type: string
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+      ZAI_API_KEY:
+        required: true
   issues:
     types: [opened, labeled]
   issue_comment:
@@ -21,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: fugue-task-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
+      group: fugue-task-${{ github.repository }}-${{ github.event.issue.number || inputs.issue_number || github.event.inputs.issue_number || github.run_id }}
       cancel-in-progress: false
 
     steps:
@@ -32,7 +43,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
+            ISSUE_NUMBER="${{ inputs.issue_number }}"
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
             issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           else
@@ -129,7 +143,6 @@ jobs:
         run: |
           set -euo pipefail
           AUTHOR="${{ steps.ctx.outputs.author }}"
-          ASSOC="${{ steps.ctx.outputs.author_association }}"
 
           PERM="none"
           PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
@@ -138,7 +151,7 @@ jobs:
           fi
 
           TRUSTED="false"
-          if [[ "${ASSOC}" == "MEMBER" || "${ASSOC}" == "OWNER" || "${PERM}" == "admin" || "${PERM}" == "write" ]]; then
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
             TRUSTED="true"
           fi
 
