@@ -1,0 +1,396 @@
+name: fugue-tutti-router
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: "Issue number to process"
+        required: true
+        type: string
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+      ZAI_API_KEY:
+        required: true
+
+permissions:
+  issues: write
+  contents: read
+  actions: read
+
+concurrency:
+  group: fugue-tutti-${{ github.repository }}-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should_run: ${{ steps.ctx.outputs.should_run }}
+      skip_reason: ${{ steps.ctx.outputs.skip_reason }}
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      issue_title: ${{ steps.ctx.outputs.issue_title }}
+      issue_body: ${{ steps.ctx.outputs.issue_body }}
+      author: ${{ steps.ctx.outputs.author }}
+      trusted: ${{ steps.trust.outputs.trusted }}
+      permission: ${{ steps.trust.outputs.permission }}
+
+    steps:
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
+            ISSUE_NUMBER="${{ inputs.issue_number }}"
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          else
+            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
+            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
+          fi
+
+          TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
+          BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+          AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
+          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
+          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
+          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
+
+          SHOULD_RUN="true"
+          SKIP_REASON=""
+          if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-required-labels"
+          elif [[ "${HAS_PROCESSING}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="already-processing"
+          fi
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "issue_title<<EOF"
+            echo "${TITLE}"
+            echo "EOF"
+            echo "issue_body<<EOF"
+            echo "${BODY}"
+            echo "EOF"
+            echo "author=${AUTHOR}"
+            echo "should_run=${SHOULD_RUN}"
+            echo "skip_reason=${SKIP_REASON}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Check author trust
+        id: trust
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          AUTHOR="${{ steps.ctx.outputs.author }}"
+          PERM="none"
+
+          perm_json="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${perm_json}" | jq -r '.permission')"
+          fi
+
+          TRUSTED="false"
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
+            TRUSTED="true"
+          fi
+
+          {
+            echo "permission=${PERM}"
+            echo "trusted=${TRUSTED}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Add processing label
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "completed" \
+            --remove-label "needs-review" \
+            --remove-label "needs-human" || true
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --add-label "processing"
+
+      - name: Mark untrusted as needs-human
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE="${{ steps.ctx.outputs.issue_number }}"
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Author trust check failed (permission: ${{ steps.trust.outputs.permission }}). Hand-off to humans required."
+          gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
+
+  run-agents:
+    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: codex-architect
+            provider: codex
+            api_url: https://api.openai.com/v1/chat/completions
+            model: gpt-4o
+            agent_role: architect
+          - name: codex-security-analyst
+            provider: codex
+            api_url: https://api.openai.com/v1/chat/completions
+            model: gpt-4o
+            agent_role: security-analyst
+          - name: codex-code-reviewer
+            provider: codex
+            api_url: https://api.openai.com/v1/chat/completions
+            model: gpt-4o
+            agent_role: code-reviewer
+          - name: glm-math-reasoning
+            provider: glm
+            api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+            model: glm-4.7
+            agent_role: math-reasoning
+          - name: glm-code-reviewer
+            provider: glm
+            api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+            model: glm-4.7
+            agent_role: code-reviewer
+          - name: glm-general-reviewer
+            provider: glm
+            api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+            model: glm-4.7
+            agent_role: general-reviewer
+
+    steps:
+      - name: Call agent API
+        id: call
+        env:
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          API_URL: ${{ matrix.api_url }}
+          PROVIDER: ${{ matrix.provider }}
+          MODEL: ${{ matrix.model }}
+          AGENT_ROLE: ${{ matrix.agent_role }}
+          AGENT_NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+
+          sys_prompt="You are ${AGENT_ROLE}. Analyze the GitHub issue and return ONLY valid JSON with keys: risk (LOW|MEDIUM|HIGH), approve (boolean), findings (array of strings), recommendation (string), rationale (string)."
+          user_prompt="Issue Title: ${ISSUE_TITLE}
+
+          Issue Body:
+          ${ISSUE_BODY}"
+
+          req="$(jq -n \
+            --arg model "${MODEL}" \
+            --arg s "${sys_prompt}" \
+            --arg u "${user_prompt}" \
+            '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+
+          if [[ "${PROVIDER}" == "codex" ]]; then
+            auth_header="Authorization: Bearer ${OPENAI_API_KEY}"
+          else
+            auth_header="Authorization: Bearer ${ZAI_API_KEY}"
+          fi
+
+          http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+            -H "${auth_header}" \
+            -H "Content-Type: application/json" \
+            -d "${req}" || true)"
+
+          content="$(jq -r '.choices[0].message.content // ""' response.json 2>/dev/null || echo "")"
+
+          if [[ -n "${content}" ]] && echo "${content}" | jq -e . >/dev/null 2>&1; then
+            parsed="${content}"
+          else
+            parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse strict JSON from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
+          fi
+
+          result="$(jq -n \
+            --arg name "${AGENT_NAME}" \
+            --arg provider "${PROVIDER}" \
+            --arg api_url "${API_URL}" \
+            --arg model "${MODEL}" \
+            --arg agent_role "${AGENT_ROLE}" \
+            --argjson payload "${parsed}" \
+            --arg http_code "${http_code}" \
+            '{
+              name:$name,
+              provider:$provider,
+              api_url:$api_url,
+              model:$model,
+              agent_role:$agent_role,
+              http_code:$http_code,
+              risk:(($payload.risk // "MEDIUM")|ascii_upcase),
+              approve:($payload.approve // false),
+              findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),
+              recommendation:($payload.recommendation // "No recommendation"),
+              rationale:($payload.rationale // "No rationale")
+            }')"
+
+          echo "${result}" > "agent-${AGENT_NAME}.json"
+
+      - name: Upload JSON artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-result-${{ matrix.name }}
+          path: agent-${{ matrix.name }}.json
+          if-no-files-found: error
+
+  integrate:
+    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    needs: [prepare, run-agents]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      high_risk: ${{ steps.integrate.outputs.high_risk }}
+      approve_count: ${{ steps.integrate.outputs.approve_count }}
+      total_count: ${{ steps.integrate.outputs.total_count }}
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-result-*
+          path: agent-results
+          merge-multiple: true
+
+      - name: Integrate results with jq rules
+        id: integrate
+        run: |
+          set -euo pipefail
+
+          jq -s '.' agent-results/*.json > all-results.json
+
+          total_count="$(jq 'length' all-results.json)"
+          approve_count="$(jq '[.[] | select(.approve == true)] | length' all-results.json)"
+          reject_count="$(jq '[.[] | select(.approve != true)] | length' all-results.json)"
+          high_risk_count="$(jq '[.[] | select((.risk|ascii_upcase) == "HIGH")] | length' all-results.json)"
+          high_risk="false"
+          if [[ "${high_risk_count}" -gt 0 ]]; then
+            high_risk="true"
+          fi
+
+          jq '
+            {
+              adopted_security_criticism: [
+                .[] | select((.agent_role|test("security";"i")) and ((.findings|length) > 0)) |
+                {agent: .name, findings: .findings, recommendation: .recommendation}
+              ],
+              high_confidence: {
+                approve_agreement: ([.[] | select(.approve == true)] | length) >= 3,
+                reject_agreement: ([.[] | select(.approve != true)] | length) >= 3
+              },
+              considerations: (
+                [ .[] | .findings[] ] | group_by(.) | map(select(length == 1) | .[0])
+              ),
+              contradictions: (
+                ([.[] | select(.approve == true)] | length) > 0 and
+                ([.[] | select(.approve != true)] | length) > 0
+              ),
+              by_agent: [ .[] | {name, provider, agent_role, risk, approve, findings, recommendation, rationale} ]
+            }
+          ' all-results.json > integrated.json
+
+          {
+            echo "high_risk=${high_risk}"
+            echo "approve_count=${approve_count}"
+            echo "total_count=${total_count}"
+          } >> "${GITHUB_OUTPUT}"
+
+          approve_agents="$(jq -r '[.[] | select(.approve == true) | .name] | join(", ")' all-results.json)"
+          reject_agents="$(jq -r '[.[] | select(.approve != true) | .name] | join(", ")' all-results.json)"
+          security_block="$(jq -r '
+            [.adopted_security_criticism[]? |
+              "- **\(.agent)**\n  - findings: \(.findings | join(" | "))\n  - recommendation: \(.recommendation)"
+            ] | if length==0 then "- none" else join("\n") end
+          ' integrated.json)"
+          one_agent_points="$(jq -r '
+            .considerations | if length==0 then "- none" else map("- " + .) | join("\n") end
+          ' integrated.json)"
+          contradiction_flag="$(jq -r '.contradictions' integrated.json)"
+          contradiction_section="- none"
+          if [[ "${contradiction_flag}" == "true" ]]; then
+            contradiction_section="Approve side: ${approve_agents}
+          Reject side: ${reject_agents}"
+          fi
+
+          cat > integrated-comment.md <<COMMENT_EOF
+          ## Tutti Integrated Review
+
+          **Rule a: Security criticism (unconditionally adopted)**
+          ${security_block}
+
+          **Rule b: 3+ agents agree (high confidence)**
+          - approve agreement (>=3): $(jq -r '.high_confidence.approve_agreement' integrated.json)
+          - reject agreement (>=3): $(jq -r '.high_confidence.reject_agreement' integrated.json)
+
+          **Rule c: Single-agent points (consideration)**
+          ${one_agent_points}
+
+          **Rule d: Contradictions (present both sides)**
+          ${contradiction_section}
+
+          **Consensus summary**
+          - approvals: ${approve_count}/${total_count}
+          - high-risk findings: ${high_risk_count}
+          - approving agents: ${approve_agents}
+          - non-approving agents: ${reject_agents}
+          COMMENT_EOF
+
+      - name: Post integrated comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ needs.prepare.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file integrated-comment.md
+
+  finalize:
+    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    needs: [prepare, integrate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Apply Tier 2 decision and labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          HIGH_RISK: ${{ needs.integrate.outputs.high_risk }}
+          APPROVE_COUNT: ${{ needs.integrate.outputs.approve_count }}
+          TOTAL_COUNT: ${{ needs.integrate.outputs.total_count }}
+        run: |
+          set -euo pipefail
+
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-review" --remove-label "needs-human" || true
+
+          threshold=$(( (TOTAL_COUNT * 2 + 2) / 3 )) # ceil(2/3 * total)
+
+          if [[ "${HIGH_RISK}" == "true" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tier 2 consensus: HIGH risk detected. Escalated to human review."
+            exit 0
+          fi
+
+          if [[ "${APPROVE_COUNT}" -ge "${threshold}" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tier 2 consensus: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Auto-execution approved."
+            gh issue close "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}"
+          else
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tier 2 consensus: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (<2/3). Marked for review."
+          fi
