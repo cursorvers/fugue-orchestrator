@@ -164,13 +164,11 @@ jobs:
           # Write instruction to temp file to avoid shell escaping issues
           echo "${INSTRUCTION}" > /tmp/codex-instruction.md
 
-          # Run Codex in full-auto mode with writable sandbox
+          # Run Codex non-interactively in full-auto mode.
           EXIT_CODE=0
-          codex \
+          codex exec \
             --model "${CODEX_MODEL}" \
-            --approval-mode full-auto \
-            --full-auto-error-mode ignore-and-continue \
-            --quiet \
+            --full-auto \
             "$(cat /tmp/codex-instruction.md)" \
             2>&1 | tee /tmp/codex-output.log || EXIT_CODE=$?
 
