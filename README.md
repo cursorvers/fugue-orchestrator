@@ -76,7 +76,7 @@ docs/
 |---------|------|--------|
 | Claude Code (MAX $200) | オーケストレーター | $200/月 |
 | OpenAI Codex / GPT Pro | コード実行, 設計, セキュリティ | $200/月 |
-| GLM-4.7 (Z.ai) | 軽量レビュー, 要約, 数学 | $15/月 |
+| GLM (Z.ai) | 軽量レビュー, 要約, 数学 | $15/月 |
 | Gemini (Google AI) | UI/UX 評価, 画像分析 | 従量課金 |
 | Grok (xAI) | X/Twitter, リアルタイム情報 | API 課金 |
 
@@ -94,6 +94,7 @@ cp -r rules/ ~/.claude/rules/
 # 3. API キーを設定
 export OPENAI_API_KEY="your-openai-key"
 export GLM_API_KEY="your-glm-key"
+export GLM_MODEL="glm-4.7" # optional (default is glm-4.7 in delegate-stub.js)
 export GEMINI_API_KEY="your-gemini-key"
 
 # 4. 委譲テスト（examples/delegate-stub.js を使用）

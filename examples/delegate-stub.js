@@ -11,8 +11,11 @@
  *
  * Environment:
  *   OPENAI_API_KEY - For Codex/GPT delegation
- *   GLM_API_KEY    - For GLM-4.7 delegation
+ *   GLM_API_KEY    - For GLM delegation (Z.ai)
  *   GEMINI_API_KEY - For Gemini delegation
+ *
+ * Optional:
+ *   GLM_MODEL       - Override GLM model (default: glm-4.7)
  */
 
 const { parseArgs } = require("node:util");
@@ -57,12 +60,13 @@ const PROVIDERS = {
     }),
   },
   glm: {
-    name: "GLM-4.7 (Z.ai)",
+    name: "GLM (Z.ai)",
     envKey: "GLM_API_KEY",
-    endpoint: "https://open.z.ai/api/paas/v4/chat/completions",
-    model: "glm-4.7",
+    // Z.ai OpenAI-compatible endpoint
+    endpoint: "https://api.z.ai/api/coding/paas/v4/chat/completions",
+    model: process.env.GLM_MODEL || "glm-4.7",
     buildPayload: (systemPrompt, userPrompt) => ({
-      model: "glm-4.7",
+      model: process.env.GLM_MODEL || "glm-4.7",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
