@@ -291,8 +291,8 @@ jobs:
                 {agent: .name, findings: .findings, recommendation: .recommendation}
               ],
               high_confidence: {
-                approve_agreement: ([.[] | select(.approve == true)] | length) >= 3,
-                reject_agreement: ([.[] | select(.approve != true)] | length) >= 3
+                approve_agreement: (([.[] | select(.approve == true)] | length) >= 3),
+                reject_agreement: (([.[] | select(.approve != true)] | length) >= 3)
               },
               considerations: (
                 [ .[] | .findings[] ] | group_by(.) | map(select(length == 1) | .[0])

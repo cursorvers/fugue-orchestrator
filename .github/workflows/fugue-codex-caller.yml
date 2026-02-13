@@ -18,7 +18,7 @@ jobs:
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
       contains(github.event.issue.labels.*.name, 'tutti') &&
       !contains(github.event.issue.labels.*.name, 'codex-implement')
-    uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-tutti-router.yml@v1
+    uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-tutti-router.yml@main
     with:
       issue_number: "${{ format('{0}', github.event.issue.number) }}"
     secrets:
@@ -31,7 +31,7 @@ jobs:
       github.actor != 'github-actions[bot]' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
       contains(github.event.issue.labels.*.name, 'codex-implement')
-    uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-codex-implement.yml@v1
+    uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-codex-implement.yml@main
     with:
       issue_number: "${{ format('{0}', github.event.issue.number) }}"
     secrets:
