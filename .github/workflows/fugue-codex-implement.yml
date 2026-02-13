@@ -178,8 +178,10 @@ jobs:
 
           echo "exit_code=${EXIT_CODE}" >> "${GITHUB_OUTPUT}"
 
-          # Check if any files were changed
-          if git diff --quiet && git diff --cached --quiet; then
+          # Check if any files were changed (including untracked files).
+          # `git diff` does not detect newly-created (untracked) files, which can
+          # cause us to incorrectly skip commit/PR creation.
+          if [[ -z "$(git status --porcelain)" ]]; then
             echo "no_changes=true" >> "${GITHUB_OUTPUT}"
           else
             echo "no_changes=false" >> "${GITHUB_OUTPUT}"
