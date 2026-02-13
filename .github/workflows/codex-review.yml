@@ -266,48 +266,52 @@ jobs:
 
           PR_NUMBER="${{ steps.diff.outputs.pr_number }}"
 
-          cat > /tmp/comment.md << EOF
-          ## :robot: Codex Review (GPT-5.2)
+          # IMPORTANT: Do not embed JSON directly into a heredoc without guarding
+          # against shell expansion. Model output may contain `$FOO` or `${BAR}`
+          # which breaks under `set -u` (unbound variable).
+          {
+            printf '%s\n\n' '## :robot: Codex Review (GPT-5.2)'
 
-          ### :bar_chart: Consensus Score: ${{ steps.consensus.outputs.total }}/10 :${{ steps.consensus.outputs.emoji }}: **${{ steps.consensus.outputs.label }}**
+            printf '### :bar_chart: Consensus Score: %s/10 :%s: **%s**\n\n' \
+              "${{ steps.consensus.outputs.total }}" \
+              "${{ steps.consensus.outputs.emoji }}" \
+              "${{ steps.consensus.outputs.label }}"
 
-          | Reviewer | Score | Details |
-          |----------|-------|---------|
-          | Code Reviewer | ${{ steps.consensus.outputs.code_score }}/7 | Accuracy, Performance, Maintainability |
-          | Security Analyst | ${{ steps.consensus.outputs.security_score }}/3 | OWASP, Auth, Input Validation |
+            printf '%s\n' '| Reviewer | Score | Details |'
+            printf '%s\n' '|----------|-------|---------|'
+            printf '| Code Reviewer | %s/7 | Accuracy, Performance, Maintainability |\n' "${{ steps.consensus.outputs.code_score }}"
+            printf '| Security Analyst | %s/3 | OWASP, Auth, Input Validation |\n\n' "${{ steps.consensus.outputs.security_score }}"
 
-          ---
+            printf '%s\n\n' '---'
 
-          <details>
-          <summary>:mag: Code Review Details</summary>
+            printf '%s\n' '<details>'
+            printf '%s\n\n' '<summary>:mag: Code Review Details</summary>'
+            printf '%s\n' '```json'
+            cat /tmp/code_review.json
+            printf '\n'
+            printf '%s\n\n' '```'
+            printf '%s\n\n' '</details>'
 
-          \`\`\`json
-          ${{ steps.code_review.outputs.result }}
-          \`\`\`
+            printf '%s\n' '<details>'
+            printf '%s\n\n' '<summary>:shield: Security Analysis Details</summary>'
+            printf '%s\n' '```json'
+            cat /tmp/security_review.json
+            printf '\n'
+            printf '%s\n\n' '```'
+            printf '%s\n\n' '</details>'
 
-          </details>
+            printf '%s\n\n' '---'
 
-          <details>
-          <summary>:shield: Security Analysis Details</summary>
+            printf '%s\n' '| Score | Verdict |'
+            printf '%s\n' '|-------|---------|'
+            printf '%s\n' '| 9-10 | :white_check_mark: Approved |'
+            printf '%s\n' '| 7-8 | :warning: Approved with Comments |'
+            printf '%s\n' '| 5-6 | :large_orange_diamond: Changes Suggested |'
+            printf '%s\n\n' '| 0-4 | :x: Changes Required |'
 
-          \`\`\`json
-          ${{ steps.security_review.outputs.result }}
-          \`\`\`
-
-          </details>
-
-          ---
-
-          | Score | Verdict |
-          |-------|---------|
-          | 9-10 | :white_check_mark: Approved |
-          | 7-8 | :warning: Approved with Comments |
-          | 5-6 | :large_orange_diamond: Changes Suggested |
-          | 0-4 | :x: Changes Required |
-
-          ---
-          *Powered by Orchestra Delegator + OpenAI Chat Completions API (GPT-5.2)*
-          EOF
+            printf '%s\n' '---'
+            printf '%s\n' '*Powered by Orchestra Delegator + OpenAI Chat Completions API (GPT-5.2)*'
+          } > /tmp/comment.md
 
           gh pr comment "${PR_NUMBER}" --body-file /tmp/comment.md
 
