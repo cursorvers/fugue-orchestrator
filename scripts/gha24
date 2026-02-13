@@ -6,10 +6,15 @@ set -euo pipefail
 #
 # Options:
 #   --implement    Add codex-implement label to trigger Codex CLI code generation
-#   --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)
+#   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
+#
+# Notes:
+#   The issue is always created in the orchestrator repo. The target repo is
+#   passed via the issue body so the caller workflow can resolve it.
 
 TASK=""
-REPO="cursorvers/fugue-orchestrator"
+ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
+TARGET_REPO="cursorvers/fugue-orchestrator"
 IMPLEMENT=false
 
 while [[ $# -gt 0 ]]; do
@@ -19,7 +24,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --repo)
-      REPO="${2}"
+      TARGET_REPO="${2}"
       shift 2
       ;;
     -h|--help)
@@ -28,6 +33,9 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
       echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
+      echo ""
+      echo "Environment:"
+      echo "  GHA24_ORCHESTRATOR_REPO  Orchestrator repo for issue creation (default: cursorvers/fugue-orchestrator)"
       echo ""
       echo "Examples:"
       echo "  gha24 \"認証フローのセキュリティレビュー\""
@@ -61,12 +69,26 @@ if [[ "${IMPLEMENT}" == "true" ]]; then
   LABELS="${LABELS},codex-implement"
 fi
 
-URL="$(gh issue create --repo "${REPO}" \
+BODY="$(cat <<EOF
+## GHA24 Task
+${TASK}
+
+## Target repo
+\`${TARGET_REPO}\`
+
+## Mode
+$( [[ "${IMPLEMENT}" == "true" ]] && echo "implement" || echo "review" )
+EOF
+)"
+
+URL="$(gh issue create --repo "${ORCHESTRATOR_REPO}" \
   --title "${TASK}" \
   --label "${LABELS}" \
-  --body "${TASK}")"
+  --body "${BODY}")"
 
 echo "Created: ${URL}"
+echo "Orchestrator repo: ${ORCHESTRATOR_REPO}"
+echo "Target repo: ${TARGET_REPO}"
 
 if [[ "${IMPLEMENT}" == "true" ]]; then
   echo "Mode: Codex CLI implementation (code generation + PR)"
@@ -76,4 +98,4 @@ else
 fi
 
 echo "Check results later:"
-echo "  gh issue view ${URL##*/} --repo ${REPO} --comments"
+echo "  gh issue view ${URL##*/} --repo ${ORCHESTRATOR_REPO} --comments"
