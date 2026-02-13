@@ -21,7 +21,7 @@ on:
         description: "Codex model to use"
         required: false
         type: string
-        default: "o4-mini"
+        default: "gpt-5.1-codex-mini"
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -135,6 +135,10 @@ jobs:
         run: |
           npm install -g @openai/codex
           codex --version
+
+      - name: Authenticate Codex CLI with API key
+        run: |
+          printenv OPENAI_API_KEY | codex login --with-api-key
 
       - name: Create working branch
         run: |
