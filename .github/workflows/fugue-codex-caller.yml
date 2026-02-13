@@ -11,19 +11,49 @@ permissions:
   actions: read
 
 jobs:
-  # Review mode: 6-parallel agent consensus (tutti label)
-  tutti-review:
+  resolve-target:
     if: >-
       github.actor != 'github-actions[bot]' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'tutti') &&
-      !contains(github.event.issue.labels.*.name, 'codex-implement')
-    uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-tutti-router.yml@main
-    with:
-      issue_number: "${{ format('{0}', github.event.issue.number) }}"
-    secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      contains(github.event.issue.labels.*.name, 'codex-implement')
+    runs-on: ubuntu-latest
+    outputs:
+      target_repo: ${{ steps.resolve.outputs.target_repo }}
+    steps:
+      - name: Resolve target repository from issue body
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          issue_number="${{ github.event.issue.number }}"
+          issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}")"
+          body="$(echo "${issue_json}" | jq -r '.body // ""')"
+          owner="${GITHUB_REPOSITORY%%/*}"
+
+          # 1) Prefer fully-qualified owner/repo found inside backticks.
+          target_repo="$(printf '%s\n' "${body}" \
+            | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
+            | head -n1)"
+
+          # 2) Fallback: repo name in backticks on lines mentioning repo/リポジトリ.
+          if [[ -z "${target_repo}" ]]; then
+            bare_repo="$(printf '%s\n' "${body}" \
+              | grep -E 'repo|Repo|repository|Repository|リポジトリ' \
+              | sed -nE 's/.*`([A-Za-z0-9_.-]+)`.*/\1/p' \
+              | head -n1 || true)"
+            if [[ -n "${bare_repo}" ]]; then
+              target_repo="${owner}/${bare_repo}"
+            fi
+          fi
+
+          # 3) Default to caller repo when no hint exists.
+          if [[ -z "${target_repo}" ]]; then
+            target_repo="${GITHUB_REPOSITORY}"
+          fi
+
+          echo "target_repo=${target_repo}" >> "${GITHUB_OUTPUT}"
 
   # Implement mode: Codex CLI code generation + PR (codex-implement label)
   codex-implement:
@@ -31,9 +61,11 @@ jobs:
       github.actor != 'github-actions[bot]' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
       contains(github.event.issue.labels.*.name, 'codex-implement')
+    needs: [resolve-target]
     uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-codex-implement.yml@main
     with:
       issue_number: "${{ format('{0}', github.event.issue.number) }}"
+      target_repo: "${{ needs.resolve-target.outputs.target_repo }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

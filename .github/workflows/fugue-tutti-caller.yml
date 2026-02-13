@@ -24,16 +24,3 @@ jobs:
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
-
-  # Implement mode: Codex CLI autonomous code generation
-  codex-implement:
-    if: >-
-      github.actor != 'github-actions[bot]' &&
-      contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'codex-implement')
-    uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-codex-implement.yml@main
-    with:
-      issue_number: "${{ format('{0}', github.event.issue.number) }}"
-    secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
