@@ -2,15 +2,52 @@
 set -euo pipefail
 
 # GHA24 - Submit task to FUGUE Tutti (6-parallel agent consensus)
-# Usage: gha24 "task description" [--repo owner/repo]
+# Usage: gha24 "task description" [--implement] [--repo owner/repo]
+#
+# Options:
+#   --implement    Add codex-implement label to trigger Codex CLI code generation
+#   --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)
 
-TASK="${1:-}"
-REPO="${2:-cursorvers/fugue-orchestrator}"
+TASK=""
+REPO="cursorvers/fugue-orchestrator"
+IMPLEMENT=false
+
+while [[ $# -gt 0 ]]; do
+  case "${1}" in
+    --implement)
+      IMPLEMENT=true
+      shift
+      ;;
+    --repo)
+      REPO="${2}"
+      shift 2
+      ;;
+    -h|--help)
+      echo "Usage: gha24 \"task description\" [--implement] [--repo owner/repo]"
+      echo ""
+      echo "Options:"
+      echo "  --implement    Trigger Codex CLI for autonomous code generation"
+      echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
+      echo ""
+      echo "Examples:"
+      echo "  gha24 \"認証フローのセキュリティレビュー\""
+      echo "  gha24 \"Implement auth middleware\" --implement"
+      echo "  gha24 \"Review auth flow\" --repo cursorvers/fugue-system-ui"
+      echo "  gha24 \"Add tests for utils\" --implement --repo cursorvers/telop-pack-srt-02"
+      exit 0
+      ;;
+    *)
+      if [[ -z "${TASK}" ]]; then
+        TASK="${1}"
+      fi
+      shift
+      ;;
+  esac
+done
 
 if [[ -z "${TASK}" ]]; then
-  echo "Usage: gha24 \"task description\" [repo]"
-  echo "Example: gha24 \"認証フローのセキュリティレビュー\""
-  echo "Example: gha24 \"Review auth flow\" cursorvers/fugue-system-ui"
+  echo "Error: task description required" >&2
+  echo "Usage: gha24 \"task description\" [--implement] [--repo owner/repo]"
   exit 1
 fi
 
@@ -19,11 +56,24 @@ if ! command -v gh &>/dev/null; then
   exit 1
 fi
 
+LABELS="fugue-task,tutti"
+if [[ "${IMPLEMENT}" == "true" ]]; then
+  LABELS="${LABELS},codex-implement"
+fi
+
 URL="$(gh issue create --repo "${REPO}" \
   --title "${TASK}" \
-  --label "fugue-task,tutti" \
+  --label "${LABELS}" \
   --body "${TASK}")"
 
 echo "Created: ${URL}"
-echo "6 agents will run automatically. Check results later:"
+
+if [[ "${IMPLEMENT}" == "true" ]]; then
+  echo "Mode: Codex CLI implementation (code generation + PR)"
+  echo "6 review agents + Codex implement will run automatically."
+else
+  echo "Mode: Review only (6-parallel agent consensus)"
+fi
+
+echo "Check results later:"
 echo "  gh issue view ${URL##*/} --repo ${REPO} --comments"

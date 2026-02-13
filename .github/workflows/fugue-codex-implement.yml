@@ -1,0 +1,284 @@
+name: fugue-codex-implement
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: "Issue number containing implementation instructions"
+        required: true
+        type: string
+      target_repo:
+        description: "Target repository (owner/repo) for code generation. Defaults to caller repo."
+        required: false
+        type: string
+        default: ""
+      target_branch:
+        description: "Base branch to create PR against"
+        required: false
+        type: string
+        default: "main"
+      codex_model:
+        description: "Codex model to use"
+        required: false
+        type: string
+        default: "o4-mini"
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+      TARGET_REPO_PAT:
+        required: false
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: fugue-codex-impl-${{ github.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.ctx.outputs.should_run }}
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      issue_title: ${{ steps.ctx.outputs.issue_title }}
+      issue_body: ${{ steps.ctx.outputs.issue_body }}
+      target_repo: ${{ steps.ctx.outputs.target_repo }}
+      branch_name: ${{ steps.ctx.outputs.branch_name }}
+
+    steps:
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ inputs.issue_number }}"
+          issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+
+          TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
+          BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+          AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
+          HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("codex-implement") != null')"
+
+          SHOULD_RUN="true"
+          if [[ "${HAS_IMPLEMENT}" != "true" ]]; then
+            SHOULD_RUN="false"
+          fi
+
+          # Determine target repo
+          TARGET_REPO="${{ inputs.target_repo }}"
+          if [[ -z "${TARGET_REPO}" ]]; then
+            TARGET_REPO="${GITHUB_REPOSITORY}"
+          fi
+
+          # Generate branch name from issue number
+          SAFE_TITLE="$(echo "${TITLE}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | head -c 40)"
+          BRANCH_NAME="codex/issue-${ISSUE_NUMBER}-${SAFE_TITLE}"
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "issue_title<<EOF"
+            echo "${TITLE}"
+            echo "EOF"
+            echo "issue_body<<EOF"
+            echo "${BODY}"
+            echo "EOF"
+            echo "should_run=${SHOULD_RUN}"
+            echo "target_repo=${TARGET_REPO}"
+            echo "branch_name=${BRANCH_NAME}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Add processing label
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "completed" --remove-label "needs-review" || true
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --add-label "processing"
+
+  implement:
+    if: ${{ needs.prepare.outputs.should_run == 'true' }}
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    outputs:
+      pr_url: ${{ steps.create-pr.outputs.pr_url }}
+      codex_exit: ${{ steps.codex.outputs.exit_code }}
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.target_repo }}
+          token: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Codex CLI
+        run: |
+          npm install -g @openai/codex
+          codex --version
+
+      - name: Create working branch
+        run: |
+          git checkout -b "${{ needs.prepare.outputs.branch_name }}"
+
+      - name: Run Codex CLI
+        id: codex
+        env:
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          CODEX_MODEL: ${{ inputs.codex_model }}
+        run: |
+          set -euo pipefail
+
+          # Build instruction from issue
+          INSTRUCTION="## Task: ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+
+          ## Rules
+          - Implement the changes described above
+          - Follow existing code style and patterns
+          - Do NOT modify unrelated files
+          - Ensure code compiles/passes lint
+          - Add tests if test infrastructure exists"
+
+          # Write instruction to temp file to avoid shell escaping issues
+          echo "${INSTRUCTION}" > /tmp/codex-instruction.md
+
+          # Run Codex in full-auto mode with writable sandbox
+          EXIT_CODE=0
+          codex \
+            --model "${CODEX_MODEL}" \
+            --approval-mode full-auto \
+            --full-auto-error-mode ignore-and-continue \
+            --quiet \
+            "$(cat /tmp/codex-instruction.md)" \
+            2>&1 | tee /tmp/codex-output.log || EXIT_CODE=$?
+
+          echo "exit_code=${EXIT_CODE}" >> "${GITHUB_OUTPUT}"
+
+          # Check if any files were changed
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "no_changes=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "no_changes=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Commit changes
+        if: ${{ steps.codex.outputs.no_changes != 'true' }}
+        run: |
+          git config user.name "fugue-codex[bot]"
+          git config user.email "fugue-codex[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement issue #${{ needs.prepare.outputs.issue_number }}
+
+          Generated by Codex CLI (${{ inputs.codex_model }}) via FUGUE GHA24.
+
+          Closes #${{ needs.prepare.outputs.issue_number }}"
+
+      - name: Push branch
+        if: ${{ steps.codex.outputs.no_changes != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          git push origin "${{ needs.prepare.outputs.branch_name }}"
+
+      - name: Create Pull Request
+        id: create-pr
+        if: ${{ steps.codex.outputs.no_changes != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          TARGET_REPO="${{ needs.prepare.outputs.target_repo }}"
+          ISSUE_NUM="${{ needs.prepare.outputs.issue_number }}"
+
+          PR_URL="$(gh pr create \
+            --repo "${TARGET_REPO}" \
+            --base "${{ inputs.target_branch }}" \
+            --head "${{ needs.prepare.outputs.branch_name }}" \
+            --title "feat: implement #${ISSUE_NUM} (Codex)" \
+            --body "## Auto-generated by FUGUE Codex Implement
+
+          **Source issue**: #${ISSUE_NUM}
+          **Model**: ${{ inputs.codex_model }}
+          **Mode**: full-auto
+
+          ### Changes
+          $(git log --oneline -1)
+
+          ### Review checklist
+          - [ ] Code compiles
+          - [ ] Tests pass
+          - [ ] No unintended file changes
+          - [ ] Security review (no secrets leaked)
+
+          ---
+          Generated by [FUGUE GHA24](https://github.com/${GITHUB_REPOSITORY})")"
+
+          echo "pr_url=${PR_URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload Codex log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-output-log
+          path: /tmp/codex-output.log
+          if-no-files-found: ignore
+
+  finalize:
+    if: always() && needs.prepare.outputs.should_run == 'true'
+    needs: [prepare, implement]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Update issue with results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          PR_URL: ${{ needs.implement.outputs.pr_url }}
+          CODEX_EXIT: ${{ needs.implement.outputs.codex_exit }}
+        run: |
+          set -euo pipefail
+
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "processing" || true
+
+          if [[ -n "${PR_URL}" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Codex implementation complete. PR created: ${PR_URL}
+
+          Exit code: ${CODEX_EXIT}"
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --add-label "completed"
+          else
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Codex implementation did not produce changes.
+
+          Exit code: ${CODEX_EXIT}
+          This may mean: no code changes were needed, the task was unclear, or Codex encountered an error.
+
+          Check the workflow run artifacts for the full Codex output log."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --add-label "needs-review"
+          fi

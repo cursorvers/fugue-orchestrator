@@ -1,4 +1,4 @@
-name: Fugue Tutti Caller
+name: Fugue Codex Implement Caller
 
 on:
   issues:
@@ -10,8 +10,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Review mode: 6-parallel agent consensus
-  tutti:
+  # Review mode: 6-parallel agent consensus (tutti label)
+  tutti-review:
     if: >-
       github.actor != 'github-actions[bot]' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
@@ -24,7 +24,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
 
-  # Implement mode: Codex CLI autonomous code generation
+  # Implement mode: Codex CLI code generation + PR (codex-implement label)
   codex-implement:
     if: >-
       github.actor != 'github-actions[bot]' &&

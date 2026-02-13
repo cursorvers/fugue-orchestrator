@@ -144,32 +144,32 @@ jobs:
           - name: codex-architect
             provider: codex
             api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-4o
+            model: gpt-5.3-codex
             agent_role: architect
           - name: codex-security-analyst
             provider: codex
             api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-4o
+            model: gpt-5.3-codex
             agent_role: security-analyst
           - name: codex-code-reviewer
             provider: codex
             api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-4o
+            model: gpt-5.3-codex
             agent_role: code-reviewer
           - name: glm-math-reasoning
             provider: glm
             api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
-            model: glm-4.7
+            model: glm-5
             agent_role: math-reasoning
           - name: glm-code-reviewer
             provider: glm
             api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
-            model: glm-4.7
+            model: glm-5
             agent_role: code-reviewer
           - name: glm-general-reviewer
             provider: glm
             api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
-            model: glm-4.7
+            model: glm-5
             agent_role: general-reviewer
 
     steps:
