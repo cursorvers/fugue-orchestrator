@@ -8,6 +8,7 @@ permissions:
   issues: write
   contents: write
   pull-requests: write
+  actions: read
 
 jobs:
   # Review mode: 6-parallel agent consensus
