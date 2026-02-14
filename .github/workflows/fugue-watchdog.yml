@@ -31,19 +31,25 @@ jobs:
             --limit 200 \
             --json number,labels)"
 
-          # Pending router work: open fugue-task missing processing/completed/needs-human
+          # Pending router work: issues that *should* be handled by `fugue-task-router`.
+          # Exclude terminal/handled states to avoid alert spam (e.g. vote-rejected drills).
           pending_json="$(echo "${issues_json}" | jq -c '[.[] | select(
             (([.labels[]? | .name] | index("processing")) == null) and
             (([.labels[]? | .name] | index("completed")) == null) and
-            (([.labels[]? | .name] | index("needs-human")) == null)
+            (([.labels[]? | .name] | index("needs-human")) == null) and
+            (([.labels[]? | .name] | index("needs-review")) == null) and
+            (([.labels[]? | .name] | index("vote-rejected")) == null) and
+            (([.labels[]? | .name] | index("tutti")) == null)
           ) | .number]')"
           pending_count="$(echo "${pending_json}" | jq 'length')"
 
-          # Pending mainframe work: open issue has `tutti` but not completed/needs-human.
+          # Pending mainframe work: open issue has `tutti` but is not in a terminal state.
           mainframe_pending_json="$(echo "${issues_json}" | jq -c '[.[] | select(
             (([.labels[]? | .name] | index("tutti")) != null) and
             (([.labels[]? | .name] | index("completed")) == null) and
-            (([.labels[]? | .name] | index("needs-human")) == null)
+            (([.labels[]? | .name] | index("needs-human")) == null) and
+            (([.labels[]? | .name] | index("needs-review")) == null) and
+            (([.labels[]? | .name] | index("vote-rejected")) == null)
           ) | .number]')"
           mainframe_pending_count="$(echo "${mainframe_pending_json}" | jq 'length')"
 
@@ -242,11 +248,15 @@ jobs:
             --limit 200 \
             --json number,labels)"
 
-          # Avoid retry loops on `needs-human` issues. Also handle edge cases where labels are missing.
+          # Only retry issues that the router would actually pick up.
+          # Avoid retry loops on terminal/handled states (`needs-human`, `needs-review`, `vote-rejected`, `tutti`).
           PENDING_JSON="$(echo "${ISSUES_JSON}" | jq -c '[.[] | select(
             (([.labels[]? | .name] | index("processing")) == null) and
             (([.labels[]? | .name] | index("completed")) == null) and
-            (([.labels[]? | .name] | index("needs-human")) == null)
+            (([.labels[]? | .name] | index("needs-human")) == null) and
+            (([.labels[]? | .name] | index("needs-review")) == null) and
+            (([.labels[]? | .name] | index("vote-rejected")) == null) and
+            (([.labels[]? | .name] | index("tutti")) == null)
           ) | .number]')"
           COUNT="$(echo "${PENDING_JSON}" | jq 'length')"
 
