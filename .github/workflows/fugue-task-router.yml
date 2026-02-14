@@ -81,9 +81,9 @@ jobs:
           if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
             TRUSTED="true"
           fi
-          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
-          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
-          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
+          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
           HAS_GHA24="$(echo "${issue_json}" | jq -r '((.body // "") | test("^##\\s*GHA24\\s*Task"; "m"))')"
 
           SHOULD_RUN="true"

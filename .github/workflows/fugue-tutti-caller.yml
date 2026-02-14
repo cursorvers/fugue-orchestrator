@@ -52,9 +52,9 @@ jobs:
           body="$(echo "${issue_json}" | jq -r '.body // ""')"
           owner="${GITHUB_REPOSITORY%%/*}"
 
-          has_fugue="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
-          has_tutti="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
-          has_codex="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("codex-implement") != null')"
+          has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+          has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+          has_codex="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("codex-implement") != null')"
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
           target_repo="$(printf '%s\n' "${body}" \
