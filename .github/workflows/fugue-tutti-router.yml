@@ -140,7 +140,9 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --remove-label "completed" \
             --remove-label "needs-review" \
-            --remove-label "needs-human" || true
+            --remove-label "needs-human" \
+            --remove-label "vote-approved" \
+            --remove-label "vote-rejected" || true
           gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
             --repo "${GITHUB_REPOSITORY}" \
             --add-label "processing"
@@ -454,8 +456,7 @@ jobs:
 
           if [[ "${APPROVE_COUNT}" -ge "${threshold}" ]]; then
             if [[ "${HAS_CODEX_IMPLEMENT}" == "true" ]]; then
-              gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "vote-approved"
-              gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Marked as vote-approved; implementation may proceed."
+              gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Approved to execute; implementation may proceed."
             else
               gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"
               gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Auto-execution approved."
@@ -463,6 +464,5 @@ jobs:
             fi
           else
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review"
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "vote-rejected" || true
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (<2/3). Marked for review."
           fi

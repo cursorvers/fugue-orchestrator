@@ -88,7 +88,9 @@ if [[ "${MODE_EXPLICIT}" != "true" ]]; then
   fi
 fi
 
-LABELS="fugue-task,tutti"
+# Create the issue first, then add the `tutti` label as a second step.
+# This avoids multiple `issues:labeled` triggers firing at creation time.
+LABELS="fugue-task"
 if [[ "${IMPLEMENT}" == "true" ]]; then
   LABELS="${LABELS},codex-implement"
 fi
@@ -96,6 +98,23 @@ fi
 BODY="$(cat <<EOF
 ## GHA24 Task
 ${TASK}
+
+## Spec (minimal)
+### Goal
+${TASK}
+
+### Must not
+- Do not touch unrelated files
+- Do not leak secrets
+- Do not perform destructive operations (delete/rotate/disable) unless explicitly requested
+
+### Acceptance criteria
+- [ ] Change matches Goal
+- [ ] No unintended file changes
+- [ ] CI/lint/tests pass if present
+
+### Rollback
+- Revert the PR
 
 ## Target repo
 \`${TARGET_REPO}\`
@@ -109,6 +128,9 @@ URL="$(gh issue create --repo "${ORCHESTRATOR_REPO}" \
   --title "${TASK}" \
   --label "${LABELS}" \
   --body "${BODY}")"
+
+ISSUE_NUM="${URL##*/}"
+gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "tutti" >/dev/null
 
 echo "Created: ${URL}"
 echo "Orchestrator repo: ${ORCHESTRATOR_REPO}"
