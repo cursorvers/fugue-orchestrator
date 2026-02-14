@@ -34,6 +34,7 @@ jobs:
       issue_title: ${{ steps.ctx.outputs.issue_title }}
       issue_body: ${{ steps.ctx.outputs.issue_body }}
       author: ${{ steps.ctx.outputs.author }}
+      has_codex_implement: ${{ steps.ctx.outputs.has_codex_implement }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
 
@@ -59,6 +60,7 @@ jobs:
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
+          HAS_CODEX_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("codex-implement") != null')"
 
           SHOULD_RUN="true"
           SKIP_REASON=""
@@ -79,6 +81,7 @@ jobs:
             echo "${BODY}"
             echo "EOF"
             echo "author=${AUTHOR}"
+            echo "has_codex_implement=${HAS_CODEX_IMPLEMENT}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
@@ -393,6 +396,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          HAS_CODEX_IMPLEMENT: ${{ needs.prepare.outputs.has_codex_implement }}
           HIGH_RISK: ${{ needs.integrate.outputs.high_risk }}
           APPROVE_COUNT: ${{ needs.integrate.outputs.approve_count }}
           TOTAL_COUNT: ${{ needs.integrate.outputs.total_count }}
@@ -411,10 +415,16 @@ jobs:
           fi
 
           if [[ "${APPROVE_COUNT}" -ge "${threshold}" ]]; then
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tier 2 consensus: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Auto-execution approved."
-            gh issue close "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}"
+            if [[ "${HAS_CODEX_IMPLEMENT}" == "true" ]]; then
+              gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "vote-approved"
+              gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Marked as vote-approved; implementation may proceed."
+            else
+              gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"
+              gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Auto-execution approved."
+              gh issue close "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}"
+            fi
           else
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review"
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tier 2 consensus: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (<2/3). Marked for review."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "vote-rejected" || true
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (<2/3). Marked for review."
           fi

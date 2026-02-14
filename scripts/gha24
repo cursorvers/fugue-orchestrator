@@ -92,7 +92,7 @@ echo "Target repo: ${TARGET_REPO}"
 
 if [[ "${IMPLEMENT}" == "true" ]]; then
   echo "Mode: Codex CLI implementation (code generation + PR)"
-  echo "6 review agents + Codex implement will run automatically."
+  echo "Tutti vote will run first. If approved, Codex implement will run automatically."
 else
   echo "Mode: Review only (6-parallel agent consensus)"
 fi
