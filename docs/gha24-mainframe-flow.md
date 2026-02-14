@@ -17,7 +17,7 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
 - **Watchdog.** `.github/workflows/fugue-watchdog.yml` runs hourly to keep the mainframe healthy: it checks OpenAI/Z.ai connectivity, verifies that both `fugue-task-router` and `fugue-tutti-caller` have had a successful run in the last 3 hours, posts a Discord alert if anything is stale, and works through open `fugue-task` issues that lack `processing`/`completed` labels by retriggering the router.
 
 ## Mobile quick start
-- Create a GitHub Issue and add label `fugue-task`.
+- Create a GitHub Issue using the template **FUGUE Task (Mobile / Natural Language)** (auto-adds label `fugue-task`), or manually add label `fugue-task`.
 - In the body, include:
   - `完遂` (hands off to GHA24 mainframe)
   - Optional: `レビューのみ` (do not add `codex-implement`)
