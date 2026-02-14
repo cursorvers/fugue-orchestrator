@@ -60,6 +60,7 @@ jobs:
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           AUTHOR_ASSOC="$(echo "${issue_json}" | jq -r '.author_association // "NONE"')"
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
+          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
 
           SHOULD_RUN="true"
@@ -67,6 +68,9 @@ jobs:
           if [[ "${HAS_FUGUE}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-fugue-task-label"
+          elif [[ "${HAS_TUTTI}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="handled-by-tutti"
           elif [[ "${HAS_PROCESSING}" == "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="already-processing"
@@ -83,6 +87,7 @@ jobs:
             echo "author=${AUTHOR}"
             echo "author_association=${AUTHOR_ASSOC}"
             echo "has_fugue=${HAS_FUGUE}"
+            echo "has_tutti=${HAS_TUTTI}"
             echo "has_processing=${HAS_PROCESSING}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"

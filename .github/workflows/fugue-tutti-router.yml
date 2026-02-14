@@ -240,10 +240,22 @@ jobs:
 
           content="$(jq -r '.choices[0].message.content // ""' response.json 2>/dev/null || echo "")"
 
-          if [[ -n "${content}" ]] && echo "${content}" | jq -e . >/dev/null 2>&1; then
-            parsed="${content}"
+          # Extract JSON even if wrapped in ```json fences.
+          extracted="$(jq -Rn --arg s "${content}" '
+            ($s | gsub("\r"; "") | gsub("^\\s+|\\s+$"; "")) as $t |
+            if ($t | test("```json"; "i")) then
+              (($t | split("```json") | .[1] // $t) | split("```") | .[0]) | gsub("^\\s+|\\s+$"; "")
+            elif ($t | test("```"; "i")) then
+              (($t | split("```") | .[1] // $t) | split("```") | .[0]) | gsub("^\\s+|\\s+$"; "")
+            else
+              $t
+            end
+          ')"
+
+          if [[ -n "${extracted}" ]] && echo "${extracted}" | jq -e . >/dev/null 2>&1; then
+            parsed="${extracted}"
           else
-            parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse strict JSON from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
+            parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse JSON from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
           fi
 
           result="$(jq -n \
