@@ -15,7 +15,8 @@ jobs:
     if: >-
       github.actor != 'github-actions[bot]' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'codex-implement')
+      contains(github.event.issue.labels.*.name, 'codex-implement') &&
+      github.event.label.name == 'vote-approved'
     runs-on: ubuntu-latest
     outputs:
       target_repo: ${{ steps.resolve.outputs.target_repo }}
@@ -60,7 +61,8 @@ jobs:
     if: >-
       github.actor != 'github-actions[bot]' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'codex-implement')
+      contains(github.event.issue.labels.*.name, 'codex-implement') &&
+      github.event.label.name == 'vote-approved'
     needs: [resolve-target]
     uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-codex-implement.yml@main
     with:

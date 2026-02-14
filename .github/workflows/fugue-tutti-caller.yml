@@ -15,9 +15,9 @@ jobs:
   tutti:
     if: >-
       github.actor != 'github-actions[bot]' &&
+      github.event.label.name == 'tutti' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'tutti') &&
-      !contains(github.event.issue.labels.*.name, 'codex-implement')
+      contains(github.event.issue.labels.*.name, 'tutti')
     uses: cursorvers/fugue-orchestrator/.github/workflows/fugue-tutti-router.yml@main
     with:
       issue_number: "${{ format('{0}', github.event.issue.number) }}"
