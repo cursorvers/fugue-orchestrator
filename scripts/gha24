@@ -11,6 +11,10 @@ set -euo pipefail
 # Notes:
 #   The issue is always created in the orchestrator repo. The target repo is
 #   passed via the issue body so the caller workflow can resolve it.
+#
+# Secrets strategy:
+#   Prefer GitHub Organization secrets (selected repos) over per-repo secrets.
+#   Run scripts/audit-org-secrets.sh to verify coverage.
 
 TASK=""
 ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
