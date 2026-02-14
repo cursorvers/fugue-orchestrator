@@ -49,9 +49,9 @@ const PROVIDERS = {
     name: "Codex (OpenAI)",
     envKey: "OPENAI_API_KEY",
     endpoint: "https://api.openai.com/v1/chat/completions",
-    model: "gpt-4o",
+    model: "gpt-5.3-codex",
     buildPayload: (systemPrompt, userPrompt) => ({
-      model: "gpt-4o",
+      model: "gpt-5.3-codex",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

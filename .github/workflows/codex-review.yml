@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   codex-review:
-    name: Codex Review (GPT-5.2)
+    name: Codex Review (gpt-5.3-codex)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -106,7 +106,7 @@ jobs:
           cat /tmp/pr_diff.txt >> /tmp/code_review_prompt.md
 
           REQUEST_BODY=$(jq -n \
-            --arg model "gpt-5.2" \
+            --arg model "gpt-5.3-codex" \
             --arg prompt "$(cat /tmp/code_review_prompt.md)" \
             '{
               model: $model,
@@ -180,7 +180,7 @@ jobs:
           cat /tmp/pr_diff.txt >> /tmp/security_prompt.md
 
           REQUEST_BODY=$(jq -n \
-            --arg model "gpt-5.2" \
+            --arg model "gpt-5.3-codex" \
             --arg prompt "$(cat /tmp/security_prompt.md)" \
             '{
               model: $model,
@@ -270,7 +270,7 @@ jobs:
           # against shell expansion. Model output may contain `$FOO` or `${BAR}`
           # which breaks under `set -u` (unbound variable).
           {
-            printf '%s\n\n' '## :robot: Codex Review (GPT-5.2)'
+            printf '%s\n\n' '## :robot: Codex Review (gpt-5.3-codex)'
 
             printf '### :bar_chart: Consensus Score: %s/10 :%s: **%s**\n\n' \
               "${{ steps.consensus.outputs.total }}" \
@@ -310,7 +310,7 @@ jobs:
             printf '%s\n\n' '| 0-4 | :x: Changes Required |'
 
             printf '%s\n' '---'
-            printf '%s\n' '*Powered by Orchestra Delegator + OpenAI Chat Completions API (GPT-5.2)*'
+            printf '%s\n' '*Powered by Orchestra Delegator + OpenAI Chat Completions API (gpt-5.3-codex)*'
           } > /tmp/comment.md
 
           gh pr comment "${PR_NUMBER}" --body-file /tmp/comment.md
