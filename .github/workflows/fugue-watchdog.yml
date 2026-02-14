@@ -7,7 +7,8 @@ on:
 
 permissions:
   issues: write
-  actions: read
+  # Needed to dispatch workflow runs for auto-recovery (reconcile job).
+  actions: write
   contents: read
 
 jobs:
@@ -16,6 +17,41 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Count pending work (for alert gating)
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          issues_json="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --label "fugue-task" \
+            --limit 200 \
+            --json number,labels)"
+
+          # Pending router work: open fugue-task missing processing/completed/needs-human
+          pending_json="$(echo "${issues_json}" | jq -c '[.[] | select(
+            (([.labels[]? | .name] | index("processing")) == null) and
+            (([.labels[]? | .name] | index("completed")) == null) and
+            (([.labels[]? | .name] | index("needs-human")) == null)
+          ) | .number]')"
+          pending_count="$(echo "${pending_json}" | jq 'length')"
+
+          # Pending mainframe work: open issue has `tutti` but not completed/needs-human.
+          mainframe_pending_json="$(echo "${issues_json}" | jq -c '[.[] | select(
+            (([.labels[]? | .name] | index("tutti")) != null) and
+            (([.labels[]? | .name] | index("completed")) == null) and
+            (([.labels[]? | .name] | index("needs-human")) == null)
+          ) | .number]')"
+          mainframe_pending_count="$(echo "${mainframe_pending_json}" | jq 'length')"
+
+          {
+            echo "pending_count=${pending_count}"
+            echo "mainframe_pending_count=${mainframe_pending_count}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: API connectivity check
         id: connectivity
         env:
@@ -26,11 +62,13 @@ jobs:
           OPENAI_OK="false"
           ZAI_OK="false"
 
-          curl -fsS https://api.openai.com/v1/models \
+          curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+            https://api.openai.com/v1/models \
             -H "Authorization: Bearer ${OPENAI_API_KEY}" >/dev/null 2>&1
           [[ $? -eq 0 ]] && OPENAI_OK="true"
 
-          curl -fsS https://api.z.ai/api/coding/paas/v4/models \
+          curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+            https://api.z.ai/api/coding/paas/v4/models \
             -H "Authorization: Bearer ${ZAI_API_KEY}" >/dev/null 2>&1
           [[ $? -eq 0 ]] && ZAI_OK="true"
 
@@ -60,7 +98,8 @@ jobs:
           DIFF_HOURS="$(( (NOW_EPOCH - LAST_EPOCH) / 3600 ))"
 
           STALE="false"
-          if [[ "${DIFF_HOURS}" -ge 3 ]]; then
+          # Only page on router staleness when there is pending work to process.
+          if [[ "${DIFF_HOURS}" -ge 3 && "${{ steps.pending.outputs.pending_count }}" != "0" ]]; then
             STALE="true"
           fi
 
@@ -91,7 +130,8 @@ jobs:
           DIFF_HOURS="$(( (NOW_EPOCH - LAST_EPOCH) / 3600 ))"
 
           STALE="false"
-          if [[ "${DIFF_HOURS}" -ge 3 ]]; then
+          # Only page on mainframe staleness when there is pending mainframe work.
+          if [[ "${DIFF_HOURS}" -ge 3 && "${{ steps.pending.outputs.mainframe_pending_count }}" != "0" ]]; then
             STALE="true"
           fi
 
@@ -101,23 +141,84 @@ jobs:
             echo "last_time=${LAST_TIME}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Decide whether to alert (throttle + relevance)
+        id: decide
+        run: |
+          set -euo pipefail
+
+          openai_ok="${{ steps.connectivity.outputs.openai_ok }}"
+          zai_ok="${{ steps.connectivity.outputs.zai_ok }}"
+          router_stale="${{ steps.last_success.outputs.stale }}"
+          mainframe_stale="${{ steps.mainframe_success.outputs.stale }}"
+
+          router_hours="${{ steps.last_success.outputs.hours_since }}"
+          mainframe_hours="${{ steps.mainframe_success.outputs.hours_since }}"
+
+          pending_count="${{ steps.pending.outputs.pending_count }}"
+          mainframe_pending_count="${{ steps.pending.outputs.mainframe_pending_count }}"
+
+          hour_utc="$(date -u +%H)"
+          should_alert="false"
+          reasons=()
+
+          # Connectivity issues can be transient. Only alert frequently if there is pending work.
+          if [[ "${openai_ok}" != "true" || "${zai_ok}" != "true" ]]; then
+            if [[ "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ]]; then
+              # With pending work, alert at most every 3 hours.
+              if (( 10#${hour_utc} % 3 == 0 )); then
+                should_alert="true"
+                reasons+=("connectivity")
+              fi
+            else
+              # Without pending work, reduce noise: alert at most every 6 hours.
+              if (( 10#${hour_utc} % 6 == 0 )); then
+                should_alert="true"
+                reasons+=("connectivity")
+              fi
+            fi
+          fi
+
+          # Staleness alerts: page at 3h, then every 6h (3,6,12,18,24,...).
+          if [[ "${router_stale}" == "true" ]]; then
+            if [[ "${router_hours}" == "9999" || "${router_hours}" == "3" || $((router_hours % 6)) -eq 0 ]]; then
+              should_alert="true"
+              reasons+=("router-stale")
+            fi
+          fi
+          if [[ "${mainframe_stale}" == "true" ]]; then
+            if [[ "${mainframe_hours}" == "9999" || "${mainframe_hours}" == "3" || $((mainframe_hours % 6)) -eq 0 ]]; then
+              should_alert="true"
+              reasons+=("mainframe-stale")
+            fi
+          fi
+
+          msg="fugue-watchdog alert
+          repo: ${GITHUB_REPOSITORY}
+          reasons: ${reasons[*]:-none}
+          openai_ok: ${openai_ok}
+          zai_ok: ${zai_ok}
+          pending_count: ${pending_count}
+          mainframe_pending_count: ${mainframe_pending_count}
+          router_hours_since_success: ${router_hours}
+          router_last_success_at: ${{ steps.last_success.outputs.last_time }}
+          mainframe_hours_since_success: ${mainframe_hours}
+          mainframe_last_success_at: ${{ steps.mainframe_success.outputs.last_time }}"
+
+          {
+            echo "should_alert=${should_alert}"
+            echo "message<<EOF"
+            echo "${msg}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Discord alert when unhealthy
-        if: ${{ steps.connectivity.outputs.openai_ok != 'true' || steps.connectivity.outputs.zai_ok != 'true' || steps.last_success.outputs.stale == 'true' || steps.mainframe_success.outputs.stale == 'true' }}
+        if: ${{ steps.decide.outputs.should_alert == 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           set -euo pipefail
 
-          MSG="fugue-watchdog alert
-          repo: ${GITHUB_REPOSITORY}
-          openai_ok: ${{ steps.connectivity.outputs.openai_ok }}
-          zai_ok: ${{ steps.connectivity.outputs.zai_ok }}
-          router_hours_since_success: ${{ steps.last_success.outputs.hours_since }}
-          router_last_success_at: ${{ steps.last_success.outputs.last_time }}
-          mainframe_hours_since_success: ${{ steps.mainframe_success.outputs.hours_since }}
-          mainframe_last_success_at: ${{ steps.mainframe_success.outputs.last_time }}"
-
-          PAYLOAD="$(jq -n --arg content "${MSG}" '{content:$content}')"
+          PAYLOAD="$(jq -n --arg content "${{ steps.decide.outputs.message }}" '{content:$content}')"
           curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
             -H "Content-Type: application/json" \
             -d "${PAYLOAD}"
@@ -141,7 +242,12 @@ jobs:
             --limit 200 \
             --json number,labels)"
 
-          PENDING_JSON="$(echo "${ISSUES_JSON}" | jq -c '[.[] | select((([.labels[].name] | index("processing")) == null) and (([.labels[].name] | index("completed")) == null)) | .number]')"
+          # Avoid retry loops on `needs-human` issues. Also handle edge cases where labels are missing.
+          PENDING_JSON="$(echo "${ISSUES_JSON}" | jq -c '[.[] | select(
+            (([.labels[]? | .name] | index("processing")) == null) and
+            (([.labels[]? | .name] | index("completed")) == null) and
+            (([.labels[]? | .name] | index("needs-human")) == null)
+          ) | .number]')"
           COUNT="$(echo "${PENDING_JSON}" | jq 'length')"
 
           {
@@ -162,6 +268,6 @@ jobs:
             echo "Triggering router for issue #${ISSUE_NUM}"
             gh workflow run fugue-task-router.yml \
               --repo "${GITHUB_REPOSITORY}" \
-              -f issue_number="${ISSUE_NUM}" || true
+              -f issue_number="${ISSUE_NUM}"
             sleep 2
           done
