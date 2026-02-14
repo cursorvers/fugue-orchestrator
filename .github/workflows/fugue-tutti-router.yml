@@ -43,7 +43,6 @@ concurrency:
 
 jobs:
   prepare:
-    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -157,7 +156,7 @@ jobs:
           gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
 
   run-agents:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -302,7 +301,7 @@ jobs:
           if-no-files-found: error
 
   integrate:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, run-agents]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -427,7 +426,7 @@ jobs:
             --body-file integrated-comment.md
 
   finalize:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, integrate]
     runs-on: ubuntu-latest
     timeout-minutes: 10

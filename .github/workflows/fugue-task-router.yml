@@ -29,7 +29,9 @@ permissions:
 
 jobs:
   route:
-    if: ${{ github.event_name != 'issue_comment' || github.actor != 'github-actions[bot]' }}
+    # Ignore bot-driven issue label churn (processing/proj labels), but still allow
+    # watchdog-triggered workflow_dispatch to run as github-actions[bot].
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
