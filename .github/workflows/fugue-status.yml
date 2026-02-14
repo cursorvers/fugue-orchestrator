@@ -45,7 +45,7 @@ jobs:
           elif [[ "${EVENT}" == "issue_comment" ]]; then
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
-            COMMENT_BODY="$(jq -r '.comment.body // \"\"' "${GITHUB_EVENT_PATH}")"
+            COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
           else
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
@@ -182,4 +182,3 @@ jobs:
           )"
 
           gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "${report}"
-
