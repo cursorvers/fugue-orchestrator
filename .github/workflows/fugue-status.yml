@@ -51,7 +51,7 @@ jobs:
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
           fi
 
-          HAS_STATUS="$(echo "${issue_json}" | jq -r '[.labels[].name] | index(\"fugue-status\") != null')"
+          HAS_STATUS="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-status") != null')"
           SHOULD_RUN="false"
           REASON=""
 
@@ -129,11 +129,11 @@ jobs:
           # Open fugue-task issues
           issues_json="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:open&per_page=100")"
           total="$(echo "${issues_json}" | jq -r '.total_count // 0')"
-          processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == \"processing\")] | length')"
-          needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == \"needs-human\")] | length')"
-          needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == \"needs-review\")] | length')"
+          processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "processing")] | length')"
+          needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-human")] | length')"
+          needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-review")] | length')"
 
-          top="$(echo "${issues_json}" | jq -r '.items[:5] | map(\"- #\\(.number) \\(.title) (\\(.html_url))\") | join(\"\\n\")')"
+          top="$(echo "${issues_json}" | jq -r '.items[:5] | map("- #\(.number) \(.title) (\(.html_url))") | join("\n")')"
           if [[ -z "${top}" ]]; then
             top="(none)"
           fi
@@ -145,10 +145,10 @@ jobs:
             local run_json
             run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 2>/dev/null || echo '{}')"
             local status concl url created
-            status="$(echo "${run_json}" | jq -r '.workflow_runs[0].status // \"unknown\"')"
-            concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // \"\"')"
-            url="$(echo "${run_json}" | jq -r '.workflow_runs[0].html_url // \"\"')"
-            created="$(echo "${run_json}" | jq -r '.workflow_runs[0].created_at // \"\"')"
+            status="$(echo "${run_json}" | jq -r '.workflow_runs[0].status // "unknown"')"
+            concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // ""')"
+            url="$(echo "${run_json}" | jq -r '.workflow_runs[0].html_url // ""')"
+            created="$(echo "${run_json}" | jq -r '.workflow_runs[0].created_at // ""')"
             if [[ -z "${url}" ]]; then
               echo "- ${label}: (no runs found)"
               return 0
