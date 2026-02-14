@@ -26,6 +26,7 @@ on:
 permissions:
   issues: write
   contents: read
+  actions: write
 
 jobs:
   route:
@@ -66,6 +67,18 @@ jobs:
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           AUTHOR_ASSOC="$(echo "${issue_json}" | jq -r '.author_association // "NONE"')"
+
+          # Trust gate (write/maintain/admin). Used to prevent untrusted users
+          # from dispatching the mainframe workflows.
+          PERM="none"
+          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
+          fi
+          TRUSTED="false"
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
+            TRUSTED="true"
+          fi
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
@@ -100,6 +113,8 @@ jobs:
             echo "EOF"
             echo "author=${AUTHOR}"
             echo "author_association=${AUTHOR_ASSOC}"
+            echo "trusted=${TRUSTED}"
+            echo "permission=${PERM}"
             echo "has_fugue=${HAS_FUGUE}"
             echo "has_tutti=${HAS_TUTTI}"
             echo "has_processing=${HAS_PROCESSING}"
@@ -177,7 +192,7 @@ jobs:
 
       - name: GHA24 mainframe handoff (natural language)
         id: handoff
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
@@ -228,6 +243,12 @@ jobs:
           fi
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Action: added label \`tutti\`${extra}\n\nNext: Tutti runs and posts the vote/audit comment. If approved and \`codex-implement\` is present, Codex will create a PR."
 
+          # IMPORTANT: label events created by GitHub Actions' GITHUB_TOKEN do NOT trigger other workflows.
+          # We must dispatch the mainframe workflow explicitly.
+          gh workflow run fugue-tutti-caller.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            -f issue_number="${ISSUE_NUMBER}" >/dev/null
+
           echo "handoff=true" >> "${GITHUB_OUTPUT}"
           echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
 
@@ -237,6 +258,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue edit "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --add-label "processing"
+
+      - name: Untrusted mainframe request notice
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+        run: |
+          set -euo pipefail
+          text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}")"
+          if echo "${text}" | grep -Eqi '(完遂|自走|完了まで|最後まで|full[- ]?auto|#gha24|GHA24)'; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Mainframe handoff is restricted to trusted collaborators (write/maintain/admin). Current permission: `${{ steps.ctx.outputs.permission }}`."
+          fi
 
       - name: Classify intent (Node.js decision table)
         id: classify
