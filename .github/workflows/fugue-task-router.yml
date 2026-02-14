@@ -13,7 +13,9 @@ on:
       ZAI_API_KEY:
         required: true
   issues:
-    types: [opened, labeled]
+    # Avoid `labeled` here: labels added by automation (processing/proj/tutti) can
+    # create extra runs and cause unnecessary concurrency cancellations.
+    types: [opened]
   issue_comment:
     types: [created]
   workflow_dispatch:
