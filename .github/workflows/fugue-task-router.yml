@@ -201,20 +201,22 @@ jobs:
           RESP=""
           # Try OpenAI first if provider is codex
           if [[ "${PROVIDER}" == "codex" && -n "${OPENAI_API_KEY}" ]]; then
-            OPENAI_MODEL="gpt-5.3-codex"
-            REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
-            RESP="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
-              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "${REQ}" 2>/dev/null || true)"
-            HTTP_CODE="$(echo "${RESP}" | tail -1)"
-            RESP_BODY="$(echo "${RESP}" | sed '$d')"
-            if [[ "${HTTP_CODE}" != "200" ]]; then
-              echo "OpenAI returned ${HTTP_CODE}, falling back to GLM"
-              RESP=""
-            else
-              RESP="${RESP_BODY}"
-            fi
+            OPENAI_MODEL_CANDIDATES=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex")
+            for OPENAI_MODEL in "${OPENAI_MODEL_CANDIDATES[@]}"; do
+              REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
+              raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
+                -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${REQ}" 2>/dev/null || true)"
+              HTTP_CODE="$(echo "${raw}" | tail -1)"
+              RESP_BODY="$(echo "${raw}" | sed '$d')"
+              if [[ "${HTTP_CODE}" == "200" ]]; then
+                RESP="${RESP_BODY}"
+                echo "OpenAI ok (model=${OPENAI_MODEL})"
+                break
+              fi
+              echo "OpenAI failed (model=${OPENAI_MODEL}, http=${HTTP_CODE})"
+            done
           fi
 
           # GLM fallback or primary

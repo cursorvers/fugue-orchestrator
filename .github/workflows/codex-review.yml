@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   codex-review:
-    name: Codex Review (gpt-5.3-codex)
+    name: Codex Review (Codex)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -105,22 +105,34 @@ jobs:
 
           cat /tmp/pr_diff.txt >> /tmp/code_review_prompt.md
 
-          REQUEST_BODY=$(jq -n \
-            --arg model "gpt-5.3-codex" \
-            --arg prompt "$(cat /tmp/code_review_prompt.md)" \
-            '{
-              model: $model,
-              temperature: 0.1,
-              messages: [
-                {role: "system", content: "You are a strict senior code reviewer. Return valid JSON only, wrapped in a json code fence."},
-                {role: "user", content: $prompt}
-              ]
-            }')
+          USED_MODEL=""
+          API_RESPONSE=""
 
-          API_RESPONSE=$(curl -sS -f https://api.openai.com/v1/chat/completions \
-            -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "${REQUEST_BODY}" || true)
+          for model in gpt-5.3-codex-spark gpt-5.3-codex gpt-5.2-codex gpt-5.1-codex; do
+            REQUEST_BODY=$(jq -n \
+              --arg model "${model}" \
+              --arg prompt "$(cat /tmp/code_review_prompt.md)" \
+              '{
+                model: $model,
+                temperature: 0.1,
+                messages: [
+                  {role: "system", content: "You are a strict senior code reviewer. Return valid JSON only, wrapped in a json code fence."},
+                  {role: "user", content: $prompt}
+                ]
+              }')
+
+            raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${REQUEST_BODY}" 2>/dev/null || true)"
+            http_code="$(echo "${raw}" | tail -1)"
+            body="$(echo "${raw}" | sed '$d')"
+            if [ "${http_code}" = "200" ]; then
+              USED_MODEL="${model}"
+              API_RESPONSE="${body}"
+              break
+            fi
+          done
 
           RESULT=$(echo "${API_RESPONSE}" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
 
@@ -143,6 +155,7 @@ jobs:
             echo '{"scores":{"accuracy":2,"performance":1,"maintainability":1},"total":4,"issues":[],"summary":"JSON parse error in review result"}' > /tmp/code_review.json
           fi
 
+          echo "used_model=${USED_MODEL:-unknown}" >> "$GITHUB_OUTPUT"
           echo "result=$(jq -c . /tmp/code_review.json)" >> "$GITHUB_OUTPUT"
 
       - name: Run Security Analyst
@@ -179,22 +192,34 @@ jobs:
 
           cat /tmp/pr_diff.txt >> /tmp/security_prompt.md
 
-          REQUEST_BODY=$(jq -n \
-            --arg model "gpt-5.3-codex" \
-            --arg prompt "$(cat /tmp/security_prompt.md)" \
-            '{
-              model: $model,
-              temperature: 0.1,
-              messages: [
-                {role: "system", content: "You are a strict security analyst. Return valid JSON only, wrapped in a json code fence."},
-                {role: "user", content: $prompt}
-              ]
-            }')
+          USED_MODEL=""
+          API_RESPONSE=""
 
-          API_RESPONSE=$(curl -sS -f https://api.openai.com/v1/chat/completions \
-            -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "${REQUEST_BODY}" || true)
+          for model in gpt-5.3-codex-spark gpt-5.3-codex gpt-5.2-codex gpt-5.1-codex; do
+            REQUEST_BODY=$(jq -n \
+              --arg model "${model}" \
+              --arg prompt "$(cat /tmp/security_prompt.md)" \
+              '{
+                model: $model,
+                temperature: 0.1,
+                messages: [
+                  {role: "system", content: "You are a strict security analyst. Return valid JSON only, wrapped in a json code fence."},
+                  {role: "user", content: $prompt}
+                ]
+              }')
+
+            raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${REQUEST_BODY}" 2>/dev/null || true)"
+            http_code="$(echo "${raw}" | tail -1)"
+            body="$(echo "${raw}" | sed '$d')"
+            if [ "${http_code}" = "200" ]; then
+              USED_MODEL="${model}"
+              API_RESPONSE="${body}"
+              break
+            fi
+          done
 
           RESULT=$(echo "${API_RESPONSE}" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
 
@@ -217,6 +242,7 @@ jobs:
             echo '{"score":2,"vulnerabilities":[],"summary":"JSON parse error in security result"}' > /tmp/security_review.json
           fi
 
+          echo "used_model=${USED_MODEL:-unknown}" >> "$GITHUB_OUTPUT"
           echo "result=$(jq -c . /tmp/security_review.json)" >> "$GITHUB_OUTPUT"
 
       - name: Calculate Consensus Score
@@ -270,7 +296,8 @@ jobs:
           # against shell expansion. Model output may contain `$FOO` or `${BAR}`
           # which breaks under `set -u` (unbound variable).
           {
-            printf '%s\n\n' '## :robot: Codex Review (gpt-5.3-codex)'
+            printf '%s\n\n' '## :robot: Codex Review'
+            printf '%s\n\n' "- Models: code=${{ steps.code_review.outputs.used_model }}, security=${{ steps.security_review.outputs.used_model }}"
 
             printf '### :bar_chart: Consensus Score: %s/10 :%s: **%s**\n\n' \
               "${{ steps.consensus.outputs.total }}" \
@@ -310,7 +337,7 @@ jobs:
             printf '%s\n\n' '| 0-4 | :x: Changes Required |'
 
             printf '%s\n' '---'
-            printf '%s\n' '*Powered by Orchestra Delegator + OpenAI Chat Completions API (gpt-5.3-codex)*'
+            printf '%s\n' '*Powered by Orchestra Delegator + OpenAI Chat Completions API (Codex)*'
           } > /tmp/comment.md
 
           gh pr comment "${PR_NUMBER}" --body-file /tmp/comment.md

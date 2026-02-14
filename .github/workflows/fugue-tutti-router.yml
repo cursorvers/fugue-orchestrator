@@ -144,17 +144,17 @@ jobs:
           - name: codex-architect
             provider: codex
             api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-5.3-codex
+            model: gpt-5.3-codex-spark
             agent_role: architect
           - name: codex-security-analyst
             provider: codex
             api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-5.3-codex
+            model: gpt-5.3-codex-spark
             agent_role: security-analyst
           - name: codex-code-reviewer
             provider: codex
             api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-5.3-codex
+            model: gpt-5.3-codex-spark
             agent_role: code-reviewer
           - name: glm-math-reasoning
             provider: glm
@@ -206,10 +206,34 @@ jobs:
             auth_header="Authorization: Bearer ${ZAI_API_KEY}"
           fi
 
-          http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
-            -H "${auth_header}" \
-            -H "Content-Type: application/json" \
-            -d "${req}" || true)"
+          chosen_model="${MODEL}"
+          http_code=""
+
+          if [[ "${PROVIDER}" == "codex" ]]; then
+            # Prefer spark when available, but fall back to widely-available Codex models.
+            candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex")
+            for m in "${candidates[@]}"; do
+              chosen_model="${m}"
+              req="$(jq -n \
+                --arg model "${chosen_model}" \
+                --arg s "${sys_prompt}" \
+                --arg u "${user_prompt}" \
+                '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+
+              http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+                -H "${auth_header}" \
+                -H "Content-Type: application/json" \
+                -d "${req}" || true)"
+              if [[ "${http_code}" == "200" ]]; then
+                break
+              fi
+            done
+          else
+            http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+              -H "${auth_header}" \
+              -H "Content-Type: application/json" \
+              -d "${req}" || true)"
+          fi
 
           content="$(jq -r '.choices[0].message.content // ""' response.json 2>/dev/null || echo "")"
 
@@ -223,7 +247,7 @@ jobs:
             --arg name "${AGENT_NAME}" \
             --arg provider "${PROVIDER}" \
             --arg api_url "${API_URL}" \
-            --arg model "${MODEL}" \
+            --arg model "${chosen_model}" \
             --arg agent_role "${AGENT_ROLE}" \
             --argjson payload "${parsed}" \
             --arg http_code "${http_code}" \
