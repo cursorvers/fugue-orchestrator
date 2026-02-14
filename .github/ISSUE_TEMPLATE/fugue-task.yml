@@ -1,0 +1,47 @@
+name: FUGUE Task (Mobile / Natural Language)
+description: Smartphone-first entrypoint. Adds label fugue-task automatically.
+title: "task: "
+labels:
+  - fugue-task
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template automatically applies label `fugue-task`.
+
+        Mainframe handoff (GHA24) keywords:
+        - Add `完遂` / `自走` / `最後まで` to request the mainframe path (adds `tutti`, and by default `codex-implement`)
+        - Add `レビューのみ` / `実装不要` to suppress PR creation
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome do you want? (write in natural language)
+      placeholder: |
+        完遂
+        目的: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: must_not
+    attributes:
+      label: Must not
+      description: Constraints / things the automation must not do.
+      placeholder: |
+        Must not: ...
+        (例) レビューのみ / PR作成しない
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (optional)
+      description: Concrete checks to know it's done.
+      placeholder: |
+        - ...
+    validations:
+      required: false
+
