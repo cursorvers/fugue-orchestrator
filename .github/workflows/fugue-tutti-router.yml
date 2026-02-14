@@ -228,6 +228,7 @@ jobs:
                 '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
 
               http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+                --connect-timeout 10 --max-time 60 --retry 2 \
                 -H "${auth_header}" \
                 -H "Content-Type: application/json" \
                 -d "${req}" || true)"
@@ -237,6 +238,7 @@ jobs:
             done
           else
             http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+              --connect-timeout 10 --max-time 60 --retry 2 \
               -H "${auth_header}" \
               -H "Content-Type: application/json" \
               -d "${req}" || true)"
