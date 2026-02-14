@@ -62,12 +62,16 @@ jobs:
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
+          HAS_GHA24="$(echo "${issue_json}" | jq -r '((.body // "") | test("^##\\s*GHA24\\s*Task"; "m"))')"
 
           SHOULD_RUN="true"
           SKIP_REASON=""
           if [[ "${HAS_FUGUE}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-fugue-task-label"
+          elif [[ "${HAS_GHA24}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="handled-by-gha24"
           elif [[ "${HAS_TUTTI}" == "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="handled-by-tutti"
@@ -89,6 +93,7 @@ jobs:
             echo "has_fugue=${HAS_FUGUE}"
             echo "has_tutti=${HAS_TUTTI}"
             echo "has_processing=${HAS_PROCESSING}"
+            echo "has_gha24=${HAS_GHA24}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"

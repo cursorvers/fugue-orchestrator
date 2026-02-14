@@ -118,6 +118,21 @@ jobs:
       codex_exit: ${{ steps.codex.outputs.exit_code }}
 
     steps:
+      - name: Guard PAT for cross-repo operations
+        if: ${{ needs.prepare.outputs.target_repo != github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TARGET_REPO_PAT}" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret TARGET_REPO_PAT. Escalating to humans."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
+            exit 0
+          fi
+
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:

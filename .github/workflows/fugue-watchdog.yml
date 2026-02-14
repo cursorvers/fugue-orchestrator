@@ -70,8 +70,39 @@ jobs:
             echo "last_time=${LAST_TIME}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Get latest successful mainframe run
+        id: mainframe_success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/fugue-tutti-caller.yml/runs?status=success&per_page=1")"
+          LAST_TIME="$(echo "${RUNS_JSON}" | jq -r '.workflow_runs[0].created_at // empty')"
+
+          if [[ -z "${LAST_TIME}" ]]; then
+            echo "stale=true" >> "${GITHUB_OUTPUT}"
+            echo "hours_since=9999" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          NOW_EPOCH="$(date -u +%s)"
+          LAST_EPOCH="$(date -u -d "${LAST_TIME}" +%s)"
+          DIFF_HOURS="$(( (NOW_EPOCH - LAST_EPOCH) / 3600 ))"
+
+          STALE="false"
+          if [[ "${DIFF_HOURS}" -ge 3 ]]; then
+            STALE="true"
+          fi
+
+          {
+            echo "stale=${STALE}"
+            echo "hours_since=${DIFF_HOURS}"
+            echo "last_time=${LAST_TIME}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Discord alert when unhealthy
-        if: ${{ steps.connectivity.outputs.openai_ok != 'true' || steps.connectivity.outputs.zai_ok != 'true' || steps.last_success.outputs.stale == 'true' }}
+        if: ${{ steps.connectivity.outputs.openai_ok != 'true' || steps.connectivity.outputs.zai_ok != 'true' || steps.last_success.outputs.stale == 'true' || steps.mainframe_success.outputs.stale == 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
@@ -82,7 +113,9 @@ jobs:
           openai_ok: ${{ steps.connectivity.outputs.openai_ok }}
           zai_ok: ${{ steps.connectivity.outputs.zai_ok }}
           router_hours_since_success: ${{ steps.last_success.outputs.hours_since }}
-          router_last_success_at: ${{ steps.last_success.outputs.last_time }}"
+          router_last_success_at: ${{ steps.last_success.outputs.last_time }}
+          mainframe_hours_since_success: ${{ steps.mainframe_success.outputs.hours_since }}
+          mainframe_last_success_at: ${{ steps.mainframe_success.outputs.last_time }}"
 
           PAYLOAD="$(jq -n --arg content "${MSG}" '{content:$content}')"
           curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \

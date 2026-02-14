@@ -10,6 +10,10 @@ permissions:
   pull-requests: write
   actions: read
 
+concurrency:
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   resolve-target:
     if: >-
