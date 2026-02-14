@@ -163,21 +163,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: codex-architect
-            provider: codex
-            api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-5.3-codex-spark
-            agent_role: architect
-          - name: codex-security-analyst
-            provider: codex
-            api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-5.3-codex-spark
-            agent_role: security-analyst
-          - name: codex-code-reviewer
-            provider: codex
-            api_url: https://api.openai.com/v1/chat/completions
-            model: gpt-5.3-codex-spark
-            agent_role: code-reviewer
           - name: glm-math-reasoning
             provider: glm
             api_url: https://api.z.ai/api/coding/paas/v4/chat/completions
