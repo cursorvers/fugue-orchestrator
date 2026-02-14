@@ -7,6 +7,25 @@ on:
         description: "Issue number to process"
         required: true
         type: string
+    outputs:
+      ok_to_execute:
+        description: "true when approvals >= 2/3 and no HIGH risk was detected"
+        value: ${{ jobs.integrate.outputs.ok_to_execute }}
+      vote_passed:
+        description: "true when approvals >= 2/3"
+        value: ${{ jobs.integrate.outputs.vote_passed }}
+      threshold:
+        description: "ceil(2/3 * total_count)"
+        value: ${{ jobs.integrate.outputs.threshold }}
+      high_risk:
+        description: "true when any agent reports HIGH risk"
+        value: ${{ jobs.integrate.outputs.high_risk }}
+      approve_count:
+        description: "number of approvals"
+        value: ${{ jobs.integrate.outputs.approve_count }}
+      total_count:
+        description: "number of total agent results"
+        value: ${{ jobs.integrate.outputs.total_count }}
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -302,6 +321,9 @@ jobs:
       high_risk: ${{ steps.integrate.outputs.high_risk }}
       approve_count: ${{ steps.integrate.outputs.approve_count }}
       total_count: ${{ steps.integrate.outputs.total_count }}
+      threshold: ${{ steps.integrate.outputs.threshold }}
+      vote_passed: ${{ steps.integrate.outputs.vote_passed }}
+      ok_to_execute: ${{ steps.integrate.outputs.ok_to_execute }}
 
     steps:
       - name: Download all artifacts
@@ -325,6 +347,16 @@ jobs:
           high_risk="false"
           if [[ "${high_risk_count}" -gt 0 ]]; then
             high_risk="true"
+          fi
+
+          threshold=$(( (total_count * 2 + 2) / 3 )) # ceil(2/3 * total)
+          vote_passed="false"
+          if [[ "${approve_count}" -ge "${threshold}" ]]; then
+            vote_passed="true"
+          fi
+          ok_to_execute="false"
+          if [[ "${vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
+            ok_to_execute="true"
           fi
 
           jq '
@@ -352,6 +384,9 @@ jobs:
             echo "high_risk=${high_risk}"
             echo "approve_count=${approve_count}"
             echo "total_count=${total_count}"
+            echo "threshold=${threshold}"
+            echo "vote_passed=${vote_passed}"
+            echo "ok_to_execute=${ok_to_execute}"
           } >> "${GITHUB_OUTPUT}"
 
           approve_agents="$(jq -r '[.[] | select(.approve == true) | .name] | join(", ")' all-results.json)"
