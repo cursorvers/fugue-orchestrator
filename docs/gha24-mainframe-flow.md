@@ -21,6 +21,7 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
 - In the body, include:
   - `完遂` (hands off to GHA24 mainframe)
   - Optional: `レビューのみ` (do not add `codex-implement`)
+  - Optional: a target repo in backticks, e.g. `cursorvers/cloudflare-workers-hub` (FUGUE will add a `proj:<repo>` label and prefix the issue title for easy scanning)
 
 ## Observability
 - Tutti summaries, vote tallies, and Codex CLI output live directly on the originating GitHub issue so reviewers can trace decisions.

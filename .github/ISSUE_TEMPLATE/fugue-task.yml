@@ -13,6 +13,17 @@ body:
         - Add `完遂` / `自走` / `最後まで` to request the mainframe path (adds `tutti`, and by default `codex-implement`)
         - Add `レビューのみ` / `実装不要` to suppress PR creation
 
+        Tip: if you include a target repo in backticks like `cursorvers/cloudflare-workers-hub`, FUGUE will label and prefix the issue title so you can quickly see which project it belongs to.
+
+  - type: input
+    id: target_repo
+    attributes:
+      label: Target repo (optional)
+      description: If the work is for another repo, put owner/repo here.
+      placeholder: cursorvers/fugue-orchestrator
+    validations:
+      required: false
+
   - type: textarea
     id: goal
     attributes:
@@ -44,4 +55,3 @@ body:
         - ...
     validations:
       required: false
-
