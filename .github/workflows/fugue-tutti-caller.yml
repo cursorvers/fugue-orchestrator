@@ -17,7 +17,6 @@ concurrency:
 jobs:
   resolve-target:
     if: >-
-      github.actor != 'github-actions[bot]' &&
       github.event.label.name == 'tutti' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
       contains(github.event.issue.labels.*.name, 'codex-implement')
@@ -63,7 +62,6 @@ jobs:
   # Review mode: Tutti consensus (currently 3 parallel agents)
   tutti:
     if: >-
-      github.actor != 'github-actions[bot]' &&
       github.event.label.name == 'tutti' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
       contains(github.event.issue.labels.*.name, 'tutti')
@@ -77,7 +75,6 @@ jobs:
   # Implement mode: if Tutti says it's safe AND issue requests implementation, run Codex implement immediately.
   codex-implement:
     if: >-
-      github.actor != 'github-actions[bot]' &&
       github.event.label.name == 'tutti' &&
       contains(github.event.issue.labels.*.name, 'fugue-task') &&
       contains(github.event.issue.labels.*.name, 'codex-implement') &&
