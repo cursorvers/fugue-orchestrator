@@ -150,7 +150,11 @@ jobs:
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "tutti" >/dev/null
 
           mode="$( [[ "${wants_implement}" == "true" ]] && echo "implement" || echo "review" )"
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Action: added label \`tutti\`$([[ \"${wants_implement}\" == \"true\" ]] && echo \" + \`codex-implement\`\" || echo \"\")\n\nNext: Tutti runs and posts the vote/audit comment. If approved and \`codex-implement\` is present, Codex will create a PR."
+          extra=""
+          if [[ "${wants_implement}" == "true" ]]; then
+            extra=" + codex-implement"
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Action: added label \`tutti\`${extra}\n\nNext: Tutti runs and posts the vote/audit comment. If approved and \`codex-implement\` is present, Codex will create a PR."
 
           echo "handoff=true" >> "${GITHUB_OUTPUT}"
           echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
