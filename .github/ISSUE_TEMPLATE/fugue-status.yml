@@ -1,0 +1,29 @@
+name: FUGUE Status (Progress Report)
+description: Ask FUGUE to summarize the current 24h automation progress in natural language.
+title: "status: "
+labels:
+  - fugue-status
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this issue as a status console.
+
+        After creating it, comment one of these commands:
+        - `/status`
+        - `進捗`
+
+        FUGUE will reply with a snapshot of:
+        - open `fugue-task` issues (processing / needs-human / needs-review)
+        - latest Actions health (mainframe/router/watchdog)
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: What do you want status for?
+      description: Optional. If you leave it blank, you'll get the default repo-wide report.
+      placeholder: |
+        (例) 今日のメインフレームの詰まりだけ知りたい
+    validations:
+      required: false
+
