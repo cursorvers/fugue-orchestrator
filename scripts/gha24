@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# GHA24 - Submit task to FUGUE Tutti (6-parallel agent consensus)
+# GHA24 - Submit task to FUGUE Tutti (agent consensus)
 # Usage: gha24 "task description" [--implement] [--repo owner/repo]
 #
 # Options:
