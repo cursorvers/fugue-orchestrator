@@ -252,10 +252,14 @@ jobs:
             end
           ')"
 
-          if [[ -n "${extracted}" ]] && echo "${extracted}" | jq -e . >/dev/null 2>&1; then
-            parsed="${extracted}"
+          normalized="$(echo "${extracted}" | jq -c '
+            if type == "string" then (fromjson? // .) else . end
+          ' 2>/dev/null || true)"
+
+          if [[ -n "${normalized}" ]] && echo "${normalized}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            parsed="${normalized}"
           else
-            parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse JSON from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
+            parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse JSON object from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
           fi
 
           result="$(jq -n \
