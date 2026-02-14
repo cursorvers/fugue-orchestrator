@@ -44,6 +44,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          COMMENT_BODY=""
+          if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
+            COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+          fi
+
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
             ISSUE_NUMBER="${{ inputs.issue_number }}"
             issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
@@ -88,6 +93,9 @@ jobs:
             echo "issue_body<<EOF"
             echo "${BODY}"
             echo "EOF"
+            echo "comment_body<<EOF"
+            echo "${COMMENT_BODY}"
+            echo "EOF"
             echo "author=${AUTHOR}"
             echo "author_association=${AUTHOR_ASSOC}"
             echo "has_fugue=${HAS_FUGUE}"
@@ -102,6 +110,68 @@ jobs:
         if: ${{ steps.ctx.outputs.should_run != 'true' }}
         run: |
           echo "Skip reason: ${{ steps.ctx.outputs.skip_reason }}"
+
+      - name: Annotate target project (label + title prefix)
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+          COMMENT_BODY: ${{ steps.ctx.outputs.comment_body }}
+        run: |
+          set -euo pipefail
+
+          title="${ISSUE_TITLE}"
+          body="${ISSUE_BODY}"
+          comment="${COMMENT_BODY}"
+          text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
+
+          owner="${GITHUB_REPOSITORY%%/*}"
+
+          # 1) Prefer fully-qualified owner/repo found inside backticks.
+          target_repo="$(printf '%s\n' "${text}" \
+            | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
+            | head -n1)"
+
+          # 2) Fallback: repo name in backticks on lines mentioning repo/リポジトリ.
+          if [[ -z "${target_repo}" ]]; then
+            bare_repo="$(printf '%s\n' "${text}" \
+              | grep -E 'repo|Repo|repository|Repository|リポジトリ|対象|target' \
+              | sed -nE 's/.*`([A-Za-z0-9_.-]+)`.*/\1/p' \
+              | head -n1 || true)"
+            if [[ -n "${bare_repo}" ]]; then
+              target_repo="${owner}/${bare_repo}"
+            fi
+          fi
+
+          # 3) Default to caller repo when no hint exists.
+          if [[ -z "${target_repo}" ]]; then
+            target_repo="${GITHUB_REPOSITORY}"
+          fi
+
+          short="${target_repo#*/}"
+          slug="$(printf '%s' "${short}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_.-]/-/g' | sed 's/--*/-/g' | head -c 40)"
+          if [[ -z "${slug}" ]]; then
+            slug="unknown"
+          fi
+
+          proj_label="proj:${slug}"
+
+          # Create label if missing (idempotent).
+          gh label create "${proj_label}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --description "Target project: ${target_repo}" \
+            --color "0E8A16" >/dev/null 2>&1 || true
+
+          # Apply label to the issue.
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${proj_label}" >/dev/null || true
+
+          # Prefix title for easy scanning in the issue list (avoid clobbering an existing [..] prefix).
+          if ! echo "${title}" | grep -Eq '^\[[^]]+\]\s'; then
+            new_title="[${slug}] ${title}"
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --title "${new_title}" >/dev/null || true
+          fi
 
       - name: GHA24 mainframe handoff (natural language)
         id: handoff
