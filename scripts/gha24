@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
-# Usage: gha24 "task description" [--implement] [--repo owner/repo]
+# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo]
 #
 # Options:
 #   --implement    Add codex-implement label to trigger Codex CLI code generation
+#   --review       Force review-only mode (ignore natural language hints)
 #   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
 #
 # Notes:
@@ -20,11 +21,18 @@ TASK=""
 ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
 TARGET_REPO="cursorvers/fugue-orchestrator"
 IMPLEMENT=false
+MODE_EXPLICIT=false
 
 while [[ $# -gt 0 ]]; do
   case "${1}" in
     --implement)
       IMPLEMENT=true
+      MODE_EXPLICIT=true
+      shift
+      ;;
+    --review)
+      IMPLEMENT=false
+      MODE_EXPLICIT=true
       shift
       ;;
     --repo)
@@ -32,10 +40,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: gha24 \"task description\" [--implement] [--repo owner/repo]"
+      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo]"
       echo ""
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
+      echo "  --review       Review only (no code generation)"
       echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
       echo ""
       echo "Environment:"
@@ -43,7 +52,8 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Examples:"
       echo "  gha24 \"認証フローのセキュリティレビュー\""
-      echo "  gha24 \"Implement auth middleware\" --implement"
+      echo "  gha24 \"実装: auth middleware を追加してPR作成\""
+      echo "  gha24 \"レビュー: auth flow をレビューして指摘だけ\""
       echo "  gha24 \"Review auth flow\" --repo cursorvers/fugue-system-ui"
       echo "  gha24 \"Add tests for utils\" --implement --repo cursorvers/telop-pack-srt-02"
       exit 0
@@ -59,13 +69,23 @@ done
 
 if [[ -z "${TASK}" ]]; then
   echo "Error: task description required" >&2
-  echo "Usage: gha24 \"task description\" [--implement] [--repo owner/repo]"
+  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo]"
   exit 1
 fi
 
 if ! command -v gh &>/dev/null; then
   echo "Error: gh CLI not found" >&2
   exit 1
+fi
+
+# Natural language mode selection (only when no explicit mode flag was provided).
+# Keep this conservative: only opt into implementation when the intent is explicit.
+if [[ "${MODE_EXPLICIT}" != "true" ]]; then
+  if echo "${TASK}" | grep -Eqi '(レビューのみ|指摘のみ|実装しない|実装不要|review only|no implement|no-implement|#review)'; then
+    IMPLEMENT=false
+  elif echo "${TASK}" | grep -Eqi '(実装|PR作成|プルリク|自走|full-auto|#implement)'; then
+    IMPLEMENT=true
+  fi
 fi
 
 LABELS="fugue-task,tutti"
