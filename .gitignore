@@ -3,4 +3,7 @@
 *.local
 node_modules/
 .DS_Store
-.claude/
+.claude/.git/
+.claude/cache/
+.claude/projects/
+.claude/.credentials.json
