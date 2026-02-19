@@ -283,6 +283,15 @@ jobs:
             wants_implement=false
           fi
 
+          # Safety guard: when review-only is explicitly requested, clear any
+          # stale implementation intent labels before handing off to Tutti.
+          if [[ "${wants_implement}" != "true" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "implement" \
+              --remove-label "codex-implement" \
+              --remove-label "claude-implement" >/dev/null 2>&1 || true
+          fi
+
           # Prefer provider-agnostic implement intent label while also adding
           # a provider-specific compatibility label for existing tooling.
           if [[ "${wants_implement}" == "true" ]]; then

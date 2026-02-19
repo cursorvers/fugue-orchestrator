@@ -57,6 +57,27 @@ jobs:
           has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          body_mode="$(printf '%s\n' "${body}" | awk '
+            BEGIN { in_sec=0 }
+            tolower($0) ~ /^##[[:space:]]*mode[[:space:]]*$/ { in_sec=1; next }
+            in_sec && $0 ~ /^##[[:space:]]/ { exit }
+            in_sec {
+              line=$0
+              gsub(/`/, "", line)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+              if (line != "") {
+                print tolower(line)
+                exit
+              }
+            }
+          ')"
+          if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
+            body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+          fi
+          # Explicit review mode in issue body always wins over stale labels.
+          if [[ "${body_mode}" == "review" ]]; then
+            has_implement="false"
+          fi
           label_provider="$(echo "${issue_json}" | jq -r '
             [ .labels[]? | .name ] as $labels
             | if ((($labels | index("orchestrator:claude")) != null) and (($labels | index("orchestrator:codex")) != null)) then ""
