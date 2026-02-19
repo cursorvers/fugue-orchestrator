@@ -2,12 +2,13 @@
 set -euo pipefail
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
-# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo]
+# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude]
 #
 # Options:
 #   --implement    Add implement intent labels to trigger post-vote implementation
 #   --review       Force review-only mode (ignore natural language hints)
 #   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
+#   --orchestrator Per-request orchestrator override (codex|claude)
 #
 # Notes:
 #   The issue is always created in the orchestrator repo. The target repo is
@@ -22,7 +23,11 @@ ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
 TARGET_REPO="cursorvers/fugue-orchestrator"
 IMPLEMENT=false
 MODE_EXPLICIT=false
-ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-codex}"
+ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-}"
+ORCHESTRATOR_PROVIDER_EXPLICIT=false
+if [[ -n "${GHA24_ORCHESTRATOR_PROVIDER:-}" ]]; then
+  ORCHESTRATOR_PROVIDER_EXPLICIT=true
+fi
 
 while [[ $# -gt 0 ]]; do
   case "${1}" in
@@ -40,16 +45,23 @@ while [[ $# -gt 0 ]]; do
       TARGET_REPO="${2}"
       shift 2
       ;;
+    --orchestrator)
+      ORCHESTRATOR_PROVIDER="${2}"
+      ORCHESTRATOR_PROVIDER_EXPLICIT=true
+      shift 2
+      ;;
     -h|--help)
-      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo]"
+      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude]"
       echo ""
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
       echo "  --review       Review only (no code generation)"
       echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
+      echo "  --orchestrator Per-request orchestrator override (codex|claude)"
       echo ""
       echo "Environment:"
       echo "  GHA24_ORCHESTRATOR_REPO  Orchestrator repo for issue creation (default: cursorvers/fugue-orchestrator)"
+      echo "  GHA24_ORCHESTRATOR_PROVIDER  Per-request orchestrator override (codex|claude)"
       echo ""
       echo "Examples:"
       echo "  gha24 \"認証フローのセキュリティレビュー\""
@@ -57,6 +69,7 @@ while [[ $# -gt 0 ]]; do
       echo "  gha24 \"レビュー: auth flow をレビューして指摘だけ\""
       echo "  gha24 \"Review auth flow\" --repo cursorvers/fugue-system-ui"
       echo "  gha24 \"Add tests for utils\" --implement --repo cursorvers/telop-pack-srt-02"
+      echo "  gha24 \"完遂: API障害対応\" --orchestrator claude"
       exit 0
       ;;
     *)
@@ -70,7 +83,7 @@ done
 
 if [[ -z "${TASK}" ]]; then
   echo "Error: task description required" >&2
-  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo]"
+  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude]"
   exit 1
 fi
 
@@ -91,11 +104,14 @@ fi
 
 # Create the issue first, then add the `tutti` label as a second step.
 # This avoids multiple `issues:labeled` triggers firing at creation time.
-provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]')"
-if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
-  provider="codex"
+provider=""
+if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
+    echo "Error: --orchestrator must be codex or claude" >&2
+    exit 1
+  fi
 fi
-compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
 
 LABELS="fugue-task"
 if [[ "${IMPLEMENT}" == "true" ]]; then
@@ -103,14 +119,18 @@ if [[ "${IMPLEMENT}" == "true" ]]; then
     --repo "${ORCHESTRATOR_REPO}" \
     --description "Implementation intent (provider-agnostic)" \
     --color "1D76DB" >/dev/null 2>&1 || true
-  gh label create "${compat_label}" \
-    --repo "${ORCHESTRATOR_REPO}" \
-    --description "Implementation intent compatibility label" \
-    --color "0052CC" >/dev/null 2>&1 || true
 
   # `implement` is the provider-agnostic intent label.
-  # Add a provider-specific compatibility label for existing workflows/tooling.
-  LABELS="${LABELS},implement,${compat_label}"
+  # Add provider-specific compatibility label only when provider is explicitly chosen.
+  LABELS="${LABELS},implement"
+  if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+    compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
+    gh label create "${compat_label}" \
+      --repo "${ORCHESTRATOR_REPO}" \
+      --description "Implementation intent compatibility label" \
+      --color "0052CC" >/dev/null 2>&1 || true
+    LABELS="${LABELS},${compat_label}"
+  fi
 fi
 
 BODY="$(cat <<EOF
@@ -137,6 +157,13 @@ ${TASK}
 ## Target repo
 \`${TARGET_REPO}\`
 
+$( if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then cat <<PROVIDER
+## Orchestrator provider
+${provider}
+
+PROVIDER
+fi )
+
 ## Mode
 $( [[ "${IMPLEMENT}" == "true" ]] && echo "implement" || echo "review" )
 EOF
@@ -148,14 +175,28 @@ URL="$(gh issue create --repo "${ORCHESTRATOR_REPO}" \
   --body "${BODY}")"
 
 ISSUE_NUM="${URL##*/}"
+if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  orchestrator_label="orchestrator:${provider}"
+  gh label create "${orchestrator_label}" \
+    --repo "${ORCHESTRATOR_REPO}" \
+    --description "Requested orchestrator profile for Tutti routing" \
+    --color "5319E7" >/dev/null 2>&1 || true
+  gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
+  gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "${orchestrator_label}" >/dev/null
+fi
 gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "tutti" >/dev/null
 
 echo "Created: ${URL}"
 echo "Orchestrator repo: ${ORCHESTRATOR_REPO}"
 echo "Target repo: ${TARGET_REPO}"
+if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  echo "Orchestrator profile override: ${provider}"
+else
+  echo "Orchestrator profile: repository default (FUGUE_ORCHESTRATOR_PROVIDER)"
+fi
 
 if [[ "${IMPLEMENT}" == "true" ]]; then
-  echo "Mode: Codex CLI implementation (code generation + PR)"
+  echo "Mode: Codex CLI implementation intent (code generation + PR after vote)"
   echo "Tutti vote will run first. If approved, Codex implement will run automatically."
 else
   echo "Mode: Review only (6-parallel agent consensus)"

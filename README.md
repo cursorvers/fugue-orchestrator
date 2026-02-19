@@ -103,9 +103,10 @@ export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
 # gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body claude -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
 
-# 3.5 GitHub Actions 用オーケストレータ切替（default: codex）
-# gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex  -R <owner/repo>
-# gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body claude -R <owner/repo>
+# 3.6 gha24 でリクエスト単位に上書き（任意）
+# gha24 "完遂: API障害対応" --implement --orchestrator claude
+# あるいは:
+# GHA24_ORCHESTRATOR_PROVIDER=claude gha24 "完遂: API障害対応" --implement
 
 # 4. 委譲テスト（examples/delegate-stub.js を使用）
 node examples/delegate-stub.js -a code-reviewer -t "Review this function" -p glm
