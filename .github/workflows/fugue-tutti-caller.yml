@@ -70,9 +70,11 @@ jobs:
     uses: ./.github/workflows/fugue-tutti-router.yml
     with:
       issue_number: "${{ format('{0}', github.event.issue.number) }}"
+      orchestrator_provider: "${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
   # Implement mode: if Tutti says it's safe AND issue requests implementation, run Codex implement immediately.
   codex-implement:

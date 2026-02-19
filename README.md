@@ -97,6 +97,10 @@ export GLM_API_KEY="your-glm-key"
 export GLM_MODEL="glm-4.7" # optional (default is glm-4.7 in delegate-stub.js)
 export GEMINI_API_KEY="your-gemini-key"
 
+# 3.5 GitHub Actions 用オーケストレータ切替（default: codex）
+# gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex  -R <owner/repo>
+# gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body claude -R <owner/repo>
+
 # 4. 委譲テスト（examples/delegate-stub.js を使用）
 node examples/delegate-stub.js -a code-reviewer -t "Review this function" -p glm
 
