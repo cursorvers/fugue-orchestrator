@@ -399,7 +399,7 @@ jobs:
           RESP_PROVIDER=""
           # Try OpenAI first if provider is codex
           if [[ "${PROVIDER}" == "codex" && -n "${OPENAI_API_KEY}" ]]; then
-            OPENAI_MODEL_CANDIDATES=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex")
+            OPENAI_MODEL_CANDIDATES=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
             for OPENAI_MODEL in "${OPENAI_MODEL_CANDIDATES[@]}"; do
               REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
               raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \

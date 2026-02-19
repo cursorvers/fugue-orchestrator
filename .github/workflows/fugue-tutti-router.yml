@@ -276,8 +276,8 @@ jobs:
           content=""
 
           if [[ "${PROVIDER}" == "codex" ]]; then
-            # Prefer spark when available, but fall back to widely-available Codex models.
-            candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex")
+            # Prefer Codex models first, then generic OpenAI fallbacks for compatibility.
+            candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
             for m in "${candidates[@]}"; do
               chosen_model="${m}"
               req="$(jq -n \
