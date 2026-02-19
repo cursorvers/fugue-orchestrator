@@ -61,7 +61,7 @@ jobs:
       issue_title: ${{ steps.ctx.outputs.issue_title }}
       issue_body: ${{ steps.ctx.outputs.issue_body }}
       author: ${{ steps.ctx.outputs.author }}
-      has_codex_implement: ${{ steps.ctx.outputs.has_codex_implement }}
+      has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
 
@@ -87,7 +87,7 @@ jobs:
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
-          HAS_CODEX_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("codex-implement") != null')"
+          HAS_IMPLEMENT_REQUEST="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
 
           SHOULD_RUN="true"
           SKIP_REASON=""
@@ -108,7 +108,7 @@ jobs:
             echo "${BODY}"
             echo "EOF"
             echo "author=${AUTHOR}"
-            echo "has_codex_implement=${HAS_CODEX_IMPLEMENT}"
+            echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
@@ -540,7 +540,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
-          HAS_CODEX_IMPLEMENT: ${{ needs.prepare.outputs.has_codex_implement }}
+          HAS_IMPLEMENT_REQUEST: ${{ needs.prepare.outputs.has_implement_request }}
           HIGH_RISK: ${{ needs.integrate.outputs.high_risk }}
           APPROVE_COUNT: ${{ needs.integrate.outputs.approve_count }}
           TOTAL_COUNT: ${{ needs.integrate.outputs.total_count }}
@@ -558,7 +558,7 @@ jobs:
           fi
 
           if [[ "${APPROVE_COUNT}" -ge "${THRESHOLD}" ]]; then
-            if [[ "${HAS_CODEX_IMPLEMENT}" == "true" ]]; then
+            if [[ "${HAS_IMPLEMENT_REQUEST}" == "true" ]]; then
               gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti vote: ${APPROVE_COUNT}/${TOTAL_COUNT} approval (>=2/3). Approved to execute; implementation may proceed."
             else
               gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"

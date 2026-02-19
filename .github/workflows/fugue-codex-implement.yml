@@ -63,7 +63,7 @@ jobs:
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
-          HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("codex-implement") != null')"
+          HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
 
           SHOULD_RUN="true"
           if [[ "${HAS_IMPLEMENT}" != "true" ]]; then

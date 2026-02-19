@@ -31,7 +31,7 @@ jobs:
       should_run: ${{ steps.ctx.outputs.should_run }}
       skip_reason: ${{ steps.ctx.outputs.skip_reason }}
       issue_number: ${{ steps.ctx.outputs.issue_number }}
-      has_codex_implement: ${{ steps.ctx.outputs.has_codex_implement }}
+      has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
     steps:
       - name: Resolve issue context
@@ -54,7 +54,7 @@ jobs:
 
           has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
-          has_codex="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("codex-implement") != null')"
+          has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
           target_repo="$(printf '%s\n' "${body}" \
@@ -91,7 +91,7 @@ jobs:
 
           {
             echo "issue_number=${ISSUE_NUMBER}"
-            echo "has_codex_implement=${has_codex}"
+            echo "has_implement_request=${has_implement}"
             echo "target_repo=${target_repo}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
@@ -116,7 +116,7 @@ jobs:
   codex-implement:
     if: >-
       needs.ctx.outputs.should_run == 'true' &&
-      needs.ctx.outputs.has_codex_implement == 'true' &&
+      needs.ctx.outputs.has_implement_request == 'true' &&
       needs.tutti.outputs.ok_to_execute == 'true'
     needs: [ctx, tutti]
     uses: ./.github/workflows/fugue-codex-implement.yml
