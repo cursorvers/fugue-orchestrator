@@ -391,7 +391,7 @@ jobs:
           RESP_PROVIDER=""
           # Try OpenAI first if provider is codex
           if [[ "${PROVIDER}" == "codex" && -n "${OPENAI_API_KEY}" ]]; then
-            OPENAI_MODEL_CANDIDATES=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex")
+            OPENAI_MODEL_CANDIDATES=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex")
             for OPENAI_MODEL in "${OPENAI_MODEL_CANDIDATES[@]}"; do
               REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
               raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
@@ -461,9 +461,11 @@ jobs:
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${ANSWER}"
 
           if [[ "${TIER}" == "0" || "${TIER}" == "1" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "needs-review" --remove-label "needs-human" || true
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "completed"
             gh issue close "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}"
           else
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-human" || true
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review"
           fi
 
@@ -473,6 +475,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ISSUE_NUMBER="${{ steps.ctx.outputs.issue_number }}"
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-review" || true
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "自動実行不可。人間の承認が必要です。"
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
 

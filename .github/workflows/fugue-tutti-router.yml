@@ -571,7 +571,9 @@ jobs:
           fi
 
   resolve-orchestrator:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    # Allow bot-triggered workflow_dispatch (from task-router handoff) to resolve
+    # the matrix; otherwise run-agents/integrate/finalize are skipped.
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare]
     runs-on: ubuntu-latest
     timeout-minutes: 5
