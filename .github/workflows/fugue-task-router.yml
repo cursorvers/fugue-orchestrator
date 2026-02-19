@@ -249,6 +249,14 @@ jobs:
           # Prefer provider-agnostic implement intent label while also adding
           # a provider-specific compatibility label for existing tooling.
           if [[ "${wants_implement}" == "true" ]]; then
+            gh label create "implement" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --description "Implementation intent (provider-agnostic)" \
+              --color "1D76DB" >/dev/null 2>&1 || true
+            gh label create "${compat_label}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --description "Implementation intent compatibility label" \
+              --color "0052CC" >/dev/null 2>&1 || true
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement" >/dev/null
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${compat_label}" >/dev/null
           fi
