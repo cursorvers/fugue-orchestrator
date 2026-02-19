@@ -209,12 +209,18 @@ jobs:
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+          ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
         run: |
           set -euo pipefail
 
           title="${ISSUE_TITLE}"
           body="${ISSUE_BODY}"
           text="$(printf '%s\n%s\n' "${title}" "${body}")"
+          provider="$(echo "${ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
+            provider="codex"
+          fi
+          compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
 
           # Natural-language trigger: require an explicit "complete it" intent
           # to avoid accidentally pushing issues into the GHA24 mainframe.
@@ -240,9 +246,11 @@ jobs:
             wants_implement=false
           fi
 
-          # Ensure `codex-implement` label is present before firing `tutti`.
+          # Prefer provider-agnostic implement intent label while also adding
+          # a provider-specific compatibility label for existing tooling.
           if [[ "${wants_implement}" == "true" ]]; then
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "codex-implement" >/dev/null
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement" >/dev/null
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${compat_label}" >/dev/null
           fi
 
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "tutti" >/dev/null
@@ -250,9 +258,9 @@ jobs:
           mode="$( [[ "${wants_implement}" == "true" ]] && echo "implement" || echo "review" )"
           extra=""
           if [[ "${wants_implement}" == "true" ]]; then
-            extra=" + codex-implement"
+            extra=" + implement (+ ${compat_label} compatibility)"
           fi
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Action: added label \`tutti\`${extra}\n\nNext: Tutti runs and posts the vote/audit comment. If approved and \`codex-implement\` is present, Codex will create a PR."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Action: added label \`tutti\`${extra}\n\nNext: Tutti runs and posts the vote/audit comment. If approved and an implementation label is present, Codex will create a PR."
 
           # IMPORTANT: label events created by GitHub Actions' GITHUB_TOKEN do NOT trigger other workflows.
           # We must dispatch the mainframe workflow explicitly.

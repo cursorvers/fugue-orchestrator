@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: gha24 "task description" [--implement|--review] [--repo owner/repo]
 #
 # Options:
-#   --implement    Add codex-implement label to trigger Codex CLI code generation
+#   --implement    Add implement intent labels to trigger post-vote implementation
 #   --review       Force review-only mode (ignore natural language hints)
 #   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
 #
@@ -22,6 +22,7 @@ ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
 TARGET_REPO="cursorvers/fugue-orchestrator"
 IMPLEMENT=false
 MODE_EXPLICIT=false
+ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-codex}"
 
 while [[ $# -gt 0 ]]; do
   case "${1}" in
@@ -90,9 +91,17 @@ fi
 
 # Create the issue first, then add the `tutti` label as a second step.
 # This avoids multiple `issues:labeled` triggers firing at creation time.
+provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
+  provider="codex"
+fi
+compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
+
 LABELS="fugue-task"
 if [[ "${IMPLEMENT}" == "true" ]]; then
-  LABELS="${LABELS},codex-implement"
+  # `implement` is the provider-agnostic intent label.
+  # Add a provider-specific compatibility label for existing workflows/tooling.
+  LABELS="${LABELS},implement,${compat_label}"
 fi
 
 BODY="$(cat <<EOF
