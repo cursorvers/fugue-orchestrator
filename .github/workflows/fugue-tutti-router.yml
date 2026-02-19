@@ -73,8 +73,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
-            ISSUE_NUMBER="${{ inputs.issue_number }}"
+          ISSUE_NUMBER="${{ inputs.issue_number }}"
+          if [[ -n "${ISSUE_NUMBER}" ]]; then
             issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           else
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
