@@ -52,7 +52,6 @@ concurrency:
 
 jobs:
   prepare:
-    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -85,10 +84,10 @@ jobs:
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
-          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
-          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
-          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
-          HAS_CODEX_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("codex-implement") != null')"
+          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
+          HAS_CODEX_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("codex-implement") != null')"
 
           SHOULD_RUN="true"
           SKIP_REASON=""
@@ -166,7 +165,7 @@ jobs:
           gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
 
   run-agents:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, resolve-orchestrator]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -400,7 +399,7 @@ jobs:
           if-no-files-found: error
 
   integrate:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, resolve-orchestrator, run-agents]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -532,7 +531,7 @@ jobs:
             --body-file integrated-comment.md
 
   finalize:
-    if: ${{ github.actor != 'github-actions[bot]' && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, integrate]
     runs-on: ubuntu-latest
     timeout-minutes: 10

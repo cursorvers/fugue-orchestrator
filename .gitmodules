@@ -1,0 +1,9 @@
+[submodule "submodules/fugue-system-ui"]
+	path = submodules/fugue-system-ui
+	url = https://github.com/cursorvers/fugue-system-ui.git
+[submodule "submodules/cloudflare-workers-hub"]
+	path = submodules/cloudflare-workers-hub
+	url = https://github.com/cursorvers/cloudflare-workers-hub.git
+[submodule ".claude"]
+	path = .claude
+	url = https://github.com/cursorvers/claude-config.git

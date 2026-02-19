@@ -1,0 +1,184 @@
+name: fugue-status
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to post status into"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  issues: write
+  actions: read
+
+jobs:
+  report:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Resolve context and gate
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          EVENT="${GITHUB_EVENT_NAME}"
+          ISSUE_NUMBER=""
+          COMMENT_BODY=""
+          if [[ "${EVENT}" == "workflow_dispatch" ]]; then
+            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
+            if [[ -z "${ISSUE_NUMBER}" ]]; then
+              echo "should_run=false" >> "${GITHUB_OUTPUT}"
+              echo "reason=missing-issue-number" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          elif [[ "${EVENT}" == "issue_comment" ]]; then
+            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
+            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
+            COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+          else
+            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
+            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
+          fi
+
+          HAS_STATUS="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-status") != null')"
+          SHOULD_RUN="false"
+          REASON=""
+
+          if [[ "${EVENT}" == "issue_comment" ]]; then
+            # Only react to explicit commands, and only on fugue-status issues.
+            if [[ "${HAS_STATUS}" == "true" ]] && echo "${COMMENT_BODY}" | grep -Eqi '^(\/status|\/progress|進捗)\b'; then
+              SHOULD_RUN="true"
+            else
+              REASON="not-a-status-command-or-missing-label"
+            fi
+          elif [[ "${EVENT}" == "issues" ]]; then
+            # On open/label events, only run when fugue-status is present.
+            if [[ "${HAS_STATUS}" == "true" ]]; then
+              SHOULD_RUN="true"
+            else
+              REASON="missing-fugue-status-label"
+            fi
+          else
+            # workflow_dispatch already validated inputs.
+            SHOULD_RUN="true"
+          fi
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "should_run=${SHOULD_RUN}"
+            echo "reason=${REASON}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Skip
+        if: ${{ steps.ctx.outputs.should_run != 'true' }}
+        run: |
+          echo "Skip: ${{ steps.ctx.outputs.reason }}"
+
+      - name: Author trust gate (write/maintain/admin)
+        id: trust
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          AUTHOR="${GITHUB_ACTOR}"
+
+          PERM="none"
+          perm_json="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${perm_json}" | jq -r '.permission')"
+          fi
+
+          TRUSTED="false"
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
+            TRUSTED="true"
+          fi
+
+          {
+            echo "permission=${PERM}"
+            echo "trusted=${TRUSTED}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Post untrusted notice
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.ctx.outputs.issue_number }}
+        run: |
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Status report is restricted to trusted repo collaborators (write/maintain/admin). Current permission: `${{ steps.trust.outputs.permission }}`."
+
+      - name: Generate and post status report
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.ctx.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+
+          # Open fugue-task issues
+          issues_json="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:open&per_page=100")"
+          total="$(echo "${issues_json}" | jq -r '.total_count // 0')"
+          processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "processing")] | length')"
+          needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-human")] | length')"
+          needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-review")] | length')"
+
+          top="$(echo "${issues_json}" | jq -r '.items[:5] | map("- #\(.number) \(.title) (\(.html_url))") | join("\n")')"
+          if [[ -z "${top}" ]]; then
+            top="(none)"
+          fi
+
+          # Latest workflow runs
+          wf_line() {
+            local wf_file="$1"
+            local label="$2"
+            local run_json
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 2>/dev/null || echo '{}')"
+            local status concl url created
+            status="$(echo "${run_json}" | jq -r '.workflow_runs[0].status // "unknown"')"
+            concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // ""')"
+            url="$(echo "${run_json}" | jq -r '.workflow_runs[0].html_url // ""')"
+            created="$(echo "${run_json}" | jq -r '.workflow_runs[0].created_at // ""')"
+            if [[ -z "${url}" ]]; then
+              echo "- ${label}: (no runs found)"
+              return 0
+            fi
+            if [[ -z "${concl}" || "${concl}" == "null" ]]; then
+              concl="(running)"
+            fi
+            echo "- ${label}: ${concl} (${created}) ${url}"
+          }
+
+          now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          report="$(cat <<EOF
+          FUGUE status report (${now})
+
+          **Open fugue-task issues**
+          - total: ${total}
+          - processing: ${processing}
+          - needs-human: ${needs_human}
+          - needs-review: ${needs_review}
+
+          **Latest runs**
+          $(wf_line "fugue-tutti-caller.yml" "mainframe")
+          $(wf_line "fugue-task-router.yml" "router")
+          $(wf_line "fugue-watchdog.yml" "watchdog")
+
+          **Top open issues**
+          ${top}
+
+          Tip: comment \`/status\` or \`進捗\` to refresh.
+          EOF
+          )"
+
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "${report}"

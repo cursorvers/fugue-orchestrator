@@ -3,6 +3,12 @@ name: Fugue Mainframe (Tutti + Optional Codex Implement)
 on:
   issues:
     types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to process (used for automated handoff)"
+        required: true
+        type: string
 
 permissions:
   issues: write
@@ -11,36 +17,54 @@ permissions:
   actions: read
 
 concurrency:
-  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number }}
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  resolve-target:
-    if: >-
-      github.actor != 'github-actions[bot]' &&
-      github.event.label.name == 'tutti' &&
-      contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'codex-implement')
+  ctx:
+    # For issues:labeled, only run when the label event is `tutti`.
+    # For workflow_dispatch, treat the dispatch itself as the trigger.
+    if: ${{ github.event_name != 'issues' || github.event.label.name == 'tutti' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
-      target_repo: ${{ steps.resolve.outputs.target_repo }}
+      should_run: ${{ steps.ctx.outputs.should_run }}
+      skip_reason: ${{ steps.ctx.outputs.skip_reason }}
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      has_codex_implement: ${{ steps.ctx.outputs.has_codex_implement }}
+      target_repo: ${{ steps.ctx.outputs.target_repo }}
     steps:
-      - name: Resolve target repository from issue body
-        id: resolve
+      - name: Resolve issue context
+        id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          issue_number="${{ github.event.issue.number }}"
-          issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}")"
+          ISSUE_NUMBER=""
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
+          else
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+          fi
+
+          issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           body="$(echo "${issue_json}" | jq -r '.body // ""')"
           owner="${GITHUB_REPOSITORY%%/*}"
+
+          has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+          has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+          has_codex="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("codex-implement") != null')"
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
           target_repo="$(printf '%s\n' "${body}" \
             | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
             | head -n1)"
+
+          # 1b) Also accept plain "owner/repo" (common on mobile forms).
+          if [[ -z "${target_repo}" ]]; then
+            target_repo="$(printf '%s\n' "${body}" | grep -oE "${owner}/[A-Za-z0-9_.-]+" | head -n1 || true)"
+          fi
 
           # 2) Fallback: repo name in backticks on lines mentioning repo/リポジトリ.
           if [[ -z "${target_repo}" ]]; then
@@ -58,18 +82,29 @@ jobs:
             target_repo="${GITHUB_REPOSITORY}"
           fi
 
-          echo "target_repo=${target_repo}" >> "${GITHUB_OUTPUT}"
+          should_run="true"
+          skip_reason=""
+          if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
+            should_run="false"
+            skip_reason="missing-required-labels"
+          fi
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "has_codex_implement=${has_codex}"
+            echo "target_repo=${target_repo}"
+            echo "should_run=${should_run}"
+            echo "skip_reason=${skip_reason}"
+          } >> "${GITHUB_OUTPUT}"
 
   # Review mode: Tutti consensus (currently 3 parallel agents)
   tutti:
     if: >-
-      github.actor != 'github-actions[bot]' &&
-      github.event.label.name == 'tutti' &&
-      contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'tutti')
+      needs.ctx.outputs.should_run == 'true'
+    needs: [ctx]
     uses: ./.github/workflows/fugue-tutti-router.yml
     with:
-      issue_number: "${{ format('{0}', github.event.issue.number) }}"
+      issue_number: "${{ needs.ctx.outputs.issue_number }}"
       orchestrator_provider: "${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -80,16 +115,14 @@ jobs:
   # Implement mode: if Tutti says it's safe AND issue requests implementation, run Codex implement immediately.
   codex-implement:
     if: >-
-      github.actor != 'github-actions[bot]' &&
-      github.event.label.name == 'tutti' &&
-      contains(github.event.issue.labels.*.name, 'fugue-task') &&
-      contains(github.event.issue.labels.*.name, 'codex-implement') &&
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.ctx.outputs.has_codex_implement == 'true' &&
       needs.tutti.outputs.ok_to_execute == 'true'
-    needs: [resolve-target, tutti]
+    needs: [ctx, tutti]
     uses: ./.github/workflows/fugue-codex-implement.yml
     with:
-      issue_number: "${{ format('{0}', github.event.issue.number) }}"
-      target_repo: "${{ needs.resolve-target.outputs.target_repo }}"
+      issue_number: "${{ needs.ctx.outputs.issue_number }}"
+      target_repo: "${{ needs.ctx.outputs.target_repo }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

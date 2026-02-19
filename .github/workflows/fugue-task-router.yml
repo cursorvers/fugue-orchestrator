@@ -17,7 +17,9 @@ on:
       XAI_API_KEY:
         required: false
   issues:
-    types: [opened, labeled]
+    # Avoid `labeled` here: labels added by automation (processing/proj/tutti) can
+    # create extra runs and cause unnecessary concurrency cancellations.
+    types: [opened]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -30,10 +32,13 @@ on:
 permissions:
   issues: write
   contents: read
+  actions: write
 
 jobs:
   route:
-    if: ${{ github.event_name != 'issue_comment' || github.actor != 'github-actions[bot]' }}
+    # Ignore bot-driven issue label churn (processing/proj labels), but still allow
+    # watchdog-triggered workflow_dispatch to run as github-actions[bot].
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -47,6 +52,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          COMMENT_BODY=""
+          if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
+            COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+          fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
             ISSUE_NUMBER="${{ inputs.issue_number }}"
@@ -63,9 +73,21 @@ jobs:
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           AUTHOR_ASSOC="$(echo "${issue_json}" | jq -r '.author_association // "NONE"')"
-          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-task") != null')"
-          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("tutti") != null')"
-          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("processing") != null')"
+
+          # Trust gate (write/maintain/admin). Used to prevent untrusted users
+          # from dispatching the mainframe workflows.
+          PERM="none"
+          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
+          fi
+          TRUSTED="false"
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
+            TRUSTED="true"
+          fi
+          HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+          HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+          HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
           HAS_GHA24="$(echo "${issue_json}" | jq -r '((.body // "") | test("^##\\s*GHA24\\s*Task"; "m"))')"
 
           SHOULD_RUN="true"
@@ -92,8 +114,13 @@ jobs:
             echo "issue_body<<EOF"
             echo "${BODY}"
             echo "EOF"
+            echo "comment_body<<EOF"
+            echo "${COMMENT_BODY}"
+            echo "EOF"
             echo "author=${AUTHOR}"
             echo "author_association=${AUTHOR_ASSOC}"
+            echo "trusted=${TRUSTED}"
+            echo "permission=${PERM}"
             echo "has_fugue=${HAS_FUGUE}"
             echo "has_tutti=${HAS_TUTTI}"
             echo "has_processing=${HAS_PROCESSING}"
@@ -107,16 +134,159 @@ jobs:
         run: |
           echo "Skip reason: ${{ steps.ctx.outputs.skip_reason }}"
 
-      - name: Add processing label
+      - name: Annotate target project (label + title prefix)
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+          COMMENT_BODY: ${{ steps.ctx.outputs.comment_body }}
+        run: |
+          set -euo pipefail
+
+          title="${ISSUE_TITLE}"
+          body="${ISSUE_BODY}"
+          comment="${COMMENT_BODY}"
+          text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
+
+          owner="${GITHUB_REPOSITORY%%/*}"
+
+          # 1) Prefer fully-qualified owner/repo found inside backticks.
+          target_repo="$(printf '%s\n' "${text}" \
+            | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
+            | head -n1)"
+
+          # 1b) Also accept plain "owner/repo" (common on mobile forms).
+          if [[ -z "${target_repo}" ]]; then
+            target_repo="$(printf '%s\n' "${text}" | grep -oE "${owner}/[A-Za-z0-9_.-]+" | head -n1 || true)"
+          fi
+
+          # 2) Fallback: repo name in backticks on lines mentioning repo/リポジトリ.
+          if [[ -z "${target_repo}" ]]; then
+            bare_repo="$(printf '%s\n' "${text}" \
+              | grep -E 'repo|Repo|repository|Repository|リポジトリ|対象|target' \
+              | sed -nE 's/.*`([A-Za-z0-9_.-]+)`.*/\1/p' \
+              | head -n1 || true)"
+            if [[ -n "${bare_repo}" ]]; then
+              target_repo="${owner}/${bare_repo}"
+            fi
+          fi
+
+          # 3) Default to caller repo when no hint exists.
+          if [[ -z "${target_repo}" ]]; then
+            target_repo="${GITHUB_REPOSITORY}"
+          fi
+
+          short="${target_repo#*/}"
+          slug="$(printf '%s' "${short}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_.-]/-/g' | sed 's/--*/-/g' | head -c 40)"
+          if [[ -z "${slug}" ]]; then
+            slug="unknown"
+          fi
+
+          proj_label="proj:${slug}"
+
+          # Create label if missing (idempotent).
+          gh label create "${proj_label}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --description "Target project: ${target_repo}" \
+            --color "0E8A16" >/dev/null 2>&1 || true
+
+          # Apply label to the issue.
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${proj_label}" >/dev/null || true
+
+          # Prefix title for easy scanning in the issue list (avoid clobbering an existing [..] prefix).
+          if ! echo "${title}" | grep -Eq '^\[[^]]+\]\s'; then
+            new_title="[${slug}] ${title}"
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --title "${new_title}" >/dev/null || true
+          fi
+
+      - name: GHA24 mainframe handoff (natural language)
+        id: handoff
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+        run: |
+          set -euo pipefail
+
+          title="${ISSUE_TITLE}"
+          body="${ISSUE_BODY}"
+          text="$(printf '%s\n%s\n' "${title}" "${body}")"
+
+          # Natural-language trigger: require an explicit "complete it" intent
+          # to avoid accidentally pushing issues into the GHA24 mainframe.
+          wants_mainframe=false
+          if echo "${text}" | grep -Eqi '(完遂|自走|完了まで|最後まで|full[- ]?auto|#gha24|GHA24)'; then
+            wants_mainframe=true
+          fi
+
+          if [[ "${wants_mainframe}" != "true" ]]; then
+            echo "handoff=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # Mode selection:
+          # - If user explicitly asked for mainframe completion, default to implement.
+          # - Explicit review-only wins over implement.
+          wants_review=false
+          wants_implement=true
+          if echo "${text}" | grep -Eqi '(レビューのみ|指摘のみ|実装しない|実装不要|review only|no implement|no-implement|#review)'; then
+            wants_review=true
+          fi
+          if [[ "${wants_review}" == "true" ]]; then
+            wants_implement=false
+          fi
+
+          # Ensure `codex-implement` label is present before firing `tutti`.
+          if [[ "${wants_implement}" == "true" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "codex-implement" >/dev/null
+          fi
+
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "tutti" >/dev/null
+
+          mode="$( [[ "${wants_implement}" == "true" ]] && echo "implement" || echo "review" )"
+          extra=""
+          if [[ "${wants_implement}" == "true" ]]; then
+            extra=" + codex-implement"
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Action: added label \`tutti\`${extra}\n\nNext: Tutti runs and posts the vote/audit comment. If approved and \`codex-implement\` is present, Codex will create a PR."
+
+          # IMPORTANT: label events created by GitHub Actions' GITHUB_TOKEN do NOT trigger other workflows.
+          # We must dispatch the mainframe workflow explicitly.
+          gh workflow run fugue-tutti-caller.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            -f issue_number="${ISSUE_NUMBER}" >/dev/null
+
+          echo "handoff=true" >> "${GITHUB_OUTPUT}"
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+
+      - name: Add processing label
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue edit "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --add-label "processing"
 
+      - name: Untrusted mainframe request notice
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+        run: |
+          set -euo pipefail
+          text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}")"
+          if echo "${text}" | grep -Eqi '(完遂|自走|完了まで|最後まで|full[- ]?auto|#gha24|GHA24)'; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Mainframe handoff is restricted to trusted collaborators (write/maintain/admin). Current permission: `${{ steps.ctx.outputs.permission }}`."
+          fi
+
       - name: Classify intent (Node.js decision table)
         id: classify
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
         env:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
@@ -154,7 +324,7 @@ jobs:
 
       - name: Check author trust
         id: trust
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -179,7 +349,7 @@ jobs:
 
       - name: Resolve final tier
         id: final
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
         run: |
           BASE_TIER="${{ steps.classify.outputs.tier }}"
           TRUSTED="${{ steps.trust.outputs.trusted }}"
@@ -190,7 +360,7 @@ jobs:
           echo "tier=${FINAL_TIER}" >> "${GITHUB_OUTPUT}"
 
       - name: Execute agent and post result (Tier 0-2)
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.final.outputs.tier != '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' && steps.final.outputs.tier != '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -298,7 +468,7 @@ jobs:
           fi
 
       - name: Tier 3 fallback
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.final.outputs.tier == '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' && steps.final.outputs.tier == '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
