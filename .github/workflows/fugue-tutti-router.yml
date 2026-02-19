@@ -164,7 +164,6 @@ jobs:
 
   run-agents:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
-    needs: [prepare]
     needs: [prepare, resolve-orchestrator]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -352,7 +351,6 @@ jobs:
 
   integrate:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
-    needs: [prepare, run-agents]
     needs: [prepare, resolve-orchestrator, run-agents]
     runs-on: ubuntu-latest
     timeout-minutes: 15
