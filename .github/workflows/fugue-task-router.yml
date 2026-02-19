@@ -12,6 +12,10 @@ on:
         required: true
       ZAI_API_KEY:
         required: true
+      GEMINI_API_KEY:
+        required: false
+      XAI_API_KEY:
+        required: false
   issues:
     types: [opened, labeled]
   issue_comment:
@@ -124,6 +128,8 @@ jobs:
           const text = `${title}\n${body}`;
 
           const rules = [
+            { keywords: ["x/twitter", "twitter", "tweet", "x検索", "トレンド", "リアルタイム", "grok", "xai"], provider: "xai", agent: "realtime-info", tier: 2, intent: "x-realtime" },
+            { keywords: ["ui", "ux", "ui design", "ux design", "figma", "screenshot", "レイアウト", "デザイン", "画面", "画像"], provider: "gemini", agent: "ui-reviewer", tier: 2, intent: "visual-review" },
             { keywords: ["review", "レビュー"], provider: "glm", agent: "code-reviewer", tier: 0, intent: "review" },
             { keywords: ["security", "セキュリティ"], provider: "codex", agent: "security-analyst", tier: 1, intent: "security" },
             { keywords: ["設計", "architecture"], provider: "codex", agent: "architect", tier: 1, intent: "architecture" },
@@ -189,7 +195,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           ZAI_MODEL: glm-4.7
+          XAI_MODEL: grok-3-mini
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
         run: |
@@ -209,6 +218,7 @@ jobs:
           ${BODY}"
 
           RESP=""
+          RESP_PROVIDER=""
           # Try OpenAI first if provider is codex
           if [[ "${PROVIDER}" == "codex" && -n "${OPENAI_API_KEY}" ]]; then
             OPENAI_MODEL_CANDIDATES=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex")
@@ -222,10 +232,43 @@ jobs:
               RESP_BODY="$(echo "${raw}" | sed '$d')"
               if [[ "${HTTP_CODE}" == "200" ]]; then
                 RESP="${RESP_BODY}"
+                RESP_PROVIDER="codex"
                 echo "OpenAI ok (model=${OPENAI_MODEL})"
                 break
               fi
               echo "OpenAI failed (model=${OPENAI_MODEL}, http=${HTTP_CODE})"
+            done
+          fi
+
+          if [[ -z "${RESP}" && "${PROVIDER}" == "gemini" && -n "${GEMINI_API_KEY:-}" ]]; then
+            REQ="$(jq -n --arg text "SYSTEM:\n${SYS_PROMPT}\n\nUSER:\n${USER_PROMPT}\n\nReturn concise actionable guidance." '{contents:[{parts:[{text:$text}]}],generationConfig:{temperature:0.2}}')"
+            GEMINI_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}"
+            raw="$(curl -sS -w "\n%{http_code}" "${GEMINI_URL}" \
+              -H "Content-Type: application/json" \
+              -d "${REQ}" 2>/dev/null || true)"
+            HTTP_CODE="$(echo "${raw}" | tail -1)"
+            RESP_BODY="$(echo "${raw}" | sed '$d')"
+            if [[ "${HTTP_CODE}" == "200" ]]; then
+              RESP="${RESP_BODY}"
+              RESP_PROVIDER="gemini"
+            fi
+          fi
+
+          if [[ -z "${RESP}" && "${PROVIDER}" == "xai" && -n "${XAI_API_KEY:-}" ]]; then
+            XAI_MODEL_CANDIDATES=("${XAI_MODEL}" "grok-2-latest")
+            for XAI_MODEL_NAME in "${XAI_MODEL_CANDIDATES[@]}"; do
+              REQ="$(jq -n --arg model "${XAI_MODEL_NAME}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
+              raw="$(curl -sS -w "\n%{http_code}" https://api.x.ai/v1/chat/completions \
+                -H "Authorization: Bearer ${XAI_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${REQ}" 2>/dev/null || true)"
+              HTTP_CODE="$(echo "${raw}" | tail -1)"
+              RESP_BODY="$(echo "${raw}" | sed '$d')"
+              if [[ "${HTTP_CODE}" == "200" ]]; then
+                RESP="${RESP_BODY}"
+                RESP_PROVIDER="xai"
+                break
+              fi
             done
           fi
 
@@ -236,9 +279,14 @@ jobs:
               -H "Authorization: Bearer ${ZAI_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "${REQ}")"
+            RESP_PROVIDER="glm"
           fi
 
-          ANSWER="$(echo "${RESP}" | jq -r '.choices[0].message.content // "No response body returned."' )"
+          if [[ "${RESP_PROVIDER}" == "gemini" ]]; then
+            ANSWER="$(echo "${RESP}" | jq -r '.candidates[0].content.parts[0].text // "No response body returned."' )"
+          else
+            ANSWER="$(echo "${RESP}" | jq -r '.choices[0].message.content // "No response body returned."' )"
+          fi
 
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${ANSWER}"
 

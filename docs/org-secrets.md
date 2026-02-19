@@ -10,6 +10,7 @@ Goal: minimize per-repository GitHub Actions secrets by centralizing shared cred
 ## Rules Of Thumb
 - Put shared provider keys in org secrets:
   - `OPENAI_API_KEY`, `ZAI_API_KEY`
+  - Optional specialists: `GEMINI_API_KEY`, `XAI_API_KEY`
 - Keep repo secrets only for repo-specific credentials:
   - Example: `TARGET_REPO_PAT` (scope-limited PAT for PR creation)
 - Use `selected` visibility unless the secret is truly safe to expose to all repos.
@@ -26,4 +27,3 @@ This checks:
 
 Config:
 - `scripts/org-secrets-audit.json`
-
