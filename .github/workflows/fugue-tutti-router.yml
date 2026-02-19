@@ -276,8 +276,8 @@ jobs:
           content=""
 
           if [[ "${PROVIDER}" == "codex" ]]; then
-            # Prefer spark when available, but fall back to widely-available Codex models.
-            candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex")
+            # Prefer Codex models first, then generic OpenAI fallbacks for compatibility.
+            candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
             for m in "${candidates[@]}"; do
               chosen_model="${m}"
               req="$(jq -n \
@@ -343,6 +343,24 @@ jobs:
             skipped_flag="true"
           fi
 
+          optional_error_note=""
+          optional_provider_label=""
+          if [[ "${PROVIDER}" == "gemini" && "${http_code}" != "200" ]]; then
+            optional_provider_label="Gemini"
+            if [[ "${http_code}" == "429" ]]; then
+              optional_error_note="Gemini API rate limited (HTTP 429)"
+            else
+              optional_error_note="Gemini API error (HTTP ${http_code})"
+            fi
+          elif [[ "${PROVIDER}" == "xai" && "${http_code}" != "200" ]]; then
+            optional_provider_label="xAI"
+            if [[ "${http_code}" == "429" ]]; then
+              optional_error_note="xAI API rate limited (HTTP 429)"
+            else
+              optional_error_note="xAI API error (HTTP ${http_code})"
+            fi
+          fi
+
           # Extract JSON even if wrapped in ```json fences.
           extracted="$(jq -Rn --arg s "${content}" '
             ($s | gsub("\r"; "") | gsub("^\\s+|\\s+$"; "")) as $t |
@@ -359,7 +377,18 @@ jobs:
             if type == "string" then (fromjson? // .) else . end
           ' 2>/dev/null || true)"
 
-          if [[ -n "${normalized}" ]] && echo "${normalized}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+          if [[ -n "${optional_error_note}" ]]; then
+            parsed="$(jq -n \
+              --arg note "${optional_error_note}" \
+              --arg provider "${optional_provider_label}" \
+              '{
+                risk:"MEDIUM",
+                approve:false,
+                findings:[$note],
+                recommendation:("Retry later or reduce " + $provider + " specialist lane pressure"),
+                rationale:"Optional specialist lane skipped due to provider-side throttling/error"
+              }')"
+          elif [[ -n "${normalized}" ]] && echo "${normalized}" | jq -e 'type == "object"' >/dev/null 2>&1; then
             parsed="${normalized}"
           else
             parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse JSON object from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
@@ -495,6 +524,11 @@ jobs:
             contradiction_section="Approve side: ${approve_agents}
           Reject side: ${reject_agents}"
           fi
+          skipped_agents="$(jq -r '
+            [ .[] | select(.skipped == true) |
+              "- \(.name) [\(.provider)] (http=\(.http_code)): \((.findings | join(" | ")))"
+            ] | if length==0 then "- none" else join("\n") end
+          ' all-results.json)"
 
           cat > integrated-comment.md <<COMMENT_EOF
           ## Tutti Integrated Review
@@ -514,6 +548,9 @@ jobs:
 
           **Rule d: Contradictions (present both sides)**
           ${contradiction_section}
+
+          **Optional lanes skipped**
+          ${skipped_agents}
 
           **Consensus summary**
           - approvals: ${approve_count}/${total_count}
@@ -618,12 +655,15 @@ jobs:
               ]
             }')"
           else
+            # Keep the same default quorum when switching to claude profile.
             matrix="$(jq -cn '{
               include: [
                 {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
+                {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
+                {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
                 {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"code-reviewer"},
                 {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"general-reviewer"},
-                {name:"gemini-general-reviewer",provider:"gemini",api_url:"https://generativelanguage.googleapis.com/v1beta/models",model:"gemini-2.0-flash",agent_role:"general-reviewer"}
+                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"math-reasoning"}
               ]
             }')"
           fi
