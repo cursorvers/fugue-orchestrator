@@ -99,6 +99,15 @@ compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || e
 
 LABELS="fugue-task"
 if [[ "${IMPLEMENT}" == "true" ]]; then
+  gh label create "implement" \
+    --repo "${ORCHESTRATOR_REPO}" \
+    --description "Implementation intent (provider-agnostic)" \
+    --color "1D76DB" >/dev/null 2>&1 || true
+  gh label create "${compat_label}" \
+    --repo "${ORCHESTRATOR_REPO}" \
+    --description "Implementation intent compatibility label" \
+    --color "0052CC" >/dev/null 2>&1 || true
+
   # `implement` is the provider-agnostic intent label.
   # Add a provider-specific compatibility label for existing workflows/tooling.
   LABELS="${LABELS},implement,${compat_label}"
