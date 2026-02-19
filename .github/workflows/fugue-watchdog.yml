@@ -63,11 +63,13 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         run: |
           set +e
           OPENAI_OK="false"
           ZAI_OK="false"
+          GEMINI_OK="skipped"
           XAI_OK="skipped"
 
           curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
@@ -80,6 +82,13 @@ jobs:
             -H "Authorization: Bearer ${ZAI_API_KEY}" >/dev/null 2>&1
           [[ $? -eq 0 ]] && ZAI_OK="true"
 
+          if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+            GEMINI_OK="false"
+            curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+              "https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}" >/dev/null 2>&1
+            [[ $? -eq 0 ]] && GEMINI_OK="true"
+          fi
+
           if [[ -n "${XAI_API_KEY:-}" ]]; then
             XAI_OK="false"
             curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
@@ -91,6 +100,7 @@ jobs:
           {
             echo "openai_ok=${OPENAI_OK}"
             echo "zai_ok=${ZAI_OK}"
+            echo "gemini_ok=${GEMINI_OK}"
             echo "xai_ok=${XAI_OK}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -165,6 +175,7 @@ jobs:
 
           openai_ok="${{ steps.connectivity.outputs.openai_ok }}"
           zai_ok="${{ steps.connectivity.outputs.zai_ok }}"
+          gemini_ok="${{ steps.connectivity.outputs.gemini_ok }}"
           xai_ok="${{ steps.connectivity.outputs.xai_ok }}"
           router_stale="${{ steps.last_success.outputs.stale }}"
           mainframe_stale="${{ steps.mainframe_success.outputs.stale }}"
@@ -180,7 +191,7 @@ jobs:
           reasons=()
 
           # Connectivity issues can be transient. Only alert frequently if there is pending work.
-          if [[ "${openai_ok}" != "true" || "${zai_ok}" != "true" || ( "${xai_ok}" != "true" && "${xai_ok}" != "skipped" ) ]]; then
+          if [[ "${openai_ok}" != "true" || "${zai_ok}" != "true" || ( "${gemini_ok}" != "true" && "${gemini_ok}" != "skipped" ) || ( "${xai_ok}" != "true" && "${xai_ok}" != "skipped" ) ]]; then
             if [[ "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ]]; then
               # With pending work, alert at most every 3 hours.
               if (( 10#${hour_utc} % 3 == 0 )); then
@@ -215,6 +226,7 @@ jobs:
           reasons: ${reasons[*]:-none}
           openai_ok: ${openai_ok}
           zai_ok: ${zai_ok}
+          gemini_ok: ${gemini_ok}
           xai_ok: ${xai_ok}
           pending_count: ${pending_count}
           mainframe_pending_count: ${mainframe_pending_count}
