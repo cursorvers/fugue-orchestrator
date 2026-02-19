@@ -38,6 +38,8 @@ on:
         required: true
       GEMINI_API_KEY:
         required: false
+      XAI_API_KEY:
+        required: false
 
 permissions:
   issues: write
@@ -181,6 +183,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
@@ -221,9 +224,34 @@ jobs:
             exit 0
           fi
 
+          if [[ "${PROVIDER}" == "xai" && -z "${XAI_API_KEY:-}" ]]; then
+            result="$(jq -n \
+              --arg name "${AGENT_NAME}" \
+              --arg provider "${PROVIDER}" \
+              --arg api_url "${API_URL}" \
+              --arg model "${MODEL}" \
+              --arg agent_role "${AGENT_ROLE}" \
+              '{
+                name:$name,
+                provider:$provider,
+                api_url:$api_url,
+                model:$model,
+                agent_role:$agent_role,
+                http_code:"skipped",
+                skipped:true,
+                risk:"MEDIUM",
+                approve:false,
+                findings:["Skipped: missing XAI_API_KEY"],
+                recommendation:"Add XAI_API_KEY to enable xAI voter",
+                rationale:"xAI voter was skipped due to missing secret"
+              }')"
+            echo "${result}" > "agent-${AGENT_NAME}.json"
+            exit 0
+          fi
+
           req=""
           auth_header=""
-          if [[ "${PROVIDER}" == "codex" || "${PROVIDER}" == "glm" ]]; then
+          if [[ "${PROVIDER}" == "codex" || "${PROVIDER}" == "glm" || "${PROVIDER}" == "xai" ]]; then
             req="$(jq -n \
               --arg model "${MODEL}" \
               --arg s "${sys_prompt}" \
@@ -231,8 +259,10 @@ jobs:
               '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
             if [[ "${PROVIDER}" == "codex" ]]; then
               auth_header="Authorization: Bearer ${OPENAI_API_KEY}"
-            else
+            elif [[ "${PROVIDER}" == "glm" ]]; then
               auth_header="Authorization: Bearer ${ZAI_API_KEY}"
+            else
+              auth_header="Authorization: Bearer ${XAI_API_KEY}"
             fi
           else
             # Gemini generateContent expects a single "user" content string. Keep it strict: JSON only.
@@ -248,6 +278,25 @@ jobs:
           if [[ "${PROVIDER}" == "codex" ]]; then
             # Prefer spark when available, but fall back to widely-available Codex models.
             candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex")
+            for m in "${candidates[@]}"; do
+              chosen_model="${m}"
+              req="$(jq -n \
+                --arg model "${chosen_model}" \
+                --arg s "${sys_prompt}" \
+                --arg u "${user_prompt}" \
+                '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+
+              http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+                --connect-timeout 10 --max-time 60 --retry 2 \
+                -H "${auth_header}" \
+                -H "Content-Type: application/json" \
+                -d "${req}" || true)"
+              if [[ "${http_code}" == "200" ]]; then
+                break
+              fi
+            done
+          elif [[ "${PROVIDER}" == "xai" ]]; then
+            candidates=("${MODEL}" "grok-3-mini" "grok-2-latest")
             for m in "${candidates[@]}"; do
               chosen_model="${m}"
               req="$(jq -n \
@@ -289,8 +338,8 @@ jobs:
           fi
 
           skipped_flag="false"
-          # Gemini is optional; if it fails, exclude it from consensus totals.
-          if [[ "${PROVIDER}" == "gemini" && "${http_code}" != "200" ]]; then
+          # Optional specialist lanes are excluded from consensus totals when they fail.
+          if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" ) && "${http_code}" != "200" ]]; then
             skipped_flag="true"
           fi
 
@@ -535,12 +584,24 @@ jobs:
         id: resolve
         env:
           REQUESTED_PROVIDER: ${{ inputs.orchestrator_provider }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
         run: |
           set -euo pipefail
 
           provider="$(echo "${REQUESTED_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]')"
           if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
             provider="codex"
+          fi
+
+          text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
+          wants_gemini="false"
+          wants_xai="false"
+          if echo "${text}" | grep -Eqi '(ui|ux|ui[[:space:]]*design|ux[[:space:]]*design|figma|mockup|wireframe|screenshot|layout|デザイン|画面|画像|スクリーンショット|レイアウト|pencil)'; then
+            wants_gemini="true"
+          fi
+          if echo "${text}" | grep -Eqi '(x/twitter|twitter|tweet|tweets|xai|grok|x検索|トレンド|リアルタイム|速報|timeline|タイムライン)'; then
+            wants_xai="true"
           fi
 
           if [[ "${provider}" == "codex" ]]; then
@@ -563,6 +624,32 @@ jobs:
                 {name:"gemini-general-reviewer",provider:"gemini",api_url:"https://generativelanguage.googleapis.com/v1beta/models",model:"gemini-2.0-flash",agent_role:"general-reviewer"}
               ]
             }')"
+          fi
+
+          if [[ "${wants_gemini}" == "true" ]]; then
+            matrix="$(echo "${matrix}" | jq -c '
+              if any(.include[]; .name == "gemini-visual-reviewer") then .
+              else .include += [{
+                name:"gemini-visual-reviewer",
+                provider:"gemini",
+                api_url:"https://generativelanguage.googleapis.com/v1beta/models",
+                model:"gemini-2.0-flash",
+                agent_role:"ui-reviewer"
+              }] end
+            ')"
+          fi
+
+          if [[ "${wants_xai}" == "true" ]]; then
+            matrix="$(echo "${matrix}" | jq -c '
+              if any(.include[]; .name == "xai-realtime-info") then .
+              else .include += [{
+                name:"xai-realtime-info",
+                provider:"xai",
+                api_url:"https://api.x.ai/v1/chat/completions",
+                model:"grok-3-mini",
+                agent_role:"realtime-info"
+              }] end
+            ')"
           fi
 
           lanes="$(echo "${matrix}" | jq -r '.include | length')"
