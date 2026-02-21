@@ -50,7 +50,8 @@ Claude Opus（統合・報告）
 ## ファイル構成
 
 ```
-CLAUDE.md                              <- エントリーポイント（~/.claude/ にコピー）
+AGENTS.md                              <- SSOT: オーケストレーション契約（共通）
+CLAUDE.md                              <- Claude用薄いアダプタ（AGENTS.mdを参照）
 rules/
   delegation-matrix.md                 <- SSOT: 誰が何を担当するか
   auto-execution.md                    <- 自動委譲トリガー
@@ -88,6 +89,7 @@ git clone https://github.com/cursorvers/fugue-orchestrator.git
 cd fugue-orchestrator
 
 # 2. ルールを Claude Code 設定にコピー
+cp AGENTS.md ~/.claude/AGENTS.md
 cp CLAUDE.md ~/.claude/CLAUDE.md
 cp -r rules/ ~/.claude/rules/
 
@@ -113,6 +115,9 @@ export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
 # gha24 "完遂: API障害対応" --implement --orchestrator claude --force-claude
 # あるいは:
 # GHA24_ORCHESTRATOR_PROVIDER=claude gha24 "完遂: API障害対応" --implement
+
+# 3.7 Orchestrator切替シミュレーション（ローカル・非破壊）
+# ./scripts/sim-orchestrator-switch.sh | column -t -s $'\t'
 
 # Note:
 # `orchestrator provider` は Tutti のレーン選択プロファイルです。
