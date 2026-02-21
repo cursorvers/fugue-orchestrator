@@ -118,8 +118,12 @@ fi
 # Create the issue first, then add the `tutti` label as a second step.
 # This avoids multiple `issues:labeled` triggers firing at creation time.
 provider=""
+requested_provider=""
+fallback_applied=false
+fallback_reason=""
 if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  requested_provider="${provider}"
   if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
     echo "Error: --orchestrator must be codex or claude" >&2
     exit 1
@@ -136,6 +140,8 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     if [[ "${claude_state}" == "degraded" || "${claude_state}" == "exhausted" ]]; then
       echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to codex applied for this request."
       provider="codex"
+      fallback_applied=true
+      fallback_reason="claude-rate-limit-${claude_state}"
     fi
   fi
 fi
@@ -219,12 +225,18 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   fi
 fi
 gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "tutti" >/dev/null
+if [[ "${fallback_applied}" == "true" ]]; then
+  gh issue comment "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --body "CLI pre-fallback applied: requested \`${requested_provider}\` but submitted \`${provider}\` due to \`${fallback_reason}\`. Use \`--force-claude\` to bypass this guard for this issue."
+fi
 
 echo "Created: ${URL}"
 echo "Orchestrator repo: ${ORCHESTRATOR_REPO}"
 echo "Target repo: ${TARGET_REPO}"
 if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   echo "Orchestrator profile override: ${provider}"
+  if [[ "${fallback_applied}" == "true" ]]; then
+    echo "Orchestrator pre-fallback: ${requested_provider} -> ${provider} (${fallback_reason})"
+  fi
   if [[ "${FORCE_CLAUDE}" == "true" ]]; then
     echo "Override guard: orchestrator-force:claude enabled"
   fi

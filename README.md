@@ -106,6 +106,7 @@ export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
 # NOTE: state が degraded/exhausted のとき、claude 指定は自動で codex にフォールバックします。
+# NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）
 # gha24 "完遂: API障害対応" --implement --orchestrator claude
