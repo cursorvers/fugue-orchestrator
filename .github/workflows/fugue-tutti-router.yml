@@ -405,11 +405,41 @@ jobs:
             done
           else
             if [[ "${PROVIDER}" == "glm" ]]; then
-              http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
-                --connect-timeout 10 --max-time 60 --retry 2 \
-                -H "${auth_header}" \
-                -H "Content-Type: application/json" \
-                -d "${req}" || true)"
+              candidates=("${MODEL}" "glm-5.0" "glm-4.5")
+              for m in "${candidates[@]}"; do
+                chosen_model="${m}"
+                req="$(jq -n \
+                  --arg model "${chosen_model}" \
+                  --arg s "${sys_prompt}" \
+                  --arg u "${user_prompt}" \
+                  '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+
+                http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+                  --connect-timeout 10 --max-time 60 --retry 2 \
+                  -H "${auth_header}" \
+                  -H "Content-Type: application/json" \
+                  -d "${req}" || true)"
+                if [[ "${http_code}" == "200" ]]; then
+                  break
+                fi
+              done
+
+              # Keep 6-lane quorum robust when GLM endpoint/model is temporarily unavailable.
+              if [[ "${http_code}" != "200" && -n "${OPENAI_API_KEY:-}" ]]; then
+                effective_provider="codex"
+                effective_api_url="https://api.openai.com/v1/chat/completions"
+                chosen_model="gpt-5.3-codex-spark"
+                fallback_req="$(jq -n \
+                  --arg model "${chosen_model}" \
+                  --arg s "${sys_prompt}" \
+                  --arg u "${user_prompt}" \
+                  '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+                http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
+                  --connect-timeout 10 --max-time 60 --retry 2 \
+                  -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+                  -H "Content-Type: application/json" \
+                  -d "${fallback_req}" || true)"
+              fi
             else
               # Gemini REST API (key in query param)
               gemini_url="${API_URL}/${MODEL}:generateContent?key=${GEMINI_API_KEY}"
