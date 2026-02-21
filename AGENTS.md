@@ -44,6 +44,7 @@ Auditability:
 
 - Core quorum: 6 lanes minimum (Codex3 + GLM3).
 - CI lane execution engine defaults to `harness` (`FUGUE_CI_EXECUTION_ENGINE=harness|api`).
+- Multi-agent depth is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`).
 - GLM baseline model: `glm-5.0`.
 - When assist is `claude` and state is not `exhausted`, add Claude assist lanes (Opus + Sonnet).
 - In `FUGUE_CLAUDE_MAX_PLAN=true` mode without `ANTHROPIC_API_KEY`, Claude assist lanes run through Codex proxy and remain vote participants.

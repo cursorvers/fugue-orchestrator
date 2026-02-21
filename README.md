@@ -106,6 +106,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body claude  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body harness -R <owner/repo> # harness|api
+# gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
 # (legacy) gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body ok        -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
@@ -116,6 +117,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: state が ok/degraded かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
 # NOTE: FUGUE_CLAUDE_MAX_PLAN=true なら ANTHROPIC_API_KEY なしでも Claude assist レーンは Codex proxy で参加します。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE=harness` で /vote レーンは harness 実行エンジンを直結利用（main=codex/claude 共通）。
+# NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）
