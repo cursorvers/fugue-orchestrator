@@ -203,6 +203,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
@@ -216,6 +217,15 @@ jobs:
 
           Issue Body:
           ${ISSUE_BODY}"
+
+          ORIGINAL_PROVIDER="${PROVIDER}"
+          ORIGINAL_MODEL="${MODEL}"
+          CLAUDE_PROXY_MODE="false"
+          CLAUDE_PROXY_NOTE=""
+          claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
 
           # Gemini can run without being OpenAI-compatible; if key is missing, skip it.
           if [[ "${PROVIDER}" == "gemini" && -z "${GEMINI_API_KEY:-}" ]]; then
@@ -269,28 +279,36 @@ jobs:
           fi
 
           if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
-            result="$(jq -n \
-              --arg name "${AGENT_NAME}" \
-              --arg provider "${PROVIDER}" \
-              --arg api_url "${API_URL}" \
-              --arg model "${MODEL}" \
-              --arg agent_role "${AGENT_ROLE}" \
-              '{
-                name:$name,
-                provider:$provider,
-                api_url:$api_url,
-                model:$model,
-                agent_role:$agent_role,
-                http_code:"skipped",
-                skipped:true,
-                risk:"MEDIUM",
-                approve:false,
-                findings:["Skipped: missing ANTHROPIC_API_KEY"],
-                recommendation:"Add ANTHROPIC_API_KEY to enable Claude assist lane",
-                rationale:"Claude assist lane was skipped due to missing secret"
-              }')"
-            echo "${result}" > "agent-${AGENT_NAME}.json"
-            exit 0
+            if [[ "${claude_max_plan}" == "true" && -n "${OPENAI_API_KEY:-}" ]]; then
+              PROVIDER="codex"
+              API_URL="https://api.openai.com/v1/chat/completions"
+              MODEL="gpt-5.3-codex-spark"
+              CLAUDE_PROXY_MODE="true"
+              CLAUDE_PROXY_NOTE="Claude MAX plan mode: executed via Codex proxy because ANTHROPIC_API_KEY is not configured."
+            else
+              result="$(jq -n \
+                --arg name "${AGENT_NAME}" \
+                --arg provider "${PROVIDER}" \
+                --arg api_url "${API_URL}" \
+                --arg model "${MODEL}" \
+                --arg agent_role "${AGENT_ROLE}" \
+                '{
+                  name:$name,
+                  provider:$provider,
+                  api_url:$api_url,
+                  model:$model,
+                  agent_role:$agent_role,
+                  http_code:"skipped",
+                  skipped:true,
+                  risk:"MEDIUM",
+                  approve:false,
+                  findings:["Skipped: missing ANTHROPIC_API_KEY and Claude MAX proxy mode is disabled"],
+                  recommendation:"Set FUGUE_CLAUDE_MAX_PLAN=true or provide ANTHROPIC_API_KEY to enable Claude assist lanes",
+                  rationale:"Claude assist lane was skipped due to missing credential path"
+                }')"
+              echo "${result}" > "agent-${AGENT_NAME}.json"
+              exit 0
+            fi
           fi
 
           req=""
@@ -522,9 +540,30 @@ jobs:
             parsed="$(jq -n --arg c "${content}" '{risk:"MEDIUM",approve:false,findings:["Could not parse JSON object from model output"],recommendation:"Manual review required",rationale:($c|tostring)}')"
           fi
 
+          if [[ "${CLAUDE_PROXY_MODE}" == "true" ]]; then
+            parsed="$(echo "${parsed}" | jq -c \
+              --arg note "${CLAUDE_PROXY_NOTE}" \
+              '{
+                risk:(.risk // "MEDIUM"),
+                approve:(.approve // false),
+                findings:(
+                  (if (.findings|type)=="array" then .findings else [(.findings|tostring)] end) + [$note]
+                ),
+                recommendation:(.recommendation // "No recommendation"),
+                rationale:(
+                  (.rationale // "No rationale") + " | " + $note
+                )
+              }')"
+          fi
+
+          reported_provider="${effective_provider}"
+          if [[ "${CLAUDE_PROXY_MODE}" == "true" ]]; then
+            reported_provider="claude-max-proxy-codex"
+          fi
+
           result="$(jq -n \
             --arg name "${AGENT_NAME}" \
-            --arg provider "${effective_provider}" \
+            --arg provider "${reported_provider}" \
             --arg api_url "${effective_api_url}" \
             --arg model "${chosen_model}" \
             --arg agent_role "${AGENT_ROLE}" \

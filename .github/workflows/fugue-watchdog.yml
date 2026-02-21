@@ -65,12 +65,19 @@ jobs:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
         run: |
           set +e
           OPENAI_OK="false"
           ZAI_OK="false"
           GEMINI_OK="skipped"
           XAI_OK="skipped"
+          ANTHROPIC_OK="skipped"
+          claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
 
           curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
             https://api.openai.com/v1/models \
@@ -97,11 +104,23 @@ jobs:
             [[ $? -eq 0 ]] && XAI_OK="true"
           fi
 
+          if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+            ANTHROPIC_OK="false"
+            curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+              https://api.anthropic.com/v1/models \
+              -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+              -H "anthropic-version: 2023-06-01" >/dev/null 2>&1
+            [[ $? -eq 0 ]] && ANTHROPIC_OK="true"
+          elif [[ "${claude_max_plan}" == "true" ]]; then
+            ANTHROPIC_OK="proxy"
+          fi
+
           {
             echo "openai_ok=${OPENAI_OK}"
             echo "zai_ok=${ZAI_OK}"
             echo "gemini_ok=${GEMINI_OK}"
             echo "xai_ok=${XAI_OK}"
+            echo "anthropic_ok=${ANTHROPIC_OK}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Get latest successful router run
@@ -172,6 +191,7 @@ jobs:
         id: decide
         env:
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
         run: |
           set -euo pipefail
 
@@ -179,9 +199,14 @@ jobs:
           zai_ok="${{ steps.connectivity.outputs.zai_ok }}"
           gemini_ok="${{ steps.connectivity.outputs.gemini_ok }}"
           xai_ok="${{ steps.connectivity.outputs.xai_ok }}"
+          anthropic_ok="${{ steps.connectivity.outputs.anthropic_ok }}"
           claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
+          fi
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
           fi
           router_stale="${{ steps.last_success.outputs.stale }}"
           mainframe_stale="${{ steps.mainframe_success.outputs.stale }}"
@@ -213,6 +238,16 @@ jobs:
             fi
           fi
 
+          # Claude assist execution path unavailable (only relevant when not exhausted).
+          if [[ "${claude_state}" != "exhausted" && "${anthropic_ok}" == "false" && "${claude_max_plan}" != "true" ]]; then
+            if [[ "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ]]; then
+              if (( 10#${hour_utc} % 3 == 0 )); then
+                should_alert="true"
+                reasons+=("claude-assist-unavailable")
+              fi
+            fi
+          fi
+
           # Claude orchestrator throttle visibility: when not ok and work is pending, page at most every 3h.
           if [[ "${claude_state}" != "ok" && ( "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ) ]]; then
             if (( 10#${hour_utc} % 3 == 0 )); then
@@ -239,10 +274,12 @@ jobs:
           repo: ${GITHUB_REPOSITORY}
           reasons: ${reasons[*]:-none}
           claude_rate_limit_state: ${claude_state}
+          claude_max_plan_mode: ${claude_max_plan}
           openai_ok: ${openai_ok}
           zai_ok: ${zai_ok}
           gemini_ok: ${gemini_ok}
           xai_ok: ${xai_ok}
+          anthropic_ok: ${anthropic_ok}
           pending_count: ${pending_count}
           mainframe_pending_count: ${mainframe_pending_count}
           router_hours_since_success: ${router_hours}

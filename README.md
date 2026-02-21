@@ -104,13 +104,16 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # 3.5 GitHub Actions 用オーケストレータ切替（repo variable 優先）
 # gh variable set FUGUE_MAIN_ORCHESTRATOR_PROVIDER   --body codex   -R <owner/repo>
 # gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body claude  -R <owner/repo>
+# gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
 # (legacy) gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body ok        -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
-# NOTE: state が exhausted のとき、mainのclaude指定は codex、assistのclaude指定は none に自動フォールバックします。
-# NOTE: state が ok/degraded かつ assist=claude のとき、Sonnet追加レーンが /vote に参加します。
+# NOTE: state が degraded/exhausted のとき、mainのclaude指定は codex に自動フォールバックします。
+# NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
+# NOTE: state が ok/degraded かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
+# NOTE: FUGUE_CLAUDE_MAX_PLAN=true なら ANTHROPIC_API_KEY なしでも Claude assist レーンは Codex proxy で参加します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）

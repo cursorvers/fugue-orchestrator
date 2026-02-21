@@ -77,10 +77,13 @@ Required/optional repo variables:
 - `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (optional, default resolved to codex)
 - `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, default `claude`)
 - `FUGUE_CLAUDE_RATE_LIMIT_STATE` (`ok|degraded|exhausted`)
+- `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, default `true`; allows Claude assist lanes without direct Anthropic key by proxying through Codex)
+- `FUGUE_CLAUDE_SONNET4_MODEL` (optional, default `claude-3-7-sonnet-latest`)
+- `FUGUE_CLAUDE_SONNET6_MODEL` (optional, default `claude-3-5-sonnet-latest`)
 
 Secrets:
 - Existing: `OPENAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`
-- New optional: `ANTHROPIC_API_KEY` for Claude assist lane
+- Optional: `ANTHROPIC_API_KEY` for direct Claude API lane execution (not required when `FUGUE_CLAUDE_MAX_PLAN=true`)
 
 ## 6. Acceptance Criteria
 

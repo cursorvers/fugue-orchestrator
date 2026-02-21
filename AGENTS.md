@@ -14,19 +14,26 @@ Adapter files such as `CLAUDE.md` must stay thin and reference this file.
 
 - Main orchestrator is provider-agnostic by design.
 - Operational default is `codex` when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted`.
-- `claude` can run as sidecar for ambiguity resolution and integration quality.
+- `claude` can run as assist sidecar for ambiguity resolution and integration quality.
 - State transitions and PR actions are owned by control plane workflows, not by sidecar advice.
 
 ## 3. Provider Resolution Contract
 
-Resolution order:
+Main resolution order:
 1. Issue label (`orchestrator:claude` or `orchestrator:codex`)
 2. Issue body hint (`## Orchestrator provider` or `orchestrator provider: ...`)
-3. Repository variable `FUGUE_ORCHESTRATOR_PROVIDER`
+3. Repository variable `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (legacy fallback `FUGUE_ORCHESTRATOR_PROVIDER`)
 4. Fallback default `codex`
 
+Assist resolution order:
+1. Issue label (`orchestrator-assist:claude|codex|none`)
+2. Issue body hint (`## Assist orchestrator provider` or inline hint)
+3. Repository variable `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER`
+4. Fallback default `claude`
+
 Throttle guard:
-- If resolved provider is `claude` and `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted`, auto-fallback to `codex`.
+- If resolved **main** provider is `claude` and state is `degraded` or `exhausted`, auto-fallback to `codex`.
+- If resolved **assist** provider is `claude` and state is `exhausted`, auto-fallback to `none`.
 - Per-issue override: label `orchestrator-force:claude` or CLI `--force-claude`.
 
 Auditability:
@@ -35,8 +42,10 @@ Auditability:
 
 ## 4. Execution/Evaluation Lanes
 
-- Core quorum: Codex + GLM lanes.
+- Core quorum: 6 lanes minimum (Codex3 + GLM3).
 - GLM baseline model: `glm-5.0`.
+- When assist is `claude` and state is not `exhausted`, add Claude assist lanes (Opus + Sonnet).
+- In `FUGUE_CLAUDE_MAX_PLAN=true` mode without `ANTHROPIC_API_KEY`, Claude assist lanes run through Codex proxy and remain vote participants.
 - Optional specialist lanes:
   - Gemini for UI/UX and visual intent.
   - xAI for X/Twitter and realtime intent.

@@ -132,8 +132,30 @@ jobs:
           processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "processing")] | length')"
           needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-human")] | length')"
           needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-review")] | length')"
+          main_default="$(gh variable get FUGUE_MAIN_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || true)"
+          legacy_default="$(gh variable get FUGUE_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || true)"
+          if [[ -z "${main_default}" ]]; then
+            main_default="${legacy_default}"
+          fi
+          if [[ -z "${main_default}" ]]; then
+            main_default="codex"
+          fi
+          assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
+          claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
           claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "ok")"
+          main_default="$(echo "${main_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          assist_default="$(echo "${assist_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${main_default}" != "codex" && "${main_default}" != "claude" ]]; then
+            main_default="codex"
+          fi
+          if [[ "${assist_default}" != "codex" && "${assist_default}" != "claude" && "${assist_default}" != "none" ]]; then
+            assist_default="claude"
+          fi
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
           fi
@@ -173,6 +195,9 @@ jobs:
           - processing: ${processing}
           - needs-human: ${needs_human}
           - needs-review: ${needs_review}
+          - main_orchestrator_default: ${main_default}
+          - assist_orchestrator_default: ${assist_default}
+          - claude_max_plan_mode: ${claude_max_plan}
           - claude_rate_limit_state: ${claude_state}
 
           **Latest runs**
