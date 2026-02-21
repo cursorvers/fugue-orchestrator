@@ -186,7 +186,7 @@ if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
       claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
     fi
     claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    if [[ "${claude_state}" == "degraded" || "${claude_state}" == "exhausted" ]]; then
+    if [[ "${claude_state}" == "exhausted" ]]; then
       echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to none applied for assist orchestrator."
       assist_provider="none"
       assist_fallback_applied=true

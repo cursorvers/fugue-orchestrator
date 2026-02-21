@@ -313,7 +313,7 @@ jobs:
             main_fallback_note="Main orchestrator auto-fallback: requested \`claude\` but switched to \`codex\` due to \`claude-rate-limit-${claude_state}\`."
           fi
           assist_fallback_note=""
-          if [[ "${assist_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+          if [[ "${assist_provider}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
             assist_provider="none"
             assist_fallback_note="Assist orchestrator auto-fallback: requested \`claude\` but switched to \`none\` due to \`claude-rate-limit-${claude_state}\`."
           fi

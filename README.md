@@ -109,7 +109,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
-# NOTE: state が degraded/exhausted のとき、mainのclaude指定は codex、assistのclaude指定は none に自動フォールバックします。
+# NOTE: state が exhausted のとき、mainのclaude指定は codex、assistのclaude指定は none に自動フォールバックします。
+# NOTE: state が ok/degraded かつ assist=claude のとき、Sonnet追加レーンが /vote に参加します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）

@@ -188,7 +188,7 @@ jobs:
 
           assist_claude_fallback_applied="false"
           assist_claude_fallback_reason=""
-          if [[ "${requested_assist_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+          if [[ "${requested_assist_provider}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
             requested_assist_provider="none"
             assist_claude_fallback_applied="true"
             assist_claude_fallback_reason="claude-rate-limit-${claude_state}"

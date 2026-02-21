@@ -39,6 +39,8 @@ FR-2 Assist provider resolution:
 
 FR-3 Claude throttle guard:
 - If Claude rate-limit state is `degraded` or `exhausted`, main provider must auto-fallback to `codex` unless forced.
+- If Claude rate-limit state is `exhausted`, assist provider `claude` must auto-fallback to `none` unless forced.
+- If Claude rate-limit state is `ok` or `degraded`, Sonnet assist lanes should remain eligible.
 - Force override must be explicit (`orchestrator-force:claude` / CLI force option).
 - Fallback reason must be written to issue comments for auditability.
 

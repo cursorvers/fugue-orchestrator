@@ -22,7 +22,7 @@ run_case() {
   fi
 
   local resolved_assist="${requested_assist}"
-  if [[ "${resolved_assist}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+  if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
     resolved_assist="none"
   fi
 
