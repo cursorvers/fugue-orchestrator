@@ -322,11 +322,11 @@ jobs:
           orchestrator_label="orchestrator:${provider}"
           assist_orchestrator_label="orchestrator-assist:${assist_provider}"
 
-          # Natural-language trigger: require an explicit "complete it" intent
-          # to avoid accidentally pushing issues into the GHA24 mainframe.
-          wants_mainframe=false
-          if echo "${text}" | grep -Eqi '(完遂|自走|完了まで|最後まで|full[- ]?auto|#gha24|GHA24)'; then
-            wants_mainframe=true
+          # Default: fugue-task issues are handed off to the GHA24 mainframe.
+          # Explicit manual markers can opt out.
+          wants_mainframe=true
+          if echo "${text}" | grep -Eqi '(mainframeしない|自動実行しない|manual only|#manual|#no-gha24)'; then
+            wants_mainframe=false
           fi
 
           if [[ "${wants_mainframe}" != "true" ]]; then
@@ -427,7 +427,7 @@ jobs:
           echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
 
       - name: Add processing label
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.conclusion != 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -438,18 +438,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
-          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
-          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
         run: |
           set -euo pipefail
-          text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}")"
-          if echo "${text}" | grep -Eqi '(完遂|自走|完了まで|最後まで|full[- ]?auto|#gha24|GHA24)'; then
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Mainframe handoff is restricted to trusted collaborators (write/maintain/admin). Current permission: `${{ steps.ctx.outputs.permission }}`."
-          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Mainframe handoff is restricted to trusted collaborators (write/maintain/admin). Current permission: `${{ steps.ctx.outputs.permission }}`."
 
       - name: Classify intent (Node.js decision table)
         id: classify
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.conclusion != 'success' }}
         env:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
@@ -463,14 +458,14 @@ jobs:
           const rules = [
             { keywords: ["x/twitter", "twitter", "tweet", "x検索", "トレンド", "リアルタイム", "grok", "xai"], provider: "xai", agent: "realtime-info", tier: 2, intent: "x-realtime" },
             { keywords: ["ui", "ux", "ui design", "ux design", "figma", "screenshot", "レイアウト", "デザイン", "画面", "画像"], provider: "gemini", agent: "ui-reviewer", tier: 2, intent: "visual-review" },
-            { keywords: ["review", "レビュー"], provider: "glm", agent: "code-reviewer", tier: 0, intent: "review" },
+            { keywords: ["review", "レビュー"], provider: "codex", agent: "code-reviewer", tier: 0, intent: "review" },
             { keywords: ["security", "セキュリティ"], provider: "codex", agent: "security-analyst", tier: 1, intent: "security" },
             { keywords: ["設計", "architecture"], provider: "codex", agent: "architect", tier: 1, intent: "architecture" },
             { keywords: ["修正", "fix", "bug"], provider: "codex", agent: "code-reviewer", tier: 2, intent: "fix" },
             { keywords: ["deploy", "本番"], provider: "null", agent: "null", tier: 3, intent: "deploy" }
           ];
 
-          let selected = { provider: "glm", agent: "general-reviewer", tier: 2, intent: "default" };
+          let selected = { provider: "codex", agent: "general-reviewer", tier: 2, intent: "default" };
           for (const rule of rules) {
             if (rule.keywords.some(k => text.includes(k.toLowerCase()))) {
               selected = rule;
@@ -487,7 +482,7 @@ jobs:
 
       - name: Check author trust
         id: trust
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.conclusion != 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -512,7 +507,7 @@ jobs:
 
       - name: Resolve final tier
         id: final
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.conclusion != 'success' }}
         run: |
           BASE_TIER="${{ steps.classify.outputs.tier }}"
           TRUSTED="${{ steps.trust.outputs.trusted }}"
@@ -523,7 +518,7 @@ jobs:
           echo "tier=${FINAL_TIER}" >> "${GITHUB_OUTPUT}"
 
       - name: Execute agent and post result (Tier 0-2)
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' && steps.final.outputs.tier != '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.conclusion != 'success' && steps.final.outputs.tier != '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -608,14 +603,27 @@ jobs:
           # GLM fallback or primary
           if [[ -z "${RESP}" ]]; then
             REQ="$(jq -n --arg model "${ZAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
-            RESP="$(curl -fsS https://api.z.ai/api/coding/paas/v4/chat/completions \
+            raw="$(curl -sS -w "\n%{http_code}" https://api.z.ai/api/coding/paas/v4/chat/completions \
               -H "Authorization: Bearer ${ZAI_API_KEY}" \
               -H "Content-Type: application/json" \
-              -d "${REQ}")"
-            RESP_PROVIDER="glm"
+              -d "${REQ}" 2>/dev/null || true)"
+            HTTP_CODE="$(echo "${raw}" | tail -1)"
+            RESP_BODY="$(echo "${raw}" | sed '$d')"
+            if [[ "${HTTP_CODE}" == "200" ]]; then
+              RESP="${RESP_BODY}"
+              RESP_PROVIDER="glm"
+            else
+              echo "GLM failed (http=${HTTP_CODE})"
+            fi
           fi
 
-          if [[ "${RESP_PROVIDER}" == "gemini" ]]; then
+          if [[ -z "${RESP}" ]]; then
+            ANSWER="自動実行で外部LLM呼び出しに失敗しました。`needs-human` を付与したので、手動確認をお願いします。"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${ANSWER}"
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-review" || true
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
+            exit 0
+          elif [[ "${RESP_PROVIDER}" == "gemini" ]]; then
             ANSWER="$(echo "${RESP}" | jq -r '.candidates[0].content.parts[0].text // "No response body returned."' )"
           else
             ANSWER="$(echo "${RESP}" | jq -r '.choices[0].message.content // "No response body returned."' )"
@@ -633,7 +641,7 @@ jobs:
           fi
 
       - name: Tier 3 fallback
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.outputs.handoff != 'true' && steps.final.outputs.tier == '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.handoff.conclusion != 'success' && steps.final.outputs.tier == '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
