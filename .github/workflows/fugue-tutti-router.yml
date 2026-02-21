@@ -8,7 +8,17 @@ on:
         required: true
         type: string
       orchestrator_provider:
-        description: "Orchestrator profile to use (claude|codex)"
+        description: "Legacy main orchestrator profile input (claude|codex)"
+        required: false
+        type: string
+        default: ""
+      main_orchestrator_provider:
+        description: "Main orchestrator profile (codex|claude)"
+        required: false
+        type: string
+        default: ""
+      assist_orchestrator_provider:
+        description: "Assist orchestrator profile (claude|codex|none)"
         required: false
         type: string
         default: ""
@@ -44,6 +54,8 @@ on:
       GEMINI_API_KEY:
         required: false
       XAI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
         required: false
 
 permissions:
@@ -184,11 +196,13 @@ jobs:
         env:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
-          ORCHESTRATOR_PROVIDER: ${{ needs.resolve-orchestrator.outputs.provider }}
+          ORCHESTRATOR_PROVIDER: ${{ needs.resolve-orchestrator.outputs.main_provider }}
+          ASSIST_ORCHESTRATOR_PROVIDER: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
@@ -254,6 +268,31 @@ jobs:
             exit 0
           fi
 
+          if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+            result="$(jq -n \
+              --arg name "${AGENT_NAME}" \
+              --arg provider "${PROVIDER}" \
+              --arg api_url "${API_URL}" \
+              --arg model "${MODEL}" \
+              --arg agent_role "${AGENT_ROLE}" \
+              '{
+                name:$name,
+                provider:$provider,
+                api_url:$api_url,
+                model:$model,
+                agent_role:$agent_role,
+                http_code:"skipped",
+                skipped:true,
+                risk:"MEDIUM",
+                approve:false,
+                findings:["Skipped: missing ANTHROPIC_API_KEY"],
+                recommendation:"Add ANTHROPIC_API_KEY to enable Claude assist lane",
+                rationale:"Claude assist lane was skipped due to missing secret"
+              }')"
+            echo "${result}" > "agent-${AGENT_NAME}.json"
+            exit 0
+          fi
+
           req=""
           auth_header=""
           if [[ "${PROVIDER}" == "codex" || "${PROVIDER}" == "glm" || "${PROVIDER}" == "xai" ]]; then
@@ -269,6 +308,12 @@ jobs:
             else
               auth_header="Authorization: Bearer ${XAI_API_KEY}"
             fi
+          elif [[ "${PROVIDER}" == "claude" ]]; then
+            req="$(jq -n \
+              --arg model "${MODEL}" \
+              --arg s "${sys_prompt}" \
+              --arg u "${user_prompt}" \
+              '{model:$model,system:$s,messages:[{role:"user",content:$u}],max_tokens:1200,temperature:0.1}')"
           else
             # Gemini generateContent expects a single "user" content string. Keep it strict: JSON only.
             req="$(jq -n \
@@ -338,6 +383,26 @@ jobs:
                 break
               fi
             done
+          elif [[ "${PROVIDER}" == "claude" ]]; then
+            candidates=("${MODEL}" "claude-opus-4-1-20250805" "claude-opus-4-20250514" "claude-3-7-sonnet-latest" "claude-3-5-sonnet-latest")
+            for m in "${candidates[@]}"; do
+              chosen_model="${m}"
+              req="$(jq -n \
+                --arg model "${chosen_model}" \
+                --arg s "${sys_prompt}" \
+                --arg u "${user_prompt}" \
+                '{model:$model,system:$s,messages:[{role:"user",content:$u}],max_tokens:1200,temperature:0.1}')"
+
+              http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+                --connect-timeout 10 --max-time 60 --retry 2 \
+                -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+                -H "anthropic-version: 2023-06-01" \
+                -H "Content-Type: application/json" \
+                -d "${req}" || true)"
+              if [[ "${http_code}" == "200" ]]; then
+                break
+              fi
+            done
           else
             if [[ "${PROVIDER}" == "glm" ]]; then
               http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
@@ -357,13 +422,15 @@ jobs:
 
           if [[ "${PROVIDER}" == "gemini" ]]; then
             content="$(jq -r '.candidates[0].content.parts[0].text // ""' response.json 2>/dev/null || echo "")"
+          elif [[ "${PROVIDER}" == "claude" ]]; then
+            content="$(jq -r '[.content[]? | select(.type=="text") | .text] | join("\n") // ""' response.json 2>/dev/null || echo "")"
           else
             content="$(jq -r '.choices[0].message.content // ""' response.json 2>/dev/null || echo "")"
           fi
 
           skipped_flag="false"
           # Optional specialist lanes are excluded from consensus totals when they fail.
-          if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" ) && "${http_code}" != "200" ]]; then
+          if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" || "${PROVIDER}" == "claude" ) && "${http_code}" != "200" ]]; then
             skipped_flag="true"
           fi
 
@@ -382,6 +449,13 @@ jobs:
               optional_error_note="xAI API rate limited (HTTP 429)"
             else
               optional_error_note="xAI API error (HTTP ${http_code})"
+            fi
+          elif [[ "${PROVIDER}" == "claude" && "${http_code}" != "200" ]]; then
+            optional_provider_label="Claude Assist"
+            if [[ "${http_code}" == "429" ]]; then
+              optional_error_note="Claude Assist API rate limited (HTTP 429)"
+            else
+              optional_error_note="Claude Assist API error (HTTP ${http_code})"
             fi
           fi
 
@@ -553,17 +627,24 @@ jobs:
               "- \(.name) [\(.provider)] (http=\(.http_code)): \((.findings | join(" | ")))"
             ] | if length==0 then "- none" else join("\n") end
           ' all-results.json)"
-          fallback_section="- auto-fallback: none"
-          if [[ "${{ needs.resolve-orchestrator.outputs.claude_fallback_applied }}" == "true" ]]; then
-            fallback_section="- auto-fallback: claude -> codex (\`${{ needs.resolve-orchestrator.outputs.claude_fallback_reason }}\`)"
+          main_fallback_section="- main fallback: none"
+          if [[ "${{ needs.resolve-orchestrator.outputs.main_claude_fallback_applied }}" == "true" ]]; then
+            main_fallback_section="- main fallback: claude -> codex (\`${{ needs.resolve-orchestrator.outputs.main_claude_fallback_reason }}\`)"
+          fi
+          assist_fallback_section="- assist fallback: none"
+          if [[ "${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_applied }}" == "true" ]]; then
+            assist_fallback_section="- assist fallback: claude -> none (\`${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_reason }}\`)"
           fi
 
           cat > integrated-comment.md <<COMMENT_EOF
           ## Tutti Integrated Review
 
-          - orchestrator requested: ${{ needs.resolve-orchestrator.outputs.provider_requested }}
-          - orchestrator profile: ${{ needs.resolve-orchestrator.outputs.provider }}
-          ${fallback_section}
+          - main orchestrator requested: ${{ needs.resolve-orchestrator.outputs.main_provider_requested }}
+          - main orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.main_provider }}
+          - assist orchestrator requested: ${{ needs.resolve-orchestrator.outputs.assist_provider_requested }}
+          - assist orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
+          ${main_fallback_section}
+          ${assist_fallback_section}
           - lanes configured: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
 
           **Rule a: Security criticism (unconditionally adopted)**
@@ -645,33 +726,52 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      provider: ${{ steps.resolve.outputs.provider }}
-      provider_requested: ${{ steps.resolve.outputs.provider_requested }}
-      claude_fallback_applied: ${{ steps.resolve.outputs.claude_fallback_applied }}
-      claude_fallback_reason: ${{ steps.resolve.outputs.claude_fallback_reason }}
+      provider: ${{ steps.resolve.outputs.main_provider }}
+      provider_requested: ${{ steps.resolve.outputs.main_provider_requested }}
+      claude_fallback_applied: ${{ steps.resolve.outputs.main_claude_fallback_applied }}
+      claude_fallback_reason: ${{ steps.resolve.outputs.main_claude_fallback_reason }}
+      main_provider: ${{ steps.resolve.outputs.main_provider }}
+      main_provider_requested: ${{ steps.resolve.outputs.main_provider_requested }}
+      main_claude_fallback_applied: ${{ steps.resolve.outputs.main_claude_fallback_applied }}
+      main_claude_fallback_reason: ${{ steps.resolve.outputs.main_claude_fallback_reason }}
+      assist_provider: ${{ steps.resolve.outputs.assist_provider }}
+      assist_provider_requested: ${{ steps.resolve.outputs.assist_provider_requested }}
+      assist_claude_fallback_applied: ${{ steps.resolve.outputs.assist_claude_fallback_applied }}
+      assist_claude_fallback_reason: ${{ steps.resolve.outputs.assist_claude_fallback_reason }}
       expected_lanes: ${{ steps.resolve.outputs.expected_lanes }}
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
     steps:
       - name: Resolve orchestrator profile and lane matrix
         id: resolve
         env:
-          REQUESTED_PROVIDER: ${{ inputs.orchestrator_provider }}
+          REQUESTED_PROVIDER: ${{ inputs.main_orchestrator_provider || inputs.orchestrator_provider }}
+          REQUESTED_ASSIST_PROVIDER: ${{ inputs.assist_orchestrator_provider }}
           FORCE_CLAUDE: ${{ inputs.force_claude }}
-          DEFAULT_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
         run: |
           set -euo pipefail
 
-          provider="$(echo "${REQUESTED_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ -z "${provider}" ]]; then
-            provider="$(echo "${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          main_provider="$(echo "${REQUESTED_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${main_provider}" ]]; then
+            main_provider="$(echo "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           fi
-          if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
-            provider="codex"
+          if [[ "${main_provider}" != "claude" && "${main_provider}" != "codex" ]]; then
+            main_provider="codex"
           fi
-          provider_requested="${provider}"
+          main_provider_requested="${main_provider}"
+
+          assist_provider="$(echo "${REQUESTED_ASSIST_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${assist_provider}" ]]; then
+            assist_provider="$(echo "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          fi
+          if [[ "${assist_provider}" != "claude" && "${assist_provider}" != "codex" && "${assist_provider}" != "none" ]]; then
+            assist_provider="claude"
+          fi
+          assist_provider_requested="${assist_provider}"
 
           force_claude="$(echo "${FORCE_CLAUDE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${force_claude}" != "true" ]]; then
@@ -681,12 +781,20 @@ jobs:
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
           fi
-          claude_fallback_applied="false"
-          claude_fallback_reason=""
-          if [[ "${provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
-            provider="codex"
-            claude_fallback_applied="true"
-            claude_fallback_reason="claude-rate-limit-${claude_state}"
+          main_claude_fallback_applied="false"
+          main_claude_fallback_reason=""
+          if [[ "${main_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            main_provider="codex"
+            main_claude_fallback_applied="true"
+            main_claude_fallback_reason="claude-rate-limit-${claude_state}"
+          fi
+
+          assist_claude_fallback_applied="false"
+          assist_claude_fallback_reason=""
+          if [[ "${assist_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            assist_provider="none"
+            assist_claude_fallback_applied="true"
+            assist_claude_fallback_reason="claude-rate-limit-${claude_state}"
           fi
 
           text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
@@ -699,29 +807,40 @@ jobs:
             wants_xai="true"
           fi
 
-          if [[ "${provider}" == "codex" ]]; then
-            matrix="$(jq -cn '{
-              include: [
-                {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
-                {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
-                {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
-                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
-                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
-                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
-              ]
-            }')"
-          else
-            # Keep the same default quorum when switching to claude profile.
-            matrix="$(jq -cn '{
-              include: [
-                {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
-                {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
-                {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
-                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
-                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
-                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
-              ]
-            }')"
+          # Keep /vote quorum baseline as 6 lanes minimum (Codex3 + GLM3).
+          matrix="$(jq -cn '{
+            include: [
+              {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
+              {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
+              {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
+              {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
+              {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
+              {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
+            ]
+          }')"
+
+          if [[ "${assist_provider}" == "claude" ]]; then
+            matrix="$(echo "${matrix}" | jq -c '
+              if any(.include[]; .name == "claude-opus-assist") then .
+              else .include += [{
+                name:"claude-opus-assist",
+                provider:"claude",
+                api_url:"https://api.anthropic.com/v1/messages",
+                model:"claude-opus-4-1-20250805",
+                agent_role:"orchestration-assistant"
+              }] end
+            ')"
+          elif [[ "${assist_provider}" == "codex" ]]; then
+            matrix="$(echo "${matrix}" | jq -c '
+              if any(.include[]; .name == "codex-orchestration-assist") then .
+              else .include += [{
+                name:"codex-orchestration-assist",
+                provider:"codex",
+                api_url:"https://api.openai.com/v1/chat/completions",
+                model:"gpt-5.3-codex-spark",
+                agent_role:"orchestration-assistant"
+              }] end
+            ')"
           fi
 
           if [[ "${wants_gemini}" == "true" ]]; then
@@ -753,10 +872,18 @@ jobs:
           lanes="$(echo "${matrix}" | jq -r '.include | length')"
 
           {
-            echo "provider=${provider}"
-            echo "provider_requested=${provider_requested}"
-            echo "claude_fallback_applied=${claude_fallback_applied}"
-            echo "claude_fallback_reason=${claude_fallback_reason}"
+            echo "provider=${main_provider}"
+            echo "provider_requested=${main_provider_requested}"
+            echo "claude_fallback_applied=${main_claude_fallback_applied}"
+            echo "claude_fallback_reason=${main_claude_fallback_reason}"
+            echo "main_provider=${main_provider}"
+            echo "main_provider_requested=${main_provider_requested}"
+            echo "main_claude_fallback_applied=${main_claude_fallback_applied}"
+            echo "main_claude_fallback_reason=${main_claude_fallback_reason}"
+            echo "assist_provider=${assist_provider}"
+            echo "assist_provider_requested=${assist_provider_requested}"
+            echo "assist_claude_fallback_applied=${assist_claude_fallback_applied}"
+            echo "assist_claude_fallback_reason=${assist_claude_fallback_reason}"
             echo "expected_lanes=${lanes}"
             echo "agent_matrix=${matrix}"
           } >> "${GITHUB_OUTPUT}"

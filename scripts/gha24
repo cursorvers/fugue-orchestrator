@@ -2,14 +2,15 @@
 set -euo pipefail
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
-# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--force-claude]
+# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude]
 #
 # Options:
 #   --implement    Add implement intent labels to trigger post-vote implementation
 #   --review       Force review-only mode (ignore natural language hints)
 #   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
 #   --orchestrator Per-request orchestrator override (codex|claude)
-#   --force-claude Force claude provider for this issue even when repo fallback state is degraded/exhausted
+#   --assist-orchestrator Per-request assist orchestrator override (claude|codex|none)
+#   --force-claude Force claude provider(s) for this issue even when repo fallback state is degraded/exhausted
 #
 # Notes:
 #   The issue is always created in the orchestrator repo. The target repo is
@@ -26,9 +27,14 @@ IMPLEMENT=false
 MODE_EXPLICIT=false
 ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-}"
 ORCHESTRATOR_PROVIDER_EXPLICIT=false
+ASSIST_ORCHESTRATOR_PROVIDER="${GHA24_ASSIST_ORCHESTRATOR_PROVIDER:-}"
+ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=false
 FORCE_CLAUDE=false
 if [[ -n "${GHA24_ORCHESTRATOR_PROVIDER:-}" ]]; then
   ORCHESTRATOR_PROVIDER_EXPLICIT=true
+fi
+if [[ -n "${GHA24_ASSIST_ORCHESTRATOR_PROVIDER:-}" ]]; then
+  ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=true
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -52,23 +58,30 @@ while [[ $# -gt 0 ]]; do
       ORCHESTRATOR_PROVIDER_EXPLICIT=true
       shift 2
       ;;
+    --assist-orchestrator)
+      ASSIST_ORCHESTRATOR_PROVIDER="${2}"
+      ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=true
+      shift 2
+      ;;
     --force-claude)
       FORCE_CLAUDE=true
       shift
       ;;
     -h|--help)
-      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--force-claude]"
+      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude]"
       echo ""
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
       echo "  --review       Review only (no code generation)"
       echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
       echo "  --orchestrator Per-request orchestrator override (codex|claude)"
-      echo "  --force-claude Force claude provider for this issue"
+      echo "  --assist-orchestrator Per-request assist orchestrator override (claude|codex|none)"
+      echo "  --force-claude Force claude provider(s) for this issue"
       echo ""
       echo "Environment:"
       echo "  GHA24_ORCHESTRATOR_REPO  Orchestrator repo for issue creation (default: cursorvers/fugue-orchestrator)"
       echo "  GHA24_ORCHESTRATOR_PROVIDER  Per-request orchestrator override (codex|claude)"
+      echo "  GHA24_ASSIST_ORCHESTRATOR_PROVIDER  Per-request assist override (claude|codex|none)"
       echo ""
       echo "Examples:"
       echo "  gha24 \"認証フローのセキュリティレビュー\""
@@ -77,6 +90,7 @@ while [[ $# -gt 0 ]]; do
       echo "  gha24 \"Review auth flow\" --repo cursorvers/fugue-system-ui"
       echo "  gha24 \"Add tests for utils\" --implement --repo cursorvers/telop-pack-srt-02"
       echo "  gha24 \"完遂: API障害対応\" --orchestrator claude"
+      echo "  gha24 \"完遂: API障害対応\" --orchestrator codex --assist-orchestrator claude"
       echo "  gha24 \"完遂: API障害対応\" --orchestrator claude --force-claude"
       exit 0
       ;;
@@ -91,7 +105,7 @@ done
 
 if [[ -z "${TASK}" ]]; then
   echo "Error: task description required" >&2
-  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--force-claude]"
+  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude]"
   exit 1
 fi
 
@@ -100,9 +114,22 @@ if ! command -v gh &>/dev/null; then
   exit 1
 fi
 
-if [[ "${FORCE_CLAUDE}" == "true" && "${ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" ]]; then
-  echo "Error: --force-claude requires --orchestrator claude" >&2
+if [[ "${FORCE_CLAUDE}" == "true" && "${ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" && "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" ]]; then
+  echo "Error: --force-claude requires explicit claude on --orchestrator or --assist-orchestrator" >&2
   exit 1
+fi
+if [[ "${FORCE_CLAUDE}" == "true" ]]; then
+  wants_force=false
+  if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" && "$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')" == "claude" ]]; then
+    wants_force=true
+  fi
+  if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" && "$(echo "${ASSIST_ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')" == "claude" ]]; then
+    wants_force=true
+  fi
+  if [[ "${wants_force}" != "true" ]]; then
+    echo "Error: --force-claude requires explicit claude on --orchestrator or --assist-orchestrator" >&2
+    exit 1
+  fi
 fi
 
 # Natural language mode selection (only when no explicit mode flag was provided).
@@ -121,6 +148,11 @@ provider=""
 requested_provider=""
 fallback_applied=false
 fallback_reason=""
+assist_provider=""
+requested_assist_provider=""
+assist_fallback_applied=false
+assist_fallback_reason=""
+claude_state=""
 if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
   requested_provider="${provider}"
@@ -129,19 +161,36 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     exit 1
   fi
 
-  if [[ "${FORCE_CLAUDE}" == "true" && "${provider}" != "claude" ]]; then
-    echo "Error: --force-claude requires --orchestrator claude" >&2
-    exit 1
-  fi
-
   if [[ "${provider}" == "claude" && "${FORCE_CLAUDE}" != "true" ]]; then
     claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
     claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
     if [[ "${claude_state}" == "degraded" || "${claude_state}" == "exhausted" ]]; then
-      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to codex applied for this request."
+      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to codex applied for main orchestrator."
       provider="codex"
       fallback_applied=true
       fallback_reason="claude-rate-limit-${claude_state}"
+    fi
+  fi
+fi
+
+if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  assist_provider="$(echo "${ASSIST_ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  requested_assist_provider="${assist_provider}"
+  if [[ "${assist_provider}" != "claude" && "${assist_provider}" != "codex" && "${assist_provider}" != "none" ]]; then
+    echo "Error: --assist-orchestrator must be claude, codex, or none" >&2
+    exit 1
+  fi
+
+  if [[ "${assist_provider}" == "claude" && "${FORCE_CLAUDE}" != "true" ]]; then
+    if [[ -z "${claude_state}" ]]; then
+      claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
+    fi
+    claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    if [[ "${claude_state}" == "degraded" || "${claude_state}" == "exhausted" ]]; then
+      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to none applied for assist orchestrator."
+      assist_provider="none"
+      assist_fallback_applied=true
+      assist_fallback_reason="claude-rate-limit-${claude_state}"
     fi
   fi
 fi
@@ -197,6 +246,13 @@ ${provider}
 PROVIDER
 fi )
 
+$( if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then cat <<ASSIST_PROVIDER
+## Assist orchestrator provider
+${assist_provider}
+
+ASSIST_PROVIDER
+fi )
+
 ## Mode
 $( [[ "${IMPLEMENT}" == "true" ]] && echo "implement" || echo "review" )
 EOF
@@ -224,9 +280,21 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "orchestrator-force:claude" >/dev/null
   fi
 fi
+if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  assist_label="orchestrator-assist:${assist_provider}"
+  gh label create "${assist_label}" \
+    --repo "${ORCHESTRATOR_REPO}" \
+    --description "Requested assist orchestrator profile for Tutti routing" \
+    --color "0052CC" >/dev/null 2>&1 || true
+  gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
+  gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "${assist_label}" >/dev/null
+fi
 gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "tutti" >/dev/null
 if [[ "${fallback_applied}" == "true" ]]; then
   gh issue comment "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --body "CLI pre-fallback applied: requested \`${requested_provider}\` but submitted \`${provider}\` due to \`${fallback_reason}\`. Use \`--force-claude\` to bypass this guard for this issue."
+fi
+if [[ "${assist_fallback_applied}" == "true" ]]; then
+  gh issue comment "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --body "CLI pre-fallback applied for assist orchestrator: requested \`${requested_assist_provider}\` but submitted \`${assist_provider}\` due to \`${assist_fallback_reason}\`. Use \`--force-claude\` to bypass this guard for this issue."
 fi
 
 echo "Created: ${URL}"
@@ -241,7 +309,15 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     echo "Override guard: orchestrator-force:claude enabled"
   fi
 else
-  echo "Orchestrator profile: repository default (FUGUE_ORCHESTRATOR_PROVIDER)"
+  echo "Orchestrator profile: repository default (FUGUE_MAIN_ORCHESTRATOR_PROVIDER/FUGUE_ORCHESTRATOR_PROVIDER)"
+fi
+if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  echo "Assist orchestrator profile override: ${assist_provider}"
+  if [[ "${assist_fallback_applied}" == "true" ]]; then
+    echo "Assist orchestrator pre-fallback: ${requested_assist_provider} -> ${assist_provider} (${assist_fallback_reason})"
+  fi
+else
+  echo "Assist orchestrator profile: repository default (FUGUE_ASSIST_ORCHESTRATOR_PROVIDER)"
 fi
 
 if [[ "${IMPLEMENT}" == "true" ]]; then

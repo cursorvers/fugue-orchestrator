@@ -99,19 +99,22 @@ export GLM_API_KEY="your-glm-key"
 export GLM_MODEL="glm-5.0" # optional (default in Tutti lanes is glm-5.0)
 export GEMINI_API_KEY="your-gemini-key"
 export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
+export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.5 GitHub Actions 用オーケストレータ切替（repo variable 優先）
-# gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex  -R <owner/repo>
-# gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body claude -R <owner/repo>
+# gh variable set FUGUE_MAIN_ORCHESTRATOR_PROVIDER   --body codex   -R <owner/repo>
+# gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body claude  -R <owner/repo>
+# (legacy) gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body ok        -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
-# NOTE: state が degraded/exhausted のとき、claude 指定は自動で codex にフォールバックします。
+# NOTE: state が degraded/exhausted のとき、mainのclaude指定は codex、assistのclaude指定は none に自動フォールバックします。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）
 # gha24 "完遂: API障害対応" --implement --orchestrator claude
+# gha24 "完遂: API障害対応" --implement --orchestrator codex --assist-orchestrator claude
 # gha24 "完遂: API障害対応" --implement --orchestrator claude --force-claude
 # あるいは:
 # GHA24_ORCHESTRATOR_PROVIDER=claude gha24 "完遂: API障害対応" --implement

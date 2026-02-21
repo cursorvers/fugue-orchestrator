@@ -33,16 +33,23 @@ jobs:
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
-      orchestrator_provider: ${{ steps.ctx.outputs.orchestrator_provider }}
-      claude_fallback_applied: ${{ steps.ctx.outputs.claude_fallback_applied }}
-      claude_fallback_reason: ${{ steps.ctx.outputs.claude_fallback_reason }}
+      orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
+      main_orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
+      assist_orchestrator_provider: ${{ steps.ctx.outputs.assist_orchestrator_provider }}
+      claude_fallback_applied: ${{ steps.ctx.outputs.main_claude_fallback_applied }}
+      claude_fallback_reason: ${{ steps.ctx.outputs.main_claude_fallback_reason }}
+      main_claude_fallback_applied: ${{ steps.ctx.outputs.main_claude_fallback_applied }}
+      main_claude_fallback_reason: ${{ steps.ctx.outputs.main_claude_fallback_reason }}
+      assist_claude_fallback_applied: ${{ steps.ctx.outputs.assist_claude_fallback_applied }}
+      assist_claude_fallback_reason: ${{ steps.ctx.outputs.assist_claude_fallback_reason }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
       - name: Resolve issue context
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
-          DEFAULT_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
         run: |
           set -euo pipefail
@@ -82,17 +89,25 @@ jobs:
           if [[ "${body_mode}" == "review" ]]; then
             has_implement="false"
           fi
-          label_provider="$(echo "${issue_json}" | jq -r '
+          label_main_provider="$(echo "${issue_json}" | jq -r '
             [ .labels[]? | .name ] as $labels
             | if ((($labels | index("orchestrator:claude")) != null) and (($labels | index("orchestrator:codex")) != null)) then ""
               elif (($labels | index("orchestrator:claude")) != null) then "claude"
               elif (($labels | index("orchestrator:codex")) != null) then "codex"
               else "" end
           ')"
+          label_assist_provider="$(echo "${issue_json}" | jq -r '
+            [ .labels[]? | .name ] as $labels
+            | if (($labels | index("orchestrator-assist:none")) != null) then "none"
+              elif ((($labels | index("orchestrator-assist:claude")) != null) and (($labels | index("orchestrator-assist:codex")) != null)) then ""
+              elif (($labels | index("orchestrator-assist:claude")) != null) then "claude"
+              elif (($labels | index("orchestrator-assist:codex")) != null) then "codex"
+              else "" end
+          ')"
           force_claude="$(echo "${issue_json}" | jq -r '
             [ .labels[]? | .name ] | index("orchestrator-force:claude") != null
           ')"
-          body_provider="$(printf '%s\n' "${body}" | awk '
+          body_main_provider="$(printf '%s\n' "${body}" | awk '
             BEGIN { in_sec=0 }
             tolower($0) ~ /^##[[:space:]]*orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
             in_sec && $0 ~ /^##[[:space:]]/ { exit }
@@ -106,22 +121,56 @@ jobs:
               }
             }
           ')"
-          if [[ "${body_provider}" != "claude" && "${body_provider}" != "codex" ]]; then
-            body_provider=""
+          if [[ "${body_main_provider}" != "claude" && "${body_main_provider}" != "codex" ]]; then
+            body_main_provider=""
           fi
-          if [[ -z "${body_provider}" ]]; then
-            body_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "${body_main_provider}" ]]; then
+            body_main_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
-          requested_provider="${label_provider}"
-          if [[ -z "${requested_provider}" && -n "${body_provider}" ]]; then
-            requested_provider="${body_provider}"
+
+          body_assist_provider="$(printf '%s\n' "${body}" | awk '
+            BEGIN { in_sec=0 }
+            tolower($0) ~ /^##[[:space:]]*assist[[:space:]]+orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
+            in_sec && $0 ~ /^##[[:space:]]/ { exit }
+            in_sec {
+              line=$0
+              gsub(/`/, "", line)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+              if (line != "") {
+                print tolower(line)
+                exit
+              }
+            }
+          ')"
+          if [[ "${body_assist_provider}" != "claude" && "${body_assist_provider}" != "codex" && "${body_assist_provider}" != "none" ]]; then
+            body_assist_provider=""
           fi
-          if [[ -z "${requested_provider}" ]]; then
-            requested_provider="${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}"
+          if [[ -z "${body_assist_provider}" ]]; then
+            body_assist_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*assist[[:space:]]+orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex|none)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
-          requested_provider="$(echo "${requested_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${requested_provider}" != "claude" && "${requested_provider}" != "codex" ]]; then
-            requested_provider="codex"
+
+          requested_main_provider="${label_main_provider}"
+          if [[ -z "${requested_main_provider}" && -n "${body_main_provider}" ]]; then
+            requested_main_provider="${body_main_provider}"
+          fi
+          if [[ -z "${requested_main_provider}" ]]; then
+            requested_main_provider="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
+          fi
+          requested_main_provider="$(echo "${requested_main_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${requested_main_provider}" != "claude" && "${requested_main_provider}" != "codex" ]]; then
+            requested_main_provider="codex"
+          fi
+
+          requested_assist_provider="${label_assist_provider}"
+          if [[ -z "${requested_assist_provider}" && -n "${body_assist_provider}" ]]; then
+            requested_assist_provider="${body_assist_provider}"
+          fi
+          if [[ -z "${requested_assist_provider}" ]]; then
+            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+          fi
+          requested_assist_provider="$(echo "${requested_assist_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${requested_assist_provider}" != "claude" && "${requested_assist_provider}" != "codex" && "${requested_assist_provider}" != "none" ]]; then
+            requested_assist_provider="claude"
           fi
 
           claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -129,12 +178,20 @@ jobs:
             claude_state="ok"
           fi
 
-          claude_fallback_applied="false"
-          claude_fallback_reason=""
-          if [[ "${requested_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
-            requested_provider="codex"
-            claude_fallback_applied="true"
-            claude_fallback_reason="claude-rate-limit-${claude_state}"
+          main_claude_fallback_applied="false"
+          main_claude_fallback_reason=""
+          if [[ "${requested_main_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            requested_main_provider="codex"
+            main_claude_fallback_applied="true"
+            main_claude_fallback_reason="claude-rate-limit-${claude_state}"
+          fi
+
+          assist_claude_fallback_applied="false"
+          assist_claude_fallback_reason=""
+          if [[ "${requested_assist_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            requested_assist_provider="none"
+            assist_claude_fallback_applied="true"
+            assist_claude_fallback_reason="claude-rate-limit-${claude_state}"
           fi
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
@@ -174,28 +231,42 @@ jobs:
             echo "issue_number=${ISSUE_NUMBER}"
             echo "has_implement_request=${has_implement}"
             echo "target_repo=${target_repo}"
-            echo "orchestrator_provider=${requested_provider}"
-            echo "claude_fallback_applied=${claude_fallback_applied}"
-            echo "claude_fallback_reason=${claude_fallback_reason}"
+            echo "orchestrator_provider=${requested_main_provider}"
+            echo "main_orchestrator_provider=${requested_main_provider}"
+            echo "assist_orchestrator_provider=${requested_assist_provider}"
+            echo "claude_fallback_applied=${main_claude_fallback_applied}"
+            echo "claude_fallback_reason=${main_claude_fallback_reason}"
+            echo "main_claude_fallback_applied=${main_claude_fallback_applied}"
+            echo "main_claude_fallback_reason=${main_claude_fallback_reason}"
+            echo "assist_claude_fallback_applied=${assist_claude_fallback_applied}"
+            echo "assist_claude_fallback_reason=${assist_claude_fallback_reason}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Comment fallback decision
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.claude_fallback_applied == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --remove-label "orchestrator:claude" \
-            --add-label "orchestrator:codex" >/dev/null 2>&1 || true
+          if [[ "${{ steps.ctx.outputs.main_claude_fallback_applied }}" == "true" ]]; then
+            gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "orchestrator:claude" \
+              --add-label "orchestrator:codex" >/dev/null 2>&1 || true
+          fi
+          if [[ "${{ steps.ctx.outputs.assist_claude_fallback_applied }}" == "true" ]]; then
+            gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "orchestrator-assist:claude" \
+              --add-label "orchestrator-assist:none" >/dev/null 2>&1 || true
+          fi
           gh issue comment "${{ steps.ctx.outputs.issue_number }}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --body "Orchestrator auto-fallback applied: requested \`claude\` but switched to \`codex\` due to \`${{ steps.ctx.outputs.claude_fallback_reason }}\`. To force Claude for this issue, add label \`orchestrator-force:claude\`."
+            --body "Orchestrator auto-fallback applied. Main fallback: \`${{ steps.ctx.outputs.main_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.main_claude_fallback_reason }}\`). Assist fallback: \`${{ steps.ctx.outputs.assist_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.assist_claude_fallback_reason }}\`). To force Claude for this issue, add label \`orchestrator-force:claude\`."
 
-  # Review mode: Tutti consensus (currently 3 parallel agents)
+  # Review mode: Tutti consensus (6+ parallel lanes baseline)
   tutti:
     if: >-
       needs.ctx.outputs.should_run == 'true'
@@ -204,12 +275,15 @@ jobs:
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
       orchestrator_provider: "${{ needs.ctx.outputs.orchestrator_provider }}"
+      main_orchestrator_provider: "${{ needs.ctx.outputs.main_orchestrator_provider }}"
+      assist_orchestrator_provider: "${{ needs.ctx.outputs.assist_orchestrator_provider }}"
       force_claude: "${{ needs.ctx.outputs.force_claude }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
   # Implement mode: if Tutti says it's safe AND issue requests implementation, run Codex implement immediately.
   codex-implement:
