@@ -76,6 +76,7 @@ NFR-3 Context efficiency:
 Required/optional repo variables:
 - `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (optional, default resolved to codex)
 - `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, default `claude`)
+- `FUGUE_CI_EXECUTION_ENGINE` (`harness|api`, default `harness`; controls run-agents engine)
 - `FUGUE_CLAUDE_RATE_LIMIT_STATE` (`ok|degraded|exhausted`)
 - `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, default `true`; allows Claude assist lanes without direct Anthropic key by proxying through Codex)
 - `FUGUE_CLAUDE_SONNET4_MODEL` (optional, default `claude-3-7-sonnet-latest`)

@@ -141,10 +141,12 @@ jobs:
             main_default="codex"
           fi
           assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
+          ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "harness")"
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
           claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "ok")"
           main_default="$(echo "${main_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           assist_default="$(echo "${assist_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          ci_execution_engine="$(echo "${ci_execution_engine}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${main_default}" != "codex" && "${main_default}" != "claude" ]]; then
@@ -152,6 +154,9 @@ jobs:
           fi
           if [[ "${assist_default}" != "codex" && "${assist_default}" != "claude" && "${assist_default}" != "none" ]]; then
             assist_default="claude"
+          fi
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
+            ci_execution_engine="harness"
           fi
           if [[ "${claude_max_plan}" != "true" ]]; then
             claude_max_plan="false"
@@ -197,6 +202,7 @@ jobs:
           - needs-review: ${needs_review}
           - main_orchestrator_default: ${main_default}
           - assist_orchestrator_default: ${assist_default}
+          - ci_execution_engine: ${ci_execution_engine}
           - claude_max_plan_mode: ${claude_max_plan}
           - claude_rate_limit_state: ${claude_state}
 

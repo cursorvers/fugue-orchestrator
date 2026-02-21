@@ -191,7 +191,10 @@ jobs:
       matrix: ${{ fromJson(needs.resolve-orchestrator.outputs.agent_matrix) }}
 
     steps:
-      - name: Call agent API
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Call agent engine
         id: call
         env:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
@@ -204,6 +207,7 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+          CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'harness' }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
@@ -211,6 +215,19 @@ jobs:
           AGENT_NAME: ${{ matrix.name }}
         run: |
           set -euo pipefail
+
+          ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-harness}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
+            ci_execution_engine="harness"
+          fi
+          if [[ "${ci_execution_engine}" == "harness" ]]; then
+            if [[ ! -x "scripts/harness/ci-agent-runner.sh" ]]; then
+              echo "harness execution engine is enabled, but scripts/harness/ci-agent-runner.sh is missing or not executable." >&2
+              exit 1
+            fi
+            bash scripts/harness/ci-agent-runner.sh
+            exit 0
+          fi
 
           sys_prompt="You are ${AGENT_ROLE}. Analyze the GitHub issue and return ONLY valid JSON with keys: risk (LOW|MEDIUM|HIGH), approve (boolean), findings (array of strings), recommendation (string), rationale (string)."
           user_prompt="Issue Title: ${ISSUE_TITLE}
@@ -582,7 +599,8 @@ jobs:
               approve:($payload.approve // false),
               findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),
               recommendation:($payload.recommendation // "No recommendation"),
-              rationale:($payload.rationale // "No rationale")
+              rationale:($payload.rationale // "No rationale"),
+              execution_engine:"api"
             }')"
 
           echo "${result}" > "agent-${AGENT_NAME}.json"
@@ -662,7 +680,7 @@ jobs:
                 ([.[] | select(.skipped != true and .approve == true)] | length) > 0 and
                 ([.[] | select(.skipped != true and .approve != true)] | length) > 0
               ),
-              by_agent: [ .[] | select(.skipped != true) | {name, provider, agent_role, risk, approve, findings, recommendation, rationale} ]
+              by_agent: [ .[] | select(.skipped != true) | {name, provider, execution_engine, agent_role, risk, approve, findings, recommendation, rationale} ]
             }
           ' all-results.json > integrated.json
 
@@ -693,7 +711,7 @@ jobs:
           fi
           skipped_agents="$(jq -r '
             [ .[] | select(.skipped == true) |
-              "- \(.name) [\(.provider)] (http=\(.http_code)): \((.findings | join(" | ")))"
+              "- \(.name) [\(.provider)/\(.execution_engine // "api")] (http=\(.http_code)): \((.findings | join(" | ")))"
             ] | if length==0 then "- none" else join("\n") end
           ' all-results.json)"
           main_fallback_section="- main fallback: none"
