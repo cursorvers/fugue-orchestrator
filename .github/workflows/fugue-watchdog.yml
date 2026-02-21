@@ -170,6 +170,8 @@ jobs:
 
       - name: Decide whether to alert (throttle + relevance)
         id: decide
+        env:
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
         run: |
           set -euo pipefail
 
@@ -177,6 +179,10 @@ jobs:
           zai_ok="${{ steps.connectivity.outputs.zai_ok }}"
           gemini_ok="${{ steps.connectivity.outputs.gemini_ok }}"
           xai_ok="${{ steps.connectivity.outputs.xai_ok }}"
+          claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
           router_stale="${{ steps.last_success.outputs.stale }}"
           mainframe_stale="${{ steps.mainframe_success.outputs.stale }}"
 
@@ -207,6 +213,14 @@ jobs:
             fi
           fi
 
+          # Claude orchestrator throttle visibility: when not ok and work is pending, page at most every 3h.
+          if [[ "${claude_state}" != "ok" && ( "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ) ]]; then
+            if (( 10#${hour_utc} % 3 == 0 )); then
+              should_alert="true"
+              reasons+=("claude-rate-limit-${claude_state}")
+            fi
+          fi
+
           # Staleness alerts: page at 3h, then every 6h (3,6,12,18,24,...).
           if [[ "${router_stale}" == "true" ]]; then
             if [[ "${router_hours}" == "9999" || "${router_hours}" == "3" || $((router_hours % 6)) -eq 0 ]]; then
@@ -224,6 +238,7 @@ jobs:
           msg="fugue-watchdog alert
           repo: ${GITHUB_REPOSITORY}
           reasons: ${reasons[*]:-none}
+          claude_rate_limit_state: ${claude_state}
           openai_ok: ${openai_ok}
           zai_ok: ${zai_ok}
           gemini_ok: ${gemini_ok}

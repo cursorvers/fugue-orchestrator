@@ -2,13 +2,14 @@
 set -euo pipefail
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
-# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude]
+# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--force-claude]
 #
 # Options:
 #   --implement    Add implement intent labels to trigger post-vote implementation
 #   --review       Force review-only mode (ignore natural language hints)
 #   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
 #   --orchestrator Per-request orchestrator override (codex|claude)
+#   --force-claude Force claude provider for this issue even when repo fallback state is degraded/exhausted
 #
 # Notes:
 #   The issue is always created in the orchestrator repo. The target repo is
@@ -25,6 +26,7 @@ IMPLEMENT=false
 MODE_EXPLICIT=false
 ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-}"
 ORCHESTRATOR_PROVIDER_EXPLICIT=false
+FORCE_CLAUDE=false
 if [[ -n "${GHA24_ORCHESTRATOR_PROVIDER:-}" ]]; then
   ORCHESTRATOR_PROVIDER_EXPLICIT=true
 fi
@@ -50,14 +52,19 @@ while [[ $# -gt 0 ]]; do
       ORCHESTRATOR_PROVIDER_EXPLICIT=true
       shift 2
       ;;
+    --force-claude)
+      FORCE_CLAUDE=true
+      shift
+      ;;
     -h|--help)
-      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude]"
+      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--force-claude]"
       echo ""
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
       echo "  --review       Review only (no code generation)"
       echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
       echo "  --orchestrator Per-request orchestrator override (codex|claude)"
+      echo "  --force-claude Force claude provider for this issue"
       echo ""
       echo "Environment:"
       echo "  GHA24_ORCHESTRATOR_REPO  Orchestrator repo for issue creation (default: cursorvers/fugue-orchestrator)"
@@ -70,6 +77,7 @@ while [[ $# -gt 0 ]]; do
       echo "  gha24 \"Review auth flow\" --repo cursorvers/fugue-system-ui"
       echo "  gha24 \"Add tests for utils\" --implement --repo cursorvers/telop-pack-srt-02"
       echo "  gha24 \"完遂: API障害対応\" --orchestrator claude"
+      echo "  gha24 \"完遂: API障害対応\" --orchestrator claude --force-claude"
       exit 0
       ;;
     *)
@@ -83,12 +91,17 @@ done
 
 if [[ -z "${TASK}" ]]; then
   echo "Error: task description required" >&2
-  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude]"
+  echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--force-claude]"
   exit 1
 fi
 
 if ! command -v gh &>/dev/null; then
   echo "Error: gh CLI not found" >&2
+  exit 1
+fi
+
+if [[ "${FORCE_CLAUDE}" == "true" && "${ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" ]]; then
+  echo "Error: --force-claude requires --orchestrator claude" >&2
   exit 1
 fi
 
@@ -106,10 +119,24 @@ fi
 # This avoids multiple `issues:labeled` triggers firing at creation time.
 provider=""
 if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
-  provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]')"
+  provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
   if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
     echo "Error: --orchestrator must be codex or claude" >&2
     exit 1
+  fi
+
+  if [[ "${FORCE_CLAUDE}" == "true" && "${provider}" != "claude" ]]; then
+    echo "Error: --force-claude requires --orchestrator claude" >&2
+    exit 1
+  fi
+
+  if [[ "${provider}" == "claude" && "${FORCE_CLAUDE}" != "true" ]]; then
+    claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
+    claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    if [[ "${claude_state}" == "degraded" || "${claude_state}" == "exhausted" ]]; then
+      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to codex applied for this request."
+      provider="codex"
+    fi
   fi
 fi
 
@@ -183,6 +210,13 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     --color "5319E7" >/dev/null 2>&1 || true
   gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
   gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "${orchestrator_label}" >/dev/null
+  if [[ "${FORCE_CLAUDE}" == "true" ]]; then
+    gh label create "orchestrator-force:claude" \
+      --repo "${ORCHESTRATOR_REPO}" \
+      --description "Force claude orchestrator for this issue (override rate-limit fallback)" \
+      --color "B60205" >/dev/null 2>&1 || true
+    gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "orchestrator-force:claude" >/dev/null
+  fi
 fi
 gh issue edit "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --add-label "tutti" >/dev/null
 
@@ -191,12 +225,15 @@ echo "Orchestrator repo: ${ORCHESTRATOR_REPO}"
 echo "Target repo: ${TARGET_REPO}"
 if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   echo "Orchestrator profile override: ${provider}"
+  if [[ "${FORCE_CLAUDE}" == "true" ]]; then
+    echo "Override guard: orchestrator-force:claude enabled"
+  fi
 else
   echo "Orchestrator profile: repository default (FUGUE_ORCHESTRATOR_PROVIDER)"
 fi
 
 if [[ "${IMPLEMENT}" == "true" ]]; then
-  echo "Mode: Codex CLI implementation intent (code generation + PR after vote)"
+  echo "Mode: Implementation intent (executed by Codex CLI after Tutti approval)"
   echo "Tutti vote will run first. If approved, Codex implement will run automatically."
 else
   echo "Mode: Review only (6-parallel agent consensus)"

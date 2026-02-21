@@ -132,6 +132,11 @@ jobs:
           processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "processing")] | length')"
           needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-human")] | length')"
           needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-review")] | length')"
+          claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "ok")"
+          claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
 
           top="$(echo "${issues_json}" | jq -r '.items[:5] | map("- #\(.number) \(.title) (\(.html_url))") | join("\n")')"
           if [[ -z "${top}" ]]; then
@@ -168,6 +173,7 @@ jobs:
           - processing: ${processing}
           - needs-human: ${needs_human}
           - needs-review: ${needs_review}
+          - claude_rate_limit_state: ${claude_state}
 
           **Latest runs**
           $(wf_line "fugue-tutti-caller.yml" "mainframe")

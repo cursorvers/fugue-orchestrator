@@ -11,7 +11,12 @@ on:
         description: "Orchestrator profile to use (claude|codex)"
         required: false
         type: string
-        default: "codex"
+        default: ""
+      force_claude:
+        description: "Force claude profile even when claude rate-limit state is degraded/exhausted"
+        required: false
+        type: string
+        default: "false"
     outputs:
       ok_to_execute:
         description: "true when approvals >= 2/3 and no HIGH risk was detected"
@@ -272,6 +277,8 @@ jobs:
           fi
 
           chosen_model="${MODEL}"
+          effective_provider="${PROVIDER}"
+          effective_api_url="${API_URL}"
           http_code=""
           content=""
 
@@ -295,6 +302,23 @@ jobs:
                 break
               fi
             done
+
+            # If Codex lane is unavailable, fail over to GLM-5.0 so consensus can continue.
+            if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
+              effective_provider="glm"
+              effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
+              chosen_model="glm-5.0"
+              fallback_req="$(jq -n \
+                --arg model "${chosen_model}" \
+                --arg s "${sys_prompt}" \
+                --arg u "${user_prompt}" \
+                '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+              http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
+                --connect-timeout 10 --max-time 60 --retry 2 \
+                -H "Authorization: Bearer ${ZAI_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${fallback_req}" || true)"
+            fi
           elif [[ "${PROVIDER}" == "xai" ]]; then
             candidates=("${MODEL}" "grok-3-mini" "grok-2-latest")
             for m in "${candidates[@]}"; do
@@ -396,8 +420,8 @@ jobs:
 
           result="$(jq -n \
             --arg name "${AGENT_NAME}" \
-            --arg provider "${PROVIDER}" \
-            --arg api_url "${API_URL}" \
+            --arg provider "${effective_provider}" \
+            --arg api_url "${effective_api_url}" \
             --arg model "${chosen_model}" \
             --arg agent_role "${AGENT_ROLE}" \
             --argjson payload "${parsed}" \
@@ -529,11 +553,17 @@ jobs:
               "- \(.name) [\(.provider)] (http=\(.http_code)): \((.findings | join(" | ")))"
             ] | if length==0 then "- none" else join("\n") end
           ' all-results.json)"
+          fallback_section="- auto-fallback: none"
+          if [[ "${{ needs.resolve-orchestrator.outputs.claude_fallback_applied }}" == "true" ]]; then
+            fallback_section="- auto-fallback: claude -> codex (\`${{ needs.resolve-orchestrator.outputs.claude_fallback_reason }}\`)"
+          fi
 
           cat > integrated-comment.md <<COMMENT_EOF
           ## Tutti Integrated Review
 
+          - orchestrator requested: ${{ needs.resolve-orchestrator.outputs.provider_requested }}
           - orchestrator profile: ${{ needs.resolve-orchestrator.outputs.provider }}
+          ${fallback_section}
           - lanes configured: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
 
           **Rule a: Security criticism (unconditionally adopted)**
@@ -616,6 +646,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       provider: ${{ steps.resolve.outputs.provider }}
+      provider_requested: ${{ steps.resolve.outputs.provider_requested }}
+      claude_fallback_applied: ${{ steps.resolve.outputs.claude_fallback_applied }}
+      claude_fallback_reason: ${{ steps.resolve.outputs.claude_fallback_reason }}
       expected_lanes: ${{ steps.resolve.outputs.expected_lanes }}
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
     steps:
@@ -623,14 +656,37 @@ jobs:
         id: resolve
         env:
           REQUESTED_PROVIDER: ${{ inputs.orchestrator_provider }}
+          FORCE_CLAUDE: ${{ inputs.force_claude }}
+          DEFAULT_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
         run: |
           set -euo pipefail
 
-          provider="$(echo "${REQUESTED_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]')"
+          provider="$(echo "${REQUESTED_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${provider}" ]]; then
+            provider="$(echo "${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          fi
           if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
             provider="codex"
+          fi
+          provider_requested="${provider}"
+
+          force_claude="$(echo "${FORCE_CLAUDE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${force_claude}" != "true" ]]; then
+            force_claude="false"
+          fi
+          claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
+          claude_fallback_applied="false"
+          claude_fallback_reason=""
+          if [[ "${provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            provider="codex"
+            claude_fallback_applied="true"
+            claude_fallback_reason="claude-rate-limit-${claude_state}"
           fi
 
           text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
@@ -649,9 +705,9 @@ jobs:
                 {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
                 {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
                 {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
-                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"code-reviewer"},
-                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"general-reviewer"},
-                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"math-reasoning"}
+                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
+                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
+                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
               ]
             }')"
           else
@@ -661,9 +717,9 @@ jobs:
                 {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
                 {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
                 {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
-                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"code-reviewer"},
-                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"general-reviewer"},
-                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5",agent_role:"math-reasoning"}
+                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
+                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
+                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
               ]
             }')"
           fi
@@ -698,6 +754,9 @@ jobs:
 
           {
             echo "provider=${provider}"
+            echo "provider_requested=${provider_requested}"
+            echo "claude_fallback_applied=${claude_fallback_applied}"
+            echo "claude_fallback_reason=${claude_fallback_reason}"
             echo "expected_lanes=${lanes}"
             echo "agent_matrix=${matrix}"
           } >> "${GITHUB_OUTPUT}"

@@ -210,6 +210,7 @@ jobs:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
           DEFAULT_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
         run: |
           set -euo pipefail
 
@@ -224,6 +225,9 @@ jobs:
               elif (($labels | index("orchestrator:claude")) != null) then "claude"
               elif (($labels | index("orchestrator:codex")) != null) then "codex"
               else "" end
+          ')"
+          force_claude="$(echo "${issue_json}" | jq -r '
+            [ .labels[]? | .name ] | index("orchestrator-force:claude") != null
           ')"
           body_provider="$(printf '%s\n' "${body}" | awk '
             BEGIN { in_sec=0 }
@@ -250,10 +254,20 @@ jobs:
             provider="${body_provider}"
           fi
           if [[ -z "${provider}" ]]; then
-            provider="$(echo "${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]')"
+            provider="$(echo "${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           fi
           if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
             provider="codex"
+          fi
+          requested_provider="${provider}"
+          claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
+          fallback_note=""
+          if [[ "${provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            provider="codex"
+            fallback_note="Orchestrator auto-fallback: requested \`claude\` but switched to \`codex\` due to \`claude-rate-limit-${claude_state}\`."
           fi
 
           compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
@@ -295,6 +309,11 @@ jobs:
           # Prefer provider-agnostic implement intent label while also adding
           # a provider-specific compatibility label for existing tooling.
           if [[ "${wants_implement}" == "true" ]]; then
+            # Keep only one compatibility label in sync with the resolved
+            # orchestrator provider to avoid stale dual-label drift.
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "codex-implement" \
+              --remove-label "claude-implement" >/dev/null 2>&1 || true
             gh label create "implement" \
               --repo "${GITHUB_REPOSITORY}" \
               --description "Implementation intent (provider-agnostic)" \
@@ -321,7 +340,25 @@ jobs:
           if [[ "${wants_implement}" == "true" ]]; then
             extra=" + implement (+ ${compat_label} compatibility)"
           fi
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "GHA24 mainframe handoff (natural language)\n\n- Mode: ${mode}\n- Orchestrator: ${provider}\n- Action: added label \`tutti\`${extra}\n\nNext: Tutti runs and posts the vote/audit comment. If approved and an implementation label is present, Codex will create a PR."
+          provider_line="- Orchestrator: ${provider}"
+          if [[ -n "${fallback_note}" ]]; then
+            provider_line="- Orchestrator: ${provider} (requested: ${requested_provider})"
+          fi
+          fallback_block=""
+          if [[ -n "${fallback_note}" ]]; then
+            fallback_block="${fallback_note}"
+          fi
+          cat > handoff-comment.md <<EOF
+          GHA24 mainframe handoff (natural language)
+
+          - Mode: ${mode}
+          ${provider_line}
+          - Action: added label \`tutti\`${extra}
+          ${fallback_block}
+
+          Next: Tutti runs and posts the vote/audit comment. If approved and an implementation label is present, Codex will create a PR.
+          EOF
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file handoff-comment.md
 
           # IMPORTANT: label events created by GitHub Actions' GITHUB_TOKEN do NOT trigger other workflows.
           # We must dispatch the mainframe workflow explicitly.
@@ -436,7 +473,7 @@ jobs:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          ZAI_MODEL: glm-4.7
+          ZAI_MODEL: glm-5.0
           XAI_MODEL: grok-3-mini
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}

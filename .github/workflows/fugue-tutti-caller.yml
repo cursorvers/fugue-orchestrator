@@ -34,12 +34,16 @@ jobs:
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
       orchestrator_provider: ${{ steps.ctx.outputs.orchestrator_provider }}
+      claude_fallback_applied: ${{ steps.ctx.outputs.claude_fallback_applied }}
+      claude_fallback_reason: ${{ steps.ctx.outputs.claude_fallback_reason }}
+      force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
       - name: Resolve issue context
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
         run: |
           set -euo pipefail
 
@@ -85,6 +89,9 @@ jobs:
               elif (($labels | index("orchestrator:codex")) != null) then "codex"
               else "" end
           ')"
+          force_claude="$(echo "${issue_json}" | jq -r '
+            [ .labels[]? | .name ] | index("orchestrator-force:claude") != null
+          ')"
           body_provider="$(printf '%s\n' "${body}" | awk '
             BEGIN { in_sec=0 }
             tolower($0) ~ /^##[[:space:]]*orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
@@ -110,10 +117,24 @@ jobs:
             requested_provider="${body_provider}"
           fi
           if [[ -z "${requested_provider}" ]]; then
-            requested_provider="$(echo "${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]')"
+            requested_provider="${DEFAULT_ORCHESTRATOR_PROVIDER:-codex}"
           fi
+          requested_provider="$(echo "${requested_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${requested_provider}" != "claude" && "${requested_provider}" != "codex" ]]; then
             requested_provider="codex"
+          fi
+
+          claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
+
+          claude_fallback_applied="false"
+          claude_fallback_reason=""
+          if [[ "${requested_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
+            requested_provider="codex"
+            claude_fallback_applied="true"
+            claude_fallback_reason="claude-rate-limit-${claude_state}"
           fi
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
@@ -154,9 +175,25 @@ jobs:
             echo "has_implement_request=${has_implement}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_provider}"
+            echo "claude_fallback_applied=${claude_fallback_applied}"
+            echo "claude_fallback_reason=${claude_fallback_reason}"
+            echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Comment fallback decision
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.claude_fallback_applied == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "orchestrator:claude" \
+            --add-label "orchestrator:codex" >/dev/null 2>&1 || true
+          gh issue comment "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "Orchestrator auto-fallback applied: requested \`claude\` but switched to \`codex\` due to \`${{ steps.ctx.outputs.claude_fallback_reason }}\`. To force Claude for this issue, add label \`orchestrator-force:claude\`."
 
   # Review mode: Tutti consensus (currently 3 parallel agents)
   tutti:
@@ -167,6 +204,7 @@ jobs:
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
       orchestrator_provider: "${{ needs.ctx.outputs.orchestrator_provider }}"
+      force_claude: "${{ needs.ctx.outputs.force_claude }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
