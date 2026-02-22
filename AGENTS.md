@@ -50,7 +50,7 @@ Auditability:
   - `codex-main-orchestrator` when main is `codex`
   - `claude-main-orchestrator` when main is `claude`
 - CI lane execution engine defaults to `harness` (`FUGUE_CI_EXECUTION_ENGINE=harness|api`).
-- Multi-agent depth is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`).
+- Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
 - GLM baseline model: `glm-5.0`.
 - When assist is `claude` and state is not `exhausted`, add Claude assist lanes (Opus + Sonnet).
 - In `FUGUE_CLAUDE_MAX_PLAN=true` mode without `ANTHROPIC_API_KEY`, Claude assist lanes run through Codex proxy and remain vote participants.
@@ -64,6 +64,8 @@ Auditability:
 - High-risk finding blocks auto-execution and escalates to human review.
 - Tutti execution decisions use weighted consensus (role-weighted 2/3 threshold) plus HIGH-risk veto.
 - Review-only intent must clear stale implementation labels.
+- Natural-language/mobile intake defaults to `review`; implement requires explicit signal.
+- Implementation execution requires both `implement` and `implement-confirmed`.
 - Cross-repo implementation requires `TARGET_REPO_PAT`.
 - Dangerous operations require explicit human consent paths.
 - Implement mode must complete preflight refinement loops before code changes:
@@ -84,6 +86,7 @@ Auditability:
 - Issue intake and natural-language handoff:
   - `.github/workflows/fugue-task-router.yml`
   - Default behavior: `fugue-task` issues auto-handoff to mainframe unless manual opt-out markers are present.
+  - Natural-language default mode is review-first; implement must be explicit and confirmed.
 - Mainframe orchestration gate:
   - `.github/workflows/fugue-tutti-caller.yml`
 - Tutti quorum integration:

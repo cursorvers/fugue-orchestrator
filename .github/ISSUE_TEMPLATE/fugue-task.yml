@@ -9,11 +9,90 @@ body:
       value: |
         This template automatically applies label `fugue-task`.
 
-        Mainframe handoff (GHA24) keywords:
-        - Add `完遂` / `自走` / `最後まで` to request the mainframe path (adds `tutti`, and by default `codex-implement`)
-        - Add `レビューのみ` / `実装不要` to suppress PR creation
+        Mainframe behavior:
+        - `Mainframe handoff = auto` sends this issue to Tutti (`tutti` label is applied by router).
+        - Natural-language/default path is **review-first**.
+        - Implementation execution needs both `implement` and `implement-confirmed`.
+        - `Orchestrator provider` selects routing profile only. The implementation engine is `fugue-codex-implement` (Codex CLI).
 
         Tip: if you include a target repo in backticks like `cursorvers/cloudflare-workers-hub`, FUGUE will label and prefix the issue title so you can quickly see which project it belongs to.
+
+  - type: dropdown
+    id: mainframe_handoff
+    attributes:
+      label: Mainframe handoff
+      description: Auto = route into Tutti pipeline. Manual = keep for human/manual handling.
+      options:
+        - auto
+        - manual
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: execution_mode
+    attributes:
+      label: Execution mode
+      description: Default is review. Choose implement only when you want autonomous code changes/PR flow.
+      options:
+        - review
+        - implement
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: implementation_confirmation
+    attributes:
+      label: Implementation confirmation
+      description: Required to actually execute implementation.
+      options:
+        - pending
+        - confirmed
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: main_orchestrator_provider
+    attributes:
+      label: Main orchestrator provider
+      description: Routing profile for Tutti voting lanes.
+      options:
+        - repository default
+        - codex
+        - claude
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: assist_orchestrator_provider
+    attributes:
+      label: Assist orchestrator provider
+      description: Secondary routing profile.
+      options:
+        - repository default
+        - claude
+        - codex
+        - none
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: multi_agent_mode
+    attributes:
+      label: Multi-agent mode
+      description: Auto lets router decide by task complexity.
+      options:
+        - auto
+        - standard
+        - enhanced
+        - max
+      default: 0
+    validations:
+      required: true
 
   - type: input
     id: target_repo

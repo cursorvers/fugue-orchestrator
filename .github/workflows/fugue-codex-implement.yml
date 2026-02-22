@@ -58,6 +58,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       should_run: ${{ steps.ctx.outputs.should_run }}
+      skip_reason: ${{ steps.ctx.outputs.skip_reason }}
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       issue_title: ${{ steps.ctx.outputs.issue_title }}
       issue_body: ${{ steps.ctx.outputs.issue_body }}
@@ -80,11 +81,17 @@ jobs:
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          HAS_IMPLEMENT_CONFIRMED="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement-confirmed") != null)')"
           HAS_LARGE_REFACTOR="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("large-refactor") != null)')"
 
           SHOULD_RUN="true"
+          SKIP_REASON=""
           if [[ "${HAS_IMPLEMENT}" != "true" ]]; then
             SHOULD_RUN="false"
+            SKIP_REASON="missing-implement-intent"
+          elif [[ "${HAS_IMPLEMENT_CONFIRMED}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-implement-confirmed"
           fi
 
           # Determine target repo
@@ -107,9 +114,17 @@ jobs:
             echo "EOF"
             echo "is_large_refactor=${HAS_LARGE_REFACTOR}"
             echo "should_run=${SHOULD_RUN}"
+            echo "skip_reason=${SKIP_REASON}"
             echo "target_repo=${TARGET_REPO}"
             echo "branch_name=${BRANCH_NAME}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Notify pending implement confirmation
+        if: ${{ steps.ctx.outputs.should_run != 'true' && steps.ctx.outputs.skip_reason == 'missing-implement-confirmed' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --body "Implementation intent detected, but \`implement-confirmed\` is missing. Add that label to allow Codex execution."
 
       - name: Add processing label
         if: ${{ steps.ctx.outputs.should_run == 'true' }}

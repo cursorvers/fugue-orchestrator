@@ -32,6 +32,7 @@ jobs:
       skip_reason: ${{ steps.ctx.outputs.skip_reason }}
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
+      has_implement_confirmed: ${{ steps.ctx.outputs.has_implement_confirmed }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
       orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
       main_orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
@@ -56,6 +57,9 @@ jobs:
       implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Resolve issue context
         id: ctx
         env:
@@ -100,6 +104,7 @@ jobs:
           has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          has_implement_confirmed="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement-confirmed") != null)')"
           body_mode="$(printf '%s\n' "${body}" | awk '
             BEGIN { in_sec=0 }
             tolower($0) ~ /^##[[:space:]]*mode[[:space:]]*$/ { in_sec=1; next }
@@ -115,11 +120,28 @@ jobs:
             }
           ')"
           if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
+            body_mode="$(printf '%s\n' "${body}" | awk '
+              BEGIN { in_sec=0 }
+              tolower($0) ~ /^###[[:space:]]*execution[[:space:]]+mode[[:space:]]*$/ { in_sec=1; next }
+              in_sec && $0 ~ /^###[[:space:]]/ { exit }
+              in_sec {
+                line=$0
+                gsub(/`/, "", line)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+                if (line != "") {
+                  print tolower(line)
+                  exit
+                }
+              }
+            ')"
+          fi
+          if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
             body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
           # Explicit review mode in issue body always wins over stale labels.
           if [[ "${body_mode}" == "review" ]]; then
             has_implement="false"
+            has_implement_confirmed="false"
           fi
           label_main_provider="$(echo "${issue_json}" | jq -r '
             [ .labels[]? | .name ] as $labels
@@ -153,6 +175,22 @@ jobs:
               }
             }
           ')"
+          if [[ -z "${body_main_provider}" ]]; then
+            body_main_provider="$(printf '%s\n' "${body}" | awk '
+              BEGIN { in_sec=0 }
+              tolower($0) ~ /^###[[:space:]]*main[[:space:]]+orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
+              in_sec && $0 ~ /^###[[:space:]]/ { exit }
+              in_sec {
+                line=$0
+                gsub(/`/, "", line)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+                if (line != "") {
+                  print tolower(line)
+                  exit
+                }
+              }
+            ')"
+          fi
           if [[ "${body_main_provider}" != "claude" && "${body_main_provider}" != "codex" ]]; then
             body_main_provider=""
           fi
@@ -174,6 +212,22 @@ jobs:
               }
             }
           ')"
+          if [[ -z "${body_assist_provider}" ]]; then
+            body_assist_provider="$(printf '%s\n' "${body}" | awk '
+              BEGIN { in_sec=0 }
+              tolower($0) ~ /^###[[:space:]]*assist[[:space:]]+orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
+              in_sec && $0 ~ /^###[[:space:]]/ { exit }
+              in_sec {
+                line=$0
+                gsub(/`/, "", line)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+                if (line != "") {
+                  print tolower(line)
+                  exit
+                }
+              }
+            ')"
+          fi
           if [[ "${body_assist_provider}" != "claude" && "${body_assist_provider}" != "codex" && "${body_assist_provider}" != "none" ]]; then
             body_assist_provider=""
           fi
@@ -467,33 +521,24 @@ jobs:
             translation_event="true"
           fi
 
-          main_claude_fallback_applied="false"
-          main_claude_fallback_reason=""
-          if [[ "${requested_main_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
-            requested_main_provider="codex"
-            main_claude_fallback_applied="true"
-            main_claude_fallback_reason="claude-rate-limit-${claude_state}"
-          fi
-
-          assist_claude_fallback_applied="false"
-          assist_claude_fallback_reason=""
-          if [[ "${requested_assist_provider}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
-            requested_assist_provider="none"
-            assist_claude_fallback_applied="true"
-            assist_claude_fallback_reason="claude-rate-limit-${claude_state}"
-          fi
-
-          claude_main_assist_policy="$(echo "${CLAUDE_MAIN_ASSIST_POLICY:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
-            claude_main_assist_policy="codex"
-          fi
-          claude_pressure_guard_applied="false"
-          claude_pressure_guard_reason=""
-          if [[ "${requested_main_provider}" == "claude" && "${requested_assist_provider}" == "claude" && "${force_claude}" != "true" ]]; then
-            requested_assist_provider="${claude_main_assist_policy}"
-            claude_pressure_guard_applied="true"
-            claude_pressure_guard_reason="main-claude-assist-claude->${requested_assist_provider}"
-          fi
+          eval "$(
+            scripts/lib/orchestrator-policy.sh \
+              --main "${requested_main_provider}" \
+              --assist "${requested_assist_provider}" \
+              --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
+              --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
+              --claude-state "${claude_state}" \
+              --force-claude "${force_claude}" \
+              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}"
+          )"
+          requested_main_provider="${resolved_main}"
+          requested_assist_provider="${resolved_assist}"
+          main_claude_fallback_applied="${main_fallback_applied}"
+          main_claude_fallback_reason="${main_fallback_reason}"
+          assist_claude_fallback_applied="${assist_fallback_applied}"
+          assist_claude_fallback_reason="${assist_fallback_reason}"
+          claude_pressure_guard_applied="${pressure_guard_applied}"
+          claude_pressure_guard_reason="${pressure_guard_reason}"
 
           implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT:-2}"
           if [[ "${orchestration_profile}" == "claude-light" ]]; then
@@ -567,6 +612,7 @@ jobs:
           {
             echo "issue_number=${ISSUE_NUMBER}"
             echo "has_implement_request=${has_implement}"
+            echo "has_implement_confirmed=${has_implement_confirmed}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_main_provider}"
             echo "main_orchestrator_provider=${requested_main_provider}"
@@ -833,6 +879,7 @@ jobs:
     if: >-
       needs.ctx.outputs.should_run == 'true' &&
       needs.ctx.outputs.has_implement_request == 'true' &&
+      needs.ctx.outputs.has_implement_confirmed == 'true' &&
       needs.tutti.outputs.ok_to_execute == 'true'
     needs: [ctx, tutti]
     uses: ./.github/workflows/fugue-codex-implement.yml
@@ -845,3 +892,20 @@ jobs:
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+
+  implement-awaiting-confirmation:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.ctx.outputs.has_implement_request == 'true' &&
+      needs.ctx.outputs.has_implement_confirmed != 'true' &&
+      needs.tutti.outputs.ok_to_execute == 'true'
+    needs: [ctx, tutti]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Post confirmation-required notice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+        run: |
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti approved execution, but implementation is blocked because \`implement-confirmed\` is missing. Add that label to proceed."

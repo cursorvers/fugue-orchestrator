@@ -74,6 +74,9 @@ on:
       resolved_multi_agent_mode:
         description: "resolved multi-agent mode after policy/override resolution"
         value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode }}
+      resolved_multi_agent_mode_source:
+        description: "where the resolved multi-agent mode came from"
+        value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode_source }}
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -800,6 +803,7 @@ jobs:
           - assist orchestrator requested: ${{ needs.resolve-orchestrator.outputs.assist_provider_requested }}
           - assist orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           - multi-agent mode: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
+          - multi-agent mode source: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
           ${main_fallback_section}
           ${assist_fallback_section}
           ${claude_pressure_section}
@@ -893,6 +897,7 @@ jobs:
       provider: ${{ steps.resolve.outputs.main_provider }}
       provider_requested: ${{ steps.resolve.outputs.main_provider_requested }}
       multi_agent_mode: ${{ steps.resolve.outputs.multi_agent_mode }}
+      multi_agent_mode_source: ${{ steps.resolve.outputs.multi_agent_mode_source }}
       claude_fallback_applied: ${{ steps.resolve.outputs.main_claude_fallback_applied }}
       claude_fallback_reason: ${{ steps.resolve.outputs.main_claude_fallback_reason }}
       main_provider: ${{ steps.resolve.outputs.main_provider }}
@@ -909,6 +914,9 @@ jobs:
       expected_lanes: ${{ steps.resolve.outputs.expected_lanes }}
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Resolve orchestrator profile and lane matrix
         id: resolve
         env:
@@ -929,78 +937,94 @@ jobs:
         run: |
           set -euo pipefail
 
-          main_provider="$(echo "${REQUESTED_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ -z "${main_provider}" ]]; then
-            main_provider="$(echo "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          fi
-          if [[ "${main_provider}" != "claude" && "${main_provider}" != "codex" ]]; then
-            main_provider="codex"
-          fi
-          main_provider_requested="${main_provider}"
-
-          assist_provider="$(echo "${REQUESTED_ASSIST_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ -z "${assist_provider}" ]]; then
-            assist_provider="$(echo "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          fi
-          if [[ "${assist_provider}" != "claude" && "${assist_provider}" != "codex" && "${assist_provider}" != "none" ]]; then
-            assist_provider="claude"
-          fi
-          assist_provider_requested="${assist_provider}"
-
           force_claude="$(echo "${FORCE_CLAUDE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${force_claude}" != "true" ]]; then
             force_claude="false"
           fi
-          claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
-            claude_state="ok"
-          fi
-          main_claude_fallback_applied="false"
-          main_claude_fallback_reason=""
-          if [[ "${main_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
-            main_provider="codex"
-            main_claude_fallback_applied="true"
-            main_claude_fallback_reason="claude-rate-limit-${claude_state}"
-          fi
 
-          assist_claude_fallback_applied="false"
-          assist_claude_fallback_reason=""
-          if [[ "${assist_provider}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
-            assist_provider="none"
-            assist_claude_fallback_applied="true"
-            assist_claude_fallback_reason="claude-rate-limit-${claude_state}"
-          fi
+          eval "$(
+            scripts/lib/orchestrator-policy.sh \
+              --main "${REQUESTED_PROVIDER}" \
+              --assist "${REQUESTED_ASSIST_PROVIDER}" \
+              --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
+              --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
+              --claude-state "${CLAUDE_RATE_LIMIT_STATE}" \
+              --force-claude "${force_claude}" \
+              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}"
+          )"
 
-          claude_main_assist_policy="$(echo "${CLAUDE_MAIN_ASSIST_POLICY:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
-            claude_main_assist_policy="codex"
-          fi
-          claude_pressure_guard_applied="false"
-          claude_pressure_guard_reason=""
-          if [[ "${main_provider}" == "claude" && "${assist_provider}" == "claude" && "${force_claude}" != "true" ]]; then
-            assist_provider="${claude_main_assist_policy}"
-            claude_pressure_guard_applied="true"
-            claude_pressure_guard_reason="main-claude-assist-claude->${assist_provider}"
-          fi
+          main_provider_requested="${requested_main}"
+          assist_provider_requested="${requested_assist}"
+          main_provider="${resolved_main}"
+          assist_provider="${resolved_assist}"
+          main_claude_fallback_applied="${main_fallback_applied}"
+          main_claude_fallback_reason="${main_fallback_reason}"
+          assist_claude_fallback_applied="${assist_fallback_applied}"
+          assist_claude_fallback_reason="${assist_fallback_reason}"
+          claude_pressure_guard_applied="${pressure_guard_applied}"
+          claude_pressure_guard_reason="${pressure_guard_reason}"
 
           text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
           multi_agent_mode="$(echo "${MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           mode_override="$(echo "${MULTI_AGENT_MODE_OVERRIDE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           mode_lock="$(echo "${MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          multi_agent_mode_source="repo-default"
           if [[ "${mode_lock}" != "true" ]]; then
             mode_lock="false"
           fi
           if [[ "${mode_override}" == "standard" || "${mode_override}" == "enhanced" || "${mode_override}" == "max" ]]; then
             multi_agent_mode="${mode_override}"
+            multi_agent_mode_source="input-override"
           fi
           if [[ "${mode_lock}" != "true" ]]; then
-            body_multi_agent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*multi[[:space:]_-]*agent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(standard|enhanced|max)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+            body_multi_agent_mode="$(printf '%s\n' "${ISSUE_BODY}" | awk '
+              BEGIN { in_sec=0 }
+              tolower($0) ~ /^###[[:space:]]*multi[[:space:]_-]*agent[[:space:]]+mode[[:space:]]*$/ { in_sec=1; next }
+              in_sec && $0 ~ /^###[[:space:]]/ { exit }
+              in_sec {
+                line=$0
+                gsub(/`/, "", line)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+                if (line != "") {
+                  print tolower(line)
+                  exit
+                }
+              }
+            ')"
+            if [[ -z "${body_multi_agent_mode}" ]]; then
+              body_multi_agent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*multi[[:space:]_-]*agent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(standard|enhanced|max|auto)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+            fi
+            if [[ "${body_multi_agent_mode}" == "auto" ]]; then
+              body_multi_agent_mode=""
+            fi
             if [[ -n "${body_multi_agent_mode}" ]]; then
               multi_agent_mode="${body_multi_agent_mode}"
+              multi_agent_mode_source="issue-body"
+            fi
+          fi
+          if [[ "${multi_agent_mode_source}" == "repo-default" ]]; then
+            heuristic_mode=""
+            if echo "${text}" | grep -Eqi '(大規模|全面|全体|refactor|rewrite|migration|アーキテクチャ|全面刷新|リライト)'; then
+              heuristic_mode="max"
+            elif echo "${text}" | grep -Eqi '(architecture|security|performance|concurrency|database|schema|workflow|ci|gha|infra|統合|設計|移行)'; then
+              heuristic_mode="enhanced"
+            fi
+            text_len="$(printf '%s' "${text}" | wc -c | tr -d ' ')"
+            if [[ -z "${heuristic_mode}" ]]; then
+              if (( text_len > 1400 )); then
+                heuristic_mode="enhanced"
+              elif (( text_len > 0 && text_len < 280 )); then
+                heuristic_mode="standard"
+              fi
+            fi
+            if [[ -n "${heuristic_mode}" ]]; then
+              multi_agent_mode="${heuristic_mode}"
+              multi_agent_mode_source="complexity-heuristic"
             fi
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
             multi_agent_mode="enhanced"
+            multi_agent_mode_source="repo-default"
           fi
           wants_gemini="false"
           wants_xai="false"
@@ -1190,6 +1214,7 @@ jobs:
             echo "provider=${main_provider}"
             echo "provider_requested=${main_provider_requested}"
             echo "multi_agent_mode=${multi_agent_mode}"
+            echo "multi_agent_mode_source=${multi_agent_mode_source}"
             echo "claude_fallback_applied=${main_claude_fallback_applied}"
             echo "claude_fallback_reason=${main_claude_fallback_reason}"
             echo "main_provider=${main_provider}"

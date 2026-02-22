@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
 # Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude]
@@ -156,45 +157,66 @@ assist_provider=""
 requested_assist_provider=""
 assist_fallback_applied=false
 assist_fallback_reason=""
-claude_state=""
+assist_pressure_guard_applied=false
+assist_pressure_guard_reason=""
+claude_state="ok"
+claude_main_assist_policy="codex"
 if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   provider="$(echo "${ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-  requested_provider="${provider}"
   if [[ "${provider}" != "claude" && "${provider}" != "codex" ]]; then
     echo "Error: --orchestrator must be codex or claude" >&2
     exit 1
-  fi
-
-  if [[ "${provider}" == "claude" && "${FORCE_CLAUDE}" != "true" ]]; then
-    claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
-    claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    if [[ "${claude_state}" == "degraded" || "${claude_state}" == "exhausted" ]]; then
-      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to codex applied for main orchestrator."
-      provider="codex"
-      fallback_applied=true
-      fallback_reason="claude-rate-limit-${claude_state}"
-    fi
   fi
 fi
 
 if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
   assist_provider="$(echo "${ASSIST_ORCHESTRATOR_PROVIDER}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-  requested_assist_provider="${assist_provider}"
   if [[ "${assist_provider}" != "claude" && "${assist_provider}" != "codex" && "${assist_provider}" != "none" ]]; then
     echo "Error: --assist-orchestrator must be claude, codex, or none" >&2
     exit 1
   fi
+fi
 
-  if [[ "${assist_provider}" == "claude" && "${FORCE_CLAUDE}" != "true" ]]; then
-    if [[ -z "${claude_state}" ]]; then
-      claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
-    fi
+if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" || "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+  if [[ "${FORCE_CLAUDE}" != "true" ]]; then
+    claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "ok")"
     claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    if [[ "${claude_state}" == "exhausted" ]]; then
-      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback to none applied for assist orchestrator."
-      assist_provider="none"
+  fi
+  claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "codex")"
+
+  eval "$(
+    "${SCRIPT_DIR}/lib/orchestrator-policy.sh" \
+      --main "${provider}" \
+      --assist "${assist_provider}" \
+      --default-main "codex" \
+      --default-assist "claude" \
+      --claude-state "${claude_state}" \
+      --force-claude "${FORCE_CLAUDE}" \
+      --assist-policy "${claude_main_assist_policy}"
+  )"
+
+  if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+    requested_provider="${requested_main}"
+    provider="${resolved_main}"
+    if [[ "${requested_provider}" != "${provider}" ]]; then
+      fallback_applied=true
+      fallback_reason="${main_fallback_reason}"
+      echo "Notice: FUGUE_CLAUDE_RATE_LIMIT_STATE=${claude_state}. Auto-fallback for main orchestrator: ${requested_provider} -> ${provider}."
+    fi
+  fi
+
+  if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
+    requested_assist_provider="${requested_assist}"
+    assist_provider="${resolved_assist}"
+    if [[ "${requested_assist_provider}" != "${assist_provider}" ]]; then
       assist_fallback_applied=true
-      assist_fallback_reason="claude-rate-limit-${claude_state}"
+      assist_fallback_reason="${assist_fallback_reason}"
+      if [[ -z "${assist_fallback_reason}" ]]; then
+        assist_fallback_reason="${pressure_guard_reason}"
+        assist_pressure_guard_applied=true
+        assist_pressure_guard_reason="${pressure_guard_reason}"
+      fi
+      echo "Notice: Orchestrator assist auto-adjusted: ${requested_assist_provider} -> ${assist_provider} (${assist_fallback_reason:-${assist_pressure_guard_reason}})."
     fi
   fi
 fi
@@ -209,6 +231,11 @@ if [[ "${IMPLEMENT}" == "true" ]]; then
   # `implement` is the provider-agnostic intent label.
   # Add provider-specific compatibility label only when provider is explicitly chosen.
   LABELS="${LABELS},implement"
+  gh label create "implement-confirmed" \
+    --repo "${ORCHESTRATOR_REPO}" \
+    --description "Human has explicitly confirmed implementation execution" \
+    --color "0E8A16" >/dev/null 2>&1 || true
+  LABELS="${LABELS},implement-confirmed"
   if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
     gh label create "${compat_label}" \
@@ -267,6 +294,13 @@ fi )
 
 ## Mode
 $( [[ "${IMPLEMENT}" == "true" ]] && echo "implement" || echo "review" )
+
+$( if [[ "${IMPLEMENT}" == "true" ]]; then cat <<IMPL_CONFIRM
+## Implement confirmation
+confirmed
+
+IMPL_CONFIRM
+fi )
 
 $( if [[ "${IMPLEMENT}" == "true" ]]; then cat <<PREFLIGHT
 ## Mandatory preflight protocol (before implementation)
@@ -342,6 +376,9 @@ fi
 if [[ "${assist_fallback_applied}" == "true" ]]; then
   gh issue comment "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --body "CLI pre-fallback applied for assist orchestrator: requested \`${requested_assist_provider}\` but submitted \`${assist_provider}\` due to \`${assist_fallback_reason}\`. Use \`--force-claude\` to bypass this guard for this issue."
 fi
+if [[ "${assist_pressure_guard_applied}" == "true" ]]; then
+  gh issue comment "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --body "CLI pressure guard applied for assist orchestrator: requested \`${requested_assist_provider}\` but submitted \`${assist_provider}\` due to \`${assist_pressure_guard_reason}\`. Use \`--force-claude\` to bypass this guard for this issue."
+fi
 
 echo "Created: ${URL}"
 echo "Orchestrator repo: ${ORCHESTRATOR_REPO}"
@@ -367,8 +404,8 @@ else
 fi
 
 if [[ "${IMPLEMENT}" == "true" ]]; then
-  echo "Mode: Implementation intent (executed by Codex CLI after Tutti approval)"
-  echo "Tutti vote will run first. If approved, Codex implement will run automatically."
+  echo "Mode: Implementation intent (routing profile only; execution engine is Codex CLI after Tutti approval)"
+  echo "Tutti vote will run first. If approved with implement-confirmed present, Codex implement will run automatically."
   if [[ "${LARGE_REFACTOR_HINT}" == "true" ]]; then
     echo "Large-refactor hint: enabled (label: large-refactor)"
   fi

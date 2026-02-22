@@ -134,6 +134,9 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE=harness` で /vote レーンは harness 実行エンジンを直結利用（main=codex/claude 共通）。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
+# NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
+# NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。
+# NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）
@@ -157,7 +160,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: third-party skills は pin SHA 取得 + ブロックリスト検査 + managed marker で保護
 
 # Note:
-# `orchestrator provider` は Tutti のレーン選択プロファイルです。
+# `orchestrator provider` は Tutti のレーン選択プロファイルです（実装エンジン切替ではありません）。
 # 実装実行エンジンは `fugue-codex-implement`（Codex CLI）で固定です。
 
 # 4. 委譲テスト（examples/delegate-stub.js を使用）
