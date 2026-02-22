@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: "2"
+      orchestration_profile:
+        description: "Resolved orchestration profile (codex-full|claude-light)"
+        required: false
+        type: string
+        default: "codex-full"
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -181,19 +186,32 @@ jobs:
           CODEX_MODEL: ${{ inputs.codex_model }}
           REFINEMENT_CYCLES: ${{ inputs.refinement_cycles }}
           IMPLEMENTATION_DIALOGUE_ROUNDS: ${{ inputs.implementation_dialogue_rounds }}
+          ORCHESTRATION_PROFILE: ${{ inputs.orchestration_profile }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
           LARGE_REFACTOR_LABEL: ${{ needs.prepare.outputs.is_large_refactor }}
         run: |
           set -euo pipefail
 
+          orchestration_profile="$(echo "${ORCHESTRATION_PROFILE:-codex-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${orchestration_profile}" != "codex-full" && "${orchestration_profile}" != "claude-light" ]]; then
+            orchestration_profile="codex-full"
+          fi
           cycles_raw="$(echo "${REFINEMENT_CYCLES:-3}" | tr -cd '0-9')"
           if [[ -z "${cycles_raw}" ]]; then
             cycles_raw="3"
           fi
-          if (( cycles_raw < 1 )); then
-            cycles_raw=1
-          elif (( cycles_raw > 5 )); then
-            cycles_raw=5
+          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+            if (( cycles_raw < 1 )); then
+              cycles_raw=1
+            elif (( cycles_raw > 3 )); then
+              cycles_raw=3
+            fi
+          else
+            if (( cycles_raw < 3 )); then
+              cycles_raw=3
+            elif (( cycles_raw > 5 )); then
+              cycles_raw=5
+            fi
           fi
           cycles="${cycles_raw}"
           dialogue_rounds_raw="$(echo "${IMPLEMENTATION_DIALOGUE_ROUNDS:-2}" | tr -cd '0-9')"
@@ -221,7 +239,7 @@ jobs:
 
           ${ISSUE_BODY}
 
-          ## Mandatory pre-implementation protocol
+          ## Mandatory pre-implementation protocol (${orchestration_profile})
           - Before touching implementation, run this loop exactly ${cycles} times.
           - Each cycle MUST include these five steps in order:
             1. Plan

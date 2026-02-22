@@ -47,6 +47,12 @@ jobs:
       translation_gate_decision: ${{ steps.ctx.outputs.translation_gate_decision }}
       translation_applied: ${{ steps.ctx.outputs.translation_applied }}
       translation_provider: ${{ steps.ctx.outputs.translation_provider }}
+      translation_score: ${{ steps.ctx.outputs.translation_score }}
+      translation_threshold: ${{ steps.ctx.outputs.translation_threshold }}
+      orchestration_profile: ${{ steps.ctx.outputs.orchestration_profile }}
+      preflight_cycles: ${{ steps.ctx.outputs.preflight_cycles }}
+      multi_agent_mode_override: ${{ steps.ctx.outputs.multi_agent_mode_override }}
+      multi_agent_mode_lock: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
       implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
@@ -66,8 +72,14 @@ jobs:
           CLAUDE_TRANSLATOR_MODE: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODE || 'auto' }}
           CLAUDE_TRANSLATOR_THRESHOLD: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD || '75' }}
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED || '88' }}
+          CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT || '90' }}
+          CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
           CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-3-7-sonnet-latest' }}
+          CLAUDE_LIGHT_MULTI_AGENT_MODE: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE || 'standard' }}
+          CLAUDE_LIGHT_MULTI_AGENT_LOCK: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_LOCK || 'true' }}
+          IMPLEMENT_PREFLIGHT_CYCLES_FULL: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL || '3' }}
+          IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE || '1' }}
           IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
           IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
         run: |
@@ -180,6 +192,23 @@ jobs:
           if [[ "${requested_main_provider}" != "claude" && "${requested_main_provider}" != "codex" ]]; then
             requested_main_provider="codex"
           fi
+          requested_main_provider_initial="${requested_main_provider}"
+          orchestration_profile="codex-full"
+          if [[ "${requested_main_provider_initial}" == "claude" && "${force_claude}" != "true" ]]; then
+            orchestration_profile="claude-light"
+          fi
+          multi_agent_mode_override=""
+          multi_agent_mode_lock="false"
+          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+            multi_agent_mode_override="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
+              multi_agent_mode_override="standard"
+            fi
+            multi_agent_mode_lock="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_LOCK:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            if [[ "${multi_agent_mode_lock}" != "true" ]]; then
+              multi_agent_mode_lock="false"
+            fi
+          fi
 
           requested_assist_provider="${label_assist_provider}"
           if [[ -z "${requested_assist_provider}" && -n "${body_assist_provider}" ]]; then
@@ -215,6 +244,22 @@ jobs:
           threshold_degraded_raw="$(echo "${CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED:-88}" | tr -cd '0-9')"
           if [[ -z "${threshold_degraded_raw}" ]]; then
             threshold_degraded_raw="88"
+          fi
+          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+            light_threshold_raw="$(echo "${CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT:-90}" | tr -cd '0-9')"
+            if [[ -z "${light_threshold_raw}" ]]; then
+              light_threshold_raw="90"
+            fi
+            light_threshold_degraded_raw="$(echo "${CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT:-95}" | tr -cd '0-9')"
+            if [[ -z "${light_threshold_degraded_raw}" ]]; then
+              light_threshold_degraded_raw="95"
+            fi
+            if (( threshold_raw < light_threshold_raw )); then
+              threshold_raw="${light_threshold_raw}"
+            fi
+            if (( threshold_degraded_raw < light_threshold_degraded_raw )); then
+              threshold_degraded_raw="${light_threshold_degraded_raw}"
+            fi
           fi
           max_chars_raw="$(echo "${CLAUDE_TRANSLATOR_MAX_CHARS:-6000}" | tr -cd '0-9')"
           if [[ -z "${max_chars_raw}" ]]; then
@@ -451,7 +496,7 @@ jobs:
           fi
 
           implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT:-2}"
-          if [[ "${requested_main_provider}" == "claude" ]]; then
+          if [[ "${orchestration_profile}" == "claude-light" ]]; then
             implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE:-1}"
           fi
           implementation_dialogue_rounds="$(echo "${implementation_dialogue_rounds_raw}" | tr -cd '0-9')"
@@ -462,6 +507,28 @@ jobs:
             implementation_dialogue_rounds=1
           elif (( implementation_dialogue_rounds > 5 )); then
             implementation_dialogue_rounds=5
+          fi
+
+          preflight_cycles_raw="${IMPLEMENT_PREFLIGHT_CYCLES_FULL:-3}"
+          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+            preflight_cycles_raw="${IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE:-1}"
+          fi
+          preflight_cycles="$(echo "${preflight_cycles_raw}" | tr -cd '0-9')"
+          if [[ -z "${preflight_cycles}" ]]; then
+            preflight_cycles="3"
+          fi
+          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+            if (( preflight_cycles < 1 )); then
+              preflight_cycles=1
+            elif (( preflight_cycles > 3 )); then
+              preflight_cycles=3
+            fi
+          else
+            if (( preflight_cycles < 3 )); then
+              preflight_cycles=3
+            elif (( preflight_cycles > 5 )); then
+              preflight_cycles=5
+            fi
           fi
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
@@ -520,6 +587,10 @@ jobs:
             echo "translation_reason=$(echo "${translation_reason}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
             echo "translation_skip_reason=${translation_skip_reason}"
             echo "translation_event=${translation_event}"
+            echo "orchestration_profile=${orchestration_profile}"
+            echo "preflight_cycles=${preflight_cycles}"
+            echo "multi_agent_mode_override=${multi_agent_mode_override}"
+            echo "multi_agent_mode_lock=${multi_agent_mode_lock}"
             echo "implementation_dialogue_rounds=${implementation_dialogue_rounds}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
@@ -545,6 +616,21 @@ jobs:
             msg="${msg} skip=\`${SKIP_REASON}\`."
           fi
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${msg}"
+
+      - name: Comment orchestration profile decision
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          PROFILE: ${{ steps.ctx.outputs.orchestration_profile }}
+          PREFLIGHT_CYCLES: ${{ steps.ctx.outputs.preflight_cycles }}
+          IMPLEMENT_ROUNDS: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
+          MODE_OVERRIDE: ${{ steps.ctx.outputs.multi_agent_mode_override }}
+          MODE_LOCK: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
+        run: |
+          set -euo pipefail
+          override_display="${MODE_OVERRIDE:-none}"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`."
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
@@ -590,12 +676,157 @@ jobs:
       main_orchestrator_provider: "${{ needs.ctx.outputs.main_orchestrator_provider }}"
       assist_orchestrator_provider: "${{ needs.ctx.outputs.assist_orchestrator_provider }}"
       force_claude: "${{ needs.ctx.outputs.force_claude }}"
+      multi_agent_mode_override: "${{ needs.ctx.outputs.multi_agent_mode_override }}"
+      multi_agent_mode_lock: "${{ needs.ctx.outputs.multi_agent_mode_lock }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  orchestration-scorecard:
+    if: >-
+      needs.ctx.outputs.should_run == 'true'
+    needs: [ctx, tutti]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post multi-agent / translator scorecard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+          PROFILE: ${{ needs.ctx.outputs.orchestration_profile }}
+          RESOLVED_MULTI_AGENT_MODE: ${{ needs.tutti.outputs.resolved_multi_agent_mode }}
+          EXPECTED_LANES: ${{ needs.tutti.outputs.expected_lanes }}
+          HIGH_RISK: ${{ needs.tutti.outputs.high_risk }}
+          WEIGHTED_VOTE_PASSED: ${{ needs.tutti.outputs.weighted_vote_passed }}
+          WEIGHTED_APPROVE_SCORE: ${{ needs.tutti.outputs.weighted_approve_score }}
+          WEIGHTED_TOTAL_SCORE: ${{ needs.tutti.outputs.weighted_total_score }}
+          APPROVE_COUNT: ${{ needs.tutti.outputs.approve_count }}
+          TOTAL_COUNT: ${{ needs.tutti.outputs.total_count }}
+          TRANSLATION_DECISION: ${{ needs.ctx.outputs.translation_gate_decision }}
+          TRANSLATION_APPLIED: ${{ needs.ctx.outputs.translation_applied }}
+          TRANSLATION_PROVIDER: ${{ needs.ctx.outputs.translation_provider }}
+          TRANSLATION_SCORE: ${{ needs.ctx.outputs.translation_score }}
+          TRANSLATION_THRESHOLD: ${{ needs.ctx.outputs.translation_threshold }}
+        run: |
+          set -euo pipefail
+
+          clamp_int() {
+            local v="$1"
+            local lo="$2"
+            local hi="$3"
+            if (( v < lo )); then
+              echo "${lo}"
+            elif (( v > hi )); then
+              echo "${hi}"
+            else
+              echo "${v}"
+            fi
+          }
+
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
+          created_epoch="$(printf '%s' "${run_json}" | jq -r '.created_at | fromdateiso8601')"
+          updated_epoch="$(printf '%s' "${run_json}" | jq -r '.updated_at | fromdateiso8601')"
+          duration_sec=$((updated_epoch - created_epoch))
+          if (( duration_sec < 1 )); then
+            duration_sec=1
+          fi
+
+          lanes="$(echo "${EXPECTED_LANES:-0}" | tr -cd '0-9')"
+          if [[ -z "${lanes}" || "${lanes}" == "0" ]]; then
+            lanes=6
+          fi
+
+          weighted_total="${WEIGHTED_TOTAL_SCORE:-0}"
+          weighted_approve="${WEIGHTED_APPROVE_SCORE:-0}"
+          quality_current="$(awk -v a="${weighted_approve}" -v t="${weighted_total}" -v ac="${APPROVE_COUNT:-0}" -v tc="${TOTAL_COUNT:-0}" 'BEGIN {
+            q=0;
+            if (t+0 > 0) q=(a/t)*100;
+            else if (tc+0 > 0) q=(ac/tc)*100;
+            if (q < 0) q=0;
+            if (q > 100) q=100;
+            printf "%.0f", q;
+          }')"
+
+          fail_current=45
+          if [[ "${HIGH_RISK}" == "true" ]]; then
+            fail_current=85
+          elif [[ "${WEIGHTED_VOTE_PASSED}" == "true" ]]; then
+            fail_current=20
+          elif [[ "${WEIGHTED_VOTE_PASSED}" == "false" ]]; then
+            fail_current=60
+          fi
+
+          mode="$(echo "${RESOLVED_MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${mode}" != "standard" && "${mode}" != "enhanced" && "${mode}" != "max" ]]; then
+            mode="enhanced"
+          fi
+          if [[ "${mode}" == "standard" ]]; then
+            ma_on_quality="$(clamp_int $((quality_current + 8)) 0 100)"
+            ma_off_quality="${quality_current}"
+            ma_on_fail="$(clamp_int $((fail_current - 8)) 0 100)"
+            ma_off_fail="${fail_current}"
+            ma_on_time=$((duration_sec * 125 / 100))
+            ma_off_time="${duration_sec}"
+          else
+            ma_on_quality="${quality_current}"
+            ma_off_quality="$(clamp_int $((quality_current - 8)) 0 100)"
+            ma_on_fail="${fail_current}"
+            ma_off_fail="$(clamp_int $((fail_current + 12)) 0 100)"
+            ma_on_time="${duration_sec}"
+            ma_off_time=$((duration_sec * 78 / 100))
+          fi
+
+          translation_current="off"
+          if [[ "${TRANSLATION_APPLIED}" == "true" || "${TRANSLATION_DECISION}" == "true" ]]; then
+            translation_current="on"
+          fi
+          if [[ "${translation_current}" == "on" ]]; then
+            tr_on_quality="${quality_current}"
+            tr_off_quality="$(clamp_int $((quality_current - 6)) 0 100)"
+            tr_on_fail="${fail_current}"
+            tr_off_fail="$(clamp_int $((fail_current + 9)) 0 100)"
+            tr_on_time="${duration_sec}"
+            tr_off_time=$((duration_sec * 94 / 100))
+          else
+            tr_on_quality="$(clamp_int $((quality_current + 2)) 0 100)"
+            tr_off_quality="${quality_current}"
+            tr_on_fail="$(clamp_int $((fail_current - 2)) 0 100)"
+            tr_off_fail="${fail_current}"
+            tr_on_time=$((duration_sec * 106 / 100))
+            tr_off_time="${duration_sec}"
+          fi
+
+          fmt_min() {
+            awk -v s="$1" 'BEGIN { printf "%.1f min", s/60 }'
+          }
+
+          cat > /tmp/fugue-scorecard.md <<EOF
+          ## Orchestration Scorecard (Heuristic)
+
+          - profile: \`${PROFILE}\`
+          - current multi-agent mode: \`${mode}\` (lanes=${lanes})
+          - current translator state: \`${translation_current}\` (decision=\`${TRANSLATION_DECISION}\`, applied=\`${TRANSLATION_APPLIED}\`, provider=\`${TRANSLATION_PROVIDER}\`, score=\`${TRANSLATION_SCORE}\`/threshold=\`${TRANSLATION_THRESHOLD}\`)
+          - run duration observed: $(fmt_min "${duration_sec}")
+
+          ### Multi-agent ON/OFF
+          | mode | quality (0-100) | time | failure risk (0-100) |
+          |---|---:|---:|---:|
+          | ON | ${ma_on_quality} | $(fmt_min "${ma_on_time}") | ${ma_on_fail} |
+          | OFF | ${ma_off_quality} | $(fmt_min "${ma_off_time}") | ${ma_off_fail} |
+
+          ### Translator ON/OFF
+          | mode | quality (0-100) | time | failure risk (0-100) |
+          |---|---:|---:|---:|
+          | ON | ${tr_on_quality} | $(fmt_min "${tr_on_time}") | ${tr_on_fail} |
+          | OFF | ${tr_off_quality} | $(fmt_min "${tr_off_time}") | ${tr_off_fail} |
+
+          Note: scorecard is an estimated counterfactual from this run (not separate A/B executions).
+          EOF
+
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/fugue-scorecard.md
 
   # Implement mode: if Tutti says it's safe AND issue requests implementation, run Codex implement immediately.
   codex-implement:
@@ -608,8 +839,9 @@ jobs:
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
       target_repo: "${{ needs.ctx.outputs.target_repo }}"
-      refinement_cycles: "${{ vars.FUGUE_IMPLEMENT_REFINEMENT_CYCLES || '3' }}"
+      refinement_cycles: "${{ needs.ctx.outputs.preflight_cycles }}"
       implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"
+      orchestration_profile: "${{ needs.ctx.outputs.orchestration_profile }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

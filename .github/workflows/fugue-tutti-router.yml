@@ -27,6 +27,16 @@ on:
         required: false
         type: string
         default: "false"
+      multi_agent_mode_override:
+        description: "Override multi-agent mode (standard|enhanced|max)"
+        required: false
+        type: string
+        default: ""
+      multi_agent_mode_lock:
+        description: "When true, ignore issue-body multi-agent mode overrides"
+        required: false
+        type: string
+        default: "false"
     outputs:
       ok_to_execute:
         description: "true when approvals >= 2/3 and no HIGH risk was detected"
@@ -46,6 +56,24 @@ on:
       total_count:
         description: "number of total agent results"
         value: ${{ jobs.integrate.outputs.total_count }}
+      weighted_approve_score:
+        description: "weighted approval score"
+        value: ${{ jobs.integrate.outputs.weighted_approve_score }}
+      weighted_total_score:
+        description: "weighted total score"
+        value: ${{ jobs.integrate.outputs.weighted_total_score }}
+      weighted_threshold:
+        description: "weighted threshold score"
+        value: ${{ jobs.integrate.outputs.weighted_threshold }}
+      weighted_vote_passed:
+        description: "true when weighted approvals meet threshold"
+        value: ${{ jobs.integrate.outputs.weighted_vote_passed }}
+      expected_lanes:
+        description: "configured lane count for this run"
+        value: ${{ jobs.resolve-orchestrator.outputs.expected_lanes }}
+      resolved_multi_agent_mode:
+        description: "resolved multi-agent mode after policy/override resolution"
+        value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode }}
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -887,6 +915,8 @@ jobs:
           REQUESTED_PROVIDER: ${{ inputs.main_orchestrator_provider || inputs.orchestrator_provider }}
           REQUESTED_ASSIST_PROVIDER: ${{ inputs.assist_orchestrator_provider }}
           FORCE_CLAUDE: ${{ inputs.force_claude }}
+          MULTI_AGENT_MODE_OVERRIDE: ${{ inputs.multi_agent_mode_override }}
+          MULTI_AGENT_MODE_LOCK: ${{ inputs.multi_agent_mode_lock }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'enhanced' }}
@@ -955,9 +985,19 @@ jobs:
 
           text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
           multi_agent_mode="$(echo "${MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          body_multi_agent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*multi[[:space:]_-]*agent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(standard|enhanced|max)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
-          if [[ -n "${body_multi_agent_mode}" ]]; then
-            multi_agent_mode="${body_multi_agent_mode}"
+          mode_override="$(echo "${MULTI_AGENT_MODE_OVERRIDE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          mode_lock="$(echo "${MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${mode_lock}" != "true" ]]; then
+            mode_lock="false"
+          fi
+          if [[ "${mode_override}" == "standard" || "${mode_override}" == "enhanced" || "${mode_override}" == "max" ]]; then
+            multi_agent_mode="${mode_override}"
+          fi
+          if [[ "${mode_lock}" != "true" ]]; then
+            body_multi_agent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*multi[[:space:]_-]*agent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(standard|enhanced|max)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+            if [[ -n "${body_multi_agent_mode}" ]]; then
+              multi_agent_mode="${body_multi_agent_mode}"
+            fi
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
             multi_agent_mode="enhanced"
