@@ -45,7 +45,7 @@ jobs:
             high_risk_escalation_rate="$(awk -v c="${high_risk_claude_reviews}" -v t="${high_risk_reviews}" 'BEGIN { printf "%.1f", (c/t)*100 }')"
           fi
 
-          canary_json="$(gh api "repos/${repo}/actions/workflows/fugue-orchestrator-canary.yml/runs?per_page=1" 2>/dev/null || echo '{}')"
+          canary_json="$(gh api "repos/${repo}/actions/workflows/fugue-orchestrator-canary.yml/runs?status=completed&per_page=1" 2>/dev/null || echo '{}')"
           canary_conclusion="$(echo "${canary_json}" | jq -r '.workflow_runs[0].conclusion // "none"')"
           canary_url="$(echo "${canary_json}" | jq -r '.workflow_runs[0].html_url // ""')"
           canary_time="$(echo "${canary_json}" | jq -r '.workflow_runs[0].created_at // ""')"
