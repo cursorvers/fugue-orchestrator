@@ -3,6 +3,19 @@
 Purpose: provider-agnostic execution baseline inspired by high-signal CLAUDE.md practices.
 This playbook is designed to work the same way when the main orchestrator is `codex` or `claude`.
 
+## Policy Boundaries (MUST / SHOULD / MAY)
+
+- MUST:
+  - Preflight loop gates (Plan -> Parallel Simulation -> Critical Review -> Problem Fix -> Replan).
+  - Implementation dialogue gates (Implementer -> Critic -> Integrator -> Applied Change -> Verification).
+  - Verification evidence before completion.
+- SHOULD:
+  - Append lessons when correction/postmortem signals are present.
+  - Keep task tracking artifacts current during execution.
+- MAY:
+  - Use additional subagent fan-out when uncertainty remains after first-pass analysis.
+  - Run extra elegance comparisons for non-trivial changes when time permits.
+
 ## 1) Plan Node Default
 
 - For non-trivial tasks (3+ steps, architecture changes, migrations), enter plan mode first.
@@ -15,6 +28,14 @@ This playbook is designed to work the same way when the main orchestrator is `co
 - Keep one clear task per subagent.
 - Keep the main context focused on integration decisions.
 - In `claude-light` profile, reduce optional subagent fan-out first.
+- Do not fan out by default on low-risk tasks.
+
+## 2.1) Context Budget (Staged Expansion)
+
+- `low` risk: start with 4 sources, expand only when blocked (max 8).
+- `medium` risk: start with 6 sources, expand only when blocked (max 12).
+- `high` risk: start with 8 sources, expand only when blocked (max 16).
+- Always summarize exploration output into short integration notes before continuing.
 
 ## 3) Mandatory Preflight Loop (Before Implementation)
 
@@ -57,6 +78,12 @@ Apply only integrator-approved changes.
   - Preventive rule
   - Trigger signal
 - Review relevant lessons at session start when available.
+
+## 6.1) Correction Signals
+
+- Treat these as correction/postmortem signals:
+  - Issue labels: `user-corrected`, `postmortem`, `regression`, `incident`
+  - Text signals: `user correction`, `postmortem`, `lessons learned`, `再発防止`, `根本原因`
 
 ## 7) Verification Before Done
 

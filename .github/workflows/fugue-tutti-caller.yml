@@ -55,6 +55,13 @@ jobs:
       multi_agent_mode_override: ${{ steps.ctx.outputs.multi_agent_mode_override }}
       multi_agent_mode_lock: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
       implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
+      risk_tier: ${{ steps.ctx.outputs.risk_tier }}
+      risk_score: ${{ steps.ctx.outputs.risk_score }}
+      risk_reasons: ${{ steps.ctx.outputs.risk_reasons }}
+      lessons_required: ${{ steps.ctx.outputs.lessons_required }}
+      correction_signal: ${{ steps.ctx.outputs.correction_signal }}
+      context_budget_initial: ${{ steps.ctx.outputs.context_budget_initial }}
+      context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
       - name: Checkout repository
@@ -105,6 +112,7 @@ jobs:
           has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
           has_implement_confirmed="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement-confirmed") != null)')"
+          labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
           body_mode="$(printf '%s\n' "${body}" | awk '
             BEGIN { in_sec=0 }
             tolower($0) ~ /^##[[:space:]]*mode[[:space:]]*$/ { in_sec=1; next }
@@ -576,6 +584,31 @@ jobs:
             fi
           fi
 
+          eval "$(
+            scripts/lib/workflow-risk-policy.sh \
+              --title "${title}" \
+              --body "${body}" \
+              --labels "${labels_csv}" \
+              --has-implement "${has_implement}" \
+              --orchestration-profile "${orchestration_profile}"
+          )"
+
+          if (( preflight_cycles < preflight_cycles_floor )); then
+            preflight_cycles="${preflight_cycles_floor}"
+          fi
+          if (( implementation_dialogue_rounds < implementation_dialogue_rounds_floor )); then
+            implementation_dialogue_rounds="${implementation_dialogue_rounds_floor}"
+          fi
+          # Keep low-risk tasks lightweight and high-risk tasks exhaustive when
+          # no explicit multi-agent override was provided.
+          if [[ -z "${multi_agent_mode_override}" && "${multi_agent_mode_lock}" != "true" ]]; then
+            if [[ "${risk_tier}" == "low" ]]; then
+              multi_agent_mode_override="standard"
+            elif [[ "${risk_tier}" == "high" ]]; then
+              multi_agent_mode_override="max"
+            fi
+          fi
+
           # 1) Prefer fully-qualified owner/repo found inside backticks.
           target_repo="$(printf '%s\n' "${body}" \
             | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
@@ -638,6 +671,13 @@ jobs:
             echo "multi_agent_mode_override=${multi_agent_mode_override}"
             echo "multi_agent_mode_lock=${multi_agent_mode_lock}"
             echo "implementation_dialogue_rounds=${implementation_dialogue_rounds}"
+            echo "risk_tier=${risk_tier}"
+            echo "risk_score=${risk_score}"
+            echo "risk_reasons=${risk_reasons}"
+            echo "lessons_required=${lessons_required}"
+            echo "correction_signal=${correction_signal}"
+            echo "context_budget_initial=${context_budget_initial}"
+            echo "context_budget_max=${context_budget_max}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
@@ -673,10 +713,16 @@ jobs:
           IMPLEMENT_ROUNDS: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
           MODE_OVERRIDE: ${{ steps.ctx.outputs.multi_agent_mode_override }}
           MODE_LOCK: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
+          RISK_TIER: ${{ steps.ctx.outputs.risk_tier }}
+          RISK_SCORE: ${{ steps.ctx.outputs.risk_score }}
+          RISK_REASONS: ${{ steps.ctx.outputs.risk_reasons }}
+          LESSONS_REQUIRED: ${{ steps.ctx.outputs.lessons_required }}
+          BUDGET_INITIAL: ${{ steps.ctx.outputs.context_budget_initial }}
+          BUDGET_MAX: ${{ steps.ctx.outputs.context_budget_max }}
         run: |
           set -euo pipefail
           override_display="${MODE_OVERRIDE:-none}"
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`."
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
@@ -889,6 +935,9 @@ jobs:
       refinement_cycles: "${{ needs.ctx.outputs.preflight_cycles }}"
       implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"
       orchestration_profile: "${{ needs.ctx.outputs.orchestration_profile }}"
+      risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
+      lessons_required: "${{ needs.ctx.outputs.lessons_required }}"
+      correction_signal: "${{ needs.ctx.outputs.correction_signal }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

@@ -137,6 +137,9 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
 # NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
+# NOTE: `risk-tier (low|medium|high)` を算出し、preflight/dialogue最小値と review fan-out を調整します。
+# NOTE: lessons 更新は correction/postmortem シグナル時に必須、それ以外は SHOULD 扱いです。
+# NOTE: コンテキスト探索は staged budget（low:4->8, medium:6->12, high:8->16）で段階拡張します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）

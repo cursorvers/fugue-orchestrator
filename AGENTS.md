@@ -80,6 +80,7 @@ Auditability:
   - Default rounds: `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS=2` (or `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE=1` when main is `claude`).
 - Parallel Simulation and Critical Review are hard gates and must not be skipped.
 - For large refactor/rewrite/migration tasks, each cycle must explicitly compare at least two candidates and include failure-mode/rollback checks (`large-refactor` label or task-text detection).
+- Risk-tier policy (`low|medium|high`) adjusts minimum loop depth and default review fan-out; low-risk defaults should stay lightweight.
 
 ## 6. Workflow Ownership
 
@@ -141,3 +142,4 @@ Security guardrails:
   - Implementation collaboration dialogue gates
   - Task tracking artifact (`.fugue/pre-implement/issue-<N>-todo.md`)
   - Lessons artifact (`.fugue/pre-implement/lessons.md`)
+  - MUST/SHOULD/MAY boundaries with staged context budget (see `rules/shared-orchestration-playbook.md`)
