@@ -210,6 +210,7 @@ Orchestrator切替（Codex/Claude）時も同一能力を維持するため、FU
 「CLAUDE.mdベストプラクティス」をCodex/Claude共通で使うため、provider-agnosticな運用基準を定義しています。
 
 - Playbook: `rules/shared-orchestration-playbook.md`
+- Smoke test guide: `docs/shared-playbook-smoke.md`
 - 実装Workflowで強制する成果物:
   - `.fugue/pre-implement/issue-<N>-todo.md`
   - `.fugue/pre-implement/lessons.md`
