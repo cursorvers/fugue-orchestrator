@@ -238,7 +238,7 @@ jobs:
           if [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
             judge_sys_prompt="You are Codex Orchestrator gate. Decide if Claude translation should be inserted before orchestration. Return ONLY compact JSON: {\"score\":0-100,\"should_translate\":true|false,\"reason\":\"short\",\"signals\":[\"...\"]}."
             judge_user_prompt="Analyze this issue text for ambiguity/conflict/risk/implicit constraints. Prioritize translation when requirements are unclear, mixed-language, or high-risk refactor/migration. Text:\n${normalized_text}"
-            judge_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex")
+            judge_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
             judge_json=""
             for judge_model in "${judge_candidates[@]}"; do
               judge_req="$(jq -n \
@@ -316,7 +316,7 @@ jobs:
                 fi
               elif [[ "${claude_max_plan}" == "true" && -n "${OPENAI_API_KEY:-}" ]]; then
                 translation_provider="claude-max-proxy-codex"
-                proxy_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex")
+                proxy_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
                 for proxy_model in "${proxy_candidates[@]}"; do
                   proxy_req="$(jq -n \
                     --arg model "${proxy_model}" \
@@ -416,7 +416,6 @@ jobs:
             translation_applied="true"
             translation_event="true"
           elif [[ "${translation_gate_decision}" == "true" ]]; then
-            translation_provider="none"
             if [[ -z "${translation_skip_reason}" ]]; then
               translation_skip_reason="translator-no-output"
             fi
