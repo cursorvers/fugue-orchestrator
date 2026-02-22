@@ -54,6 +54,8 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
+          ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
@@ -73,9 +75,9 @@ jobs:
 
           ISSUE_NUMBER=""
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
+            ISSUE_NUMBER="${ISSUE_NUMBER_FROM_DISPATCH}"
           else
-            ISSUE_NUMBER="${{ github.event.issue.number }}"
+            ISSUE_NUMBER="${ISSUE_NUMBER_FROM_ISSUE}"
           fi
 
           issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
