@@ -1,0 +1,169 @@
+name: fugue-orchestrator-canary
+
+on:
+  schedule:
+    - cron: "43 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+      CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
+      CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
+      CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run canary (regular + forced claude)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          repo="${GITHUB_REPOSITORY}"
+          ts="$(date -u +%Y%m%d%H%M%S)"
+          failures=0
+
+          normalize() {
+            echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
+          }
+
+          claude_state="$(normalize "${CLAUDE_RATE_LIMIT_STATE:-ok}")"
+          role_policy="$(normalize "${CLAUDE_ROLE_POLICY:-flex}")"
+          degraded_assist_policy="$(normalize "${CLAUDE_DEGRADED_ASSIST_POLICY:-none}")"
+          main_assist_policy="$(normalize "${CLAUDE_MAIN_ASSIST_POLICY:-codex}")"
+
+          eval "$(
+            ./scripts/lib/orchestrator-policy.sh \
+              --main "claude" \
+              --assist "none" \
+              --default-main "codex" \
+              --default-assist "none" \
+              --claude-state "${claude_state}" \
+              --force-claude "false" \
+              --assist-policy "${main_assist_policy}" \
+              --claude-role-policy "${role_policy}" \
+              --degraded-assist-policy "${degraded_assist_policy}"
+          )"
+          expected_regular="${resolved_main}"
+
+          eval "$(
+            ./scripts/lib/orchestrator-policy.sh \
+              --main "claude" \
+              --assist "none" \
+              --default-main "codex" \
+              --default-assist "none" \
+              --claude-state "${claude_state}" \
+              --force-claude "true" \
+              --assist-policy "${main_assist_policy}" \
+              --claude-role-policy "${role_policy}" \
+              --degraded-assist-policy "${degraded_assist_policy}"
+          )"
+          expected_force="${resolved_main}"
+
+          gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
+          gh label create "orchestrator-assist:none" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
+          gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
+          gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
+          gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
+
+          create_issue() {
+            local title="$1"
+            local force_label="$2"
+            local body
+            body="$(printf '## Canary\nAutomated orchestration canary.\n\n- profile: codex main baseline + optional claude\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
+              "${title}" \
+              "$(date -u +"%Y-%m-%dT%H:%M:%SZ")")"
+
+            local cmd=(gh issue create --repo "${repo}" --title "${title}" --body "${body}" \
+              --label "fugue-task" \
+              --label "tutti" \
+              --label "orchestrator:claude" \
+              --label "orchestrator-assist:none")
+            if [[ -n "${force_label}" ]]; then
+              cmd+=(--label "${force_label}")
+            fi
+            local url
+            url="$("${cmd[@]}")"
+            echo "${url##*/}"
+          }
+
+          wait_for_resolved_main() {
+            local issue_num="$1"
+            local max_attempts=45
+            local sleep_sec=20
+            local attempt=1
+            while [[ "${attempt}" -le "${max_attempts}" ]]; do
+              comment="$(gh issue view "${issue_num}" --repo "${repo}" --json comments --jq '[.comments[].body | select(contains("## Tutti Integrated Review"))] | last // ""')"
+              if [[ -n "${comment}" ]]; then
+                resolved="$(printf '%s\n' "${comment}" | sed -n 's/^- main orchestrator resolved: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+                if [[ -n "${resolved}" ]]; then
+                  echo "${resolved}"
+                  return 0
+                fi
+              fi
+              sleep "${sleep_sec}"
+              attempt="$((attempt + 1))"
+            done
+            return 1
+          }
+
+          conclude_issue() {
+            local issue_num="$1"
+            local expected="$2"
+            local actual="$3"
+            local pass="$4"
+            local case_name="$5"
+            if [[ "${pass}" == "true" ]]; then
+              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected}\`, actual=\`${actual}\`."
+              gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null
+              gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification."
+            else
+              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected}\`, actual=\`${actual:-timeout}\`. Investigate router/caller policy."
+              gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null
+            fi
+          }
+
+          regular_issue="$(create_issue "[canary] regular claude request ${ts}" "")"
+          force_issue="$(create_issue "[canary] forced claude request ${ts}" "orchestrator-force:claude")"
+
+          regular_actual=""
+          if regular_actual="$(wait_for_resolved_main "${regular_issue}")"; then
+            if [[ "${regular_actual}" == "${expected_regular}" ]]; then
+              conclude_issue "${regular_issue}" "${expected_regular}" "${regular_actual}" "true" "regular"
+            else
+              conclude_issue "${regular_issue}" "${expected_regular}" "${regular_actual}" "false" "regular"
+              failures="$((failures + 1))"
+            fi
+          else
+            conclude_issue "${regular_issue}" "${expected_regular}" "" "false" "regular"
+            failures="$((failures + 1))"
+          fi
+
+          force_actual=""
+          if force_actual="$(wait_for_resolved_main "${force_issue}")"; then
+            if [[ "${force_actual}" == "${expected_force}" ]]; then
+              conclude_issue "${force_issue}" "${expected_force}" "${force_actual}" "true" "force"
+            else
+              conclude_issue "${force_issue}" "${expected_force}" "${force_actual}" "false" "force"
+              failures="$((failures + 1))"
+            fi
+          else
+            conclude_issue "${force_issue}" "${expected_force}" "" "false" "force"
+            failures="$((failures + 1))"
+          fi
+
+          if [[ "${failures}" -gt 0 ]]; then
+            echo "Canary failed: ${failures} case(s)"
+            exit 1
+          fi
+
+          echo "Canary passed: regular=${expected_regular}, force=${expected_force}"

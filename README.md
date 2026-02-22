@@ -148,6 +148,9 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: lessons 更新は correction/postmortem シグナル時に必須、それ以外は SHOULD 扱いです。
 # NOTE: コンテキスト探索は staged budget（low:4->8, medium:6->12, high:8->16）で段階拡張します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
+# NOTE: `fugue-watchdog` は Claude state を自動復帰（degraded/exhausted -> ok）できますが、cooldown + 安定性条件を満たす場合のみ実行されます。
+# NOTE: `fugue-orchestrator-canary` が毎日、実Issueベースで regular/force の切替E2Eを自動検証します。
+# NOTE: `fugue-orchestration-weekly-review` が週次で assist昇格率と high-risk時の昇格カバレッジを status issue に投稿します。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）
 # gha24 "完遂: API障害対応" --implement --orchestrator claude

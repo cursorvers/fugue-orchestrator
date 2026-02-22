@@ -1,0 +1,89 @@
+name: fugue-orchestration-weekly-review
+
+on:
+  schedule:
+    - cron: "11 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  actions: read
+  contents: read
+
+jobs:
+  weekly-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Build weekly orchestration report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+        run: |
+          set -euo pipefail
+
+          repo="${GITHUB_REPOSITORY}"
+          since_iso="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          until_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          comments_json="$(gh api --paginate "repos/${repo}/issues/comments?since=${since_iso}&per_page=100" | jq -s 'add // []')"
+
+          reviews_total="$(echo "${comments_json}" | jq '[.[] | select((.body // "") | contains("## Tutti Integrated Review"))] | length')"
+          assist_none_reviews="$(echo "${comments_json}" | jq '[.[] | select((.body // "") | contains("## Tutti Integrated Review")) | select((.body // "") | test("(?m)^- assist orchestrator resolved: none$"))] | length')"
+          assist_claude_reviews="$(echo "${comments_json}" | jq '[.[] | select((.body // "") | contains("## Tutti Integrated Review")) | select((.body // "") | test("(?m)^- assist orchestrator resolved: claude$"))] | length')"
+          high_risk_reviews="$(echo "${comments_json}" | jq '[.[] | select((.body // "") | contains("## Tutti Integrated Review")) | ((.body // "") | capture("(?m)^- high-risk findings: (?<n>[0-9]+)$")? // empty) | select((.n | tonumber) > 0)] | length')"
+          high_risk_claude_reviews="$(echo "${comments_json}" | jq '[.[] | select((.body // "") | contains("## Tutti Integrated Review")) | select((.body // "") | test("(?m)^- assist orchestrator resolved: claude$")) | ((.body // "") | capture("(?m)^- high-risk findings: (?<n>[0-9]+)$")? // empty) | select((.n | tonumber) > 0)] | length')"
+
+          assist_none_rate="0.0"
+          assist_claude_rate="0.0"
+          high_risk_escalation_rate="0.0"
+          if (( reviews_total > 0 )); then
+            assist_none_rate="$(awk -v n="${assist_none_reviews}" -v t="${reviews_total}" 'BEGIN { printf "%.1f", (n/t)*100 }')"
+            assist_claude_rate="$(awk -v c="${assist_claude_reviews}" -v t="${reviews_total}" 'BEGIN { printf "%.1f", (c/t)*100 }')"
+          fi
+          if (( high_risk_reviews > 0 )); then
+            high_risk_escalation_rate="$(awk -v c="${high_risk_claude_reviews}" -v t="${high_risk_reviews}" 'BEGIN { printf "%.1f", (c/t)*100 }')"
+          fi
+
+          canary_json="$(gh api "repos/${repo}/actions/workflows/fugue-orchestrator-canary.yml/runs?per_page=1" 2>/dev/null || echo '{}')"
+          canary_conclusion="$(echo "${canary_json}" | jq -r '.workflow_runs[0].conclusion // "none"')"
+          canary_url="$(echo "${canary_json}" | jq -r '.workflow_runs[0].html_url // ""')"
+          canary_time="$(echo "${canary_json}" | jq -r '.workflow_runs[0].created_at // ""')"
+
+          status_issue="$(gh issue list --repo "${repo}" --state open --label "fugue-status" --limit 1 --json number --jq '.[0].number // empty')"
+          if [[ -z "${status_issue}" ]]; then
+            gh label create "fugue-status" \
+              --repo "${repo}" \
+              --description "Status reporting thread for FUGUE orchestration" \
+              --color "1D76DB" >/dev/null 2>&1 || true
+            status_issue_url="$(gh issue create --repo "${repo}" \
+              --title "FUGUE Status Thread" \
+              --label "fugue-status" \
+              --body "Automated status and weekly orchestration reports are posted here.")"
+            status_issue="${status_issue_url##*/}"
+          fi
+
+          warning_line="- escalation check: healthy"
+          if (( high_risk_reviews > 0 && high_risk_claude_reviews == 0 )); then
+            warning_line="- escalation check: **warning** high-risk reviews detected but no claude-assist escalation"
+          fi
+
+          printf '%s\n' \
+            "## Weekly Orchestration Review" \
+            "" \
+            "- window: ${since_iso} .. ${until_iso}" \
+            "- claude rate-limit state (current): ${CLAUDE_RATE_LIMIT_STATE}" \
+            "- tutti integrated reviews: ${reviews_total}" \
+            "- assist resolved none: ${assist_none_reviews} (${assist_none_rate}%)" \
+            "- assist resolved claude: ${assist_claude_reviews} (${assist_claude_rate}%)" \
+            "- high-risk reviews (>0 findings): ${high_risk_reviews}" \
+            "- high-risk reviews with claude assist: ${high_risk_claude_reviews} (${high_risk_escalation_rate}%)" \
+            "${warning_line}" \
+            "" \
+            "### Canary" \
+            "- latest canary conclusion: ${canary_conclusion}" \
+            "- latest canary run: ${canary_time}" \
+            "- canary url: ${canary_url}" \
+            > weekly-report.md
+
+          gh issue comment "${status_issue}" --repo "${repo}" --body-file weekly-report.md
