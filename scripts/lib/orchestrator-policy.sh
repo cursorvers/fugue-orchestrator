@@ -23,7 +23,7 @@ default_assist="none"
 claude_state="ok"
 force_claude="false"
 assist_policy="codex"
-claude_role_policy="sub-only"
+claude_role_policy="flex"
 degraded_assist_policy="none"
 format="env"
 
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --claude-role-policy)
-      claude_role_policy="${2:-sub-only}"
+      claude_role_policy="${2:-flex}"
       shift 2
       ;;
     --degraded-assist-policy)
@@ -81,7 +81,7 @@ Options:
   --claude-state VALUE      Claude rate-limit state (ok|degraded|exhausted)
   --force-claude VALUE      true to bypass fallback/pressure guards
   --assist-policy VALUE     Guard policy for main=claude+assist=claude (codex|none)
-  --claude-role-policy      Claude role policy (sub-only|flex). Default: sub-only
+  --claude-role-policy      Claude role policy (sub-only|flex). Default: flex
   --degraded-assist-policy  Fallback for assist=claude when state=degraded (none|codex)
   --format VALUE            env (default) or json
 EOF
@@ -149,7 +149,7 @@ fi
 
 claude_role_policy="$(lower_trim "${claude_role_policy}")"
 if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex" ]]; then
-  claude_role_policy="sub-only"
+  claude_role_policy="flex"
 fi
 
 degraded_assist_policy="$(normalize_assist "${degraded_assist_policy}")"

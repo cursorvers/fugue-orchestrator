@@ -112,7 +112,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body harness -R <owner/repo> # harness|api
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
-# gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body sub-only -R <owner/repo> # sub-only|flex
+# gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body flex     -R <owner/repo> # sub-only|flex
 # gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body none   -R <owner/repo> # none|codex
 # gh variable set FUGUE_CLAUDE_SUB_AUTO_ESCALATE     --body high    -R <owner/repo> # off|high|medium-high
 # gh variable set FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE --body 90    -R <owner/repo> # 0-100 (translation gate score threshold)
@@ -124,7 +124,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
-# NOTE: 既定では `FUGUE_CLAUDE_ROLE_POLICY=sub-only` により、mainのclaude指定は codex に自動降格します（force時除く）。
+# NOTE: 既定では `FUGUE_CLAUDE_ROLE_POLICY=flex` で codex/claude main 切替を許可します。sub-only にすると mainのclaude指定は codex に自動降格します（force時除く）。
 # NOTE: state が degraded のとき、assistのclaude指定は `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` に従って縮退します（既定 none）。
 # NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
 # NOTE: assist既定は none。高リスク/修正シグナル/曖昧性シグナル時のみ Claude sub assist を自動昇格します。

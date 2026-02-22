@@ -23,9 +23,9 @@ claude_main_assist_policy="$(echo "${FUGUE_CLAUDE_MAIN_ASSIST_POLICY:-codex}" | 
 if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
   claude_main_assist_policy="codex"
 fi
-claude_role_policy="$(echo "${FUGUE_CLAUDE_ROLE_POLICY:-sub-only}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+claude_role_policy="$(echo "${FUGUE_CLAUDE_ROLE_POLICY:-flex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex" ]]; then
-  claude_role_policy="sub-only"
+  claude_role_policy="flex"
 fi
 claude_degraded_assist_policy="$(echo "${FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${claude_degraded_assist_policy}" != "codex" && "${claude_degraded_assist_policy}" != "none" ]]; then

@@ -183,7 +183,7 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" || "${ASSIST_ORCHESTRATOR_PR
     claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
   fi
   claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "codex")"
-  claude_role_policy="$(gh variable get FUGUE_CLAUDE_ROLE_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "sub-only")"
+  claude_role_policy="$(gh variable get FUGUE_CLAUDE_ROLE_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "flex")"
   claude_degraded_assist_policy="$(gh variable get FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "none")"
 
   eval "$(
