@@ -106,7 +106,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.5 GitHub Actions 用オーケストレータ切替（repo variable 優先）
 # gh variable set FUGUE_MAIN_ORCHESTRATOR_PROVIDER   --body codex   -R <owner/repo>
-# gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body claude  -R <owner/repo>
+# gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body none    -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_PLAN_TIER             --body max20   -R <owner/repo>
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body harness -R <owner/repo> # harness|api
@@ -114,6 +114,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
 # gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body sub-only -R <owner/repo> # sub-only|flex
 # gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body none   -R <owner/repo> # none|codex
+# gh variable set FUGUE_CLAUDE_SUB_AUTO_ESCALATE     --body high    -R <owner/repo> # off|high|medium-high
+# gh variable set FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE --body 90    -R <owner/repo> # 0-100 (translation gate score threshold)
 # gh variable set FUGUE_IMPLEMENT_REFINEMENT_CYCLES  --body 3       -R <owner/repo> # default preflight loops before implement
 # gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS    --body 2       -R <owner/repo> # implementation dialogue rounds (default)
 # gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --body 1   -R <owner/repo> # implementation dialogue rounds when main=claude
@@ -125,6 +127,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 既定では `FUGUE_CLAUDE_ROLE_POLICY=sub-only` により、mainのclaude指定は codex に自動降格します（force時除く）。
 # NOTE: state が degraded のとき、assistのclaude指定は `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` に従って縮退します（既定 none）。
 # NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
+# NOTE: assist既定は none。高リスク/修正シグナル/曖昧性シグナル時のみ Claude sub assist を自動昇格します。
+# NOTE: 曖昧性シグナルは `FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE` 以上の高スコア時のみ昇格し、常時コンテキスト圧迫を避けます。
 # NOTE: state が ok かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
 # NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
 # NOTE: FUGUE_CLAUDE_MAX_PLAN=true なら ANTHROPIC_API_KEY なしでも Claude assist レーンは Codex proxy で参加します。

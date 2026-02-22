@@ -19,7 +19,7 @@ set -euo pipefail
 main=""
 assist=""
 default_main="codex"
-default_assist="claude"
+default_assist="none"
 claude_state="ok"
 force_claude="false"
 assist_policy="codex"

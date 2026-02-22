@@ -62,6 +62,7 @@ jobs:
       correction_signal: ${{ steps.ctx.outputs.correction_signal }}
       context_budget_initial: ${{ steps.ctx.outputs.context_budget_initial }}
       context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
+      assist_auto_selected: ${{ steps.ctx.outputs.assist_auto_selected }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
       - name: Checkout repository
@@ -76,11 +77,13 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
-          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'none' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'sub-only' }}
           CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
+          CLAUDE_SUB_AUTO_ESCALATE: ${{ vars.FUGUE_CLAUDE_SUB_AUTO_ESCALATE || 'high' }}
+          CLAUDE_SUB_AMBIGUITY_MIN_SCORE: ${{ vars.FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE || '90' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_TRANSLATOR_MODE: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODE || 'auto' }}
           CLAUDE_TRANSLATOR_THRESHOLD: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD || '75' }}
@@ -278,12 +281,16 @@ jobs:
           if [[ -z "${requested_assist_provider}" && -n "${body_assist_provider}" ]]; then
             requested_assist_provider="${body_assist_provider}"
           fi
+          assist_explicit="false"
+          if [[ -n "${label_assist_provider}" || -n "${body_assist_provider}" ]]; then
+            assist_explicit="true"
+          fi
           if [[ -z "${requested_assist_provider}" ]]; then
-            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-none}"
           fi
           requested_assist_provider="$(echo "${requested_assist_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${requested_assist_provider}" != "claude" && "${requested_assist_provider}" != "codex" && "${requested_assist_provider}" != "none" ]]; then
-            requested_assist_provider="claude"
+            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-none}"
           fi
 
           claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -533,7 +540,7 @@ jobs:
 
           eval "$(
             scripts/lib/orchestrator-policy.sh \
-              --main "${requested_main_provider}" \
+              --main "${requested_main_provider_initial}" \
               --assist "${requested_assist_provider}" \
               --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
               --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
@@ -608,6 +615,81 @@ jobs:
           if (( implementation_dialogue_rounds < implementation_dialogue_rounds_floor )); then
             implementation_dialogue_rounds="${implementation_dialogue_rounds_floor}"
           fi
+          assist_auto_selected="explicit-or-default"
+          sub_auto_escalate="$(echo "${CLAUDE_SUB_AUTO_ESCALATE:-high}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${sub_auto_escalate}" != "off" && "${sub_auto_escalate}" != "high" && "${sub_auto_escalate}" != "medium-high" ]]; then
+            sub_auto_escalate="high"
+          fi
+          claude_sub_trigger="none"
+          auto_attach_claude="false"
+          ambiguity_score_min="$(echo "${CLAUDE_SUB_AMBIGUITY_MIN_SCORE:-90}" | tr -cd '0-9')"
+          if [[ -z "${ambiguity_score_min}" ]]; then
+            ambiguity_score_min="90"
+          fi
+          if (( ambiguity_score_min < 0 )); then
+            ambiguity_score_min=0
+          elif (( ambiguity_score_min > 100 )); then
+            ambiguity_score_min=100
+          fi
+          translation_score_num="$(echo "${translation_score}" | tr -cd '0-9')"
+          if [[ -z "${translation_score_num}" ]]; then
+            translation_score_num=0
+          fi
+          # Secondary triggers to avoid "never-use-Claude" failure when risk heuristics miss.
+          if [[ "${risk_tier}" == "high" ]]; then
+            auto_attach_claude="true"
+            claude_sub_trigger="risk-high"
+          elif [[ "${correction_signal}" == "true" ]]; then
+            auto_attach_claude="true"
+            claude_sub_trigger="correction-signal"
+          elif [[ "${translation_gate_decision}" == "true" && "${translation_score_num}" -ge "${ambiguity_score_min}" ]]; then
+            auto_attach_claude="true"
+            claude_sub_trigger="ambiguity-translation-gate(${translation_score_num})"
+          fi
+          # Claude is a sub orchestrator under constrained MAX plans.
+          # Auto-attach only when risk warrants it and no explicit assist was requested.
+          if [[ "${assist_explicit}" != "true" && "${force_claude}" != "true" ]]; then
+            if [[ "${sub_auto_escalate}" == "off" ]]; then
+              requested_assist_provider="none"
+              assist_auto_selected="off->none"
+            elif [[ "${sub_auto_escalate}" == "medium-high" ]]; then
+              if [[ "${risk_tier}" == "medium" || "${risk_tier}" == "high" || "${auto_attach_claude}" == "true" ]]; then
+                requested_assist_provider="claude"
+                assist_auto_selected="${risk_tier}->claude(${claude_sub_trigger})"
+              else
+                requested_assist_provider="none"
+                assist_auto_selected="low->none"
+              fi
+            else
+              if [[ "${auto_attach_claude}" == "true" ]]; then
+                requested_assist_provider="claude"
+                assist_auto_selected="${risk_tier}->claude(${claude_sub_trigger})"
+              else
+                requested_assist_provider="none"
+                assist_auto_selected="${risk_tier}->none"
+              fi
+            fi
+          fi
+          eval "$(
+            scripts/lib/orchestrator-policy.sh \
+              --main "${requested_main_provider_initial}" \
+              --assist "${requested_assist_provider}" \
+              --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
+              --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
+              --claude-state "${claude_state}" \
+              --force-claude "${force_claude}" \
+              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}" \
+              --claude-role-policy "${CLAUDE_ROLE_POLICY}" \
+              --degraded-assist-policy "${CLAUDE_DEGRADED_ASSIST_POLICY}"
+          )"
+          requested_main_provider="${resolved_main}"
+          requested_assist_provider="${resolved_assist}"
+          main_claude_fallback_applied="${main_fallback_applied}"
+          main_claude_fallback_reason="${main_fallback_reason}"
+          assist_claude_fallback_applied="${assist_fallback_applied}"
+          assist_claude_fallback_reason="${assist_fallback_reason}"
+          claude_pressure_guard_applied="${pressure_guard_applied}"
+          claude_pressure_guard_reason="${pressure_guard_reason}"
           # Keep low-risk tasks lightweight and high-risk tasks exhaustive when
           # no explicit multi-agent override was provided.
           if [[ -z "${multi_agent_mode_override}" && "${multi_agent_mode_lock}" != "true" ]]; then
@@ -689,6 +771,7 @@ jobs:
             echo "correction_signal=${correction_signal}"
             echo "context_budget_initial=${context_budget_initial}"
             echo "context_budget_max=${context_budget_max}"
+            echo "assist_auto_selected=${assist_auto_selected}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
@@ -730,10 +813,11 @@ jobs:
           LESSONS_REQUIRED: ${{ steps.ctx.outputs.lessons_required }}
           BUDGET_INITIAL: ${{ steps.ctx.outputs.context_budget_initial }}
           BUDGET_MAX: ${{ steps.ctx.outputs.context_budget_max }}
+          ASSIST_AUTO: ${{ steps.ctx.outputs.assist_auto_selected }}
         run: |
           set -euo pipefail
           override_display="${MODE_OVERRIDE:-none}"
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`."
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}

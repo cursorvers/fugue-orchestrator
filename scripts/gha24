@@ -191,7 +191,7 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" || "${ASSIST_ORCHESTRATOR_PR
       --main "${provider}" \
       --assist "${assist_provider}" \
       --default-main "codex" \
-      --default-assist "claude" \
+      --default-assist "none" \
       --claude-state "${claude_state}" \
       --force-claude "${FORCE_CLAUDE}" \
       --assist-policy "${claude_main_assist_policy}" \
