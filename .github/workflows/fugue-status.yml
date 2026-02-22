@@ -147,8 +147,17 @@ jobs:
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
           claude_plan_tier="$(gh variable get FUGUE_CLAUDE_PLAN_TIER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "max20")"
           implement_refinement_cycles="$(gh variable get FUGUE_IMPLEMENT_REFINEMENT_CYCLES --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
+          implement_preflight_cycles_full="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
+          implement_preflight_cycles_claude="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "1")"
           implement_dialogue_rounds="$(gh variable get FUGUE_IMPLEMENT_DIALOGUE_ROUNDS --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "2")"
           implement_dialogue_rounds_claude="$(gh variable get FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "1")"
+          claude_light_multi_agent_mode="$(gh variable get FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "standard")"
+          claude_light_multi_agent_lock="$(gh variable get FUGUE_CLAUDE_LIGHT_MULTI_AGENT_LOCK --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
+          claude_translator_mode="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "auto")"
+          claude_translator_threshold="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "75")"
+          claude_translator_threshold_degraded="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "88")"
+          claude_translator_threshold_claude_light="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "90")"
+          claude_translator_threshold_degraded_claude_light="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "95")"
           claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "ok")"
           main_default="$(echo "${main_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           assist_default="$(echo "${assist_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -158,8 +167,17 @@ jobs:
           claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_plan_tier="$(echo "${claude_plan_tier}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           implement_refinement_cycles="$(echo "${implement_refinement_cycles}" | tr -cd '0-9')"
+          implement_preflight_cycles_full="$(echo "${implement_preflight_cycles_full}" | tr -cd '0-9')"
+          implement_preflight_cycles_claude="$(echo "${implement_preflight_cycles_claude}" | tr -cd '0-9')"
           implement_dialogue_rounds="$(echo "${implement_dialogue_rounds}" | tr -cd '0-9')"
           implement_dialogue_rounds_claude="$(echo "${implement_dialogue_rounds_claude}" | tr -cd '0-9')"
+          claude_light_multi_agent_mode="$(echo "${claude_light_multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_light_multi_agent_lock="$(echo "${claude_light_multi_agent_lock}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_translator_mode="$(echo "${claude_translator_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_translator_threshold="$(echo "${claude_translator_threshold}" | tr -cd '0-9')"
+          claude_translator_threshold_degraded="$(echo "${claude_translator_threshold_degraded}" | tr -cd '0-9')"
+          claude_translator_threshold_claude_light="$(echo "${claude_translator_threshold_claude_light}" | tr -cd '0-9')"
+          claude_translator_threshold_degraded_claude_light="$(echo "${claude_translator_threshold_degraded_claude_light}" | tr -cd '0-9')"
           claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${main_default}" != "codex" && "${main_default}" != "claude" ]]; then
             main_default="codex"
@@ -185,11 +203,38 @@ jobs:
           if [[ -z "${implement_refinement_cycles}" ]]; then
             implement_refinement_cycles="3"
           fi
+          if [[ -z "${implement_preflight_cycles_full}" ]]; then
+            implement_preflight_cycles_full="3"
+          fi
+          if [[ -z "${implement_preflight_cycles_claude}" ]]; then
+            implement_preflight_cycles_claude="1"
+          fi
           if [[ -z "${implement_dialogue_rounds}" ]]; then
             implement_dialogue_rounds="2"
           fi
           if [[ -z "${implement_dialogue_rounds_claude}" ]]; then
             implement_dialogue_rounds_claude="1"
+          fi
+          if [[ "${claude_light_multi_agent_mode}" != "standard" && "${claude_light_multi_agent_mode}" != "enhanced" && "${claude_light_multi_agent_mode}" != "max" ]]; then
+            claude_light_multi_agent_mode="standard"
+          fi
+          if [[ "${claude_light_multi_agent_lock}" != "true" ]]; then
+            claude_light_multi_agent_lock="false"
+          fi
+          if [[ "${claude_translator_mode}" != "auto" && "${claude_translator_mode}" != "always" && "${claude_translator_mode}" != "off" ]]; then
+            claude_translator_mode="auto"
+          fi
+          if [[ -z "${claude_translator_threshold}" ]]; then
+            claude_translator_threshold="75"
+          fi
+          if [[ -z "${claude_translator_threshold_degraded}" ]]; then
+            claude_translator_threshold_degraded="88"
+          fi
+          if [[ -z "${claude_translator_threshold_claude_light}" ]]; then
+            claude_translator_threshold_claude_light="90"
+          fi
+          if [[ -z "${claude_translator_threshold_degraded_claude_light}" ]]; then
+            claude_translator_threshold_degraded_claude_light="95"
           fi
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
@@ -238,8 +283,15 @@ jobs:
           - claude_max_plan_mode: ${claude_max_plan}
           - claude_plan_tier: ${claude_plan_tier}
           - implement_refinement_cycles: ${implement_refinement_cycles}
+          - implement_preflight_cycles (codex-full): ${implement_preflight_cycles_full}
+          - implement_preflight_cycles (claude-light): ${implement_preflight_cycles_claude}
           - implement_dialogue_rounds (default): ${implement_dialogue_rounds}
           - implement_dialogue_rounds (claude-main): ${implement_dialogue_rounds_claude}
+          - claude_light_multi_agent_mode: ${claude_light_multi_agent_mode}
+          - claude_light_multi_agent_lock: ${claude_light_multi_agent_lock}
+          - claude_translator_mode: ${claude_translator_mode}
+          - claude_translator_threshold (base/degraded): ${claude_translator_threshold}/${claude_translator_threshold_degraded}
+          - claude_translator_threshold (claude-light base/degraded): ${claude_translator_threshold_claude_light}/${claude_translator_threshold_degraded_claude_light}
           - claude_rate_limit_state: ${claude_state}
 
           **Latest runs**
