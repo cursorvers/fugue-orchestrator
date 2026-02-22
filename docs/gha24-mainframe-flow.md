@@ -43,3 +43,18 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
 - Tutti summaries, vote tallies, and Codex CLI output live directly on the originating GitHub issue so reviewers can trace decisions.
 - `fugue-watchdog` issues Discord alerts with the last-success timestamps and hours-since metrics whenever the router/mainframe runners stall, which keeps the codex team aware of automation outages.
 - The `processing` label heartbeat and `needs-human` escalations form a feedback loop: humans can step in when trust, PATs, or agency votes raise concerns.
+
+## Operations Record (2026-02-22)
+- Goal: verify codex/claude main orchestrator switching works under Claude throttle states without breaking review/implement routing.
+- Deployed code baseline: commit `2e85de3` (`CLAUDE_ROLE_POLICY` default moved to `flex`; robust main/assist fallback preserved).
+- Validation summary:
+  - `bash -n` for changed shell scripts: pass
+  - workflow YAML parse: pass
+  - `actionlint -shellcheck= -pyflakes=`: pass
+  - local simulation (`scripts/sim-orchestrator-switch.sh`): pass
+- Live checks:
+  - issue `#132` (`orchestrator:claude`, no force) under `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded` resolved main to `codex` as expected.
+  - issue `#133` (`orchestrator:claude` + force) resolved main to `claude` as expected.
+  - workflow evidence: `https://github.com/cursorvers/fugue-orchestrator/actions/runs/22278213098`
+- Current operational note:
+  - `FUGUE_CLAUDE_RATE_LIMIT_STATE` remains `degraded`; claude should be treated as constrained capacity until it returns to `ok`.

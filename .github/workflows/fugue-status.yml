@@ -171,7 +171,7 @@ jobs:
           if [[ -z "${main_default}" ]]; then
             main_default="codex"
           fi
-          assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
+          assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "none")"
           ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "harness")"
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
           claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
@@ -214,7 +214,7 @@ jobs:
             main_default="codex"
           fi
           if [[ "${assist_default}" != "codex" && "${assist_default}" != "claude" && "${assist_default}" != "none" ]]; then
-            assist_default="claude"
+            assist_default="none"
           fi
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
             ci_execution_engine="harness"
