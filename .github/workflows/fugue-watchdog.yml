@@ -127,6 +127,7 @@ jobs:
         id: claude_state_guard
         env:
           GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || '' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
         run: |
@@ -141,6 +142,13 @@ jobs:
           recover_reason="not-required"
           age_hours="0"
           fallback_mentions_24h="0"
+          can_manage_variables="false"
+
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+            can_manage_variables="true"
+          fi
 
           claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${claude_max_plan}" != "true" ]]; then
@@ -148,11 +156,15 @@ jobs:
           fi
 
           if [[ "${state}" != "ok" ]]; then
-            var_updated_at="$(gh variable list --repo "${GITHUB_REPOSITORY}" | awk '$1=="FUGUE_CLAUDE_RATE_LIMIT_STATE"{print $3}')"
-            if [[ -n "${var_updated_at}" ]]; then
-              now_epoch="$(date -u +%s)"
-              var_epoch="$(date -u -d "${var_updated_at}" +%s)"
-              age_hours="$(( (now_epoch - var_epoch) / 3600 ))"
+            if [[ "${can_manage_variables}" == "true" ]]; then
+              var_updated_at="$(gh variable list --repo "${GITHUB_REPOSITORY}" 2>/dev/null | awk '$1=="FUGUE_CLAUDE_RATE_LIMIT_STATE"{print $3}' || true)"
+              if [[ -n "${var_updated_at}" ]]; then
+                now_epoch="$(date -u +%s)"
+                var_epoch="$(date -u -d "${var_updated_at}" +%s)"
+                age_hours="$(( (now_epoch - var_epoch) / 3600 ))"
+              fi
+            else
+              recover_reason="hold-no-ops-token"
             fi
 
             since_24h="$(date -u -d '1 day ago' +%Y-%m-%d)"
@@ -179,20 +191,26 @@ jobs:
               claude_path_ok="false"
             fi
 
-            if [[ "${age_hours}" -ge "${min_age_hours}" &&
+            if [[ "${can_manage_variables}" == "true" &&
+                  "${age_hours}" -ge "${min_age_hours}" &&
                   "${fallback_mentions_24h}" == "0" &&
                   "${has_pending}" == "false" &&
                   "${openai_ok}" == "true" &&
                   "${zai_ok}" == "true" &&
                   "${claude_path_ok}" == "true" ]]; then
-              gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE \
+              if gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE \
                 --repo "${GITHUB_REPOSITORY}" \
-                --body "ok"
-              state_effective="ok"
-              recovered="true"
-              recover_reason="cooldown-auto-recover"
+                --body "ok"; then
+                state_effective="ok"
+                recovered="true"
+                recover_reason="cooldown-auto-recover"
+              else
+                recover_reason="hold-variable-write-failed"
+              fi
             else
-              recover_reason="hold-${state}"
+              if [[ "${recover_reason}" == "not-required" ]]; then
+                recover_reason="hold-${state}"
+              fi
             fi
           fi
 
@@ -202,6 +220,7 @@ jobs:
             echo "recover_reason=${recover_reason}"
             echo "state_age_hours=${age_hours}"
             echo "fallback_mentions_24h=${fallback_mentions_24h}"
+            echo "can_manage_variables=${can_manage_variables}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Get latest successful router run
@@ -285,6 +304,7 @@ jobs:
           claude_recover_reason="${{ steps.claude_state_guard.outputs.recover_reason }}"
           claude_state_age_hours="${{ steps.claude_state_guard.outputs.state_age_hours }}"
           claude_fallback_mentions_24h="${{ steps.claude_state_guard.outputs.fallback_mentions_24h }}"
+          claude_can_manage_variables="${{ steps.claude_state_guard.outputs.can_manage_variables }}"
           claude_state="$(echo "${claude_state:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
@@ -361,6 +381,7 @@ jobs:
           claude_rate_limit_state: ${claude_state}
           claude_rate_limit_auto_recovered: ${claude_recovered}
           claude_rate_limit_recover_reason: ${claude_recover_reason}
+          claude_rate_limit_manage_variables_enabled: ${claude_can_manage_variables}
           claude_rate_limit_state_age_hours: ${claude_state_age_hours}
           claude_fallback_mentions_24h: ${claude_fallback_mentions_24h}
           claude_max_plan_mode: ${claude_max_plan}

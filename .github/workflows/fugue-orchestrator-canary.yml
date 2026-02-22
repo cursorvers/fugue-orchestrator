@@ -8,6 +8,7 @@ on:
 permissions:
   issues: write
   contents: read
+  actions: write
 
 jobs:
   canary:
@@ -94,6 +95,9 @@ jobs:
             url="$("${cmd[@]}")"
             local issue_num="${url##*/}"
             gh issue edit "${issue_num}" --repo "${repo}" --add-label "tutti" >/dev/null
+            gh workflow run fugue-tutti-caller.yml \
+              --repo "${repo}" \
+              -f issue_number="${issue_num}" >/dev/null
             echo "${issue_num}"
           }
 
