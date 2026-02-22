@@ -112,6 +112,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body harness -R <owner/repo> # harness|api
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
+# gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body sub-only -R <owner/repo> # sub-only|flex
+# gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body none   -R <owner/repo> # none|codex
 # gh variable set FUGUE_IMPLEMENT_REFINEMENT_CYCLES  --body 3       -R <owner/repo> # default preflight loops before implement
 # gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS    --body 2       -R <owner/repo> # implementation dialogue rounds (default)
 # gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --body 1   -R <owner/repo> # implementation dialogue rounds when main=claude
@@ -120,9 +122,10 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
-# NOTE: state が degraded/exhausted のとき、mainのclaude指定は codex に自動フォールバックします。
+# NOTE: 既定では `FUGUE_CLAUDE_ROLE_POLICY=sub-only` により、mainのclaude指定は codex に自動降格します（force時除く）。
+# NOTE: state が degraded のとき、assistのclaude指定は `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` に従って縮退します（既定 none）。
 # NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
-# NOTE: state が ok/degraded かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
+# NOTE: state が ok かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
 # NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
 # NOTE: FUGUE_CLAUDE_MAX_PLAN=true なら ANTHROPIC_API_KEY なしでも Claude assist レーンは Codex proxy で参加します。
 # NOTE: /vote の実行可否は role-weighted 2/3 合議 + HIGH risk veto で判定されます。

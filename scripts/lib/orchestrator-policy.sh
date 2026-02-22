@@ -23,6 +23,8 @@ default_assist="claude"
 claude_state="ok"
 force_claude="false"
 assist_policy="codex"
+claude_role_policy="sub-only"
+degraded_assist_policy="none"
 format="env"
 
 while [[ $# -gt 0 ]]; do
@@ -55,6 +57,14 @@ while [[ $# -gt 0 ]]; do
       assist_policy="${2:-codex}"
       shift 2
       ;;
+    --claude-role-policy)
+      claude_role_policy="${2:-sub-only}"
+      shift 2
+      ;;
+    --degraded-assist-policy)
+      degraded_assist_policy="${2:-none}"
+      shift 2
+      ;;
     --format)
       format="${2:-env}"
       shift 2
@@ -71,6 +81,8 @@ Options:
   --claude-state VALUE      Claude rate-limit state (ok|degraded|exhausted)
   --force-claude VALUE      true to bypass fallback/pressure guards
   --assist-policy VALUE     Guard policy for main=claude+assist=claude (codex|none)
+  --claude-role-policy      Claude role policy (sub-only|flex). Default: sub-only
+  --degraded-assist-policy  Fallback for assist=claude when state=degraded (none|codex)
   --format VALUE            env (default) or json
 EOF
       exit 0
@@ -135,11 +147,26 @@ if [[ "${assist_policy}" != "codex" && "${assist_policy}" != "none" ]]; then
   assist_policy="codex"
 fi
 
+claude_role_policy="$(lower_trim "${claude_role_policy}")"
+if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex" ]]; then
+  claude_role_policy="sub-only"
+fi
+
+degraded_assist_policy="$(normalize_assist "${degraded_assist_policy}")"
+if [[ "${degraded_assist_policy}" != "codex" && "${degraded_assist_policy}" != "none" ]]; then
+  degraded_assist_policy="none"
+fi
+
 resolved_main="${requested_main}"
 resolved_assist="${requested_assist}"
 
 main_fallback_applied="false"
 main_fallback_reason=""
+if [[ "${resolved_main}" == "claude" && "${claude_role_policy}" == "sub-only" && "${force_claude}" != "true" ]]; then
+  resolved_main="codex"
+  main_fallback_applied="true"
+  main_fallback_reason="claude-main-sub-only"
+fi
 if [[ "${resolved_main}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
   resolved_main="codex"
   main_fallback_applied="true"
@@ -148,6 +175,11 @@ fi
 
 assist_fallback_applied="false"
 assist_fallback_reason=""
+if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "degraded" && "${force_claude}" != "true" ]]; then
+  resolved_assist="${degraded_assist_policy}"
+  assist_fallback_applied="true"
+  assist_fallback_reason="claude-rate-limit-degraded->${resolved_assist}"
+fi
 if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
   resolved_assist="none"
   assist_fallback_applied="true"
@@ -182,6 +214,8 @@ if [[ "${format}" == "json" ]]; then
     --arg assist_fallback_reason "${assist_fallback_reason}" \
     --arg pressure_guard_applied "${pressure_guard_applied}" \
     --arg pressure_guard_reason "${pressure_guard_reason}" \
+    --arg claude_role_policy "${claude_role_policy}" \
+    --arg degraded_assist_policy "${degraded_assist_policy}" \
     --arg compat_label "${compat_label}" \
     --arg orchestrator_label "${orchestrator_label}" \
     --arg assist_orchestrator_label "${assist_orchestrator_label}" \
@@ -196,6 +230,8 @@ if [[ "${format}" == "json" ]]; then
       assist_fallback_reason:$assist_fallback_reason,
       pressure_guard_applied:($pressure_guard_applied == "true"),
       pressure_guard_reason:$pressure_guard_reason,
+      claude_role_policy:$claude_role_policy,
+      degraded_assist_policy:$degraded_assist_policy,
       compat_label:$compat_label,
       orchestrator_label:$orchestrator_label,
       assist_orchestrator_label:$assist_orchestrator_label
@@ -214,6 +250,8 @@ assist_fallback_applied=${assist_fallback_applied}
 assist_fallback_reason=${assist_fallback_reason}
 pressure_guard_applied=${pressure_guard_applied}
 pressure_guard_reason=${pressure_guard_reason}
+claude_role_policy=${claude_role_policy}
+degraded_assist_policy=${degraded_assist_policy}
 compat_label=${compat_label}
 orchestrator_label=${orchestrator_label}
 assist_orchestrator_label=${assist_orchestrator_label}

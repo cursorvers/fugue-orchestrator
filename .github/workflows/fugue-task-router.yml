@@ -217,6 +217,8 @@ jobs:
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+          CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'sub-only' }}
+          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
         run: |
           set -euo pipefail
 
@@ -303,7 +305,9 @@ jobs:
               --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
               --claude-state "${CLAUDE_RATE_LIMIT_STATE}" \
               --force-claude "${force_claude}" \
-              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}"
+              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}" \
+              --claude-role-policy "${CLAUDE_ROLE_POLICY}" \
+              --degraded-assist-policy "${CLAUDE_DEGRADED_ASSIST_POLICY}"
           )"
           requested_provider="${requested_main}"
           requested_assist_provider="${requested_assist}"

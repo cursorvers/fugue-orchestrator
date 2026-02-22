@@ -23,6 +23,14 @@ claude_main_assist_policy="$(echo "${FUGUE_CLAUDE_MAIN_ASSIST_POLICY:-codex}" | 
 if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
   claude_main_assist_policy="codex"
 fi
+claude_role_policy="$(echo "${FUGUE_CLAUDE_ROLE_POLICY:-sub-only}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex" ]]; then
+  claude_role_policy="sub-only"
+fi
+claude_degraded_assist_policy="$(echo "${FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_degraded_assist_policy}" != "codex" && "${claude_degraded_assist_policy}" != "none" ]]; then
+  claude_degraded_assist_policy="none"
+fi
 
 printf "scenario\trequested_main\trequested_assist\tclaude_state\tforce_claude\tresolved_main\tresolved_assist\tmain_signal_lane\texpected_lanes\tweighted_vote\timpl_gate\trefinement_cycles\timplementation_dialogue_rounds\tpreflight_gate\tnote\n"
 
@@ -37,11 +45,17 @@ run_case() {
   local high_risk="$8"
 
   local resolved_main="${requested_main}"
+  if [[ "${resolved_main}" == "claude" && "${claude_role_policy}" == "sub-only" && "${force_claude}" != "true" ]]; then
+    resolved_main="codex"
+  fi
   if [[ "${resolved_main}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
     resolved_main="codex"
   fi
 
   local resolved_assist="${requested_assist}"
+  if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "degraded" && "${force_claude}" != "true" ]]; then
+    resolved_assist="${claude_degraded_assist_policy}"
+  fi
   if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
     resolved_assist="none"
   fi
@@ -78,15 +92,25 @@ run_case() {
   fi
 
   if [[ "${requested_main}" == "claude" && "${resolved_main}" == "codex" ]]; then
-    note="main-fallback-claude-to-codex"
+    if [[ "${claude_role_policy}" == "sub-only" && "${claude_state}" == "ok" && "${force_claude}" != "true" ]]; then
+      note="main-sub-only-guard-claude-to-codex"
+    else
+      note="main-fallback-claude-to-codex"
+    fi
   fi
-  if [[ "${requested_assist}" == "claude" && "${resolved_assist}" == "none" ]]; then
+  if [[ "${requested_assist}" == "claude" && "${claude_state}" == "degraded" && "${resolved_assist}" != "claude" && "${force_claude}" != "true" ]]; then
+    if [[ -n "${note}" ]]; then
+      note="${note};"
+    fi
+    note="${note}assist-fallback-claude-degraded->${resolved_assist}"
+  fi
+  if [[ "${requested_assist}" == "claude" && "${resolved_assist}" == "none" && "${claude_state}" == "exhausted" ]]; then
     if [[ -n "${note}" ]]; then
       note="${note};"
     fi
     note="${note}assist-fallback-claude-to-none"
   fi
-  if [[ "${requested_main}" == "claude" && "${requested_assist}" == "claude" && "${resolved_assist}" != "claude" && "${claude_state}" != "exhausted" && "${force_claude}" != "true" ]]; then
+  if [[ "${resolved_main}" == "claude" && "${requested_assist}" == "claude" && "${resolved_assist}" != "claude" && "${claude_state}" != "exhausted" && "${force_claude}" != "true" ]]; then
     if [[ -n "${note}" ]]; then
       note="${note};"
     fi

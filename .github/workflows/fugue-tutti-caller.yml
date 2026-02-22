@@ -79,6 +79,8 @@ jobs:
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+          CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'sub-only' }}
+          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_TRANSLATOR_MODE: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODE || 'auto' }}
           CLAUDE_TRANSLATOR_THRESHOLD: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD || '75' }}
@@ -537,7 +539,9 @@ jobs:
               --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
               --claude-state "${claude_state}" \
               --force-claude "${force_claude}" \
-              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}"
+              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}" \
+              --claude-role-policy "${CLAUDE_ROLE_POLICY}" \
+              --degraded-assist-policy "${CLAUDE_DEGRADED_ASSIST_POLICY}"
           )"
           requested_main_provider="${resolved_main}"
           requested_assist_provider="${resolved_assist}"
@@ -547,6 +551,11 @@ jobs:
           assist_claude_fallback_reason="${assist_fallback_reason}"
           claude_pressure_guard_applied="${pressure_guard_applied}"
           claude_pressure_guard_reason="${pressure_guard_reason}"
+          # Profile should follow the resolved main provider, not just initial request.
+          orchestration_profile="codex-full"
+          if [[ "${requested_main_provider}" == "claude" ]]; then
+            orchestration_profile="claude-light"
+          fi
 
           implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT:-2}"
           if [[ "${orchestration_profile}" == "claude-light" ]]; then
@@ -658,6 +667,8 @@ jobs:
             echo "assist_claude_fallback_reason=${assist_claude_fallback_reason}"
             echo "claude_pressure_guard_applied=${claude_pressure_guard_applied}"
             echo "claude_pressure_guard_reason=${claude_pressure_guard_reason}"
+            echo "claude_role_policy=${claude_role_policy}"
+            echo "claude_degraded_assist_policy=${degraded_assist_policy}"
             echo "translation_gate_decision=${translation_gate_decision}"
             echo "translation_applied=${translation_applied}"
             echo "translation_provider=${translation_provider}"
