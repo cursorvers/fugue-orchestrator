@@ -44,6 +44,9 @@ jobs:
       assist_claude_fallback_reason: ${{ steps.ctx.outputs.assist_claude_fallback_reason }}
       claude_pressure_guard_applied: ${{ steps.ctx.outputs.claude_pressure_guard_applied }}
       claude_pressure_guard_reason: ${{ steps.ctx.outputs.claude_pressure_guard_reason }}
+      translation_gate_decision: ${{ steps.ctx.outputs.translation_gate_decision }}
+      translation_applied: ${{ steps.ctx.outputs.translation_applied }}
+      translation_provider: ${{ steps.ctx.outputs.translation_provider }}
       implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
@@ -51,10 +54,18 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+          CLAUDE_TRANSLATOR_MODE: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODE || 'auto' }}
+          CLAUDE_TRANSLATOR_THRESHOLD: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD || '75' }}
+          CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED || '88' }}
+          CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
+          CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-3-7-sonnet-latest' }}
           IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
           IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
         run: |
@@ -68,6 +79,7 @@ jobs:
           fi
 
           issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          title="$(echo "${issue_json}" | jq -r '.title // ""')"
           body="$(echo "${issue_json}" | jq -r '.body // ""')"
           owner="${GITHUB_REPOSITORY%%/*}"
 
@@ -184,6 +196,231 @@ jobs:
             claude_state="ok"
           fi
 
+          # Translation gateway:
+          # Codex judges whether Claude translation is needed between human input and Codex orchestration.
+          translator_mode="$(echo "${CLAUDE_TRANSLATOR_MODE:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${translator_mode}" != "auto" && "${translator_mode}" != "always" && "${translator_mode}" != "off" ]]; then
+            translator_mode="auto"
+          fi
+          claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
+          threshold_raw="$(echo "${CLAUDE_TRANSLATOR_THRESHOLD:-75}" | tr -cd '0-9')"
+          if [[ -z "${threshold_raw}" ]]; then
+            threshold_raw="75"
+          fi
+          threshold_degraded_raw="$(echo "${CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED:-88}" | tr -cd '0-9')"
+          if [[ -z "${threshold_degraded_raw}" ]]; then
+            threshold_degraded_raw="88"
+          fi
+          max_chars_raw="$(echo "${CLAUDE_TRANSLATOR_MAX_CHARS:-6000}" | tr -cd '0-9')"
+          if [[ -z "${max_chars_raw}" ]]; then
+            max_chars_raw="6000"
+          fi
+          translation_threshold="${threshold_raw}"
+          if [[ "${claude_state}" == "degraded" ]]; then
+            translation_threshold="${threshold_degraded_raw}"
+          fi
+          translation_gate_decision="false"
+          translation_applied="false"
+          translation_provider="none"
+          translation_judge_provider="codex"
+          translation_score="0"
+          translation_reason="translation-not-required"
+          translation_skip_reason=""
+          translation_event="false"
+          translation_payload=""
+          normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
+
+          if [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
+            judge_sys_prompt="You are Codex Orchestrator gate. Decide if Claude translation should be inserted before orchestration. Return ONLY compact JSON: {\"score\":0-100,\"should_translate\":true|false,\"reason\":\"short\",\"signals\":[\"...\"]}."
+            judge_user_prompt="Analyze this issue text for ambiguity/conflict/risk/implicit constraints. Prioritize translation when requirements are unclear, mixed-language, or high-risk refactor/migration. Text:\n${normalized_text}"
+            judge_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex")
+            judge_json=""
+            for judge_model in "${judge_candidates[@]}"; do
+              judge_req="$(jq -n \
+                --arg model "${judge_model}" \
+                --arg s "${judge_sys_prompt}" \
+                --arg u "${judge_user_prompt}" \
+                '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.0}')"
+              judge_http="$(curl -sS -o /tmp/fugue-judge-response.json -w "%{http_code}" https://api.openai.com/v1/chat/completions \
+                --connect-timeout 10 --max-time 60 --retry 2 \
+                -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${judge_req}" || true)"
+              if [[ "${judge_http}" == "200" ]]; then
+                judge_content="$(jq -r '.choices[0].message.content // ""' /tmp/fugue-judge-response.json 2>/dev/null || echo "")"
+                judge_json="$(printf '%s' "${judge_content}" | sed -E 's/^```json[[:space:]]*//; s/^```[[:space:]]*//; s/[[:space:]]*```$//')"
+                if printf '%s' "${judge_json}" | jq -e . >/dev/null 2>&1; then
+                  break
+                fi
+              fi
+              judge_json=""
+            done
+            if [[ -n "${judge_json}" ]]; then
+              translation_score="$(printf '%s' "${judge_json}" | jq -r '.score // 0' | tr -cd '0-9')"
+              if [[ -z "${translation_score}" ]]; then
+                translation_score="0"
+              fi
+              judge_decision="$(printf '%s' "${judge_json}" | jq -r '.should_translate // false')"
+              if [[ "${judge_decision}" == "true" || "${translator_mode}" == "always" || "${translation_score}" -ge "${translation_threshold}" ]]; then
+                translation_gate_decision="true"
+              fi
+              translation_reason="$(printf '%s' "${judge_json}" | jq -r '.reason // "codex-judge"' | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+            else
+              # Heuristic fallback when Codex judge response is unavailable.
+              translation_score=30
+              if [[ "${#normalized_text}" -gt 1600 ]]; then translation_score=$((translation_score + 20)); fi
+              if echo "${normalized_text}" | grep -Eqi '(大規模|全面|全体|リファクタ|refactor|migration|rewrite|アーキテクチャ刷新)'; then translation_score=$((translation_score + 25)); fi
+              if echo "${normalized_text}" | grep -Eqi '(いい感じ|任せ|よろしく|適宜|うまく|なんとか|ざっくり|とりあえず|as needed|best effort)'; then translation_score=$((translation_score + 20)); fi
+              if echo "${normalized_text}" | grep -Eqi '(must not|制約|禁止|rollback|ロールバック|受け入れ|acceptance)'; then translation_score=$((translation_score + 10)); fi
+              if (( translation_score > 100 )); then translation_score=100; fi
+              translation_reason="codex-judge-fallback-heuristic"
+              if [[ "${translator_mode}" == "always" || "${translation_score}" -ge "${translation_threshold}" ]]; then
+                translation_gate_decision="true"
+              fi
+            fi
+          fi
+          if [[ "${translator_mode}" == "always" ]]; then
+            translation_gate_decision="true"
+          elif [[ "${translator_mode}" == "off" ]]; then
+            translation_gate_decision="false"
+            translation_reason="translator-mode-off"
+          fi
+
+          if [[ "${translation_gate_decision}" == "true" ]]; then
+            if [[ "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
+              translation_skip_reason="claude-rate-limit-exhausted"
+            else
+              translator_sys_prompt="You are a requirements translator between human request and Codex orchestrator. Preserve intent. Return ONLY compact JSON with keys: task_summary, goal, constraints(array), acceptance_criteria(array), risks(array), open_questions(array), execution_mode_hint(review|implement|unspecified)."
+              translator_user_prompt="Translate and structure this issue for precise execution:\n${normalized_text}"
+              translation_resp_json=""
+              if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+                translation_provider="claude"
+                claude_req="$(jq -n \
+                  --arg model "${CLAUDE_TRANSLATOR_MODEL}" \
+                  --arg s "${translator_sys_prompt}" \
+                  --arg u "${translator_user_prompt}" \
+                  '{model:$model,system:$s,messages:[{role:"user",content:$u}],max_tokens:1400,temperature:0.1}')"
+                claude_http="$(curl -sS -o /tmp/fugue-translation-response.json -w "%{http_code}" https://api.anthropic.com/v1/messages \
+                  --connect-timeout 10 --max-time 60 --retry 2 \
+                  -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+                  -H "anthropic-version: 2023-06-01" \
+                  -H "Content-Type: application/json" \
+                  -d "${claude_req}" || true)"
+                if [[ "${claude_http}" == "200" ]]; then
+                  translation_resp_json="$(jq -r '[.content[]? | select(.type=="text") | .text] | join("\n") // ""' /tmp/fugue-translation-response.json 2>/dev/null || echo "")"
+                fi
+              elif [[ "${claude_max_plan}" == "true" && -n "${OPENAI_API_KEY:-}" ]]; then
+                translation_provider="claude-max-proxy-codex"
+                proxy_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex")
+                for proxy_model in "${proxy_candidates[@]}"; do
+                  proxy_req="$(jq -n \
+                    --arg model "${proxy_model}" \
+                    --arg s "${translator_sys_prompt}" \
+                    --arg u "${translator_user_prompt}" \
+                    '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+                  proxy_http="$(curl -sS -o /tmp/fugue-translation-response.json -w "%{http_code}" https://api.openai.com/v1/chat/completions \
+                    --connect-timeout 10 --max-time 60 --retry 2 \
+                    -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+                    -H "Content-Type: application/json" \
+                    -d "${proxy_req}" || true)"
+                  if [[ "${proxy_http}" == "200" ]]; then
+                    translation_resp_json="$(jq -r '.choices[0].message.content // ""' /tmp/fugue-translation-response.json 2>/dev/null || echo "")"
+                    if [[ -n "${translation_resp_json}" ]]; then
+                      break
+                    fi
+                  fi
+                done
+              else
+                translation_skip_reason="missing-claude-translation-credentials"
+              fi
+
+              if [[ -n "${translation_resp_json}" ]]; then
+                translation_payload="$(printf '%s' "${translation_resp_json}" | sed -E 's/^```json[[:space:]]*//; s/^```[[:space:]]*//; s/[[:space:]]*```$//')"
+                if ! printf '%s' "${translation_payload}" | jq -e . >/dev/null 2>&1; then
+                  translation_payload=""
+                  translation_skip_reason="translator-invalid-json"
+                fi
+              fi
+            fi
+          fi
+
+          if [[ "${translation_gate_decision}" == "true" && -n "${translation_payload}" ]]; then
+            task_summary="$(printf '%s' "${translation_payload}" | jq -r '.task_summary // ""')"
+            translated_goal="$(printf '%s' "${translation_payload}" | jq -r '.goal // ""')"
+            exec_mode_hint="$(printf '%s' "${translation_payload}" | jq -r '.execution_mode_hint // "unspecified"')"
+            constraints_md="$(printf '%s' "${translation_payload}" | jq -r '(.constraints // []) | if length==0 then "- none" else map("- " + .) | join("\n") end')"
+            acceptance_md="$(printf '%s' "${translation_payload}" | jq -r '(.acceptance_criteria // []) | if length==0 then "- none" else map("- " + .) | join("\n") end')"
+            risks_md="$(printf '%s' "${translation_payload}" | jq -r '(.risks // []) | if length==0 then "- none" else map("- " + .) | join("\n") end')"
+            questions_md="$(printf '%s' "${translation_payload}" | jq -r '(.open_questions // []) | if length==0 then "- none" else map("- " + .) | join("\n") end')"
+            ts_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            marker_start="<!-- fugue-translation-gateway:start -->"
+            marker_end="<!-- fugue-translation-gateway:end -->"
+            old_body_file="$(mktemp)"
+            new_body_file="$(mktemp)"
+            block_file="$(mktemp)"
+            printf '%s\n' "${body}" > "${old_body_file}"
+            {
+              echo "${marker_start}"
+              echo "## FUGUE Translation Gateway"
+              echo "- mode: ${translator_mode}"
+              echo "- judge: ${translation_judge_provider}"
+              echo "- decision: ${translation_gate_decision}"
+              echo "- score: ${translation_score} (threshold=${translation_threshold})"
+              echo "- reason: ${translation_reason}"
+              echo "- translator: ${translation_provider}"
+              echo "- timestamp_utc: ${ts_utc}"
+              echo
+              echo "### Task Summary"
+              echo "${task_summary}"
+              echo
+              echo "### Goal"
+              echo "${translated_goal}"
+              echo
+              echo "### Constraints"
+              echo "${constraints_md}"
+              echo
+              echo "### Acceptance Criteria"
+              echo "${acceptance_md}"
+              echo
+              echo "### Risk Notes"
+              echo "${risks_md}"
+              echo
+              echo "### Open Questions"
+              echo "${questions_md}"
+              echo
+              echo "### Routing Hint"
+              echo "- execution_mode_hint: ${exec_mode_hint}"
+              echo "${marker_end}"
+            } > "${block_file}"
+            awk -v start="${marker_start}" -v end="${marker_end}" '
+              $0 == start {skip=1; next}
+              $0 == end {skip=0; next}
+              !skip {print}
+            ' "${old_body_file}" > "${new_body_file}"
+            printf '\n\n' >> "${new_body_file}"
+            cat "${block_file}" >> "${new_body_file}"
+            new_body="$(cat "${new_body_file}")"
+            if [[ "${new_body}" != "${body}" ]]; then
+              payload_file="$(mktemp)"
+              jq -n --arg b "${new_body}" '{body:$b}' > "${payload_file}"
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+                --method PATCH \
+                --input "${payload_file}" >/dev/null
+              body="${new_body}"
+            fi
+            translation_applied="true"
+            translation_event="true"
+          elif [[ "${translation_gate_decision}" == "true" ]]; then
+            translation_provider="none"
+            if [[ -z "${translation_skip_reason}" ]]; then
+              translation_skip_reason="translator-no-output"
+            fi
+            translation_event="true"
+          fi
+
           main_claude_fallback_applied="false"
           main_claude_fallback_reason=""
           if [[ "${requested_main_provider}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
@@ -274,11 +511,39 @@ jobs:
             echo "assist_claude_fallback_reason=${assist_claude_fallback_reason}"
             echo "claude_pressure_guard_applied=${claude_pressure_guard_applied}"
             echo "claude_pressure_guard_reason=${claude_pressure_guard_reason}"
+            echo "translation_gate_decision=${translation_gate_decision}"
+            echo "translation_applied=${translation_applied}"
+            echo "translation_provider=${translation_provider}"
+            echo "translation_score=${translation_score}"
+            echo "translation_threshold=${translation_threshold}"
+            echo "translation_reason=$(echo "${translation_reason}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+            echo "translation_skip_reason=${translation_skip_reason}"
+            echo "translation_event=${translation_event}"
             echo "implementation_dialogue_rounds=${implementation_dialogue_rounds}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Comment translation gateway decision
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.translation_event == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          DECISION: ${{ steps.ctx.outputs.translation_gate_decision }}
+          APPLIED: ${{ steps.ctx.outputs.translation_applied }}
+          PROVIDER: ${{ steps.ctx.outputs.translation_provider }}
+          SCORE: ${{ steps.ctx.outputs.translation_score }}
+          THRESHOLD: ${{ steps.ctx.outputs.translation_threshold }}
+          REASON: ${{ steps.ctx.outputs.translation_reason }}
+          SKIP_REASON: ${{ steps.ctx.outputs.translation_skip_reason }}
+        run: |
+          set -euo pipefail
+          msg="Translation gateway evaluated by Codex. decision=\`${DECISION}\`, applied=\`${APPLIED}\`, provider=\`${PROVIDER}\`, score=\`${SCORE}\` (threshold=\`${THRESHOLD}\`), reason=\`${REASON}\`."
+          if [[ -n "${SKIP_REASON}" ]]; then
+            msg="${msg} skip=\`${SKIP_REASON}\`."
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${msg}"
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
