@@ -42,6 +42,9 @@ jobs:
       main_claude_fallback_reason: ${{ steps.ctx.outputs.main_claude_fallback_reason }}
       assist_claude_fallback_applied: ${{ steps.ctx.outputs.assist_claude_fallback_applied }}
       assist_claude_fallback_reason: ${{ steps.ctx.outputs.assist_claude_fallback_reason }}
+      claude_pressure_guard_applied: ${{ steps.ctx.outputs.claude_pressure_guard_applied }}
+      claude_pressure_guard_reason: ${{ steps.ctx.outputs.claude_pressure_guard_reason }}
+      implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
     steps:
       - name: Resolve issue context
@@ -51,6 +54,9 @@ jobs:
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+          CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+          IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
+          IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
         run: |
           set -euo pipefail
 
@@ -194,6 +200,32 @@ jobs:
             assist_claude_fallback_reason="claude-rate-limit-${claude_state}"
           fi
 
+          claude_main_assist_policy="$(echo "${CLAUDE_MAIN_ASSIST_POLICY:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
+            claude_main_assist_policy="codex"
+          fi
+          claude_pressure_guard_applied="false"
+          claude_pressure_guard_reason=""
+          if [[ "${requested_main_provider}" == "claude" && "${requested_assist_provider}" == "claude" && "${force_claude}" != "true" ]]; then
+            requested_assist_provider="${claude_main_assist_policy}"
+            claude_pressure_guard_applied="true"
+            claude_pressure_guard_reason="main-claude-assist-claude->${requested_assist_provider}"
+          fi
+
+          implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT:-2}"
+          if [[ "${requested_main_provider}" == "claude" ]]; then
+            implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE:-1}"
+          fi
+          implementation_dialogue_rounds="$(echo "${implementation_dialogue_rounds_raw}" | tr -cd '0-9')"
+          if [[ -z "${implementation_dialogue_rounds}" ]]; then
+            implementation_dialogue_rounds="2"
+          fi
+          if (( implementation_dialogue_rounds < 1 )); then
+            implementation_dialogue_rounds=1
+          elif (( implementation_dialogue_rounds > 5 )); then
+            implementation_dialogue_rounds=5
+          fi
+
           # 1) Prefer fully-qualified owner/repo found inside backticks.
           target_repo="$(printf '%s\n' "${body}" \
             | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
@@ -240,13 +272,16 @@ jobs:
             echo "main_claude_fallback_reason=${main_claude_fallback_reason}"
             echo "assist_claude_fallback_applied=${assist_claude_fallback_applied}"
             echo "assist_claude_fallback_reason=${assist_claude_fallback_reason}"
+            echo "claude_pressure_guard_applied=${claude_pressure_guard_applied}"
+            echo "claude_pressure_guard_reason=${claude_pressure_guard_reason}"
+            echo "implementation_dialogue_rounds=${implementation_dialogue_rounds}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Comment fallback decision
-        if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true') }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -262,9 +297,20 @@ jobs:
               --remove-label "orchestrator-assist:claude" \
               --add-label "orchestrator-assist:none" >/dev/null 2>&1 || true
           fi
+          if [[ "${{ steps.ctx.outputs.claude_pressure_guard_applied }}" == "true" ]]; then
+            target_assist="$(echo "${{ steps.ctx.outputs.assist_orchestrator_provider }}" | tr '[:upper:]' '[:lower:]')"
+            gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "orchestrator-assist:claude" >/dev/null 2>&1 || true
+            if [[ "${target_assist}" == "codex" || "${target_assist}" == "none" ]]; then
+              gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --add-label "orchestrator-assist:${target_assist}" >/dev/null 2>&1 || true
+            fi
+          fi
           gh issue comment "${{ steps.ctx.outputs.issue_number }}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --body "Orchestrator auto-fallback applied. Main fallback: \`${{ steps.ctx.outputs.main_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.main_claude_fallback_reason }}\`). Assist fallback: \`${{ steps.ctx.outputs.assist_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.assist_claude_fallback_reason }}\`). To force Claude for this issue, add label \`orchestrator-force:claude\`."
+            --body "Orchestrator auto-adjust applied. Main fallback: \`${{ steps.ctx.outputs.main_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.main_claude_fallback_reason }}\`). Assist fallback: \`${{ steps.ctx.outputs.assist_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.assist_claude_fallback_reason }}\`). Claude pressure guard: \`${{ steps.ctx.outputs.claude_pressure_guard_applied }}\` (\`${{ steps.ctx.outputs.claude_pressure_guard_reason }}\`). To force Claude for this issue, add label \`orchestrator-force:claude\`."
 
   # Review mode: Tutti consensus (6+ parallel lanes baseline)
   tutti:
@@ -296,6 +342,8 @@ jobs:
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
       target_repo: "${{ needs.ctx.outputs.target_repo }}"
+      refinement_cycles: "${{ vars.FUGUE_IMPLEMENT_REFINEMENT_CYCLES || '3' }}"
+      implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

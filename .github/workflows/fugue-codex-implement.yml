@@ -22,6 +22,16 @@ on:
         required: false
         type: string
         default: "gpt-5.1-codex-mini"
+      refinement_cycles:
+        description: "Pre-implementation refinement cycles (Plan/Parallel Simulation/Critical Review/Fix/Replan)"
+        required: false
+        type: string
+        default: "3"
+      implementation_dialogue_rounds:
+        description: "Implementation-phase collaboration rounds (Implementer/Critic/Integrator)"
+        required: false
+        type: string
+        default: "2"
     secrets:
       OPENAI_API_KEY:
         required: true
@@ -46,6 +56,7 @@ jobs:
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       issue_title: ${{ steps.ctx.outputs.issue_title }}
       issue_body: ${{ steps.ctx.outputs.issue_body }}
+      is_large_refactor: ${{ steps.ctx.outputs.is_large_refactor }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
       branch_name: ${{ steps.ctx.outputs.branch_name }}
 
@@ -64,6 +75,7 @@ jobs:
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          HAS_LARGE_REFACTOR="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("large-refactor") != null)')"
 
           SHOULD_RUN="true"
           if [[ "${HAS_IMPLEMENT}" != "true" ]]; then
@@ -88,6 +100,7 @@ jobs:
             echo "issue_body<<EOF"
             echo "${BODY}"
             echo "EOF"
+            echo "is_large_refactor=${HAS_LARGE_REFACTOR}"
             echo "should_run=${SHOULD_RUN}"
             echo "target_repo=${TARGET_REPO}"
             echo "branch_name=${BRANCH_NAME}"
@@ -109,12 +122,14 @@ jobs:
     if: ${{ needs.prepare.outputs.should_run == 'true' }}
     needs: [prepare]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     outputs:
       pr_url: ${{ steps.create-pr.outputs.pr_url }}
       codex_exit: ${{ steps.codex.outputs.exit_code }}
+      preflight_report_path: ${{ steps.codex.outputs.preflight_report_path }}
+      implementation_report_path: ${{ steps.codex.outputs.implementation_report_path }}
 
     steps:
       - name: Guard PAT for cross-repo operations
@@ -164,20 +179,95 @@ jobs:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
           CODEX_MODEL: ${{ inputs.codex_model }}
+          REFINEMENT_CYCLES: ${{ inputs.refinement_cycles }}
+          IMPLEMENTATION_DIALOGUE_ROUNDS: ${{ inputs.implementation_dialogue_rounds }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          LARGE_REFACTOR_LABEL: ${{ needs.prepare.outputs.is_large_refactor }}
         run: |
           set -euo pipefail
+
+          cycles_raw="$(echo "${REFINEMENT_CYCLES:-3}" | tr -cd '0-9')"
+          if [[ -z "${cycles_raw}" ]]; then
+            cycles_raw="3"
+          fi
+          if (( cycles_raw < 1 )); then
+            cycles_raw=1
+          elif (( cycles_raw > 5 )); then
+            cycles_raw=5
+          fi
+          cycles="${cycles_raw}"
+          dialogue_rounds_raw="$(echo "${IMPLEMENTATION_DIALOGUE_ROUNDS:-2}" | tr -cd '0-9')"
+          if [[ -z "${dialogue_rounds_raw}" ]]; then
+            dialogue_rounds_raw="2"
+          fi
+          if (( dialogue_rounds_raw < 1 )); then
+            dialogue_rounds_raw=1
+          elif (( dialogue_rounds_raw > 5 )); then
+            dialogue_rounds_raw=5
+          fi
+          dialogue_rounds="${dialogue_rounds_raw}"
+          preflight_report=".fugue/pre-implement/issue-${ISSUE_NUMBER}-preflight.md"
+          implementation_report=".fugue/implement/issue-${ISSUE_NUMBER}-implementation-loop.md"
+          issue_text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
+          is_large_refactor="false"
+          if [[ "${LARGE_REFACTOR_LABEL:-false}" == "true" ]]; then
+            is_large_refactor="true"
+          elif echo "${issue_text}" | grep -Eqi '(大規模|全面|全体|リファクタ|refactor|migration|rewrite|アーキテクチャ刷新)'; then
+            is_large_refactor="true"
+          fi
 
           # Build instruction from issue
           INSTRUCTION="## Task: ${ISSUE_TITLE}
 
           ${ISSUE_BODY}
 
+          ## Mandatory pre-implementation protocol
+          - Before touching implementation, run this loop exactly ${cycles} times.
+          - Each cycle MUST include these five steps in order:
+            1. Plan
+            2. Parallel Simulation
+            3. Critical Review
+            4. Problem Fix
+            5. Replan
+          - Record every cycle in ${preflight_report} using this exact section format:
+            - ## Cycle N
+            - ### 1. Plan
+            - ### 2. Parallel Simulation
+            - ### 3. Critical Review
+            - ### 4. Problem Fix
+            - ### 5. Replan
+          - Parallel Simulation and Critical Review are mandatory gates and cannot be skipped.
+          - If this is a large refactor/rewrite/migration task (detected=${is_large_refactor}), every cycle MUST include:
+            - #### Candidate A
+            - #### Candidate B
+            - #### Failure Modes
+            - #### Rollback Check
+          - After all preflight cycles complete, proceed to implementation-phase collaboration.
+          - If a cycle reveals a blocking issue, resolve it before moving to the next cycle.
+
+          ## Mandatory implementation collaboration protocol
+          - During implementation, run this dialogue loop exactly ${dialogue_rounds} rounds.
+          - Treat this as team collaboration with distinct roles:
+            - Implementer: proposes concrete code changes and file-level edits.
+            - Critic: challenges regressions, security gaps, and test insufficiency.
+            - Integrator: resolves disagreements and decides the merged patch direction.
+          - Record all rounds in ${implementation_report} using this exact format:
+            - ## Round N
+            - ### Implementer Proposal
+            - ### Critic Challenge
+            - ### Integrator Decision
+            - ### Applied Change
+            - ### Verification
+          - Apply only integrator-approved changes for each round.
+          - Final code must reflect the latest integrator decisions.
+
           ## Rules
           - Implement the changes described above
           - Follow existing code style and patterns
           - Do NOT modify unrelated files
           - Ensure code compiles/passes lint
-          - Add tests if test infrastructure exists"
+          - Add tests if test infrastructure exists
+          - Keep all preflight reasoning concise and actionable"
 
           # Write instruction to temp file to avoid shell escaping issues
           echo "${INSTRUCTION}" > /tmp/codex-instruction.md
@@ -189,6 +279,81 @@ jobs:
             --full-auto \
             "$(cat /tmp/codex-instruction.md)" \
             2>&1 | tee /tmp/codex-output.log || EXIT_CODE=$?
+
+          echo "preflight_report_path=${preflight_report}" >> "${GITHUB_OUTPUT}"
+          echo "implementation_report_path=${implementation_report}" >> "${GITHUB_OUTPUT}"
+
+          # Enforce the default refinement protocol before implementation is accepted.
+          if [[ ! -f "${preflight_report}" ]]; then
+            echo "Missing mandatory preflight report: ${preflight_report}" | tee -a /tmp/codex-output.log
+            EXIT_CODE=1
+          else
+            for i in $(seq 1 "${cycles}"); do
+              if ! grep -q "^## Cycle ${i}$" "${preflight_report}"; then
+                echo "Missing section: ## Cycle ${i}" | tee -a /tmp/codex-output.log
+                EXIT_CODE=1
+                continue
+              fi
+              block="$(awk -v n="${i}" '
+                $0 == "## Cycle " n {on=1; next}
+                on && /^## Cycle [0-9]+$/ {exit}
+                on {print}
+              ' "${preflight_report}")"
+              for heading in \
+                "### 1. Plan" \
+                "### 2. Parallel Simulation" \
+                "### 3. Critical Review" \
+                "### 4. Problem Fix" \
+                "### 5. Replan"; do
+                if ! printf '%s\n' "${block}" | grep -q "^${heading}$"; then
+                  echo "Cycle ${i} missing heading: ${heading}" | tee -a /tmp/codex-output.log
+                  EXIT_CODE=1
+                fi
+              done
+              if [[ "${is_large_refactor}" == "true" ]]; then
+                for heading in \
+                  "#### Candidate A" \
+                  "#### Candidate B" \
+                  "#### Failure Modes" \
+                  "#### Rollback Check"; do
+                  if ! printf '%s\n' "${block}" | grep -q "^${heading}$"; then
+                    echo "Cycle ${i} missing large-refactor section: ${heading}" | tee -a /tmp/codex-output.log
+                    EXIT_CODE=1
+                  fi
+                done
+              fi
+            done
+          fi
+
+          # Enforce implementation-phase dialogue loop report.
+          if [[ ! -f "${implementation_report}" ]]; then
+            echo "Missing mandatory implementation collaboration report: ${implementation_report}" | tee -a /tmp/codex-output.log
+            EXIT_CODE=1
+          else
+            for i in $(seq 1 "${dialogue_rounds}"); do
+              if ! grep -q "^## Round ${i}$" "${implementation_report}"; then
+                echo "Missing section: ## Round ${i}" | tee -a /tmp/codex-output.log
+                EXIT_CODE=1
+                continue
+              fi
+              block="$(awk -v n="${i}" '
+                $0 == "## Round " n {on=1; next}
+                on && /^## Round [0-9]+$/ {exit}
+                on {print}
+              ' "${implementation_report}")"
+              for heading in \
+                "### Implementer Proposal" \
+                "### Critic Challenge" \
+                "### Integrator Decision" \
+                "### Applied Change" \
+                "### Verification"; do
+                if ! printf '%s\n' "${block}" | grep -q "^${heading}$"; then
+                  echo "Round ${i} missing heading: ${heading}" | tee -a /tmp/codex-output.log
+                  EXIT_CODE=1
+                fi
+              done
+            done
+          fi
 
           echo "exit_code=${EXIT_CODE}" >> "${GITHUB_OUTPUT}"
 
@@ -202,7 +367,7 @@ jobs:
           fi
 
       - name: Commit changes
-        if: ${{ steps.codex.outputs.no_changes != 'true' }}
+        if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
         run: |
           git config user.name "fugue-codex[bot]"
           git config user.email "fugue-codex[bot]@users.noreply.github.com"
@@ -214,7 +379,7 @@ jobs:
           Closes #${{ needs.prepare.outputs.issue_number }}"
 
       - name: Push branch
-        if: ${{ steps.codex.outputs.no_changes != 'true' }}
+        if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
         env:
           GH_TOKEN: ${{ secrets.TARGET_REPO_PAT || github.token }}
         run: |
@@ -222,7 +387,7 @@ jobs:
 
       - name: Create Pull Request
         id: create-pr
-        if: ${{ steps.codex.outputs.no_changes != 'true' }}
+        if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
         env:
           GH_TOKEN: ${{ secrets.TARGET_REPO_PAT || github.token }}
         run: |
@@ -261,7 +426,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-output-log
-          path: /tmp/codex-output.log
+          path: |
+            /tmp/codex-output.log
+            ${{ steps.codex.outputs.preflight_report_path }}
+            ${{ steps.codex.outputs.implementation_report_path }}
           if-no-files-found: ignore
 
   finalize:
@@ -289,6 +457,14 @@ jobs:
           Exit code: ${CODEX_EXIT}"
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --add-label "completed"
+          elif [[ "${CODEX_EXIT}" != "0" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Codex implementation stopped before PR creation because mandatory protocol checks failed.
+
+          Exit code: ${CODEX_EXIT}
+          Check artifacts for protocol reports and codex output log."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --add-label "needs-review"
           else
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation did not produce changes.

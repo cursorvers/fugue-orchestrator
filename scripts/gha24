@@ -13,6 +13,7 @@ set -euo pipefail
 #   --force-claude Force claude provider(s) for this issue even when repo fallback state is degraded/exhausted
 #
 # Notes:
+#   Default mode is implement unless review-only intent is explicit.
 #   The issue is always created in the orchestrator repo. The target repo is
 #   passed via the issue body so the caller workflow can resolve it.
 #
@@ -23,7 +24,7 @@ set -euo pipefail
 TASK=""
 ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
 TARGET_REPO="cursorvers/fugue-orchestrator"
-IMPLEMENT=false
+IMPLEMENT=true
 MODE_EXPLICIT=false
 ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-}"
 ORCHESTRATOR_PROVIDER_EXPLICIT=false
@@ -133,13 +134,16 @@ if [[ "${FORCE_CLAUDE}" == "true" ]]; then
 fi
 
 # Natural language mode selection (only when no explicit mode flag was provided).
-# Keep this conservative: only opt into implementation when the intent is explicit.
+# Default is implement; explicit review-only phrases can switch to review mode.
 if [[ "${MODE_EXPLICIT}" != "true" ]]; then
   if echo "${TASK}" | grep -Eqi '(レビューのみ|指摘のみ|実装しない|実装不要|review only|no implement|no-implement|#review)'; then
     IMPLEMENT=false
-  elif echo "${TASK}" | grep -Eqi '(実装|PR作成|プルリク|自走|full-auto|#implement)'; then
-    IMPLEMENT=true
   fi
+fi
+
+LARGE_REFACTOR_HINT=false
+if echo "${TASK}" | grep -Eqi '(大規模|全面|全体|リファクタ|refactor|migration|rewrite|アーキテクチャ刷新)'; then
+  LARGE_REFACTOR_HINT=true
 fi
 
 # Create the issue first, then add the `tutti` label as a second step.
@@ -213,6 +217,14 @@ if [[ "${IMPLEMENT}" == "true" ]]; then
       --color "0052CC" >/dev/null 2>&1 || true
     LABELS="${LABELS},${compat_label}"
   fi
+
+  if [[ "${LARGE_REFACTOR_HINT}" == "true" ]]; then
+    gh label create "large-refactor" \
+      --repo "${ORCHESTRATOR_REPO}" \
+      --description "Large refactor/rewrite/migration task requiring extended preflight sections" \
+      --color "D93F0B" >/dev/null 2>&1 || true
+    LABELS="${LABELS},large-refactor"
+  fi
 fi
 
 BODY="$(cat <<EOF
@@ -255,6 +267,34 @@ fi )
 
 ## Mode
 $( [[ "${IMPLEMENT}" == "true" ]] && echo "implement" || echo "review" )
+
+$( if [[ "${IMPLEMENT}" == "true" ]]; then cat <<PREFLIGHT
+## Mandatory preflight protocol (before implementation)
+- Repeat 3 cycles by default (repo variable \`FUGUE_IMPLEMENT_REFINEMENT_CYCLES\` can override).
+- Each cycle must execute in this exact order:
+  1. Plan
+  2. Parallel Simulation
+  3. Critical Review
+  4. Problem Fix
+  5. Replan
+- Parallel Simulation and Critical Review are hard gates and cannot be skipped.
+- For large refactor/rewrite/migration tasks, every cycle must include:
+  - Candidate A
+  - Candidate B
+  - Failure Modes
+  - Rollback Check
+
+## Mandatory implementation collaboration protocol
+- After preflight completion, run implementation dialogue loops (repo variable \`FUGUE_IMPLEMENT_DIALOGUE_ROUNDS\`, default 2).
+- Each round must include:
+  - Implementer Proposal
+  - Critic Challenge
+  - Integrator Decision
+  - Applied Change
+  - Verification
+- Only integrator-approved changes should be applied.
+PREFLIGHT
+fi )
 EOF
 )"
 
@@ -323,6 +363,9 @@ fi
 if [[ "${IMPLEMENT}" == "true" ]]; then
   echo "Mode: Implementation intent (executed by Codex CLI after Tutti approval)"
   echo "Tutti vote will run first. If approved, Codex implement will run automatically."
+  if [[ "${LARGE_REFACTOR_HINT}" == "true" ]]; then
+    echo "Large-refactor hint: enabled (label: large-refactor)"
+  fi
 else
   echo "Mode: Review only (6-parallel agent consensus)"
 fi

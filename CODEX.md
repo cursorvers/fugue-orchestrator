@@ -1,6 +1,6 @@
-# CLAUDE.md - Thin Adapter
+# CODEX.md - Thin Adapter
 
-Role: Claude is an orchestrator adapter for this repository.
+Role: Codex is an orchestrator adapter for this repository.
 Primary policy source is `AGENTS.md`.
 
 ## 1. Read Order
@@ -9,14 +9,11 @@ Primary policy source is `AGENTS.md`.
 2. Read only the specific workflow/docs sections needed for the current task.
 3. Do not load large reference files unless blocked.
 
-## 2. Claude-Specific Deltas
+## 2. Codex-Specific Deltas
 
-- When Claude is rate-limited, fallback behavior is controlled by:
-  - `FUGUE_CLAUDE_RATE_LIMIT_STATE`
-  - `orchestrator-force:claude`
-  - `--force-claude` in `scripts/gha24`
-- Claude sidecar can be used for ambiguity resolution and synthesis quality,
-  but control-plane state transitions remain workflow-owned.
+- Codex is the safe default main orchestrator when Claude is throttled.
+- Main/assist provider selection and fallback must stay audit-visible on each issue.
+- Keep implementation ownership in workflow gates (`vote` + risk), not in ad-hoc bypasses.
 
 ## 3. Operational Anchors
 
@@ -35,7 +32,7 @@ Primary policy source is `AGENTS.md`.
   - `./scripts/gha24 "task" --implement`
 - Provider override:
   - `./scripts/gha24 "task" --orchestrator codex`
-  - `./scripts/gha24 "task" --orchestrator claude`
+  - `./scripts/gha24 "task" --assist-orchestrator codex`
   - `./scripts/gha24 "task" --orchestrator claude --force-claude`
 - Deterministic simulation:
   - `scripts/sim-orchestrator-switch.sh`

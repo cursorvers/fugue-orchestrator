@@ -93,8 +93,8 @@ if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
         risk:"MEDIUM",
         approve:false,
         findings:["Skipped: missing ANTHROPIC_API_KEY and Claude MAX proxy mode is disabled"],
-        recommendation:"Set FUGUE_CLAUDE_MAX_PLAN=true or provide ANTHROPIC_API_KEY to enable Claude assist lanes",
-        rationale:"Claude assist lane was skipped due to missing credential path",
+        recommendation:"Set FUGUE_CLAUDE_MAX_PLAN=true or provide ANTHROPIC_API_KEY to enable Claude lanes",
+        rationale:"Claude lane was skipped due to missing credential path",
         execution_engine:"harness"
       }')"
     echo "${result}" > "agent-${AGENT_NAME}.json"
@@ -284,11 +284,11 @@ elif [[ "${PROVIDER}" == "xai" && "${http_code}" != "200" ]]; then
     optional_error_note="xAI API error (HTTP ${http_code})"
   fi
 elif [[ "${PROVIDER}" == "claude" && "${http_code}" != "200" ]]; then
-  optional_provider_label="Claude Assist"
+  optional_provider_label="Claude"
   if [[ "${http_code}" == "429" ]]; then
-    optional_error_note="Claude Assist API rate limited (HTTP 429)"
+    optional_error_note="Claude API rate limited (HTTP 429)"
   else
-    optional_error_note="Claude Assist API error (HTTP ${http_code})"
+    optional_error_note="Claude API error (HTTP ${http_code})"
   fi
 fi
 

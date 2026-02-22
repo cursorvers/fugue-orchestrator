@@ -11,6 +11,7 @@ Build an orchestration system where:
 
 In scope:
 - Main/assist provider resolution in GitHub Actions.
+- Main-provider signal lane wiring in Tutti matrix (`codex-main-orchestrator` / `claude-main-orchestrator`).
 - Claude rate-limit aware fallback.
 - Assist lane integration as optional/non-blocking.
 - Workflow observability for requested vs resolved providers.
@@ -40,6 +41,7 @@ FR-2 Assist provider resolution:
 FR-3 Claude throttle guard:
 - If Claude rate-limit state is `degraded` or `exhausted`, main provider must auto-fallback to `codex` unless forced.
 - If Claude rate-limit state is `exhausted`, assist provider `claude` must auto-fallback to `none` unless forced.
+- If main provider resolves to `claude` and assist provider also resolves to `claude`, apply pressure guard to reduce Claude lane pressure (`FUGUE_CLAUDE_MAIN_ASSIST_POLICY=codex|none`, default `codex`) unless forced.
 - If Claude rate-limit state is `ok` or `degraded`, Sonnet assist lanes should remain eligible.
 - Force override must be explicit (`orchestrator-force:claude` / CLI force option).
 - Fallback reason must be written to issue comments for auditability.
@@ -53,7 +55,35 @@ FR-5 Assist lane behavior:
 - Missing/failed assist provider credentials must not fail quorum.
 - Assist lane failure should be reported as skipped/error in integrated comment.
 
-FR-6 Backward compatibility:
+FR-6 Weighted governance gate:
+- Execution approval uses role-weighted 2/3 consensus (not flat count only).
+- Any HIGH risk finding must veto auto-execution regardless of weighted score.
+
+FR-7 Implement preflight protocol:
+- Before implementation, run 5-step refinement loop:
+  1) Plan
+  2) Parallel Simulation
+  3) Critical Review
+  4) Problem fix
+  5) Replan
+- Default cycles must be 3 (`FUGUE_IMPLEMENT_REFINEMENT_CYCLES=3`) and auditable via artifact/report.
+- Large refactor/rewrite/migration strict sections are required when either:
+  - issue has `large-refactor` label, or
+  - issue text matches large-refactor keywords.
+
+FR-8 Implementation collaboration protocol:
+- After preflight passes, implementation phase must run role-based dialogue rounds:
+  - `Implementer Proposal`
+  - `Critic Challenge`
+  - `Integrator Decision`
+  - `Applied Change`
+  - `Verification`
+- Default rounds must be configurable:
+  - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS` (default baseline)
+  - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE` (default when main provider is `claude`)
+- Missing/invalid implementation collaboration report must fail before PR creation.
+
+FR-9 Backward compatibility:
 - Existing `orchestrator_provider` workflow input remains supported.
 - Existing issue labeling patterns continue to work.
 
@@ -79,9 +109,14 @@ Required/optional repo variables:
 - `FUGUE_CI_EXECUTION_ENGINE` (`harness|api`, default `harness`; controls run-agents engine)
 - `FUGUE_MULTI_AGENT_MODE` (`standard|enhanced|max`, default `enhanced`; controls lane depth)
 - `FUGUE_CLAUDE_RATE_LIMIT_STATE` (`ok|degraded|exhausted`)
+- `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` (`codex|none`, default `codex`; when main=claude and assist=claude, adjust assist to reduce Claude pressure unless forced)
 - `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, default `true`; allows Claude assist lanes without direct Anthropic key by proxying through Codex)
+- `FUGUE_CLAUDE_PLAN_TIER` (`max20` default assumption for operations messaging / status visibility)
 - `FUGUE_CLAUDE_SONNET4_MODEL` (optional, default `claude-3-7-sonnet-latest`)
 - `FUGUE_CLAUDE_SONNET6_MODEL` (optional, default `claude-3-5-sonnet-latest`)
+- `FUGUE_IMPLEMENT_REFINEMENT_CYCLES` (`1-5`, default `3`; enforce pre-implementation refinement loops)
+- `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS` (`1-5`, default `2`; implementation collaboration rounds)
+- `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE` (`1-5`, default `1`; implementation collaboration rounds when main=claude)
 
 Secrets:
 - Existing: `OPENAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`
@@ -94,6 +129,7 @@ AC-1 Deterministic simulation:
   - main fallback `claude -> codex` under throttled state
   - assist behavior non-blocking
   - implementation gate unchanged (`vote + risk` guarded)
+  - weighted vote outcome and refinement-cycle gate visibility
 
 AC-2 Workflow syntax:
 - All changed shell scripts pass `bash -n`.
@@ -108,6 +144,8 @@ AC-3 Live smoke checks:
 AC-4 No system breakage:
 - Review-only flow still completes.
 - Implement flow gate remains `ok_to_execute == true` and implementation intent required.
+- Implement flow fails fast when refinement report is missing/incomplete.
+- Implement flow fails fast when implementation collaboration report is missing/incomplete.
 
 ## 7. Rollout
 

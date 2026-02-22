@@ -13,8 +13,10 @@ Adapter files such as `CLAUDE.md` must stay thin and reference this file.
 ## 2. Control Plane Contract
 
 - Main orchestrator is provider-agnostic by design.
+- Operational default is `codex` (main), with `claude` as assist sidecar.
 - Operational default is `codex` when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted`.
 - `claude` can run as assist sidecar for ambiguity resolution and integration quality.
+- Claude subscription assumption is `FUGUE_CLAUDE_PLAN_TIER=max20` with `FUGUE_CLAUDE_MAX_PLAN=true`.
 - State transitions and PR actions are owned by control plane workflows, not by sidecar advice.
 
 ## 3. Provider Resolution Contract
@@ -34,6 +36,7 @@ Assist resolution order:
 Throttle guard:
 - If resolved **main** provider is `claude` and state is `degraded` or `exhausted`, auto-fallback to `codex`.
 - If resolved **assist** provider is `claude` and state is `exhausted`, auto-fallback to `none`.
+- If resolved **main** is `claude` and resolved **assist** is also `claude`, apply pressure guard (`FUGUE_CLAUDE_MAIN_ASSIST_POLICY=codex|none`, default `codex`) unless forced.
 - Per-issue override: label `orchestrator-force:claude` or CLI `--force-claude`.
 
 Auditability:
@@ -43,6 +46,9 @@ Auditability:
 ## 4. Execution/Evaluation Lanes
 
 - Core quorum: 6 lanes minimum (Codex3 + GLM3).
+- Add one main-provider signal lane after resolution:
+  - `codex-main-orchestrator` when main is `codex`
+  - `claude-main-orchestrator` when main is `claude`
 - CI lane execution engine defaults to `harness` (`FUGUE_CI_EXECUTION_ENGINE=harness|api`).
 - Multi-agent depth is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`).
 - GLM baseline model: `glm-5.0`.
@@ -56,14 +62,28 @@ Auditability:
 ## 5. Safety and Governance
 
 - High-risk finding blocks auto-execution and escalates to human review.
+- Tutti execution decisions use weighted consensus (role-weighted 2/3 threshold) plus HIGH-risk veto.
 - Review-only intent must clear stale implementation labels.
 - Cross-repo implementation requires `TARGET_REPO_PAT`.
 - Dangerous operations require explicit human consent paths.
+- Implement mode must complete preflight refinement loops before code changes:
+  1) Plan
+  2) Parallel Simulation
+  3) Critical Review
+  4) Problem Fix
+  5) Replan
+  Repeat default 3 cycles (`FUGUE_IMPLEMENT_REFINEMENT_CYCLES=3`).
+- After preflight passes, implement mode must run implementation collaboration dialogue rounds:
+  - `Implementer Proposal` -> `Critic Challenge` -> `Integrator Decision` -> `Applied Change` -> `Verification`
+  - Default rounds: `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS=2` (or `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE=1` when main is `claude`).
+- Parallel Simulation and Critical Review are hard gates and must not be skipped.
+- For large refactor/rewrite/migration tasks, each cycle must explicitly compare at least two candidates and include failure-mode/rollback checks (`large-refactor` label or task-text detection).
 
 ## 6. Workflow Ownership
 
 - Issue intake and natural-language handoff:
   - `.github/workflows/fugue-task-router.yml`
+  - Default behavior: `fugue-task` issues auto-handoff to mainframe unless manual opt-out markers are present.
 - Mainframe orchestration gate:
   - `.github/workflows/fugue-tutti-caller.yml`
 - Tutti quorum integration:
@@ -76,7 +96,7 @@ Auditability:
 
 ## 7. Adapter Contract
 
-Adapter files (`CLAUDE.md`, future `CODEX.md`) must contain only:
+Adapter files (`CLAUDE.md`, `CODEX.md`) must contain only:
 - Role-specific deltas that cannot live in SSOT.
 - Pointers to this file and a minimal command reference.
 - No duplicated long policy text from SSOT.
@@ -90,3 +110,18 @@ scripts/sim-orchestrator-switch.sh
 ```
 
 Use live rehearsal only when needed and clean up synthetic issues after verification.
+
+## 9. Shared Skills Baseline (Codex/Claude)
+
+- FUGUE useful third-party skills must be curated and pinned.
+- Baseline manifest:
+  - `config/skills/fugue-openclaw-baseline.tsv`
+- Shared sync script (provider-agnostic):
+  - `scripts/skills/sync-openclaw-skills.sh`
+- Profile details:
+  - `docs/fugue-skills-profile.md`
+
+Security guardrails:
+- Do not install unpinned third-party skills directly from `main`.
+- Reject skills with unsafe auto-execution guidance (`--yolo`, `--full-auto`) in default profile.
+- Keep Codex and Claude skill sets synchronized from the same manifest so orchestrator switching does not change capabilities.

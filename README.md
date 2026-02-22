@@ -4,7 +4,7 @@
 >
 > 分散自律 x 統合収束
 
-Claude Code 向けのマルチモデル AI オーケストレーションフレームワーク。Claude を純粋なオーケストレーターに徹させ、タスク実行は専門 AI エージェント（Codex/GPT, GLM, Gemini, Grok）に委譲します。
+Codex/Claude 両対応のマルチモデル AI オーケストレーションフレームワーク。メインオーケストレーターは実行を持たず、タスク実行は専門 AI エージェント（Codex/GPT, GLM, Gemini, Grok）に委譲します。
 
 名前は音楽のフーガに由来します。複数の独立した声部が織り合わさり、ひとつの統一された全体を形成する。各 AI モデルが声部であり、オーケストレーターが調和を保証します。
 
@@ -14,12 +14,12 @@ Claude Code の Agent Teams 機能はレートリミットが想定より低い�
 
 ## 解決策
 
-**2層オーケストレーション**: Claude Opus はオーケストレーター（ルーティング・統合・報告）に専念。個別タスクの実行は固定費サブスクリプションの外部モデルに委譲。
+**2層オーケストレーション**: メインオーケストレーター（Codex/Claude）はルーティング・統合・報告に専念。個別タスクの実行は固定費サブスクリプションの外部モデルに委譲。
 
 ```
 ユーザー
     |  指示
-Claude Opus（オーケストレーター専念）
+Main Orchestrator（Codex/Claude）
     |  ルーティング
 +-----------------------------------+
 | 実行層 (Execution Tier)           |
@@ -37,12 +37,12 @@ Claude Opus（オーケストレーター専念）
 | +-> Gemini (UI/UX監査)           |
 +-----------------------------------+
     |  フィードバック
-Claude Opus（統合・報告）
+Main Orchestrator（統合・報告）
 ```
 
 ## 基本原則
 
-- **オーケストレーターは実行しない**: Claude はルーティング・統合・報告のみ。実装は禁止。
+- **オーケストレーターは実行しない**: メインオーケストレーター（Codex/Claude）はルーティング・統合・報告のみ。実装は禁止。
 - **固定費の最大活用**: Codex ($200/月) と GLM ($15/月) で90%以上のタスクを処理。
 - **サブエージェント最小化**: Haiku/Sonnet サブエージェントは Claude レートリミットを消費するため、ファイル探索のみに限定。
 - **二重評価**: 成果物はユーザーに報告する前に自動レビューを通過。
@@ -52,6 +52,7 @@ Claude Opus（統合・報告）
 ```
 AGENTS.md                              <- SSOT: オーケストレーション契約（共通）
 CLAUDE.md                              <- Claude用薄いアダプタ（AGENTS.mdを参照）
+CODEX.md                               <- Codex用薄いアダプタ（AGENTS.mdを参照）
 rules/
   delegation-matrix.md                 <- SSOT: 誰が何を担当するか
   auto-execution.md                    <- 自動委譲トリガー
@@ -91,6 +92,7 @@ cd fugue-orchestrator
 # 2. ルールを Claude Code 設定にコピー
 cp AGENTS.md ~/.claude/AGENTS.md
 cp CLAUDE.md ~/.claude/CLAUDE.md
+cp CODEX.md ~/.claude/CODEX.md
 cp -r rules/ ~/.claude/rules/
 
 # 3. API キーを設定
@@ -105,8 +107,13 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_MAIN_ORCHESTRATOR_PROVIDER   --body codex   -R <owner/repo>
 # gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body claude  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
+# gh variable set FUGUE_CLAUDE_PLAN_TIER             --body max20   -R <owner/repo>
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body harness -R <owner/repo> # harness|api
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
+# gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
+# gh variable set FUGUE_IMPLEMENT_REFINEMENT_CYCLES  --body 3       -R <owner/repo> # default preflight loops before implement
+# gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS    --body 2       -R <owner/repo> # implementation dialogue rounds (default)
+# gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --body 1   -R <owner/repo> # implementation dialogue rounds when main=claude
 # (legacy) gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body ok        -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
@@ -115,7 +122,14 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: state が degraded/exhausted のとき、mainのclaude指定は codex に自動フォールバックします。
 # NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
 # NOTE: state が ok/degraded かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
+# NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
 # NOTE: FUGUE_CLAUDE_MAX_PLAN=true なら ANTHROPIC_API_KEY なしでも Claude assist レーンは Codex proxy で参加します。
+# NOTE: /vote の実行可否は role-weighted 2/3 合議 + HIGH risk veto で判定されます。
+# NOTE: implement 時は Plan→Parallel Simulation→Critical Review→Problem Fix→Replan を 3 サイクル完了後に実装します。
+# NOTE: preflight通過後の実装フェーズでは Implementer/ Critic/ Integrator の対話ループを必須化しています。
+# NOTE: 大規模リファクタ/リライト/移行タスクでは、各サイクルで Candidate A/B + Failure Modes + Rollback Check を必須化します。
+# NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
+# NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE=harness` で /vote レーンは harness 実行エンジンを直結利用（main=codex/claude 共通）。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
@@ -124,11 +138,21 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gha24 "完遂: API障害対応" --implement --orchestrator claude
 # gha24 "完遂: API障害対応" --implement --orchestrator codex --assist-orchestrator claude
 # gha24 "完遂: API障害対応" --implement --orchestrator claude --force-claude
+# NOTE: `gha24` はデフォルト implement。レビューのみは `--review` か `レビューのみ` 指示で明示します。
 # あるいは:
 # GHA24_ORCHESTRATOR_PROVIDER=claude gha24 "完遂: API障害対応" --implement
 
 # 3.7 Orchestrator切替シミュレーション（ローカル・非破壊）
 # ./scripts/sim-orchestrator-switch.sh | column -t -s $'\t'
+
+# 3.8 FUGUE有用スキル同期（Codex/Claude 共通）
+# required プロファイルのみ同期
+# ./scripts/skills/sync-openclaw-skills.sh --target both
+# optional まで含める
+# ./scripts/skills/sync-openclaw-skills.sh --target both --with-optional
+# dry-run（差分確認）
+# ./scripts/skills/sync-openclaw-skills.sh --target both --with-optional --dry-run
+# NOTE: third-party skills は pin SHA 取得 + ブロックリスト検査 + managed marker で保護
 
 # Note:
 # `orchestrator provider` は Tutti のレーン選択プロファイルです。
@@ -169,6 +193,15 @@ chmod +x examples/consensus-vote-stub.sh
 ## アーキテクチャ決定記録
 
 競合比較（AutoGen, CrewAI, LangGraph, Agent Teams）を含む設計根拠の詳細は [ADR-001: Why FUGUE Exists](docs/ADR-001-why-fugue.md) を参照。
+
+## FUGUE Skills Profile
+
+Orchestrator切替（Codex/Claude）時も同一能力を維持するため、FUGUE有用スキルは
+共有マニフェストから同期する運用を採用します。
+
+- Profile: `docs/fugue-skills-profile.md`
+- Manifest: `config/skills/fugue-openclaw-baseline.tsv`
+- Sync script: `scripts/skills/sync-openclaw-skills.sh`
 
 ## FUGUE オーケストレーション vs. Claude Code Agent Teams
 
