@@ -555,8 +555,8 @@ jobs:
             fi
           fi
           if [[ "${lessons_required}" == "true" ]]; then
-            if ! grep -Eq "^##[[:space:]]+Issue[[:space:]]+#${ISSUE_NUMBER}$" "${lessons_report}"; then
-              echo "Lessons required but missing issue-specific section: ## Issue #${ISSUE_NUMBER}" | tee -a /tmp/codex-output.log
+            if ! grep -Eq "^##[[:space:]]+Issue[[:space:]]+#${ISSUE_NUMBER}([[:space:]].*)?$" "${lessons_report}"; then
+              echo "Lessons required but missing issue-specific section beginning with: ## Issue #${ISSUE_NUMBER}" | tee -a /tmp/codex-output.log
               EXIT_CODE=1
             fi
           fi
