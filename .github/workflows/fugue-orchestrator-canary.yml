@@ -85,7 +85,6 @@ jobs:
 
             local cmd=(gh issue create --repo "${repo}" --title "${title}" --body "${body}" \
               --label "fugue-task" \
-              --label "tutti" \
               --label "orchestrator:claude" \
               --label "orchestrator-assist:none")
             if [[ -n "${force_label}" ]]; then
@@ -93,7 +92,9 @@ jobs:
             fi
             local url
             url="$("${cmd[@]}")"
-            echo "${url##*/}"
+            local issue_num="${url##*/}"
+            gh issue edit "${issue_num}" --repo "${repo}" --add-label "tutti" >/dev/null
+            echo "${issue_num}"
           }
 
           wait_for_resolved_main() {
