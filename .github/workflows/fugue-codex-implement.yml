@@ -135,6 +135,8 @@ jobs:
       codex_exit: ${{ steps.codex.outputs.exit_code }}
       preflight_report_path: ${{ steps.codex.outputs.preflight_report_path }}
       implementation_report_path: ${{ steps.codex.outputs.implementation_report_path }}
+      todo_report_path: ${{ steps.codex.outputs.todo_report_path }}
+      lessons_report_path: ${{ steps.codex.outputs.lessons_report_path }}
 
     steps:
       - name: Guard PAT for cross-repo operations
@@ -226,6 +228,8 @@ jobs:
           dialogue_rounds="${dialogue_rounds_raw}"
           preflight_report=".fugue/pre-implement/issue-${ISSUE_NUMBER}-preflight.md"
           implementation_report=".fugue/implement/issue-${ISSUE_NUMBER}-implementation-loop.md"
+          todo_report=".fugue/pre-implement/issue-${ISSUE_NUMBER}-todo.md"
+          lessons_report=".fugue/pre-implement/lessons.md"
           issue_text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
           is_large_refactor="false"
           if [[ "${LARGE_REFACTOR_LABEL:-false}" == "true" ]]; then
@@ -279,6 +283,22 @@ jobs:
           - Apply only integrator-approved changes for each round.
           - Final code must reflect the latest integrator decisions.
 
+          ## Shared task management + self-improvement protocol
+          - Keep checkable execution items in ${todo_report}.
+          - ${todo_report} MUST contain these headings:
+            - ## Plan
+            - ## Checklist
+            - ## Progress
+            - ## Review
+          - Checklist items must be markdown checkboxes and updated during execution.
+          - When user corrections or postmortem findings exist, append durable prevention rules to ${lessons_report}.
+          - Ensure ${lessons_report} exists (create a minimal header when no new lesson is added in this run).
+          - ${lessons_report} entries should capture:
+            - Mistake pattern
+            - Preventive rule
+            - Trigger signal
+          - Before finalizing, include concrete verification evidence (tests, logs, or behavioral diff).
+
           ## Rules
           - Implement the changes described above
           - Follow existing code style and patterns
@@ -300,6 +320,8 @@ jobs:
 
           echo "preflight_report_path=${preflight_report}" >> "${GITHUB_OUTPUT}"
           echo "implementation_report_path=${implementation_report}" >> "${GITHUB_OUTPUT}"
+          echo "todo_report_path=${todo_report}" >> "${GITHUB_OUTPUT}"
+          echo "lessons_report_path=${lessons_report}" >> "${GITHUB_OUTPUT}"
 
           # Enforce the default refinement protocol before implementation is accepted.
           if [[ ! -f "${preflight_report}" ]]; then
@@ -371,6 +393,29 @@ jobs:
                 fi
               done
             done
+          fi
+
+          # Enforce shared task tracking artifact.
+          if [[ ! -f "${todo_report}" ]]; then
+            echo "Missing mandatory task ledger: ${todo_report}" | tee -a /tmp/codex-output.log
+            EXIT_CODE=1
+          else
+            for heading in "## Plan" "## Checklist" "## Progress" "## Review"; do
+              if ! grep -q "^${heading}$" "${todo_report}"; then
+                echo "Task ledger missing heading: ${heading}" | tee -a /tmp/codex-output.log
+                EXIT_CODE=1
+              fi
+            done
+            if ! grep -Eq '^[[:space:]]*-[[:space:]]\[[ xX]\][[:space:]]+' "${todo_report}"; then
+              echo "Task ledger has no markdown checkbox items: ${todo_report}" | tee -a /tmp/codex-output.log
+              EXIT_CODE=1
+            fi
+          fi
+
+          # Ensure lessons artifact exists for future corrections.
+          if [[ ! -f "${lessons_report}" ]]; then
+            echo "Missing shared lessons artifact: ${lessons_report}" | tee -a /tmp/codex-output.log
+            EXIT_CODE=1
           fi
 
           echo "exit_code=${EXIT_CODE}" >> "${GITHUB_OUTPUT}"
@@ -448,6 +493,8 @@ jobs:
             /tmp/codex-output.log
             ${{ steps.codex.outputs.preflight_report_path }}
             ${{ steps.codex.outputs.implementation_report_path }}
+            ${{ steps.codex.outputs.todo_report_path }}
+            ${{ steps.codex.outputs.lessons_report_path }}
           if-no-files-found: ignore
 
   finalize:

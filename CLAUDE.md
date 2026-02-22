@@ -27,6 +27,8 @@ Primary policy source is `AGENTS.md`.
   - `.github/workflows/fugue-tutti-router.yml`
 - CLI entry:
   - `scripts/gha24`
+- Shared workflow playbook:
+  - `rules/shared-orchestration-playbook.md`
 
 ## 4. Commands
 

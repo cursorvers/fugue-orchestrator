@@ -64,6 +64,7 @@ rules/
   security.md                          <- セキュリティチェックリスト
   performance.md                       <- モデル選択・最適化
   secrets-management.md                <- API キー管理
+  shared-orchestration-playbook.md     <- Codex/Claude共通ワークフロープレイブック
 examples/
   delegate-stub.js                     <- 最小委譲スクリプト（Codex/GLM/Gemini対応）
   parallel-delegation.sh               <- 並列コードレビュー + セキュリティ監査
@@ -127,6 +128,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: /vote の実行可否は role-weighted 2/3 合議 + HIGH risk veto で判定されます。
 # NOTE: implement 時は Plan→Parallel Simulation→Critical Review→Problem Fix→Replan を 3 サイクル完了後に実装します。
 # NOTE: preflight通過後の実装フェーズでは Implementer/ Critic/ Integrator の対話ループを必須化しています。
+# NOTE: 共有プレイブックに基づき、todo/lessons成果物（.fugue/pre-implement）を必須化しています。
 # NOTE: 大規模リファクタ/リライト/移行タスクでは、各サイクルで Candidate A/B + Failure Modes + Rollback Check を必須化します。
 # NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
@@ -202,6 +204,15 @@ Orchestrator切替（Codex/Claude）時も同一能力を維持するため、FU
 - Profile: `docs/fugue-skills-profile.md`
 - Manifest: `config/skills/fugue-openclaw-baseline.tsv`
 - Sync script: `scripts/skills/sync-openclaw-skills.sh`
+
+## Shared Workflow Playbook
+
+「CLAUDE.mdベストプラクティス」をCodex/Claude共通で使うため、provider-agnosticな運用基準を定義しています。
+
+- Playbook: `rules/shared-orchestration-playbook.md`
+- 実装Workflowで強制する成果物:
+  - `.fugue/pre-implement/issue-<N>-todo.md`
+  - `.fugue/pre-implement/lessons.md`
 
 ## FUGUE オーケストレーション vs. Claude Code Agent Teams
 

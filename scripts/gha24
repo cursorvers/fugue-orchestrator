@@ -293,6 +293,12 @@ $( if [[ "${IMPLEMENT}" == "true" ]]; then cat <<PREFLIGHT
   - Applied Change
   - Verification
 - Only integrator-approved changes should be applied.
+
+## Shared playbook operational requirements (Codex/Claude common)
+- Keep a checkable task ledger in \`.fugue/pre-implement/issue-<N>-todo.md\`.
+- Record durable prevention rules in \`.fugue/pre-implement/lessons.md\` after corrections or postmortems.
+- Before marking done, show concrete verification evidence (tests/logs/diff).
+- For non-trivial fixes, explicitly challenge hacky paths and keep the smallest elegant change surface.
 PREFLIGHT
 fi )
 EOF

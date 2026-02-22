@@ -125,3 +125,16 @@ Security guardrails:
 - Do not install unpinned third-party skills directly from `main`.
 - Reject skills with unsafe auto-execution guidance (`--yolo`, `--full-auto`) in default profile.
 - Keep Codex and Claude skill sets synchronized from the same manifest so orchestrator switching does not change capabilities.
+
+## 10. Shared Workflow Playbook (Codex/Claude)
+
+- Provider-agnostic playbook source:
+  - `rules/shared-orchestration-playbook.md`
+- The playbook applies to both orchestrator profiles:
+  - `codex-full`
+  - `claude-light`
+- Control-plane enforcement in implement mode must keep:
+  - Preflight refinement loop gates
+  - Implementation collaboration dialogue gates
+  - Task tracking artifact (`.fugue/pre-implement/issue-<N>-todo.md`)
+  - Lessons artifact (`.fugue/pre-implement/lessons.md`)
