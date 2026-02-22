@@ -230,11 +230,18 @@ jobs:
           implementation_report=".fugue/implement/issue-${ISSUE_NUMBER}-implementation-loop.md"
           todo_report=".fugue/pre-implement/issue-${ISSUE_NUMBER}-todo.md"
           lessons_report=".fugue/pre-implement/lessons.md"
-          issue_text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
+          title_text="$(printf '%s\n' "${ISSUE_TITLE}" | tr '[:upper:]' '[:lower:]')"
+          goal_text="$(printf '%s\n' "${ISSUE_BODY}" | awk '
+            BEGIN { capture=0 }
+            /^###[[:space:]]*Goal[[:space:]]*$/ { capture=1; next }
+            capture && /^###[[:space:]]/ { exit }
+            capture && NF { print; exit }
+          ' | tr '[:upper:]' '[:lower:]')"
+          task_signal_text="$(printf '%s\n%s\n' "${title_text}" "${goal_text}")"
           is_large_refactor="false"
           if [[ "${LARGE_REFACTOR_LABEL:-false}" == "true" ]]; then
             is_large_refactor="true"
-          elif echo "${issue_text}" | grep -Eqi '(大規模|全面|全体|リファクタ|refactor|migration|rewrite|アーキテクチャ刷新)'; then
+          elif echo "${task_signal_text}" | grep -Eqi '(大規模|全面|全体|リファクタ|refactor|migration|rewrite|アーキテクチャ刷新)'; then
             is_large_refactor="true"
           fi
 
