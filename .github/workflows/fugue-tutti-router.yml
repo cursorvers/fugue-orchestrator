@@ -788,7 +788,16 @@ jobs:
           fi
           assist_fallback_section="- assist fallback: none"
           if [[ "${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_applied }}" == "true" ]]; then
-            assist_fallback_section="- assist fallback: claude -> none (\`${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_reason }}\`)"
+            assist_fallback_reason="${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_reason }}"
+            assist_fallback_target="none"
+            if [[ "${assist_fallback_reason}" == *"->"* ]]; then
+              assist_fallback_target="${assist_fallback_reason##*->}"
+            fi
+            assist_fallback_target="$(echo "${assist_fallback_target}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-].*$//g')"
+            if [[ -z "${assist_fallback_target}" ]]; then
+              assist_fallback_target="none"
+            fi
+            assist_fallback_section="- assist fallback: claude -> ${assist_fallback_target} (\`${assist_fallback_reason}\`)"
           fi
           claude_pressure_section="- claude pressure guard: none"
           if [[ "${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_applied }}" == "true" ]]; then
