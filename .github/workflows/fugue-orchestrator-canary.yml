@@ -72,6 +72,8 @@ jobs:
             online_count="$(echo "${online_count}" | tr -cd '0-9')"
             if [[ -z "${online_count}" ]]; then
               online_count="0"
+            else
+              online_count="$((10#${online_count}))"
             fi
             if (( online_count == 0 )); then
               echo "Canary skipped: subscription strict hold policy active and no online self-hosted runner for label ${subscription_runner_label}."

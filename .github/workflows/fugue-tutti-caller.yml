@@ -148,6 +148,8 @@ jobs:
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
               self_hosted_online_count="0"
+            else
+              self_hosted_online_count="$((10#${self_hosted_online_count}))"
             fi
           fi
           labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
