@@ -32,6 +32,26 @@ jobs:
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
         run: |
           set -euo pipefail
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
 
           if [[ -n "${OPS_TOKEN:-}" ]]; then
             GH_TOKEN="${OPS_TOKEN}"
@@ -44,6 +64,7 @@ jobs:
           repo="${GITHUB_REPOSITORY}"
           ts="$(date -u +%Y%m%d%H%M%S)"
           failures=0
+          online_count=0
 
           normalize() {
             echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
@@ -67,7 +88,7 @@ jobs:
           fi
 
           if [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" ]]; then
-            runners_json="$(gh api "repos/${repo}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            runners_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 5 || echo '{}')"
             online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             online_count="$(echo "${online_count}" | tr -cd '0-9')"
             if [[ -z "${online_count}" ]]; then
@@ -148,12 +169,17 @@ jobs:
             local sleep_sec=20
             local attempt=1
             while [[ "${attempt}" -le "${max_attempts}" ]]; do
-              comment="$(gh issue view "${issue_num}" --repo "${repo}" --json comments --jq '[.comments[].body | select(contains("## Tutti Integrated Review"))] | last // ""')"
+              comments_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}/comments?per_page=100" 4 || echo '[]')"
+              comment="$(echo "${comments_json}" | jq -r '[.[].body | select(contains("## Tutti Integrated Review"))] | last // ""')"
               if [[ -n "${comment}" ]]; then
                 resolved_main="$(printf '%s\n' "${comment}" | sed -n 's/^- main orchestrator resolved: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
                 resolved_assist="$(printf '%s\n' "${comment}" | sed -n 's/^- assist orchestrator resolved: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
-                if [[ -n "${resolved_main}" && -n "${resolved_assist}" ]]; then
-                  echo "${resolved_main}|${resolved_assist}"
+                resolved_profile="$(printf '%s\n' "${comment}" | sed -n 's/^- execution profile: \([^ ]*\).*/\1/p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+                resolved_runner="$(printf '%s\n' "${comment}" | sed -n 's/^- run-agents runner: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+                resolved_runner_labels="$(printf '%s\n' "${comment}" | sed -n 's/^- run-agents runner labels: //p' | head -n1 | tr -d '\r')"
+                resolved_lanes="$(printf '%s\n' "${comment}" | sed -n 's/^- lanes configured: //p' | head -n1 | tr -cd '0-9')"
+                if [[ -n "${resolved_main}" && -n "${resolved_assist}" && -n "${resolved_profile}" ]]; then
+                  echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}"
                   return 0
                 fi
               fi
@@ -169,17 +195,27 @@ jobs:
             local expected_assist="$3"
             local actual_main="$4"
             local actual_assist="$5"
-            local pass="$6"
-            local case_name="$7"
+            local actual_profile="$6"
+            local actual_runner="$7"
+            local actual_runner_labels="$8"
+            local actual_lanes="$9"
+            local pass="${10}"
+            local case_name="${11}"
+            local reason="${12}"
             if [[ "${pass}" == "true" ]]; then
-              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\`."
+              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\`, profile=\`${actual_profile}\`, runner=\`${actual_runner}\`, lanes=\`${actual_lanes}\`."
               gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null
               gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification."
             else
-              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\`. Investigate router/caller policy."
+              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\`, profile=\`${actual_profile:-timeout}\`, runner=\`${actual_runner:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
               gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null
             fi
           }
+
+          strict_expected="false"
+          if [[ "${ci_execution_engine}" == "subscription" && "${online_count}" -gt 0 ]]; then
+            strict_expected="true"
+          fi
 
           regular_issue="$(create_issue "[canary] regular claude request ${ts}" "")"
           force_issue="$(create_issue "[canary] forced claude request ${ts}" "orchestrator-force:claude")"
@@ -187,30 +223,86 @@ jobs:
           regular_pair=""
           if regular_pair="$(wait_for_resolved_orchestrators "${regular_issue}")"; then
             regular_main="${regular_pair%%|*}"
-            regular_assist="${regular_pair#*|}"
-            if [[ "${regular_main}" == "${expected_regular_main}" && "${regular_assist}" == "${expected_regular_assist}" ]]; then
-              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "${regular_main}" "${regular_assist}" "true" "regular"
+            regular_rest="${regular_pair#*|}"
+            regular_assist="${regular_rest%%|*}"
+            regular_rest="${regular_rest#*|}"
+            regular_profile="${regular_rest%%|*}"
+            regular_rest="${regular_rest#*|}"
+            regular_runner="${regular_rest%%|*}"
+            regular_rest="${regular_rest#*|}"
+            regular_runner_labels="${regular_rest%%|*}"
+            regular_lanes="${regular_rest#*|}"
+            regular_ok="true"
+            regular_reason="ok"
+            if [[ "${regular_main}" != "${expected_regular_main}" || "${regular_assist}" != "${expected_regular_assist}" ]]; then
+              regular_ok="false"
+              regular_reason="resolved-provider-mismatch"
+            elif [[ "${strict_expected}" == "true" ]]; then
+              if [[ "${regular_profile}" != "subscription-strict" ]]; then
+                regular_ok="false"
+                regular_reason="expected-subscription-strict-profile"
+              elif [[ "${regular_runner}" != "self-hosted" ]]; then
+                regular_ok="false"
+                regular_reason="expected-self-hosted-runner"
+              elif [[ "${regular_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
+                regular_ok="false"
+                regular_reason="required-runner-label-missing"
+              elif [[ -z "${regular_lanes}" || "${regular_lanes}" == "0" ]]; then
+                regular_ok="false"
+                regular_reason="lanes-not-materialized"
+              fi
+            fi
+            if [[ "${regular_ok}" == "true" ]]; then
+              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_runner_labels}" "${regular_lanes}" "true" "regular" "ok"
             else
-              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "${regular_main}" "${regular_assist}" "false" "regular"
+              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_runner_labels}" "${regular_lanes}" "false" "regular" "${regular_reason}"
               failures="$((failures + 1))"
             fi
           else
-            conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "" "" "false" "regular"
+            conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
             failures="$((failures + 1))"
           fi
 
           force_pair=""
           if force_pair="$(wait_for_resolved_orchestrators "${force_issue}")"; then
             force_main="${force_pair%%|*}"
-            force_assist="${force_pair#*|}"
-            if [[ "${force_main}" == "${expected_force_main}" && "${force_assist}" == "${expected_force_assist}" ]]; then
-              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "${force_main}" "${force_assist}" "true" "force"
+            force_rest="${force_pair#*|}"
+            force_assist="${force_rest%%|*}"
+            force_rest="${force_rest#*|}"
+            force_profile="${force_rest%%|*}"
+            force_rest="${force_rest#*|}"
+            force_runner="${force_rest%%|*}"
+            force_rest="${force_rest#*|}"
+            force_runner_labels="${force_rest%%|*}"
+            force_lanes="${force_rest#*|}"
+            force_ok="true"
+            force_reason="ok"
+            if [[ "${force_main}" != "${expected_force_main}" || "${force_assist}" != "${expected_force_assist}" ]]; then
+              force_ok="false"
+              force_reason="resolved-provider-mismatch"
+            elif [[ "${strict_expected}" == "true" ]]; then
+              if [[ "${force_profile}" != "subscription-strict" ]]; then
+                force_ok="false"
+                force_reason="expected-subscription-strict-profile"
+              elif [[ "${force_runner}" != "self-hosted" ]]; then
+                force_ok="false"
+                force_reason="expected-self-hosted-runner"
+              elif [[ "${force_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
+                force_ok="false"
+                force_reason="required-runner-label-missing"
+              elif [[ -z "${force_lanes}" || "${force_lanes}" == "0" ]]; then
+                force_ok="false"
+                force_reason="lanes-not-materialized"
+              fi
+            fi
+            if [[ "${force_ok}" == "true" ]]; then
+              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_runner_labels}" "${force_lanes}" "true" "force" "ok"
             else
-              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "${force_main}" "${force_assist}" "false" "force"
+              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_runner_labels}" "${force_lanes}" "false" "force" "${force_reason}"
               failures="$((failures + 1))"
             fi
           else
-            conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "" "" "false" "force"
+            conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
             failures="$((failures + 1))"
           fi
 
@@ -219,4 +311,4 @@ jobs:
             exit 1
           fi
 
-          echo "Canary passed: regular(main=${expected_regular_main},assist=${expected_regular_assist}), force(main=${expected_force_main},assist=${expected_force_assist})"
+          echo "Canary passed: regular(main=${expected_regular_main},assist=${expected_regular_assist}), force(main=${expected_force_main},assist=${expected_force_assist}), strict_expected=${strict_expected}"

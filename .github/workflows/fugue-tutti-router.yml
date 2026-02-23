@@ -127,10 +127,34 @@ jobs:
           SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: |
           set -euo pipefail
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
 
           ISSUE_NUMBER="${{ inputs.issue_number }}"
           if [[ -n "${ISSUE_NUMBER}" ]]; then
-            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            issue_endpoint="repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}"
+            if ! issue_json="$(gh_api_retry "${issue_endpoint}" 5)"; then
+              echo "Failed to fetch issue context after retries: ${issue_endpoint}" >&2
+              exit 1
+            fi
           else
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
@@ -161,7 +185,8 @@ jobs:
           fi
           self_hosted_online_count="0"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            runners_endpoint="repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100"
+            runners_json="$(gh_api_retry "${runners_endpoint}" 5 || echo '{}')"
             self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
@@ -213,11 +238,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-4}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
 
           AUTHOR="${{ steps.ctx.outputs.author }}"
           PERM="none"
 
-          perm_json="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission"
+          perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
           if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
             PERM="$(echo "${perm_json}" | jq -r '.permission')"
           fi
@@ -281,6 +327,26 @@ jobs:
           RUNNER_LABEL: ${{ needs.resolve-orchestrator.outputs.subscription_runner_label }}
         run: |
           set -euo pipefail
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no available self-hosted runner detected for required label \`${RUNNER_LABEL}\` (available=${ONLINE_COUNT}). Task is kept pending; no agent lanes were started."
 
@@ -1239,7 +1305,8 @@ jobs:
           self_hosted_online_count="0"
           self_hosted_online="false"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            runners_endpoint="repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100"
+            runners_json="$(gh_api_retry "${runners_endpoint}" 5 || echo '{}')"
             self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then

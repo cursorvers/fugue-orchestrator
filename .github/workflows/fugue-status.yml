@@ -125,15 +125,35 @@ jobs:
           ISSUE: ${{ steps.ctx.outputs.issue_number }}
         run: |
           set -euo pipefail
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
 
           # Open fugue-task issues
-          issues_json="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:open&per_page=100")"
+          issues_json="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:open&per_page=100" 5 || echo '{"items":[],"total_count":0}')"
           total="$(echo "${issues_json}" | jq -r '.total_count // 0')"
           processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "processing")] | length')"
           needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-human")] | length')"
           needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-review")] | length')"
           since_7d="$(date -u -d '7 days ago' +%Y-%m-%d)"
-          recent_json="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+created:>=${since_7d}&per_page=100")"
+          recent_json="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+created:>=${since_7d}&per_page=100" 5 || echo '{"items":[],"total_count":0}')"
           recent_total="$(echo "${recent_json}" | jq -r '.total_count // 0')"
           recent_needs_human="$(echo "${recent_json}" | jq -r '[.items[] | select((([.labels[]?.name] | index("needs-human")) != null))] | length')"
           recent_implement="$(echo "${recent_json}" | jq -r '[.items[] | select((([.labels[]?.name] | index("implement")) != null) or (([.labels[]?.name] | index("codex-implement")) != null) or (([.labels[]?.name] | index("claude-implement")) != null))] | length')"
@@ -144,13 +164,13 @@ jobs:
           else
             recent_unconfirmed=0
           fi
-          recent_closed_json="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:closed+closed:>=${since_7d}&per_page=100")"
+          recent_closed_json="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:closed+closed:>=${since_7d}&per_page=100" 5 || echo '{"items":[],"total_count":0}')"
           avg_lead_hours="$(echo "${recent_closed_json}" | jq -r '
             [ .items[] | select(.closed_at != null and .created_at != null)
               | ((.closed_at | fromdateiso8601) - (.created_at | fromdateiso8601)) / 3600 ] as $h
             | if ($h | length) == 0 then 0 else (($h | add) / ($h | length)) end
           ' 2>/dev/null || echo "0")"
-          fallback_mentions="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+%22auto-fallback%22+updated:>=${since_7d}&per_page=1" | jq -r '.total_count // 0')"
+          fallback_mentions="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+%22auto-fallback%22+updated:>=${since_7d}&per_page=1" 5 | jq -r '.total_count // 0' 2>/dev/null || echo "0")"
           confirmation_rate="0.0"
           if (( recent_implement > 0 )); then
             confirmation_rate="$(awk -v c="${recent_confirmed}" -v i="${recent_implement}" 'BEGIN { printf "%.1f", (c/i)*100 }')"
@@ -291,7 +311,7 @@ jobs:
           fi
           self_hosted_online_count="n/a"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            runners_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 5 || echo '{}')"
             self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
@@ -311,7 +331,7 @@ jobs:
             local wf_file="$1"
             local label="$2"
             local run_json
-            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 2>/dev/null || echo '{}')"
+            run_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 4 || echo '{}')"
             local status concl url created
             status="$(echo "${run_json}" | jq -r '.workflow_runs[0].status // "unknown"')"
             concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // ""')"
