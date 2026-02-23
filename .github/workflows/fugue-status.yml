@@ -176,6 +176,7 @@ jobs:
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
           claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
+          claude_assist_execution_policy="$(gh variable get FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "")"
           claude_plan_tier="$(gh variable get FUGUE_CLAUDE_PLAN_TIER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "max20")"
           implement_refinement_cycles="$(gh variable get FUGUE_IMPLEMENT_REFINEMENT_CYCLES --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
           implement_preflight_cycles_full="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
@@ -196,6 +197,7 @@ jobs:
           multi_agent_mode="$(echo "${multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_main_assist_policy="$(echo "${claude_main_assist_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_assist_execution_policy="$(echo "${claude_assist_execution_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_plan_tier="$(echo "${claude_plan_tier}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           implement_refinement_cycles="$(echo "${implement_refinement_cycles}" | tr -cd '0-9')"
           implement_preflight_cycles_full="$(echo "${implement_preflight_cycles_full}" | tr -cd '0-9')"
@@ -227,6 +229,13 @@ jobs:
           fi
           if [[ "${claude_max_plan}" != "true" ]]; then
             claude_max_plan="false"
+          fi
+          if [[ "${claude_assist_execution_policy}" != "direct" && "${claude_assist_execution_policy}" != "hybrid" && "${claude_assist_execution_policy}" != "proxy" ]]; then
+            if [[ "${claude_max_plan}" == "true" ]]; then
+              claude_assist_execution_policy="hybrid"
+            else
+              claude_assist_execution_policy="direct"
+            fi
           fi
           if [[ -z "${claude_plan_tier}" ]]; then
             claude_plan_tier="max20"
@@ -312,6 +321,7 @@ jobs:
           - multi_agent_mode: ${multi_agent_mode}
           - claude_main_assist_policy: ${claude_main_assist_policy}
           - claude_max_plan_mode: ${claude_max_plan}
+          - claude_assist_execution_policy: ${claude_assist_execution_policy}
           - claude_plan_tier: ${claude_plan_tier}
           - implement_refinement_cycles: ${implement_refinement_cycles}
           - implement_preflight_cycles (codex-full): ${implement_preflight_cycles_full}

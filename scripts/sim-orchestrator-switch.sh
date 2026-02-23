@@ -28,7 +28,7 @@ if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex"
   claude_role_policy="flex"
 fi
 claude_degraded_assist_policy="$(echo "${FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ "${claude_degraded_assist_policy}" != "codex" && "${claude_degraded_assist_policy}" != "none" ]]; then
+if [[ "${claude_degraded_assist_policy}" != "codex" && "${claude_degraded_assist_policy}" != "none" && "${claude_degraded_assist_policy}" != "claude" ]]; then
   claude_degraded_assist_policy="none"
 fi
 

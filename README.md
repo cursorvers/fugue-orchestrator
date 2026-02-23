@@ -113,7 +113,9 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
 # gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body flex     -R <owner/repo> # sub-only|flex
-# gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body none   -R <owner/repo> # none|codex
+# gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body none   -R <owner/repo> # none|codex|claude
+# gh variable set FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --body hybrid -R <owner/repo> # direct|hybrid|proxy
+# gh variable set FUGUE_CLAUDE_OPUS_MODEL            --body claude-opus-4-6 -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_SUB_AUTO_ESCALATE     --body high    -R <owner/repo> # off|high|medium-high
 # gh variable set FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE --body 90    -R <owner/repo> # 0-100 (translation gate score threshold)
 # gh variable set FUGUE_IMPLEMENT_REFINEMENT_CYCLES  --body 3       -R <owner/repo> # default preflight loops before implement
@@ -127,11 +129,14 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 既定では `FUGUE_CLAUDE_ROLE_POLICY=flex` で codex/claude main 切替を許可します。sub-only にすると mainのclaude指定は codex に自動降格します（force時除く）。
 # NOTE: state が degraded のとき、assistのclaude指定は `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` に従って縮退します（既定 none）。
 # NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
+# NOTE: `orchestrator provider` は役割（control-plane）、`FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY` は Claude assist の実行経路（data-plane）です。
+# NOTE: `direct` は Anthropic 直実行のみ、`hybrid` は Anthropic 未設定時に Codex proxy、`proxy` は常に Codex proxy を試行します。
 # NOTE: assist既定は none。高リスク/修正シグナル/曖昧性シグナル時のみ Claude sub assist を自動昇格します。
 # NOTE: 曖昧性シグナルは `FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE` 以上の高スコア時のみ昇格し、常時コンテキスト圧迫を避けます。
 # NOTE: state が ok かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
 # NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
-# NOTE: FUGUE_CLAUDE_MAX_PLAN=true なら ANTHROPIC_API_KEY なしでも Claude assist レーンは Codex proxy で参加します。
+# NOTE: 互換既定では `FUGUE_CLAUDE_MAX_PLAN=true` のとき execution policy は `hybrid`、false のとき `direct` として扱います。
+# NOTE: `FUGUE_CLAUDE_OPUS_MODEL` は claude-opus-assist/main の既定モデル指定に使われます。
 # NOTE: /vote の実行可否は role-weighted 2/3 合議 + HIGH risk veto で判定されます。
 # NOTE: implement 時は Plan→Parallel Simulation→Critical Review→Problem Fix→Replan を 3 サイクル完了後に実装します。
 # NOTE: preflight通過後の実装フェーズでは Implementer/ Critic/ Integrator の対話ループを必須化しています。

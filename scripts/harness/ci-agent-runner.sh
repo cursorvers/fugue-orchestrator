@@ -15,6 +15,20 @@ claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' 
 if [[ "${claude_max_plan}" != "true" ]]; then
   claude_max_plan="false"
 fi
+claude_assist_execution_policy="$(echo "${CLAUDE_ASSIST_EXECUTION_POLICY:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_assist_execution_policy}" != "direct" && "${claude_assist_execution_policy}" != "hybrid" && "${claude_assist_execution_policy}" != "proxy" ]]; then
+  claude_assist_execution_policy=""
+fi
+if [[ -z "${claude_assist_execution_policy}" ]]; then
+  # Backward compatible default:
+  # - max plan true  => hybrid (direct preferred, proxy on missing Anthropic key)
+  # - max plan false => direct
+  if [[ "${claude_max_plan}" == "true" ]]; then
+    claude_assist_execution_policy="hybrid"
+  else
+    claude_assist_execution_policy="direct"
+  fi
+fi
 claude_opus_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -z "${claude_opus_model}" ]]; then
   claude_opus_model="claude-opus-4-6"
@@ -72,13 +86,13 @@ if [[ "${PROVIDER}" == "xai" && -z "${XAI_API_KEY:-}" ]]; then
   exit 0
 fi
 
-if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  if [[ "${claude_max_plan}" == "true" && -n "${OPENAI_API_KEY:-}" ]]; then
+if [[ "${PROVIDER}" == "claude" && "${claude_assist_execution_policy}" == "proxy" ]]; then
+  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
     PROVIDER="codex"
     API_URL="https://api.openai.com/v1/chat/completions"
     MODEL="gpt-5.3-codex-spark"
     CLAUDE_PROXY_MODE="true"
-    CLAUDE_PROXY_NOTE="Claude MAX plan mode: executed via Codex proxy because ANTHROPIC_API_KEY is not configured."
+    CLAUDE_PROXY_NOTE="Claude assist execution policy=proxy: executed via Codex proxy."
   else
     result="$(jq -n \
       --arg name "${AGENT_NAME}" \
@@ -96,10 +110,46 @@ if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
         skipped:true,
         risk:"MEDIUM",
         approve:false,
-        findings:["Skipped: missing ANTHROPIC_API_KEY and Claude MAX proxy mode is disabled"],
-        recommendation:"Set FUGUE_CLAUDE_MAX_PLAN=true or provide ANTHROPIC_API_KEY to enable Claude lanes",
-        rationale:"Claude lane was skipped due to missing credential path",
-        execution_engine:"harness"
+        findings:["Skipped: FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY=proxy but OPENAI_API_KEY is not configured"],
+        recommendation:"Set OPENAI_API_KEY or switch FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY to direct|hybrid",
+        rationale:"Claude assist lane requested proxy execution but Codex credentials are unavailable",
+        execution_engine:"harness",
+        execution_route:"claude-proxy-unavailable"
+      }')"
+    echo "${result}" > "agent-${AGENT_NAME}.json"
+    exit 0
+  fi
+fi
+
+if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ "${claude_assist_execution_policy}" == "hybrid" && -n "${OPENAI_API_KEY:-}" ]]; then
+    PROVIDER="codex"
+    API_URL="https://api.openai.com/v1/chat/completions"
+    MODEL="gpt-5.3-codex-spark"
+    CLAUDE_PROXY_MODE="true"
+    CLAUDE_PROXY_NOTE="Claude assist execution policy=hybrid: executed via Codex proxy because ANTHROPIC_API_KEY is not configured."
+  else
+    result="$(jq -n \
+      --arg name "${AGENT_NAME}" \
+      --arg provider "${PROVIDER}" \
+      --arg api_url "${API_URL}" \
+      --arg model "${MODEL}" \
+      --arg agent_role "${AGENT_ROLE}" \
+      '{
+        name:$name,
+        provider:$provider,
+        api_url:$api_url,
+        model:$model,
+        agent_role:$agent_role,
+        http_code:"skipped",
+        skipped:true,
+        risk:"MEDIUM",
+        approve:false,
+        findings:["Skipped: missing ANTHROPIC_API_KEY for Claude lane"],
+        recommendation:"Provide ANTHROPIC_API_KEY, or set FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY=hybrid|proxy with OPENAI_API_KEY configured",
+        rationale:"Claude lane was skipped because ANTHROPIC_API_KEY is not configured and execution policy could not use proxy fallback",
+        execution_engine:"harness",
+        execution_route:"claude-direct-unavailable"
       }')"
     echo "${result}" > "agent-${AGENT_NAME}.json"
     exit 0
@@ -348,6 +398,13 @@ reported_provider="${effective_provider}"
 if [[ "${CLAUDE_PROXY_MODE}" == "true" ]]; then
   reported_provider="claude-max-proxy-codex"
 fi
+execution_route="native"
+if [[ "${ORIGINAL_PROVIDER}" == "claude" ]]; then
+  execution_route="claude-direct"
+fi
+if [[ "${CLAUDE_PROXY_MODE}" == "true" ]]; then
+  execution_route="claude-via-codex-proxy"
+fi
 
 result="$(jq -n \
   --arg name "${AGENT_NAME}" \
@@ -355,15 +412,20 @@ result="$(jq -n \
   --arg api_url "${effective_api_url}" \
   --arg model "${chosen_model}" \
   --arg agent_role "${AGENT_ROLE}" \
+  --arg requested_provider "${ORIGINAL_PROVIDER}" \
+  --arg requested_model "${ORIGINAL_MODEL}" \
   --argjson payload "${parsed}" \
   --arg http_code "${http_code}" \
   --arg skipped "${skipped_flag}" \
+  --arg execution_route "${execution_route}" \
   '{
     name:$name,
     provider:$provider,
     api_url:$api_url,
     model:$model,
     agent_role:$agent_role,
+    requested_provider:$requested_provider,
+    requested_model:$requested_model,
     http_code:$http_code,
     skipped:($skipped == "true"),
     risk:(($payload.risk // "MEDIUM")|ascii_upcase),
@@ -371,7 +433,8 @@ result="$(jq -n \
     findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),
     recommendation:($payload.recommendation // "No recommendation"),
     rationale:($payload.rationale // "No rationale"),
-    execution_engine:"harness"
+    execution_engine:"harness",
+    execution_route:$execution_route
   }')"
 
 echo "${result}" > "agent-${AGENT_NAME}.json"

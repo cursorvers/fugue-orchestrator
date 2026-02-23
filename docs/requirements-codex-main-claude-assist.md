@@ -54,6 +54,7 @@ FR-5 Assist lane behavior:
 - Assist lane must be optional and non-blocking.
 - Missing/failed assist provider credentials must not fail quorum.
 - Assist lane failure should be reported as skipped/error in integrated comment.
+- Assist role resolution (control-plane) and execution backend choice (data-plane) must be independently configurable and auditable.
 
 FR-6 Weighted governance gate:
 - Execution approval uses role-weighted 2/3 consensus (not flat count only).
@@ -96,6 +97,7 @@ NFR-1 Reliability:
 NFR-2 Observability:
 - Integrated comment must include requested/resolved main + assist profiles.
 - Status/watchdog should expose assist/provider health signals where possible.
+- Agent artifacts should expose requested provider/model and effective execution route (direct vs proxy).
 
 NFR-3 Context efficiency:
 - Local policy entry files remain thin; avoid large duplicated policy blocks.
@@ -105,12 +107,15 @@ NFR-3 Context efficiency:
 
 Required/optional repo variables:
 - `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (optional, default resolved to codex)
-- `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, default `claude`)
+- `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, repository policy default; commonly `none` or `claude`)
 - `FUGUE_CI_EXECUTION_ENGINE` (`harness|api`, default `harness`; controls run-agents engine)
 - `FUGUE_MULTI_AGENT_MODE` (`standard|enhanced|max`, default `enhanced`; controls lane depth)
 - `FUGUE_CLAUDE_RATE_LIMIT_STATE` (`ok|degraded|exhausted`)
 - `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` (`codex|none`, default `codex`; when main=claude and assist=claude, adjust assist to reduce Claude pressure unless forced)
-- `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, default `true`; allows Claude assist lanes without direct Anthropic key by proxying through Codex)
+- `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` (`none|codex|claude`, default `none`; fallback target when assist=claude and state=degraded)
+- `FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY` (`direct|hybrid|proxy`; controls Claude assist execution backend)
+- `FUGUE_CLAUDE_OPUS_MODEL` (optional, default `claude-opus-4-6`; Opus model for Claude main/assist lanes)
+- `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, compatibility fallback; when execution policy is unset, true=>hybrid/false=>direct)
 - `FUGUE_CLAUDE_PLAN_TIER` (`max20` default assumption for operations messaging / status visibility)
 - `FUGUE_CLAUDE_SONNET4_MODEL` (optional, default `claude-3-7-sonnet-latest`)
 - `FUGUE_CLAUDE_SONNET6_MODEL` (optional, default `claude-3-5-sonnet-latest`)
@@ -120,7 +125,8 @@ Required/optional repo variables:
 
 Secrets:
 - Existing: `OPENAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`
-- Optional: `ANTHROPIC_API_KEY` for direct Claude API lane execution (not required when `FUGUE_CLAUDE_MAX_PLAN=true`)
+- Optional: `ANTHROPIC_API_KEY` for direct Claude API lane execution
+- For `FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY=proxy|hybrid` fallback path, `OPENAI_API_KEY` is required
 
 ## 6. Acceptance Criteria
 
