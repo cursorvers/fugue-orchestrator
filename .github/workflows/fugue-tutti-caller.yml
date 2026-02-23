@@ -92,6 +92,8 @@ jobs:
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
           CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-3-7-sonnet-latest' }}
+          DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
+          DEFAULT_MULTI_AGENT_MODE_LOCK: ${{ vars.FUGUE_MULTI_AGENT_MODE_LOCK || 'false' }}
           CLAUDE_LIGHT_MULTI_AGENT_MODE: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE || 'standard' }}
           CLAUDE_LIGHT_MULTI_AGENT_LOCK: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_LOCK || 'true' }}
           IMPLEMENT_PREFLIGHT_CYCLES_FULL: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL || '3' }}
@@ -264,16 +266,26 @@ jobs:
           if [[ "${requested_main_provider_initial}" == "claude" && "${force_claude}" != "true" ]]; then
             orchestration_profile="claude-light"
           fi
-          multi_agent_mode_override=""
-          multi_agent_mode_lock="false"
+          multi_agent_mode_override="$(echo "${DEFAULT_MULTI_AGENT_MODE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
+            multi_agent_mode_override=""
+          fi
+          multi_agent_mode_lock="$(echo "${DEFAULT_MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${multi_agent_mode_lock}" != "true" ]]; then
+            multi_agent_mode_lock="false"
+          fi
           if [[ "${orchestration_profile}" == "claude-light" ]]; then
-            multi_agent_mode_override="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-            if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
-              multi_agent_mode_override="standard"
+            if [[ -z "${multi_agent_mode_override}" ]]; then
+              multi_agent_mode_override="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+              if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
+                multi_agent_mode_override="standard"
+              fi
             fi
-            multi_agent_mode_lock="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_LOCK:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
             if [[ "${multi_agent_mode_lock}" != "true" ]]; then
-              multi_agent_mode_lock="false"
+              multi_agent_mode_lock="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_LOCK:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+              if [[ "${multi_agent_mode_lock}" != "true" ]]; then
+                multi_agent_mode_lock="false"
+              fi
             fi
           fi
 
