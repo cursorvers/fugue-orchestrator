@@ -19,12 +19,12 @@ set -euo pipefail
 main=""
 assist=""
 default_main="codex"
-default_assist="none"
+default_assist="claude"
 claude_state="ok"
 force_claude="false"
 assist_policy="codex"
 claude_role_policy="flex"
-degraded_assist_policy="none"
+degraded_assist_policy="claude"
 format="env"
 
 while [[ $# -gt 0 ]]; do
@@ -62,7 +62,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --degraded-assist-policy)
-      degraded_assist_policy="${2:-none}"
+      degraded_assist_policy="${2:-claude}"
       shift 2
       ;;
     --format)
@@ -154,7 +154,7 @@ fi
 
 degraded_assist_policy="$(normalize_assist "${degraded_assist_policy}")"
 if [[ "${degraded_assist_policy}" != "codex" && "${degraded_assist_policy}" != "none" && "${degraded_assist_policy}" != "claude" ]]; then
-  degraded_assist_policy="none"
+  degraded_assist_policy="claude"
 fi
 
 resolved_main="${requested_main}"
@@ -239,20 +239,24 @@ if [[ "${format}" == "json" ]]; then
   exit 0
 fi
 
-cat <<EOF
-requested_main=${requested_main}
-requested_assist=${requested_assist}
-resolved_main=${resolved_main}
-resolved_assist=${resolved_assist}
-main_fallback_applied=${main_fallback_applied}
-main_fallback_reason=${main_fallback_reason}
-assist_fallback_applied=${assist_fallback_applied}
-assist_fallback_reason=${assist_fallback_reason}
-pressure_guard_applied=${pressure_guard_applied}
-pressure_guard_reason=${pressure_guard_reason}
-claude_role_policy=${claude_role_policy}
-degraded_assist_policy=${degraded_assist_policy}
-compat_label=${compat_label}
-orchestrator_label=${orchestrator_label}
-assist_orchestrator_label=${assist_orchestrator_label}
-EOF
+emit_kv() {
+  local key="$1"
+  local value="$2"
+  printf '%s=%q\n' "${key}" "${value}"
+}
+
+emit_kv "requested_main" "${requested_main}"
+emit_kv "requested_assist" "${requested_assist}"
+emit_kv "resolved_main" "${resolved_main}"
+emit_kv "resolved_assist" "${resolved_assist}"
+emit_kv "main_fallback_applied" "${main_fallback_applied}"
+emit_kv "main_fallback_reason" "${main_fallback_reason}"
+emit_kv "assist_fallback_applied" "${assist_fallback_applied}"
+emit_kv "assist_fallback_reason" "${assist_fallback_reason}"
+emit_kv "pressure_guard_applied" "${pressure_guard_applied}"
+emit_kv "pressure_guard_reason" "${pressure_guard_reason}"
+emit_kv "claude_role_policy" "${claude_role_policy}"
+emit_kv "degraded_assist_policy" "${degraded_assist_policy}"
+emit_kv "compat_label" "${compat_label}"
+emit_kv "orchestrator_label" "${orchestrator_label}"
+emit_kv "assist_orchestrator_label" "${assist_orchestrator_label}"

@@ -171,8 +171,9 @@ jobs:
           if [[ -z "${main_default}" ]]; then
             main_default="codex"
           fi
-          assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "none")"
-          ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "harness")"
+          assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
+          ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
+          subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "hold")"
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
           claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
@@ -194,6 +195,7 @@ jobs:
           main_default="$(echo "${main_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           assist_default="$(echo "${assist_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           ci_execution_engine="$(echo "${ci_execution_engine}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_offline_policy="$(echo "${subscription_offline_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           multi_agent_mode="$(echo "${multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_main_assist_policy="$(echo "${claude_main_assist_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -216,10 +218,13 @@ jobs:
             main_default="codex"
           fi
           if [[ "${assist_default}" != "codex" && "${assist_default}" != "claude" && "${assist_default}" != "none" ]]; then
-            assist_default="none"
+            assist_default="claude"
           fi
-          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
-            ci_execution_engine="harness"
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
+            ci_execution_engine="subscription"
+          fi
+          if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
+            subscription_offline_policy="hold"
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
             multi_agent_mode="enhanced"
@@ -279,6 +284,14 @@ jobs:
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
           fi
+          self_hosted_online_count="n/a"
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online")] | length' 2>/dev/null || echo "0")"
+            self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
+            if [[ -z "${self_hosted_online_count}" ]]; then
+              self_hosted_online_count="0"
+            fi
+          fi
 
           top="$(echo "${issues_json}" | jq -r '.items[:5] | map("- #\(.number) \(.title) (\(.html_url))") | join("\n")')"
           if [[ -z "${top}" ]]; then
@@ -318,6 +331,8 @@ jobs:
           - main_orchestrator_default: ${main_default}
           - assist_orchestrator_default: ${assist_default}
           - ci_execution_engine: ${ci_execution_engine}
+          - subscription_offline_policy: ${subscription_offline_policy}
+          - self_hosted_online_count: ${self_hosted_online_count}
           - multi_agent_mode: ${multi_agent_mode}
           - claude_main_assist_policy: ${claude_main_assist_policy}
           - claude_max_plan_mode: ${claude_max_plan}

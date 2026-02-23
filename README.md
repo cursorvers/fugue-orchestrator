@@ -96,7 +96,11 @@ cp CLAUDE.md ~/.claude/CLAUDE.md
 cp CODEX.md ~/.claude/CODEX.md
 cp -r rules/ ~/.claude/rules/
 
-# 3. API キーを設定
+# 3A. サブスク専用（推奨: 従量APIなし）
+# - Codex / Claude CLI に事前ログインして実行
+# - GitHub Actions で使う場合は self-hosted runner が必要
+
+# 3B. API 実行を使う場合のみキー設定
 export OPENAI_API_KEY="your-openai-key"
 export GLM_API_KEY="your-glm-key"
 export GLM_MODEL="glm-5.0" # optional (default in Tutti lanes is glm-5.0)
@@ -106,14 +110,21 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.5 GitHub Actions 用オーケストレータ切替（repo variable 優先）
 # gh variable set FUGUE_MAIN_ORCHESTRATOR_PROVIDER   --body codex   -R <owner/repo>
-# gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body none    -R <owner/repo>
+# gh variable set FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --body claude  -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_PLAN_TIER             --body max20   -R <owner/repo>
-# gh variable set FUGUE_CI_EXECUTION_ENGINE          --body harness -R <owner/repo> # harness|api
+# gh variable set FUGUE_CI_EXECUTION_ENGINE          --body subscription -R <owner/repo> # harness|api|subscription
+# gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
+# gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body hold    -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
+# gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body true    -R <owner/repo> # require codex-main-orchestrator=gpt-5.3-codex
+# gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body true    -R <owner/repo> # require claude-opus-assist=CLAUDE_OPUS_MODEL
+# gh variable set FUGUE_API_STRICT_MODE              --body false   -R <owner/repo> # trueでharness/api時もstrict guardを維持
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
+# gh variable set FUGUE_EMERGENCY_CONTINUITY_MODE    --body false   -R <owner/repo> # trueでin-flight issueのみ継続処理
+# gh variable set FUGUE_EMERGENCY_ASSIST_POLICY      --body none    -R <owner/repo> # none|codex|claude (continuity時assist縮退先)
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
 # gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body flex     -R <owner/repo> # sub-only|flex
-# gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body none   -R <owner/repo> # none|codex|claude
+# gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body claude -R <owner/repo> # none|codex|claude
 # gh variable set FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --body hybrid -R <owner/repo> # direct|hybrid|proxy
 # gh variable set FUGUE_CLAUDE_OPUS_MODEL            --body claude-opus-4-6 -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_SUB_AUTO_ESCALATE     --body high    -R <owner/repo> # off|high|medium-high
@@ -127,13 +138,13 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body exhausted -R <owner/repo>
 # issue意図に応じて Gemini/xAI specialist lane が自動追加されます
 # NOTE: 既定では `FUGUE_CLAUDE_ROLE_POLICY=flex` で codex/claude main 切替を許可します。sub-only にすると mainのclaude指定は codex に自動降格します（force時除く）。
-# NOTE: state が degraded のとき、assistのclaude指定は `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` に従って縮退します（既定 none）。
+# NOTE: state が degraded のとき、assistのclaude指定は `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` に従って縮退します（既定 claude）。
 # NOTE: state が exhausted のとき、assistのclaude指定は none に自動フォールバックします。
 # NOTE: `orchestrator provider` は役割（control-plane）、`FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY` は Claude assist の実行経路（data-plane）です。
 # NOTE: `direct` は Anthropic 直実行のみ、`hybrid` は Anthropic 未設定時に Codex proxy、`proxy` は常に Codex proxy を試行します。
-# NOTE: assist既定は none。高リスク/修正シグナル/曖昧性シグナル時のみ Claude sub assist を自動昇格します。
+# NOTE: assist既定は claude（co-orchestrator 常時有効）。
 # NOTE: 曖昧性シグナルは `FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE` 以上の高スコア時のみ昇格し、常時コンテキスト圧迫を避けます。
-# NOTE: state が ok かつ assist=claude のとき、Opus/Sonnet追加レーンが /vote に参加します。
+# NOTE: state が ok かつ assist=claude のとき、/vote に Claude assist レーンが参加します（subscription では Opus を常時優先）。
 # NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
 # NOTE: 互換既定では `FUGUE_CLAUDE_MAX_PLAN=true` のとき execution policy は `hybrid`、false のとき `direct` として扱います。
 # NOTE: `FUGUE_CLAUDE_OPUS_MODEL` は claude-opus-assist/main の既定モデル指定に使われます。
@@ -144,7 +155,14 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 大規模リファクタ/リライト/移行タスクでは、各サイクルで Candidate A/B + Failure Modes + Rollback Check を必須化します。
 # NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
-# NOTE: `FUGUE_CI_EXECUTION_ENGINE=harness` で /vote レーンは harness 実行エンジンを直結利用（main=codex/claude 共通）。
+# NOTE: `FUGUE_CI_EXECUTION_ENGINE=subscription` は pay-as-you-go APIを使わず、`codex` / `claude` CLI で /vote レーンを実行します（self-hosted runner前提）。
+# NOTE: `FUGUE_CI_EXECUTION_ENGINE` の既定は `subscription` です。`harness/api` は互換用途です。
+# NOTE: `subscription` 要求時に self-hosted runner が online でない場合、`FUGUE_SUBSCRIPTION_OFFLINE_POLICY` に従います。
+# NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`（既定）では処理を安全停止し、API縮退しません。
+# NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity` では `api-continuity` (harness) に縮退します。
+# NOTE: `api-continuity` では strict guard は既定で無効化されます（`FUGUE_API_STRICT_MODE=true` で明示的に有効化可能）。
+# NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
+# NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
 # NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。

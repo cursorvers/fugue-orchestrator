@@ -107,12 +107,17 @@ NFR-3 Context efficiency:
 
 Required/optional repo variables:
 - `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (optional, default resolved to codex)
-- `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, repository policy default; commonly `none` or `claude`)
-- `FUGUE_CI_EXECUTION_ENGINE` (`harness|api`, default `harness`; controls run-agents engine)
+- `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, repository policy default; recommended `claude`)
+- `FUGUE_CI_EXECUTION_ENGINE` (`harness|api|subscription`, default `subscription`; controls run-agents engine)
+- `FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC` (default `180`; timeout seconds for each `codex` / `claude` CLI lane in `subscription` mode)
+- `FUGUE_SUBSCRIPTION_OFFLINE_POLICY` (`hold|continuity`, default `hold`; behavior when `subscription` is requested but no self-hosted runner is online)
+- `FUGUE_API_STRICT_MODE` (`true|false`, default `false`; when false, strict guards are disabled in `harness|api` profiles)
+- `FUGUE_EMERGENCY_CONTINUITY_MODE` (`true|false`, default `false`; when true, only in-flight `processing` issues continue)
+- `FUGUE_EMERGENCY_ASSIST_POLICY` (`none|codex|claude`, default `none`; assist demotion target in continuity profile)
 - `FUGUE_MULTI_AGENT_MODE` (`standard|enhanced|max`, default `enhanced`; controls lane depth)
 - `FUGUE_CLAUDE_RATE_LIMIT_STATE` (`ok|degraded|exhausted`)
 - `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` (`codex|none`, default `codex`; when main=claude and assist=claude, adjust assist to reduce Claude pressure unless forced)
-- `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` (`none|codex|claude`, default `none`; fallback target when assist=claude and state=degraded)
+- `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` (`none|codex|claude`, default `claude`; fallback target when assist=claude and state=degraded)
 - `FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY` (`direct|hybrid|proxy`; controls Claude assist execution backend)
 - `FUGUE_CLAUDE_OPUS_MODEL` (optional, default `claude-opus-4-6`; Opus model for Claude main/assist lanes)
 - `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, compatibility fallback; when execution policy is unset, true=>hybrid/false=>direct)
@@ -124,9 +129,8 @@ Required/optional repo variables:
 - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE` (`1-5`, default `1`; implementation collaboration rounds when main=claude)
 
 Secrets:
-- Existing: `OPENAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`
-- Optional: `ANTHROPIC_API_KEY` for direct Claude API lane execution
-- For `FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY=proxy|hybrid` fallback path, `OPENAI_API_KEY` is required
+- API engines (`harness|api`): `OPENAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, optional `ANTHROPIC_API_KEY`
+- Subscription engine (`subscription`): API keys are not required for codex/claude lanes. Execution host must have authenticated `codex` and `claude` CLIs.
 
 ## 6. Acceptance Criteria
 
@@ -134,6 +138,10 @@ AC-1 Deterministic simulation:
 - A local simulation script must show:
   - main fallback `claude -> codex` under throttled state
   - assist behavior non-blocking
+  - execution profile behavior when self-hosted is unavailable:
+    - `subscription-strict -> subscription-paused` under `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`
+    - `subscription-strict -> api-continuity` under `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity`
+  - emergency inflight-only guard (`FUGUE_EMERGENCY_CONTINUITY_MODE=true`)
   - implementation gate unchanged (`vote + risk` guarded)
   - weighted vote outcome and refinement-cycle gate visibility
 

@@ -49,7 +49,13 @@ Auditability:
 - Add one main-provider signal lane after resolution:
   - `codex-main-orchestrator` when main is `codex`
   - `claude-main-orchestrator` when main is `claude`
-- CI lane execution engine defaults to `harness` (`FUGUE_CI_EXECUTION_ENGINE=harness|api`).
+- Execution profile is resolved per run:
+  - Primary: `subscription-strict` (`FUGUE_CI_EXECUTION_ENGINE=subscription` + online self-hosted runner)
+  - Offline hold: `subscription-paused` (`FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`, default)
+  - Continuity fallback: `api-continuity` (`FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity` or emergency continuity mode)
+- `FUGUE_EMERGENCY_CONTINUITY_MODE=true` enables inflight-only processing on GitHub-hosted runners.
+- Continuity fallback demotes assist `claude` using `FUGUE_EMERGENCY_ASSIST_POLICY` (default `none`) unless forced.
+- Strict guards (`FUGUE_STRICT_MAIN_CODEX_MODEL`, `FUGUE_STRICT_OPUS_ASSIST_DIRECT`) are enforced in `subscription-strict` and disabled by default in API continuity mode unless `FUGUE_API_STRICT_MODE=true`.
 - Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
 - GLM baseline model: `glm-5.0`.
 - When assist is `claude` and state is not `exhausted`, add Claude assist lanes (Opus + Sonnet).

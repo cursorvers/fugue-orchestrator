@@ -79,9 +79,9 @@ on:
         value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode_source }}
     secrets:
       OPENAI_API_KEY:
-        required: true
+        required: false
       ZAI_API_KEY:
-        required: true
+        required: false
       GEMINI_API_KEY:
         required: false
       XAI_API_KEY:
@@ -110,6 +110,8 @@ jobs:
       issue_body: ${{ steps.ctx.outputs.issue_body }}
       author: ${{ steps.ctx.outputs.author }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
+      emergency_continuity_mode: ${{ steps.ctx.outputs.emergency_continuity_mode }}
+      self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
 
@@ -118,6 +120,9 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
         run: |
           set -euo pipefail
 
@@ -136,12 +141,40 @@ jobs:
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
           HAS_IMPLEMENT_REQUEST="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
+            ci_execution_engine="subscription"
+          fi
+          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
+            subscription_offline_policy="hold"
+          fi
+          emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${emergency_continuity_mode}" != "true" ]]; then
+            emergency_continuity_mode="false"
+          fi
+          self_hosted_online_count="0"
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online")] | length' 2>/dev/null || echo "0")"
+            self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
+            if [[ -z "${self_hosted_online_count}" ]]; then
+              self_hosted_online_count="0"
+            fi
+          fi
 
           SHOULD_RUN="true"
           SKIP_REASON=""
           if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-required-labels"
+          elif [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" && "${emergency_continuity_mode}" != "true" && "${self_hosted_online_count}" == "0" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="subscription-self-hosted-offline-strict"
+          elif [[ "${emergency_continuity_mode}" == "true" ]]; then
+            if [[ "${HAS_PROCESSING}" != "true" ]]; then
+              SHOULD_RUN="false"
+              SKIP_REASON="emergency-inflight-only"
+            fi
           elif [[ "${HAS_PROCESSING}" == "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="already-processing"
@@ -157,6 +190,8 @@ jobs:
             echo "EOF"
             echo "author=${AUTHOR}"
             echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
+            echo "emergency_continuity_mode=${emergency_continuity_mode}"
+            echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
@@ -212,10 +247,19 @@ jobs:
           gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Author trust check failed (permission: ${{ steps.trust.outputs.permission }}). Hand-off to humans required."
           gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
 
+      - name: Comment when subscription strict is paused
+        if: ${{ steps.ctx.outputs.should_run != 'true' && steps.ctx.outputs.skip_reason == 'subscription-self-hosted-offline-strict' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.ctx.outputs.issue_number }}
+          ONLINE_COUNT: ${{ steps.ctx.outputs.self_hosted_online_count }}
+        run: |
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
+
   run-agents:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, resolve-orchestrator]
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -240,9 +284,11 @@ jobs:
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
-          STRICT_MAIN_CODEX_MODEL: ${{ vars.FUGUE_STRICT_MAIN_CODEX_MODEL || 'false' }}
-          STRICT_OPUS_ASSIST_DIRECT: ${{ vars.FUGUE_STRICT_OPUS_ASSIST_DIRECT || 'false' }}
-          CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'harness' }}
+          STRICT_MAIN_CODEX_MODEL: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
+          STRICT_OPUS_ASSIST_DIRECT: ${{ needs.resolve-orchestrator.outputs.strict_opus_assist_direct_effective }}
+          CI_EXECUTION_ENGINE: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
+          EXECUTION_PROFILE: ${{ needs.resolve-orchestrator.outputs.execution_profile }}
+          SUBSCRIPTION_CLI_TIMEOUT_SEC: ${{ vars.FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC || '180' }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
@@ -251,9 +297,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-harness}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
-            ci_execution_engine="harness"
+          ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
+            ci_execution_engine="subscription"
           fi
           if [[ "${ci_execution_engine}" == "harness" ]]; then
             if [[ ! -x "scripts/harness/ci-agent-runner.sh" ]]; then
@@ -261,6 +307,14 @@ jobs:
               exit 1
             fi
             bash scripts/harness/ci-agent-runner.sh
+            exit 0
+          fi
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            if [[ ! -x "scripts/harness/subscription-agent-runner.sh" ]]; then
+              echo "subscription execution engine is enabled, but scripts/harness/subscription-agent-runner.sh is missing or not executable." >&2
+              exit 1
+            fi
+            bash scripts/harness/subscription-agent-runner.sh
             exit 0
           fi
 
@@ -817,6 +871,15 @@ jobs:
           - assist orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           - multi-agent mode: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
           - multi-agent mode source: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
+          - ci execution engine: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
+          - subscription offline policy: ${{ needs.resolve-orchestrator.outputs.subscription_offline_policy }}
+          - run-agents runner: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
+          - execution profile: ${{ needs.resolve-orchestrator.outputs.execution_profile }} (\`${{ needs.resolve-orchestrator.outputs.execution_profile_reason }}\`)
+          - continuity active: ${{ needs.resolve-orchestrator.outputs.continuity_active }}
+          - self-hosted online count: ${{ needs.resolve-orchestrator.outputs.self_hosted_online_count }}
+          - strict main codex model effective: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
+          - strict opus assist direct effective: ${{ needs.resolve-orchestrator.outputs.strict_opus_assist_direct_effective }}
+          - assist adjusted by execution profile: ${{ needs.resolve-orchestrator.outputs.assist_adjusted_by_execution_profile }} (\`${{ needs.resolve-orchestrator.outputs.assist_adjustment_reason }}\`)
           ${main_fallback_section}
           ${assist_fallback_section}
           ${claude_pressure_section}
@@ -923,6 +986,17 @@ jobs:
       assist_claude_fallback_reason: ${{ steps.resolve.outputs.assist_claude_fallback_reason }}
       claude_pressure_guard_applied: ${{ steps.resolve.outputs.claude_pressure_guard_applied }}
       claude_pressure_guard_reason: ${{ steps.resolve.outputs.claude_pressure_guard_reason }}
+      ci_execution_engine: ${{ steps.resolve.outputs.ci_execution_engine }}
+      run_agents_runner: ${{ steps.resolve.outputs.run_agents_runner }}
+      execution_profile: ${{ steps.resolve.outputs.execution_profile }}
+      execution_profile_reason: ${{ steps.resolve.outputs.execution_profile_reason }}
+      continuity_active: ${{ steps.resolve.outputs.continuity_active }}
+      self_hosted_online_count: ${{ steps.resolve.outputs.self_hosted_online_count }}
+      strict_main_codex_model_effective: ${{ steps.resolve.outputs.strict_main_codex_model_effective }}
+      strict_opus_assist_direct_effective: ${{ steps.resolve.outputs.strict_opus_assist_direct_effective }}
+      subscription_offline_policy: ${{ steps.resolve.outputs.subscription_offline_policy }}
+      assist_adjusted_by_execution_profile: ${{ steps.resolve.outputs.assist_adjusted_by_execution_profile }}
+      assist_adjustment_reason: ${{ steps.resolve.outputs.assist_adjustment_reason }}
       main_signal_lane: ${{ steps.resolve.outputs.main_signal_lane }}
       expected_lanes: ${{ steps.resolve.outputs.expected_lanes }}
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
@@ -933,13 +1007,14 @@ jobs:
       - name: Resolve orchestrator profile and lane matrix
         id: resolve
         env:
+          GH_TOKEN: ${{ github.token }}
           REQUESTED_PROVIDER: ${{ inputs.main_orchestrator_provider || inputs.orchestrator_provider }}
           REQUESTED_ASSIST_PROVIDER: ${{ inputs.assist_orchestrator_provider }}
           FORCE_CLAUDE: ${{ inputs.force_claude }}
           MULTI_AGENT_MODE_OVERRIDE: ${{ inputs.multi_agent_mode_override }}
           MULTI_AGENT_MODE_LOCK: ${{ inputs.multi_agent_mode_lock }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
-          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'none' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'enhanced' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
           CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-3-7-sonnet-latest' }}
@@ -947,7 +1022,14 @@ jobs:
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
-          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
+          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
+          CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
+          STRICT_MAIN_CODEX_MODEL: ${{ vars.FUGUE_STRICT_MAIN_CODEX_MODEL || 'true' }}
+          STRICT_OPUS_ASSIST_DIRECT: ${{ vars.FUGUE_STRICT_OPUS_ASSIST_DIRECT || 'true' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
+          EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
+          EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
         run: |
@@ -983,6 +1065,72 @@ jobs:
           claude_pressure_guard_reason="${pressure_guard_reason}"
 
           text="$(printf '%s\n%s\n' "${ISSUE_TITLE}" "${ISSUE_BODY}" | tr '[:upper:]' '[:lower:]')"
+          ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
+            ci_execution_engine="subscription"
+          fi
+          strict_main_requested="$(echo "${STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${strict_main_requested}" != "true" ]]; then
+            strict_main_requested="false"
+          fi
+          strict_opus_requested="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${strict_opus_requested}" != "true" ]]; then
+            strict_opus_requested="false"
+          fi
+          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
+            subscription_offline_policy="hold"
+          fi
+          api_strict_mode="$(echo "${API_STRICT_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${api_strict_mode}" != "true" ]]; then
+            api_strict_mode="false"
+          fi
+          emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${emergency_continuity_mode}" != "true" ]]; then
+            emergency_continuity_mode="false"
+          fi
+          emergency_assist_policy="$(echo "${EMERGENCY_ASSIST_POLICY:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${emergency_assist_policy}" != "none" && "${emergency_assist_policy}" != "codex" && "${emergency_assist_policy}" != "claude" ]]; then
+            emergency_assist_policy="none"
+          fi
+          self_hosted_online_count="0"
+          self_hosted_online="false"
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online")] | length' 2>/dev/null || echo "0")"
+            self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
+            if [[ -z "${self_hosted_online_count}" ]]; then
+              self_hosted_online_count="0"
+            fi
+            if (( self_hosted_online_count > 0 )); then
+              self_hosted_online="true"
+            fi
+          fi
+          assist_before_execution_profile="${assist_provider}"
+          eval "$(
+            scripts/lib/execution-profile-policy.sh \
+              --requested-engine "${ci_execution_engine}" \
+              --main-provider "${main_provider}" \
+              --assist-provider "${assist_provider}" \
+              --force-claude "${force_claude}" \
+              --self-hosted-online "${self_hosted_online}" \
+              --strict-main-requested "${strict_main_requested}" \
+              --strict-opus-requested "${strict_opus_requested}" \
+              --subscription-offline-policy "${subscription_offline_policy}" \
+              --api-strict-mode "${api_strict_mode}" \
+              --emergency-continuity-mode "${emergency_continuity_mode}" \
+              --emergency-assist-policy "${emergency_assist_policy}"
+          )"
+          ci_execution_engine="${effective_engine}"
+          strict_main_codex_model_effective="${strict_main_effective}"
+          strict_opus_assist_direct_effective="${strict_opus_effective}"
+          assist_adjusted_by_execution_profile="${assist_adjusted_by_profile}"
+          assist_provider="${assist_provider_effective}"
+          if [[ "${assist_before_execution_profile}" != "${assist_provider}" ]]; then
+            assist_claude_fallback_applied="true"
+            if [[ -n "${assist_adjustment_reason}" ]]; then
+              assist_claude_fallback_reason="${assist_adjustment_reason}"
+            fi
+          fi
           multi_agent_mode="$(echo "${MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           mode_override="$(echo "${MULTI_AGENT_MODE_OVERRIDE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           mode_lock="$(echo "${MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -1046,33 +1194,49 @@ jobs:
           fi
           wants_gemini="false"
           wants_xai="false"
-          if echo "${text}" | grep -Eqi '(ui|ux|ui[[:space:]]*design|ux[[:space:]]*design|figma|mockup|wireframe|screenshot|layout|デザイン|画面|画像|スクリーンショット|レイアウト|pencil)'; then
-            wants_gemini="true"
-          fi
-          if echo "${text}" | grep -Eqi '(x/twitter|twitter|tweet|tweets|xai|grok|x検索|トレンド|リアルタイム|速報|timeline|タイムライン)'; then
-            wants_xai="true"
+          if [[ "${ci_execution_engine}" != "subscription" ]]; then
+            if echo "${text}" | grep -Eqi '(ui|ux|ui[[:space:]]*design|ux[[:space:]]*design|figma|mockup|wireframe|screenshot|layout|デザイン|画面|画像|スクリーンショット|レイアウト|pencil)'; then
+              wants_gemini="true"
+            fi
+            if echo "${text}" | grep -Eqi '(x/twitter|twitter|tweet|tweets|xai|grok|x検索|トレンド|リアルタイム|速報|timeline|タイムライン)'; then
+              wants_xai="true"
+            fi
           fi
 
-          # Keep /vote quorum baseline as 6 lanes minimum (Codex3 + GLM3).
-          matrix="$(jq -cn '{
-            include: [
-              {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
-              {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
-              {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
-              {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
-              {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
-              {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
-            ]
-          }')"
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            # Subscription mode avoids pay-as-you-go providers.
+            matrix="$(jq -cn '{
+              include: [
+                {name:"codex-security-analyst",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex",agent_role:"security-analyst"},
+                {name:"codex-code-reviewer",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
+                {name:"codex-general-reviewer",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
+                {name:"codex-math-reasoning",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"math-reasoning"},
+                {name:"codex-refactor-advisor",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"refactor-advisor"},
+                {name:"codex-general-critic",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"general-critic"}
+              ]
+            }')"
+          else
+            # Keep /vote quorum baseline as 6 lanes minimum (Codex3 + GLM3).
+            matrix="$(jq -cn '{
+              include: [
+                {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
+                {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
+                {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
+                {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
+                {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
+                {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
+              ]
+            }')"
+          fi
           main_signal_lane="codex-main-orchestrator"
           if [[ "${main_provider}" == "claude" ]]; then
             main_signal_lane="claude-main-orchestrator"
-            matrix="$(echo "${matrix}" | jq -c --arg opus "${CLAUDE_OPUS_MODEL}" '
+            matrix="$(echo "${matrix}" | jq -c --arg opus "${CLAUDE_OPUS_MODEL}" --arg engine "${ci_execution_engine}" '
               if any(.include[]; .name == "claude-main-orchestrator") then .
               else .include += [{
                 name:"claude-main-orchestrator",
                 provider:"claude",
-                api_url:"https://api.anthropic.com/v1/messages",
+                api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.anthropic.com/v1/messages" end),
                 model:$opus,
                 agent_role:"main-orchestrator"
               }] end
@@ -1083,51 +1247,60 @@ jobs:
               else .include += [{
                 name:"codex-main-orchestrator",
                 provider:"codex",
-                api_url:"https://api.openai.com/v1/chat/completions",
+                api_url:"subscription-cli",
                 model:"gpt-5.3-codex",
                 agent_role:"main-orchestrator"
               }] end
-            ')"
+            ' )"
+            if [[ "${ci_execution_engine}" != "subscription" ]]; then
+              matrix="$(echo "${matrix}" | jq -c '
+                .include |= map(
+                  if .name == "codex-main-orchestrator" then . + {api_url:"https://api.openai.com/v1/chat/completions"} else . end
+                )'
+              )"
+            fi
           fi
 
           if [[ "${assist_provider}" == "claude" ]]; then
-            matrix="$(echo "${matrix}" | jq -c --arg opus "${CLAUDE_OPUS_MODEL}" '
+            matrix="$(echo "${matrix}" | jq -c --arg opus "${CLAUDE_OPUS_MODEL}" --arg engine "${ci_execution_engine}" '
               if any(.include[]; .name == "claude-opus-assist") then .
               else .include += [{
                 name:"claude-opus-assist",
                 provider:"claude",
-                api_url:"https://api.anthropic.com/v1/messages",
+                api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.anthropic.com/v1/messages" end),
                 model:$opus,
                 agent_role:"orchestration-assistant"
               }] end
             ')"
-            matrix="$(echo "${matrix}" | jq -c --arg sonnet4 "${CLAUDE_SONNET4_MODEL}" '
-              if any(.include[]; .name == "claude-sonnet4-assist") then .
-              else .include += [{
-                name:"claude-sonnet4-assist",
-                provider:"claude",
-                api_url:"https://api.anthropic.com/v1/messages",
-                model:$sonnet4,
-                agent_role:"orchestration-assistant"
-              }] end
-            ')"
-            matrix="$(echo "${matrix}" | jq -c --arg sonnet6 "${CLAUDE_SONNET6_MODEL}" '
-              if any(.include[]; .name == "claude-sonnet6-assist") then .
-              else .include += [{
-                name:"claude-sonnet6-assist",
-                provider:"claude",
-                api_url:"https://api.anthropic.com/v1/messages",
-                model:$sonnet6,
-                agent_role:"orchestration-assistant"
-              }] end
-            ')"
+            if [[ "${ci_execution_engine}" != "subscription" ]]; then
+              matrix="$(echo "${matrix}" | jq -c --arg sonnet4 "${CLAUDE_SONNET4_MODEL}" --arg engine "${ci_execution_engine}" '
+                if any(.include[]; .name == "claude-sonnet4-assist") then .
+                else .include += [{
+                  name:"claude-sonnet4-assist",
+                  provider:"claude",
+                  api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.anthropic.com/v1/messages" end),
+                  model:$sonnet4,
+                  agent_role:"orchestration-assistant"
+                }] end
+              ')"
+              matrix="$(echo "${matrix}" | jq -c --arg sonnet6 "${CLAUDE_SONNET6_MODEL}" --arg engine "${ci_execution_engine}" '
+                if any(.include[]; .name == "claude-sonnet6-assist") then .
+                else .include += [{
+                  name:"claude-sonnet6-assist",
+                  provider:"claude",
+                  api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.anthropic.com/v1/messages" end),
+                  model:$sonnet6,
+                  agent_role:"orchestration-assistant"
+                }] end
+              ')"
+            fi
           elif [[ "${assist_provider}" == "codex" ]]; then
-            matrix="$(echo "${matrix}" | jq -c '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
               if any(.include[]; .name == "codex-orchestration-assist") then .
               else .include += [{
                 name:"codex-orchestration-assist",
                 provider:"codex",
-                api_url:"https://api.openai.com/v1/chat/completions",
+                api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
                 model:"gpt-5.3-codex-spark",
                 agent_role:"orchestration-assistant"
               }] end
@@ -1161,69 +1334,105 @@ jobs:
           fi
 
           if [[ "${multi_agent_mode}" == "enhanced" || "${multi_agent_mode}" == "max" ]]; then
-            matrix="$(echo "${matrix}" | jq -c '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
               if any(.include[]; .name == "codex-architect") then .
               else .include += [{
                 name:"codex-architect",
                 provider:"codex",
-                api_url:"https://api.openai.com/v1/chat/completions",
+                api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
                 model:"gpt-5.3-codex",
                 agent_role:"architect"
               }] end
             ')"
-            matrix="$(echo "${matrix}" | jq -c '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
               if any(.include[]; .name == "codex-plan-reviewer") then .
               else .include += [{
                 name:"codex-plan-reviewer",
                 provider:"codex",
-                api_url:"https://api.openai.com/v1/chat/completions",
+                api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
                 model:"gpt-5.3-codex-spark",
                 agent_role:"plan-reviewer"
               }] end
             ')"
-            matrix="$(echo "${matrix}" | jq -c '
-              if any(.include[]; .name == "glm-refactor-advisor") then .
-              else .include += [{
-                name:"glm-refactor-advisor",
-                provider:"glm",
-                api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-                model:"glm-5.0",
-                agent_role:"refactor-advisor"
-              }] end
-            ')"
-            matrix="$(echo "${matrix}" | jq -c '
-              if any(.include[]; .name == "glm-general-critic") then .
-              else .include += [{
-                name:"glm-general-critic",
-                provider:"glm",
-                api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-                model:"glm-5.0",
-                agent_role:"general-critic"
-              }] end
-            ')"
+            if [[ "${ci_execution_engine}" == "subscription" ]]; then
+              matrix="$(echo "${matrix}" | jq -c '
+                if any(.include[]; .name == "codex-refactor-advisor-enhanced") then .
+                else .include += [{
+                  name:"codex-refactor-advisor-enhanced",
+                  provider:"codex",
+                  api_url:"subscription-cli",
+                  model:"gpt-5.3-codex-spark",
+                  agent_role:"refactor-advisor"
+                }] end
+              ')"
+              matrix="$(echo "${matrix}" | jq -c '
+                if any(.include[]; .name == "codex-general-critic-enhanced") then .
+                else .include += [{
+                  name:"codex-general-critic-enhanced",
+                  provider:"codex",
+                  api_url:"subscription-cli",
+                  model:"gpt-5.3-codex-spark",
+                  agent_role:"general-critic"
+                }] end
+              ')"
+            else
+              matrix="$(echo "${matrix}" | jq -c '
+                if any(.include[]; .name == "glm-refactor-advisor") then .
+                else .include += [{
+                  name:"glm-refactor-advisor",
+                  provider:"glm",
+                  api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                  model:"glm-5.0",
+                  agent_role:"refactor-advisor"
+                }] end
+              ')"
+              matrix="$(echo "${matrix}" | jq -c '
+                if any(.include[]; .name == "glm-general-critic") then .
+                else .include += [{
+                  name:"glm-general-critic",
+                  provider:"glm",
+                  api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                  model:"glm-5.0",
+                  agent_role:"general-critic"
+                }] end
+              ')"
+            fi
           fi
 
           if [[ "${multi_agent_mode}" == "max" ]]; then
-            matrix="$(echo "${matrix}" | jq -c '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
               if any(.include[]; .name == "codex-reliability-engineer") then .
               else .include += [{
                 name:"codex-reliability-engineer",
                 provider:"codex",
-                api_url:"https://api.openai.com/v1/chat/completions",
+                api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
                 model:"gpt-5.3-codex-spark",
                 agent_role:"reliability-engineer"
               }] end
             ')"
-            matrix="$(echo "${matrix}" | jq -c '
-              if any(.include[]; .name == "glm-invariants-checker") then .
-              else .include += [{
-                name:"glm-invariants-checker",
-                provider:"glm",
-                api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-                model:"glm-5.0",
-                agent_role:"invariants-checker"
-              }] end
-            ')"
+            if [[ "${ci_execution_engine}" == "subscription" ]]; then
+              matrix="$(echo "${matrix}" | jq -c '
+                if any(.include[]; .name == "codex-invariants-checker") then .
+                else .include += [{
+                  name:"codex-invariants-checker",
+                  provider:"codex",
+                  api_url:"subscription-cli",
+                  model:"gpt-5.3-codex-spark",
+                  agent_role:"invariants-checker"
+                }] end
+              ')"
+            else
+              matrix="$(echo "${matrix}" | jq -c '
+                if any(.include[]; .name == "glm-invariants-checker") then .
+                else .include += [{
+                  name:"glm-invariants-checker",
+                  provider:"glm",
+                  api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                  model:"glm-5.0",
+                  agent_role:"invariants-checker"
+                }] end
+              ')"
+            fi
           fi
 
           lanes="$(echo "${matrix}" | jq -r '.include | length')"
@@ -1245,6 +1454,17 @@ jobs:
             echo "assist_claude_fallback_reason=${assist_claude_fallback_reason}"
             echo "claude_pressure_guard_applied=${claude_pressure_guard_applied}"
             echo "claude_pressure_guard_reason=${claude_pressure_guard_reason}"
+            echo "ci_execution_engine=${ci_execution_engine}"
+            echo "run_agents_runner=${run_agents_runner}"
+            echo "execution_profile=${execution_profile}"
+            echo "execution_profile_reason=${execution_profile_reason}"
+            echo "continuity_active=${continuity_active}"
+            echo "self_hosted_online_count=${self_hosted_online_count}"
+            echo "strict_main_codex_model_effective=${strict_main_codex_model_effective}"
+            echo "strict_opus_assist_direct_effective=${strict_opus_assist_direct_effective}"
+            echo "subscription_offline_policy=${subscription_offline_policy}"
+            echo "assist_adjusted_by_execution_profile=${assist_adjusted_by_execution_profile}"
+            echo "assist_adjustment_reason=${assist_adjustment_reason}"
             echo "main_signal_lane=${main_signal_lane}"
             echo "expected_lanes=${lanes}"
             echo "agent_matrix=${matrix}"

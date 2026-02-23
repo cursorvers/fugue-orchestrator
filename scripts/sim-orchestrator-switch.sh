@@ -27,12 +27,36 @@ claude_role_policy="$(echo "${FUGUE_CLAUDE_ROLE_POLICY:-flex}" | tr '[:upper:]' 
 if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex" ]]; then
   claude_role_policy="flex"
 fi
-claude_degraded_assist_policy="$(echo "${FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+claude_degraded_assist_policy="$(echo "${FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY:-claude}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${claude_degraded_assist_policy}" != "codex" && "${claude_degraded_assist_policy}" != "none" && "${claude_degraded_assist_policy}" != "claude" ]]; then
-  claude_degraded_assist_policy="none"
+  claude_degraded_assist_policy="claude"
+fi
+requested_engine_default="$(echo "${FUGUE_CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${requested_engine_default}" != "subscription" && "${requested_engine_default}" != "harness" && "${requested_engine_default}" != "api" ]]; then
+  requested_engine_default="subscription"
+fi
+strict_main_requested="$(echo "${FUGUE_STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${strict_main_requested}" != "true" ]]; then
+  strict_main_requested="false"
+fi
+strict_opus_requested="$(echo "${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${strict_opus_requested}" != "true" ]]; then
+  strict_opus_requested="false"
+fi
+api_strict_mode="$(echo "${FUGUE_API_STRICT_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${api_strict_mode}" != "true" ]]; then
+  api_strict_mode="false"
+fi
+emergency_assist_policy="$(echo "${FUGUE_EMERGENCY_ASSIST_POLICY:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${emergency_assist_policy}" != "none" && "${emergency_assist_policy}" != "codex" && "${emergency_assist_policy}" != "claude" ]]; then
+  emergency_assist_policy="none"
+fi
+subscription_offline_policy_default="$(echo "${FUGUE_SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${subscription_offline_policy_default}" != "hold" && "${subscription_offline_policy_default}" != "continuity" ]]; then
+  subscription_offline_policy_default="hold"
 fi
 
-printf "scenario\trequested_main\trequested_assist\tclaude_state\tforce_claude\tresolved_main\tresolved_assist\tmain_signal_lane\texpected_lanes\tweighted_vote\timpl_gate\trefinement_cycles\timplementation_dialogue_rounds\tpreflight_gate\tnote\n"
+printf "scenario\trequested_main\trequested_assist\tclaude_state\tforce_claude\trequested_engine\tself_hosted_online\temergency_mode\tsubscription_offline_policy\tresolved_main\tresolved_assist\teffective_assist\texecution_profile\teffective_engine\trunner\tcontinuity\tstrict_main\tstrict_opus\tmain_signal_lane\texpected_lanes\tweighted_vote\timpl_gate\trefinement_cycles\timplementation_dialogue_rounds\tpreflight_gate\tnote\n"
 
 run_case() {
   local scenario="$1"
@@ -43,25 +67,55 @@ run_case() {
   local mode="$6"
   local weighted_vote="$7"
   local high_risk="$8"
+  local requested_engine="${9:-${requested_engine_default}}"
+  local self_hosted_online="${10:-false}"
+  local emergency_mode="${11:-false}"
+  local subscription_offline_policy="${12:-${subscription_offline_policy_default}}"
 
-  local resolved_main="${requested_main}"
-  if [[ "${resolved_main}" == "claude" && "${claude_role_policy}" == "sub-only" && "${force_claude}" != "true" ]]; then
-    resolved_main="codex"
+  eval "$(
+    scripts/lib/orchestrator-policy.sh \
+      --main "${requested_main}" \
+      --assist "${requested_assist}" \
+      --default-main "codex" \
+      --default-assist "claude" \
+      --claude-state "${claude_state}" \
+      --force-claude "${force_claude}" \
+      --assist-policy "${claude_main_assist_policy}" \
+      --claude-role-policy "${claude_role_policy}" \
+      --degraded-assist-policy "${claude_degraded_assist_policy}"
+  )"
+  local resolved_main="${resolved_main}"
+  local resolved_assist="${resolved_assist}"
+  local note_parts=()
+  if [[ "${main_fallback_applied}" == "true" && -n "${main_fallback_reason}" ]]; then
+    note_parts+=("main:${main_fallback_reason}")
   fi
-  if [[ "${resolved_main}" == "claude" && "${claude_state}" != "ok" && "${force_claude}" != "true" ]]; then
-    resolved_main="codex"
+  if [[ "${assist_fallback_applied}" == "true" && -n "${assist_fallback_reason}" ]]; then
+    note_parts+=("assist:${assist_fallback_reason}")
+  fi
+  if [[ "${pressure_guard_applied}" == "true" && -n "${pressure_guard_reason}" ]]; then
+    note_parts+=("pressure:${pressure_guard_reason}")
   fi
 
-  local resolved_assist="${requested_assist}"
-  if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "degraded" && "${force_claude}" != "true" ]]; then
-    resolved_assist="${claude_degraded_assist_policy}"
+  eval "$(
+    scripts/lib/execution-profile-policy.sh \
+      --requested-engine "${requested_engine}" \
+      --main-provider "${resolved_main}" \
+      --assist-provider "${resolved_assist}" \
+      --force-claude "${force_claude}" \
+      --self-hosted-online "${self_hosted_online}" \
+      --strict-main-requested "${strict_main_requested}" \
+      --strict-opus-requested "${strict_opus_requested}" \
+      --subscription-offline-policy "${subscription_offline_policy}" \
+      --api-strict-mode "${api_strict_mode}" \
+      --emergency-continuity-mode "${emergency_mode}" \
+      --emergency-assist-policy "${emergency_assist_policy}"
+  )"
+  local effective_assist="${assist_provider_effective}"
+  if [[ "${assist_adjusted_by_profile}" == "true" && -n "${assist_adjustment_reason}" ]]; then
+    note_parts+=("profile:${assist_adjustment_reason}")
   fi
-  if [[ "${resolved_assist}" == "claude" && "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
-    resolved_assist="none"
-  fi
-  if [[ "${resolved_main}" == "claude" && "${resolved_assist}" == "claude" && "${force_claude}" != "true" ]]; then
-    resolved_assist="${claude_main_assist_policy}"
-  fi
+
   local main_signal_lane
   if [[ "${resolved_main}" == "claude" ]]; then
     main_signal_lane="claude-main-orchestrator"
@@ -69,16 +123,18 @@ run_case() {
     main_signal_lane="codex-main-orchestrator"
   fi
   local assist_lane_count=0
-  if [[ "${resolved_assist}" == "claude" ]]; then
-    assist_lane_count=3
-  elif [[ "${resolved_assist}" == "codex" ]]; then
+  if [[ "${effective_assist}" == "claude" ]]; then
+    if [[ "${effective_engine}" == "subscription" ]]; then
+      assist_lane_count=1
+    else
+      assist_lane_count=3
+    fi
+  elif [[ "${effective_assist}" == "codex" ]]; then
     assist_lane_count=1
   fi
   local expected_lanes=$((6 + 1 + assist_lane_count))
 
   local impl_gate="no-implement"
-  local note=""
-
   if [[ "${mode}" == "implement" && "${weighted_vote}" == "pass" && "${high_risk}" == "false" ]]; then
     impl_gate="codex-implement"
   fi
@@ -90,47 +146,31 @@ run_case() {
   if [[ "${impl_gate}" == "codex-implement" ]]; then
     preflight_gate="required(${refinement_cycles}x)"
   fi
-
-  if [[ "${requested_main}" == "claude" && "${resolved_main}" == "codex" ]]; then
-    if [[ "${claude_role_policy}" == "sub-only" && "${claude_state}" == "ok" && "${force_claude}" != "true" ]]; then
-      note="main-sub-only-guard-claude-to-codex"
-    else
-      note="main-fallback-claude-to-codex"
-    fi
-  fi
-  if [[ "${requested_assist}" == "claude" && "${claude_state}" == "degraded" && "${resolved_assist}" != "claude" && "${force_claude}" != "true" ]]; then
-    if [[ -n "${note}" ]]; then
-      note="${note};"
-    fi
-    note="${note}assist-fallback-claude-degraded->${resolved_assist}"
-  fi
-  if [[ "${requested_assist}" == "claude" && "${resolved_assist}" == "none" && "${claude_state}" == "exhausted" ]]; then
-    if [[ -n "${note}" ]]; then
-      note="${note};"
-    fi
-    note="${note}assist-fallback-claude-to-none"
-  fi
-  if [[ "${resolved_main}" == "claude" && "${requested_assist}" == "claude" && "${resolved_assist}" != "claude" && "${claude_state}" != "exhausted" && "${force_claude}" != "true" ]]; then
-    if [[ -n "${note}" ]]; then
-      note="${note};"
-    fi
-    note="${note}claude-pressure-guard-assist->${resolved_assist}"
-  fi
-  if [[ "${force_claude}" == "true" && "${claude_state}" != "ok" ]]; then
-    if [[ -n "${note}" ]]; then
-      note="${note};"
-    fi
-    note="${note}forced-claude-under-throttle"
+  note_parts+=("exec:${execution_profile_reason}")
+  local note="none"
+  if [[ "${#note_parts[@]}" -gt 0 ]]; then
+    note="$(IFS=';'; echo "${note_parts[*]}")"
   fi
 
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "${scenario}" \
     "${requested_main}" \
     "${requested_assist}" \
     "${claude_state}" \
     "${force_claude}" \
+    "${requested_engine}" \
+    "${self_hosted_online}" \
+    "${emergency_mode}" \
+    "${subscription_offline_policy}" \
     "${resolved_main}" \
     "${resolved_assist}" \
+    "${effective_assist}" \
+    "${execution_profile}" \
+    "${effective_engine}" \
+    "${run_agents_runner}" \
+    "${continuity_active}" \
+    "${strict_main_effective}" \
+    "${strict_opus_effective}" \
     "${main_signal_lane}" \
     "${expected_lanes}" \
     "${weighted_vote}" \
@@ -141,11 +181,13 @@ run_case() {
     "${note}"
 }
 
-run_case "S1"  "codex"  "claude" "ok"        "false" "review"    "pass"   "false"
-run_case "S2"  "claude" "claude" "ok"        "false" "implement" "pass"   "false"
-run_case "S3"  "claude" "claude" "degraded"  "false" "review"    "pass"   "false"
-run_case "S4"  "claude" "claude" "exhausted" "false" "implement" "pass"   "false"
-run_case "S5"  "claude" "claude" "exhausted" "true"  "review"    "pass"   "false"
-run_case "S6"  "claude" "none"   "ok"        "false" "implement" "pass"   "true"
-run_case "S7"  "codex"  "codex"  "ok"        "false" "implement" "reject" "false"
-run_case "S8"  "codex"  "claude" "ok"        "false" "implement" "pass"   "false"
+run_case "S1"  "codex"  "claude" "ok"        "false" "review"    "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S2"  "claude" "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S3"  "claude" "claude" "degraded"  "false" "review"    "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S4"  "codex"  "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "false" "false" "hold"
+run_case "S5"  "codex"  "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "false" "false" "continuity"
+run_case "S6"  "codex"  "claude" "ok"        "false" "implement" "pass"   "false" "harness"      "false" "false" "hold"
+run_case "S7"  "codex"  "claude" "ok"        "false" "implement" "pass"   "false" "harness"      "false" "true"  "hold"
+run_case "S8"  "codex"  "codex"  "ok"        "false" "implement" "reject" "false" "api"          "false" "false" "hold"
+run_case "S9"  "claude" "none"   "ok"        "false" "implement" "pass"   "true"  "subscription" "true"  "false" "hold"
+run_case "S10" "claude" "claude" "exhausted" "true"  "review"    "pass"   "false" "subscription" "false" "false" "hold"
