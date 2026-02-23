@@ -14,7 +14,7 @@ permissions:
   issues: write
   contents: write
   pull-requests: write
-  actions: read
+  actions: write
 
 concurrency:
   group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
