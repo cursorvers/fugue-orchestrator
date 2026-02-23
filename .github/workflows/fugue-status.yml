@@ -174,6 +174,7 @@ jobs:
           assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
           ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
           subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "hold")"
+          subscription_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
           claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
@@ -196,6 +197,7 @@ jobs:
           assist_default="$(echo "${assist_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           ci_execution_engine="$(echo "${ci_execution_engine}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           subscription_offline_policy="$(echo "${subscription_offline_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_runner_label="$(echo "${subscription_runner_label}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           multi_agent_mode="$(echo "${multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_main_assist_policy="$(echo "${claude_main_assist_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -225,6 +227,9 @@ jobs:
           fi
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
             subscription_offline_policy="hold"
+          fi
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
             multi_agent_mode="enhanced"
@@ -286,7 +291,8 @@ jobs:
           fi
           self_hosted_online_count="n/a"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
               self_hosted_online_count="0"
@@ -332,6 +338,7 @@ jobs:
           - assist_orchestrator_default: ${assist_default}
           - ci_execution_engine: ${ci_execution_engine}
           - subscription_offline_policy: ${subscription_offline_policy}
+          - subscription_runner_label: ${subscription_runner_label}
           - self_hosted_online_count: ${self_hosted_online_count}
           - multi_agent_mode: ${multi_agent_mode}
           - claude_main_assist_policy: ${claude_main_assist_policy}

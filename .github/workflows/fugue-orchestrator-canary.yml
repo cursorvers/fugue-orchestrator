@@ -21,6 +21,7 @@ jobs:
       CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
       CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
       SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+      SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,15 +61,20 @@ jobs:
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
             subscription_offline_policy="hold"
           fi
+          subscription_runner_label="$(echo "${SUBSCRIPTION_RUNNER_LABEL:-fugue-subscription}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
+          fi
 
           if [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" ]]; then
-            online_count="$(gh api "repos/${repo}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            runners_json="$(gh api "repos/${repo}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             online_count="$(echo "${online_count}" | tr -cd '0-9')"
             if [[ -z "${online_count}" ]]; then
               online_count="0"
             fi
             if (( online_count == 0 )); then
-              echo "Canary skipped: subscription strict hold policy active and no online self-hosted runner."
+              echo "Canary skipped: subscription strict hold policy active and no online self-hosted runner for label ${subscription_runner_label}."
               exit 0
             fi
           fi

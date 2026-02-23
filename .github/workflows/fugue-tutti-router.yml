@@ -112,6 +112,7 @@ jobs:
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       emergency_continuity_mode: ${{ steps.ctx.outputs.emergency_continuity_mode }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
+      subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
 
@@ -123,6 +124,7 @@ jobs:
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
+          SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: |
           set -euo pipefail
 
@@ -153,9 +155,14 @@ jobs:
           if [[ "${emergency_continuity_mode}" != "true" ]]; then
             emergency_continuity_mode="false"
           fi
+          subscription_runner_label="$(echo "${SUBSCRIPTION_RUNNER_LABEL:-fugue-subscription}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
+          fi
           self_hosted_online_count="0"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
               self_hosted_online_count="0"
@@ -192,6 +199,7 @@ jobs:
             echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
             echo "emergency_continuity_mode=${emergency_continuity_mode}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
+            echo "subscription_runner_label=${subscription_runner_label}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
@@ -253,8 +261,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.ctx.outputs.issue_number }}
           ONLINE_COUNT: ${{ steps.ctx.outputs.self_hosted_online_count }}
+          RUNNER_LABEL: ${{ steps.ctx.outputs.subscription_runner_label }}
         run: |
-          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
 
   pause-subscription:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile == 'subscription-paused' }}
@@ -267,15 +276,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
           ONLINE_COUNT: ${{ needs.resolve-orchestrator.outputs.self_hosted_online_count }}
+          RUNNER_LABEL: ${{ needs.resolve-orchestrator.outputs.subscription_runner_label }}
         run: |
           set -euo pipefail
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no available self-hosted runner detected (available=${ONLINE_COUNT}). Task is kept pending; no agent lanes were started."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no available self-hosted runner detected for required label \`${RUNNER_LABEL}\` (available=${ONLINE_COUNT}). Task is kept pending; no agent lanes were started."
 
   run-agents:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile != 'subscription-paused' }}
     needs: [prepare, resolve-orchestrator]
-    runs-on: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
+    runs-on: ${{ fromJson(needs.resolve-orchestrator.outputs.run_agents_runner_json) }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -732,6 +742,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
           QUEUE_GUARD_TIMEOUT_SEC: ${{ vars.FUGUE_SUBSCRIPTION_QUEUE_GUARD_TIMEOUT_SEC || '120' }}
+          EXPECTED_LANES: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
         run: |
           set -euo pipefail
 
@@ -755,6 +766,10 @@ jobs:
           idle_sec=0
           saw_jobs="false"
           last_metric=-1
+          expected_lanes="$(echo "${EXPECTED_LANES:-0}" | tr -cd '0-9')"
+          if [[ -z "${expected_lanes}" ]]; then
+            expected_lanes="0"
+          fi
 
           while (( elapsed < max_watch_sec )); do
             jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
@@ -795,7 +810,20 @@ jobs:
           final_jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
           final_total="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
           final_started="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) > 0))] | length' 2>/dev/null || echo "0")"
+          final_completed="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and ((.conclusion // "") != ""))] | length' 2>/dev/null || echo "0")"
           final_pending="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) == 0) and ((.conclusion // "") == ""))] | length' 2>/dev/null || echo "0")"
+          if [[ "${saw_jobs}" == "true" ]] && (( final_total == 0 )); then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lane inventory became unreadable (expected_lanes=${expected_lanes}, observed_total=${final_total}). Task is paused; processing label was cleared."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+            gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+            exit 0
+          fi
+          if (( expected_lanes > 0 && final_total < expected_lanes )); then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lanes were only partially materialized (expected=${expected_lanes}, observed=${final_total}, started=${final_started}, completed=${final_completed}). Task is paused; processing label was cleared."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+            gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+            exit 0
+          fi
           if (( final_total > 0 && final_pending > 0 && final_started == 0 )); then
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lanes remained unstarted after guard window (pending=${final_pending}/${final_total}, started=${final_started}). Task is paused; processing label was cleared."
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
@@ -803,7 +831,7 @@ jobs:
             exit 0
           fi
 
-          echo "Queue guard timed out without confirmed stall (max_watch_sec=${max_watch_sec}, idle_sec=${idle_sec}, final_pending=${final_pending}, final_started=${final_started})."
+          echo "Queue guard timed out without confirmed stall (max_watch_sec=${max_watch_sec}, idle_sec=${idle_sec}, final_total=${final_total}, expected_lanes=${expected_lanes}, final_pending=${final_pending}, final_started=${final_started}, final_completed=${final_completed})."
 
   integrate:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
@@ -978,9 +1006,11 @@ jobs:
           - ci execution engine: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
           - subscription offline policy: ${{ needs.resolve-orchestrator.outputs.subscription_offline_policy }}
           - run-agents runner: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
+          - run-agents runner labels: ${{ needs.resolve-orchestrator.outputs.run_agents_runner_json }}
           - execution profile: ${{ needs.resolve-orchestrator.outputs.execution_profile }} (\`${{ needs.resolve-orchestrator.outputs.execution_profile_reason }}\`)
           - continuity active: ${{ needs.resolve-orchestrator.outputs.continuity_active }}
           - self-hosted online count: ${{ needs.resolve-orchestrator.outputs.self_hosted_online_count }}
+          - required subscription runner label: ${{ needs.resolve-orchestrator.outputs.subscription_runner_label }}
           - strict main codex model effective: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
           - strict opus assist direct effective: ${{ needs.resolve-orchestrator.outputs.strict_opus_assist_direct_effective }}
           - assist adjusted by execution profile: ${{ needs.resolve-orchestrator.outputs.assist_adjusted_by_execution_profile }} (\`${{ needs.resolve-orchestrator.outputs.assist_adjustment_reason }}\`)
@@ -1092,10 +1122,12 @@ jobs:
       claude_pressure_guard_reason: ${{ steps.resolve.outputs.claude_pressure_guard_reason }}
       ci_execution_engine: ${{ steps.resolve.outputs.ci_execution_engine }}
       run_agents_runner: ${{ steps.resolve.outputs.run_agents_runner }}
+      run_agents_runner_json: ${{ steps.resolve.outputs.run_agents_runner_json }}
       execution_profile: ${{ steps.resolve.outputs.execution_profile }}
       execution_profile_reason: ${{ steps.resolve.outputs.execution_profile_reason }}
       continuity_active: ${{ steps.resolve.outputs.continuity_active }}
       self_hosted_online_count: ${{ steps.resolve.outputs.self_hosted_online_count }}
+      subscription_runner_label: ${{ steps.resolve.outputs.subscription_runner_label }}
       strict_main_codex_model_effective: ${{ steps.resolve.outputs.strict_main_codex_model_effective }}
       strict_opus_assist_direct_effective: ${{ steps.resolve.outputs.strict_opus_assist_direct_effective }}
       subscription_offline_policy: ${{ steps.resolve.outputs.subscription_offline_policy }}
@@ -1131,6 +1163,7 @@ jobs:
           STRICT_MAIN_CODEX_MODEL: ${{ vars.FUGUE_STRICT_MAIN_CODEX_MODEL || 'true' }}
           STRICT_OPUS_ASSIST_DIRECT: ${{ vars.FUGUE_STRICT_OPUS_ASSIST_DIRECT || 'true' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
           API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
           EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
@@ -1197,10 +1230,15 @@ jobs:
           if [[ "${emergency_assist_policy}" != "none" && "${emergency_assist_policy}" != "codex" && "${emergency_assist_policy}" != "claude" ]]; then
             emergency_assist_policy="none"
           fi
+          subscription_runner_label="$(echo "${SUBSCRIPTION_RUNNER_LABEL:-fugue-subscription}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
+          fi
           self_hosted_online_count="0"
           self_hosted_online="false"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
               self_hosted_online_count="0"
@@ -1229,6 +1267,10 @@ jobs:
           strict_opus_assist_direct_effective="${strict_opus_effective}"
           assist_adjusted_by_execution_profile="${assist_adjusted_by_profile}"
           assist_provider="${assist_provider_effective}"
+          run_agents_runner_json='["ubuntu-latest"]'
+          if [[ "${run_agents_runner}" == "self-hosted" ]]; then
+            run_agents_runner_json="$(jq -cn --arg label "${subscription_runner_label}" '["self-hosted",$label]')"
+          fi
           if [[ "${assist_before_execution_profile}" != "${assist_provider}" ]]; then
             assist_claude_fallback_applied="true"
             if [[ -n "${assist_adjustment_reason}" ]]; then
@@ -1560,10 +1602,12 @@ jobs:
             echo "claude_pressure_guard_reason=${claude_pressure_guard_reason}"
             echo "ci_execution_engine=${ci_execution_engine}"
             echo "run_agents_runner=${run_agents_runner}"
+            echo "run_agents_runner_json=${run_agents_runner_json}"
             echo "execution_profile=${execution_profile}"
             echo "execution_profile_reason=${execution_profile_reason}"
             echo "continuity_active=${continuity_active}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
+            echo "subscription_runner_label=${subscription_runner_label}"
             echo "strict_main_codex_model_effective=${strict_main_codex_model_effective}"
             echo "strict_opus_assist_direct_effective=${strict_opus_assist_direct_effective}"
             echo "subscription_offline_policy=${subscription_offline_policy}"

@@ -50,7 +50,7 @@ Auditability:
   - `codex-main-orchestrator` when main is `codex`
   - `claude-main-orchestrator` when main is `claude`
 - Execution profile is resolved per run:
-  - Primary: `subscription-strict` (`FUGUE_CI_EXECUTION_ENGINE=subscription` + online self-hosted runner)
+  - Primary: `subscription-strict` (`FUGUE_CI_EXECUTION_ENGINE=subscription` + online self-hosted runner with required label `FUGUE_SUBSCRIPTION_RUNNER_LABEL`)
   - Offline hold: `subscription-paused` (`FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`, default)
   - Continuity fallback: `api-continuity` (`FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity` or emergency continuity mode)
 - `FUGUE_EMERGENCY_CONTINUITY_MODE=true` enables inflight-only processing on GitHub-hosted runners.

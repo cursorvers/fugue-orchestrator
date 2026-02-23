@@ -98,7 +98,7 @@ cp -r rules/ ~/.claude/rules/
 
 # 3A. サブスク専用（推奨: 従量APIなし）
 # - Codex / Claude CLI に事前ログインして実行
-# - GitHub Actions で使う場合は self-hosted runner が必要
+# - GitHub Actions で使う場合は self-hosted runner が必要（`FUGUE_SUBSCRIPTION_RUNNER_LABEL` 既定: `fugue-subscription`）
 
 # 3B. API 実行を使う場合のみキー設定
 export OPENAI_API_KEY="your-openai-key"
@@ -114,6 +114,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_PLAN_TIER             --body max20   -R <owner/repo>
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body subscription -R <owner/repo> # harness|api|subscription
+# gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
 # gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body hold    -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
 # gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body true    -R <owner/repo> # require codex-main-orchestrator=gpt-5.3-codex
@@ -157,7 +158,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE=subscription` は pay-as-you-go APIを使わず、`codex` / `claude` CLI で /vote レーンを実行します（self-hosted runner前提）。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE` の既定は `subscription` です。`harness/api` は互換用途です。
-# NOTE: `subscription` 要求時に self-hosted runner が online でない場合、`FUGUE_SUBSCRIPTION_OFFLINE_POLICY` に従います。
+# NOTE: `subscription` 要求時は `FUGUE_SUBSCRIPTION_RUNNER_LABEL` が付いた self-hosted runner を必須判定します。
+# NOTE: 上記ラベルを持つ runner が online でない場合、`FUGUE_SUBSCRIPTION_OFFLINE_POLICY` に従います。
 # NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`（既定）では処理を安全停止し、API縮退しません。
 # NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity` では `api-continuity` (harness) に縮退します。
 # NOTE: `api-continuity` では strict guard は既定で無効化されます（`FUGUE_API_STRICT_MODE=true` で明示的に有効化可能）。

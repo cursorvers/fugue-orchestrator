@@ -65,6 +65,7 @@ jobs:
       assist_auto_selected: ${{ steps.ctx.outputs.assist_auto_selected }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
+      subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -104,6 +105,7 @@ jobs:
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
+          SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: |
           set -euo pipefail
 
@@ -135,9 +137,14 @@ jobs:
           if [[ "${emergency_continuity_mode}" != "true" ]]; then
             emergency_continuity_mode="false"
           fi
+          subscription_runner_label="$(echo "${SUBSCRIPTION_RUNNER_LABEL:-fugue-subscription}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
+          fi
           self_hosted_online_count="0"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{}')"
+            self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
               self_hosted_online_count="0"
@@ -777,6 +784,7 @@ jobs:
             echo "has_implement_request=${has_implement}"
             echo "has_implement_confirmed=${has_implement_confirmed}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
+            echo "subscription_runner_label=${subscription_runner_label}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_main_provider}"
             echo "main_orchestrator_provider=${requested_main_provider}"
@@ -823,9 +831,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
           ONLINE_COUNT: ${{ steps.ctx.outputs.self_hosted_online_count }}
+          RUNNER_LABEL: ${{ steps.ctx.outputs.subscription_runner_label }}
         run: |
           set -euo pipefail
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
 
       - name: Comment translation gateway decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.translation_event == 'true' }}
