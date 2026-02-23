@@ -767,7 +767,7 @@ jobs:
             if (( total > 0 )); then
               saw_jobs="true"
             fi
-            if [[ "${saw_jobs}" == "true" && (( pending_count == 0 )) ]]; then
+            if [[ "${saw_jobs}" == "true" ]] && (( pending_count == 0 )); then
               echo "Queue guard: no pending run-agent lanes remain."
               exit 0
             fi
@@ -780,7 +780,7 @@ jobs:
             fi
             last_metric="${metric}"
 
-            if [[ "${saw_jobs}" == "true" && (( pending_count > 0 )) && (( idle_sec >= timeout_sec )) ]]; then
+            if [[ "${saw_jobs}" == "true" ]] && (( pending_count > 0 )) && (( idle_sec >= timeout_sec )); then
               gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lane progress stopped for ${timeout_sec}s (pending=${pending_count}/${total}, started=${started_count}, completed=${completed_count}). Task is paused; processing label was cleared."
               gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
               gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
