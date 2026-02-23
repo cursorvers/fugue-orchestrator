@@ -418,8 +418,6 @@ jobs:
           Issue Body:
           ${ISSUE_BODY}"
 
-          ORIGINAL_PROVIDER="${PROVIDER}"
-          ORIGINAL_MODEL="${MODEL}"
           CLAUDE_PROXY_MODE="false"
           CLAUDE_PROXY_NOTE=""
           claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -928,6 +926,8 @@ jobs:
 
       - name: Integrate results with jq rules
         id: integrate
+        env:
+          ASSIST_PROVIDER_RESOLVED: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
         run: |
           set -euo pipefail
 
@@ -935,21 +935,50 @@ jobs:
 
           total_count="$(jq '[.[] | select(.skipped != true)] | length' all-results.json)"
           approve_count="$(jq '[.[] | select(.skipped != true and .approve == true)] | length' all-results.json)"
-          reject_count="$(jq '[.[] | select(.skipped != true and .approve != true)] | length' all-results.json)"
           high_risk_count="$(jq '[.[] | select(.skipped != true and (.risk|ascii_upcase) == "HIGH")] | length' all-results.json)"
           high_risk="false"
           if [[ "${high_risk_count}" -gt 0 ]]; then
             high_risk="true"
+          fi
+          assist_provider_resolved="$(echo "${ASSIST_PROVIDER_RESOLVED:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${assist_provider_resolved}" != "claude" && "${assist_provider_resolved}" != "codex" && "${assist_provider_resolved}" != "none" ]]; then
+            assist_provider_resolved="none"
+          fi
+          required_claude_assist_gate="not-required"
+          required_claude_assist_reason="none"
+          if [[ "${assist_provider_resolved}" == "claude" ]]; then
+            required_claude_assist_gate="pass"
+            required_claude_assist_reason="ok"
+            claude_opus_lane_total="$(jq '[.[] | select(.name == "claude-opus-assist")] | length' all-results.json)"
+            claude_opus_lane_success="$(jq '[
+              .[] | select(
+                .name == "claude-opus-assist"
+                and .skipped != true
+                and ((.provider // "" | ascii_downcase) == "claude")
+                and (
+                  ((.http_code // "" | tostring) == "200")
+                  or
+                  ((.http_code // "" | tostring | startswith("cli:0")))
+                )
+              )
+            ] | length' all-results.json)"
+            if [[ "${claude_opus_lane_total}" -eq 0 ]]; then
+              required_claude_assist_gate="fail"
+              required_claude_assist_reason="missing-claude-opus-assist-lane"
+            elif [[ "${claude_opus_lane_success}" -eq 0 ]]; then
+              required_claude_assist_gate="fail"
+              required_claude_assist_reason="claude-opus-assist-not-direct-success"
+            fi
+            if [[ "${required_claude_assist_gate}" == "fail" ]]; then
+              high_risk="true"
+              high_risk_count="$((high_risk_count + 1))"
+            fi
           fi
 
           if [[ "${total_count}" -eq 0 ]]; then
             threshold=1
           else
             threshold=$(( (total_count * 2 + 2) / 3 )) # ceil(2/3 * total)
-          fi
-          vote_passed="false"
-          if [[ "${approve_count}" -ge "${threshold}" ]]; then
-            vote_passed="true"
           fi
           weighted_total_score="$(jq -r '
             [ .[] | select(.skipped != true) |
@@ -980,6 +1009,9 @@ jobs:
           weighted_threshold="$(awk -v total="${weighted_total_score}" 'BEGIN {printf "%.3f", (2*total)/3}')"
           weighted_vote_passed="$(awk -v approve="${weighted_approve_score}" -v threshold="${weighted_threshold}" 'BEGIN { if (approve + 1e-9 >= threshold) print "true"; else print "false" }')"
           ok_to_execute="false"
+          if [[ "${required_claude_assist_gate}" == "fail" ]]; then
+            weighted_vote_passed="false"
+          fi
           if [[ "${weighted_vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
             ok_to_execute="true"
           fi
@@ -1060,6 +1092,12 @@ jobs:
           if [[ "${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_applied }}" == "true" ]]; then
             claude_pressure_section="- claude pressure guard: applied (\`${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_reason }}\`)"
           fi
+          required_assist_section="- required claude assist gate: not-required"
+          if [[ "${required_claude_assist_gate}" == "pass" ]]; then
+            required_assist_section="- required claude assist gate: pass (\`${required_claude_assist_reason}\`)"
+          elif [[ "${required_claude_assist_gate}" == "fail" ]]; then
+            required_assist_section="- required claude assist gate: fail (\`${required_claude_assist_reason}\`)"
+          fi
           integrated_meta="$(jq -cn \
             --arg schema "fugue-integrated-meta/v1" \
             --arg run_id "${GITHUB_RUN_ID}" \
@@ -1072,6 +1110,8 @@ jobs:
             --arg lanes "${{ needs.resolve-orchestrator.outputs.expected_lanes }}" \
             --arg weighted_vote "${weighted_vote_passed}" \
             --arg high_risk "${high_risk}" \
+            --arg required_claude_assist_gate "${required_claude_assist_gate}" \
+            --arg required_claude_assist_reason "${required_claude_assist_reason}" \
             '{
               schema:$schema,
               run_id:$run_id,
@@ -1083,7 +1123,9 @@ jobs:
               run_agents_runner_labels:(try ($runner_labels | fromjson) catch []),
               lanes_configured:($lanes | tonumber? // 0),
               weighted_vote_passed:($weighted_vote == "true"),
-              high_risk:($high_risk == "true")
+              high_risk:($high_risk == "true"),
+              required_claude_assist_gate:$required_claude_assist_gate,
+              required_claude_assist_reason:$required_claude_assist_reason
             }'
           )"
 
@@ -1111,6 +1153,7 @@ jobs:
           ${main_fallback_section}
           ${assist_fallback_section}
           ${claude_pressure_section}
+          ${required_assist_section}
           - lanes configured: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
 
           **Rule a: Security criticism (unconditionally adopted)**
