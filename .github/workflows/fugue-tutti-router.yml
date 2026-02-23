@@ -717,6 +717,67 @@ jobs:
           path: agent-${{ matrix.name }}.json
           if-no-files-found: error
 
+  subscription-queue-guard:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile == 'subscription-strict' }}
+    needs: [prepare, resolve-orchestrator]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      issues: write
+      contents: read
+    steps:
+      - name: Detect stalled self-hosted queue and pause
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          QUEUE_GUARD_TIMEOUT_SEC: ${{ vars.FUGUE_SUBSCRIPTION_QUEUE_GUARD_TIMEOUT_SEC || '120' }}
+        run: |
+          set -euo pipefail
+
+          timeout_sec="$(echo "${QUEUE_GUARD_TIMEOUT_SEC:-120}" | tr -cd '0-9')"
+          if [[ -z "${timeout_sec}" ]]; then
+            timeout_sec="120"
+          fi
+          if (( timeout_sec < 30 )); then
+            timeout_sec=30
+          elif (( timeout_sec > 900 )); then
+            timeout_sec=900
+          fi
+          interval_sec=10
+          elapsed=0
+          started="false"
+
+          while (( elapsed < timeout_sec )); do
+            jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
+            total="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
+            active="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (.status == "in_progress" or .status == "completed"))] | length' 2>/dev/null || echo "0")"
+            if (( total > 0 && active > 0 )); then
+              started="true"
+              break
+            fi
+            sleep "${interval_sec}"
+            elapsed=$((elapsed + interval_sec))
+          done
+
+          if [[ "${started}" == "true" ]]; then
+            echo "run-agents started within queue guard window."
+            exit 0
+          fi
+
+          final_jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
+          final_total="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
+          final_queued="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and .status == "queued")] | length' 2>/dev/null || echo "0")"
+
+          if (( final_total > 0 && final_queued == final_total )); then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but self-hosted lanes stayed queued for ${timeout_sec}s (queued=${final_queued}/${final_total}). Task is paused; processing label was cleared."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+            gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+            exit 0
+          fi
+
+          echo "Queue guard found progress or no stalled queue condition (total=${final_total}, queued=${final_queued})."
+
   integrate:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
     needs: [prepare, resolve-orchestrator, run-agents]
