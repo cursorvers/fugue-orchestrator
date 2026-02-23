@@ -62,7 +62,7 @@ jobs:
           fi
 
           if [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" ]]; then
-            online_count="$(gh api "repos/${repo}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online")] | length' 2>/dev/null || echo "0")"
+            online_count="$(gh api "repos/${repo}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
             online_count="$(echo "${online_count}" | tr -cd '0-9')"
             if [[ -z "${online_count}" ]]; then
               online_count="0"
