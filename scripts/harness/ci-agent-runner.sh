@@ -29,11 +29,11 @@ if [[ -z "${claude_assist_execution_policy}" ]]; then
     claude_assist_execution_policy="direct"
   fi
 fi
-strict_main_codex_model="$(echo "${STRICT_MAIN_CODEX_MODEL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+strict_main_codex_model="$(echo "${STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_main_codex_model}" != "true" ]]; then
   strict_main_codex_model="false"
 fi
-strict_opus_assist_direct="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+strict_opus_assist_direct="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_opus_assist_direct}" != "true" ]]; then
   strict_opus_assist_direct="false"
 fi

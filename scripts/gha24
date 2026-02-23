@@ -184,14 +184,14 @@ if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" || "${ASSIST_ORCHESTRATOR_PR
   fi
   claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "codex")"
   claude_role_policy="$(gh variable get FUGUE_CLAUDE_ROLE_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "flex")"
-  claude_degraded_assist_policy="$(gh variable get FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "none")"
+  claude_degraded_assist_policy="$(gh variable get FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "claude")"
 
   eval "$(
     "${SCRIPT_DIR}/lib/orchestrator-policy.sh" \
       --main "${provider}" \
       --assist "${assist_provider}" \
       --default-main "codex" \
-      --default-assist "none" \
+      --default-assist "claude" \
       --claude-state "${claude_state}" \
       --force-claude "${FORCE_CLAUDE}" \
       --assist-policy "${claude_main_assist_policy}" \

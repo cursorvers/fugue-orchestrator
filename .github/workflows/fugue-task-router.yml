@@ -9,9 +9,9 @@ on:
         type: string
     secrets:
       OPENAI_API_KEY:
-        required: true
+        required: false
       ZAI_API_KEY:
-        required: true
+        required: false
       GEMINI_API_KEY:
         required: false
       XAI_API_KEY:
@@ -214,11 +214,11 @@ jobs:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
-          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'none' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
-          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
+          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
         run: |
           set -euo pipefail
 

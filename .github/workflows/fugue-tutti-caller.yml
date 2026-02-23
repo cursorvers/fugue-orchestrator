@@ -64,6 +64,7 @@ jobs:
       context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
       assist_auto_selected: ${{ steps.ctx.outputs.assist_auto_selected }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
+      self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -77,11 +78,11 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
-          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'none' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
-          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'none' }}
+          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
           CLAUDE_SUB_AUTO_ESCALATE: ${{ vars.FUGUE_CLAUDE_SUB_AUTO_ESCALATE || 'high' }}
           CLAUDE_SUB_AMBIGUITY_MIN_SCORE: ${{ vars.FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE || '90' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
@@ -100,6 +101,9 @@ jobs:
           IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE || '1' }}
           IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
           IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
+          CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
         run: |
           set -euo pipefail
 
@@ -119,6 +123,26 @@ jobs:
           has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
           has_implement_confirmed="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement-confirmed") != null)')"
+          ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
+            ci_execution_engine="subscription"
+          fi
+          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
+            subscription_offline_policy="hold"
+          fi
+          emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${emergency_continuity_mode}" != "true" ]]; then
+            emergency_continuity_mode="false"
+          fi
+          self_hosted_online_count="0"
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
+            if [[ -z "${self_hosted_online_count}" ]]; then
+              self_hosted_online_count="0"
+            fi
+          fi
           labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
           body_mode="$(printf '%s\n' "${body}" | awk '
             BEGIN { in_sec=0 }
@@ -298,11 +322,11 @@ jobs:
             assist_explicit="true"
           fi
           if [[ -z "${requested_assist_provider}" ]]; then
-            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-none}"
+            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
           fi
           requested_assist_provider="$(echo "${requested_assist_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${requested_assist_provider}" != "claude" && "${requested_assist_provider}" != "codex" && "${requested_assist_provider}" != "none" ]]; then
-            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-none}"
+            requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
           fi
 
           claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -743,12 +767,16 @@ jobs:
           if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
             should_run="false"
             skip_reason="missing-required-labels"
+          elif [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" && "${emergency_continuity_mode}" != "true" && "${self_hosted_online_count}" == "0" ]]; then
+            should_run="false"
+            skip_reason="subscription-self-hosted-offline-strict"
           fi
 
           {
             echo "issue_number=${ISSUE_NUMBER}"
             echo "has_implement_request=${has_implement}"
             echo "has_implement_confirmed=${has_implement_confirmed}"
+            echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_main_provider}"
             echo "main_orchestrator_provider=${requested_main_provider}"
@@ -788,6 +816,16 @@ jobs:
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Comment when subscription strict is paused
+        if: ${{ steps.ctx.outputs.should_run != 'true' && steps.ctx.outputs.skip_reason == 'subscription-self-hosted-offline-strict' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ONLINE_COUNT: ${{ steps.ctx.outputs.self_hosted_online_count }}
+        run: |
+          set -euo pipefail
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
 
       - name: Comment translation gateway decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.translation_event == 'true' }}
