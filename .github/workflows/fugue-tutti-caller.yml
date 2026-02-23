@@ -659,8 +659,8 @@ jobs:
             claude_sub_trigger="ambiguity-translation-gate(${translation_score_num})"
           fi
           # Claude is a sub orchestrator under constrained MAX plans.
-          # Auto-attach only when risk warrants it and no explicit assist was requested.
-          if [[ "${assist_explicit}" != "true" && "${force_claude}" != "true" ]]; then
+          # Auto-attach only when risk warrants it and no explicit/default assist was requested.
+          if [[ "${assist_explicit}" != "true" && "${force_claude}" != "true" && "${requested_assist_provider}" == "none" ]]; then
             if [[ "${sub_auto_escalate}" == "off" ]]; then
               requested_assist_provider="none"
               assist_auto_selected="off->none"
