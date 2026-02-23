@@ -35,6 +35,22 @@ requested_engine_default="$(echo "${FUGUE_CI_EXECUTION_ENGINE:-subscription}" | 
 if [[ "${requested_engine_default}" != "subscription" && "${requested_engine_default}" != "harness" && "${requested_engine_default}" != "api" ]]; then
   requested_engine_default="subscription"
 fi
+multi_agent_mode_default="$(echo "${FUGUE_MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${multi_agent_mode_default}" != "standard" && "${multi_agent_mode_default}" != "enhanced" && "${multi_agent_mode_default}" != "max" ]]; then
+  multi_agent_mode_default="enhanced"
+fi
+glm_subagent_mode_default="$(echo "${FUGUE_GLM_SUBAGENT_MODE:-paired}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${glm_subagent_mode_default}" != "off" && "${glm_subagent_mode_default}" != "paired" && "${glm_subagent_mode_default}" != "symphony" ]]; then
+  glm_subagent_mode_default="paired"
+fi
+sim_claude_direct_available="$(echo "${FUGUE_SIM_CLAUDE_DIRECT_AVAILABLE:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${sim_claude_direct_available}" != "true" ]]; then
+  sim_claude_direct_available="false"
+fi
+sim_codex_api_available="$(echo "${FUGUE_SIM_CODEX_API_AVAILABLE:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${sim_codex_api_available}" != "true" ]]; then
+  sim_codex_api_available="false"
+fi
 strict_main_requested="$(echo "${FUGUE_STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_main_requested}" != "true" ]]; then
   strict_main_requested="false"
@@ -106,6 +122,8 @@ run_case() {
       --self-hosted-online "${self_hosted_online}" \
       --strict-main-requested "${strict_main_requested}" \
       --strict-opus-requested "${strict_opus_requested}" \
+      --claude-direct-available "${sim_claude_direct_available}" \
+      --codex-api-available "${sim_codex_api_available}" \
       --subscription-offline-policy "${subscription_offline_policy}" \
       --api-strict-mode "${api_strict_mode}" \
       --emergency-continuity-mode "${emergency_mode}" \
@@ -132,7 +150,32 @@ run_case() {
   elif [[ "${effective_assist}" == "codex" ]]; then
     assist_lane_count=1
   fi
-  local expected_lanes=$((6 + 1 + assist_lane_count))
+  local effective_glm_subagent_mode="${glm_subagent_mode_default}"
+  if [[ "${effective_engine}" == "subscription" ]]; then
+    effective_glm_subagent_mode="off"
+  elif [[ "${multi_agent_mode_default}" == "max" && "${effective_glm_subagent_mode}" == "paired" ]]; then
+    effective_glm_subagent_mode="symphony"
+  fi
+
+  local baseline_lanes=6
+  if [[ "${effective_engine}" != "subscription" && "${effective_glm_subagent_mode}" != "off" ]]; then
+    baseline_lanes=$((baseline_lanes + 1))
+  fi
+  if [[ "${multi_agent_mode_default}" == "enhanced" || "${multi_agent_mode_default}" == "max" ]]; then
+    baseline_lanes=$((baseline_lanes + 2))
+    baseline_lanes=$((baseline_lanes + 2))
+    if [[ "${effective_engine}" != "subscription" && "${effective_glm_subagent_mode}" != "off" ]]; then
+      baseline_lanes=$((baseline_lanes + 2))
+    fi
+  fi
+  if [[ "${multi_agent_mode_default}" == "max" ]]; then
+    baseline_lanes=$((baseline_lanes + 1))
+    baseline_lanes=$((baseline_lanes + 1))
+    if [[ "${effective_engine}" != "subscription" && "${effective_glm_subagent_mode}" == "symphony" ]]; then
+      baseline_lanes=$((baseline_lanes + 1))
+    fi
+  fi
+  local expected_lanes=$((baseline_lanes + 1 + assist_lane_count))
 
   local impl_gate="no-implement"
   if [[ "${mode}" == "implement" && "${weighted_vote}" == "pass" && "${high_risk}" == "false" ]]; then

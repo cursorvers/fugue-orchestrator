@@ -57,8 +57,16 @@ Auditability:
 - Continuity fallback demotes assist `claude` using `FUGUE_EMERGENCY_ASSIST_POLICY` (default `none`) unless forced.
 - Strict guards (`FUGUE_STRICT_MAIN_CODEX_MODEL`, `FUGUE_STRICT_OPUS_ASSIST_DIRECT`) are enforced in `subscription-strict` and disabled by default in API continuity mode unless `FUGUE_API_STRICT_MODE=true`.
 - Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
+- Codex lane model split:
+  - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.3-codex`)
+  - `FUGUE_CODEX_MULTI_AGENT_MODEL` for non-main codex lanes (default `gpt-5.3-codex-spark`)
 - GLM baseline model: `glm-5.0`.
+- GLM subagent fan-out is controlled by `FUGUE_GLM_SUBAGENT_MODE=off|paired|symphony` (default `paired`).
+  - `paired`: adds GLM orchestration subagent lane in API/harness and mirrors architect/plan checks in enhanced/max.
+  - `symphony`: adds the above plus GLM reliability subagent in max mode.
+  - `*-subagent` lanes are optional/non-blocking on provider-side API failure.
 - When assist is `claude` and state is not `exhausted`, add Claude assist lanes (Opus + Sonnet).
+- Local direct orchestration (`scripts/local/run-local-orchestration.sh`) enforces `claude-opus-assist` direct success as mandatory when `assist=claude`, `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true`, and `FUGUE_CLAUDE_RATE_LIMIT_STATE=ok`.
 - In `FUGUE_CLAUDE_MAX_PLAN=true` mode without `ANTHROPIC_API_KEY`, Claude assist lanes run through Codex proxy and remain vote participants.
 - Optional specialist lanes:
   - Gemini for UI/UX and visual intent.

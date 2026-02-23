@@ -77,6 +77,12 @@ on:
       resolved_multi_agent_mode_source:
         description: "where the resolved multi-agent mode came from"
         value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode_source }}
+      resolved_glm_subagent_mode:
+        description: "resolved GLM subagent mode after policy/override resolution"
+        value: ${{ jobs.resolve-orchestrator.outputs.glm_subagent_mode }}
+      resolved_glm_subagent_mode_source:
+        description: "where the resolved GLM subagent mode came from"
+        value: ${{ jobs.resolve-orchestrator.outputs.glm_subagent_mode_source }}
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -388,6 +394,7 @@ jobs:
           MODEL: ${{ matrix.model }}
           AGENT_ROLE: ${{ matrix.agent_role }}
           AGENT_NAME: ${{ matrix.name }}
+          AGENT_DIRECTIVE: ${{ matrix.agent_directive || '' }}
         run: |
           set -euo pipefail
 
@@ -412,7 +419,11 @@ jobs:
             exit 0
           fi
 
+          agent_directive="$(echo "${AGENT_DIRECTIVE:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           sys_prompt="You are ${AGENT_ROLE}. Analyze the GitHub issue and return ONLY valid JSON with keys: risk (LOW|MEDIUM|HIGH), approve (boolean), findings (array of strings), recommendation (string), rationale (string)."
+          if [[ -n "${agent_directive}" ]]; then
+            sys_prompt="${sys_prompt} Focus directive: ${agent_directive}"
+          fi
           user_prompt="Issue Title: ${ISSUE_TITLE}
 
           Issue Body:
@@ -676,7 +687,7 @@ jobs:
 
           skipped_flag="false"
           # Optional specialist lanes are excluded from consensus totals when they fail.
-          if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" || "${PROVIDER}" == "claude" ) && "${http_code}" != "200" ]]; then
+          if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" || "${PROVIDER}" == "claude" || ( "${PROVIDER}" == "glm" && "${AGENT_NAME}" == glm-*-subagent ) ) && "${http_code}" != "200" ]]; then
             skipped_flag="true"
           fi
 
@@ -702,6 +713,13 @@ jobs:
               optional_error_note="Claude API rate limited (HTTP 429)"
             else
               optional_error_note="Claude API error (HTTP ${http_code})"
+            fi
+          elif [[ "${PROVIDER}" == "glm" && "${AGENT_NAME}" == glm-*-subagent && "${http_code}" != "200" ]]; then
+            optional_provider_label="GLM"
+            if [[ "${http_code}" == "429" ]]; then
+              optional_error_note="GLM subagent API rate limited (HTTP 429)"
+            else
+              optional_error_note="GLM subagent API error (HTTP ${http_code})"
             fi
           fi
 
@@ -1112,6 +1130,8 @@ jobs:
             --arg issue_number "${{ needs.prepare.outputs.issue_number }}" \
             --arg main "${{ needs.resolve-orchestrator.outputs.main_provider }}" \
             --arg assist "${{ needs.resolve-orchestrator.outputs.assist_provider }}" \
+            --arg multi_agent_mode "${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}" \
+            --arg glm_subagent_mode "${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}" \
             --arg profile "${{ needs.resolve-orchestrator.outputs.execution_profile }}" \
             --arg runner "${{ needs.resolve-orchestrator.outputs.run_agents_runner }}" \
             --arg runner_labels "${{ needs.resolve-orchestrator.outputs.run_agents_runner_json }}" \
@@ -1126,6 +1146,8 @@ jobs:
               issue_number:$issue_number,
               main_orchestrator_resolved:$main,
               assist_orchestrator_resolved:$assist,
+              multi_agent_mode:$multi_agent_mode,
+              glm_subagent_mode:$glm_subagent_mode,
               execution_profile:$profile,
               run_agents_runner:$runner,
               run_agents_runner_labels:(try ($runner_labels | fromjson) catch []),
@@ -1147,6 +1169,8 @@ jobs:
           - assist orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           - multi-agent mode: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
           - multi-agent mode source: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
+          - glm subagent mode: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}
+          - glm subagent mode source: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode_source }}
           - ci execution engine: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
           - subscription offline policy: ${{ needs.resolve-orchestrator.outputs.subscription_offline_policy }}
           - run-agents runner: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
@@ -1255,6 +1279,8 @@ jobs:
       provider_requested: ${{ steps.resolve.outputs.main_provider_requested }}
       multi_agent_mode: ${{ steps.resolve.outputs.multi_agent_mode }}
       multi_agent_mode_source: ${{ steps.resolve.outputs.multi_agent_mode_source }}
+      glm_subagent_mode: ${{ steps.resolve.outputs.glm_subagent_mode }}
+      glm_subagent_mode_source: ${{ steps.resolve.outputs.glm_subagent_mode_source }}
       claude_fallback_applied: ${{ steps.resolve.outputs.main_claude_fallback_applied }}
       claude_fallback_reason: ${{ steps.resolve.outputs.main_claude_fallback_reason }}
       main_provider: ${{ steps.resolve.outputs.main_provider }}
@@ -1298,7 +1324,10 @@ jobs:
           MULTI_AGENT_MODE_LOCK: ${{ inputs.multi_agent_mode_lock }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.3-codex' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'enhanced' }}
+          GLM_SUBAGENT_MODE: ${{ vars.FUGUE_GLM_SUBAGENT_MODE || 'paired' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
           CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-3-7-sonnet-latest' }}
           CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-3-5-sonnet-latest' }}
@@ -1493,6 +1522,45 @@ jobs:
             multi_agent_mode="enhanced"
             multi_agent_mode_source="repo-default"
           fi
+          glm_subagent_mode="$(echo "${GLM_SUBAGENT_MODE:-paired}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          glm_subagent_mode_source="repo-default"
+          if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
+            glm_subagent_mode="paired"
+          fi
+          if [[ "${mode_lock}" != "true" ]]; then
+            body_glm_subagent_mode="$(printf '%s\n' "${ISSUE_BODY}" | awk '
+              BEGIN { in_sec=0 }
+              tolower($0) ~ /^###[[:space:]]*glm[[:space:]_-]*subagent[[:space:]]+mode[[:space:]]*$/ { in_sec=1; next }
+              in_sec && $0 ~ /^###[[:space:]]/ { exit }
+              in_sec {
+                line=$0
+                gsub(/`/, "", line)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+                if (line != "") {
+                  print tolower(line)
+                  exit
+                }
+              }
+            ')"
+            if [[ -z "${body_glm_subagent_mode}" ]]; then
+              body_glm_subagent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*glm[[:space:]_-]*subagent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(off|paired|symphony|auto)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+            fi
+            if [[ "${body_glm_subagent_mode}" == "auto" ]]; then
+              body_glm_subagent_mode=""
+            fi
+            if [[ "${body_glm_subagent_mode}" == "off" || "${body_glm_subagent_mode}" == "paired" || "${body_glm_subagent_mode}" == "symphony" ]]; then
+              glm_subagent_mode="${body_glm_subagent_mode}"
+              glm_subagent_mode_source="issue-body"
+            fi
+          fi
+          if [[ "${glm_subagent_mode_source}" == "repo-default" && "${multi_agent_mode}" == "max" && "${glm_subagent_mode}" == "paired" ]]; then
+            glm_subagent_mode="symphony"
+            glm_subagent_mode_source="complexity-heuristic"
+          fi
+          if [[ "${ci_execution_engine}" == "subscription" && "${glm_subagent_mode}" != "off" ]]; then
+            glm_subagent_mode="off"
+            glm_subagent_mode_source="subscription-engine"
+          fi
           wants_gemini="false"
           wants_xai="false"
           if [[ "${ci_execution_engine}" != "subscription" ]]; then
@@ -1503,31 +1571,55 @@ jobs:
               wants_xai="true"
             fi
           fi
+          codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.3-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${codex_main_model}" ]]; then
+            codex_main_model="gpt-5.3-codex"
+          fi
+          codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${codex_multi_agent_model}" ]]; then
+            codex_multi_agent_model="gpt-5.3-codex-spark"
+          fi
+          if [[ "${strict_main_codex_model_effective}" == "true" ]]; then
+            codex_main_model="gpt-5.3-codex"
+          fi
 
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
             # Subscription mode avoids pay-as-you-go providers.
-            matrix="$(jq -cn '{
+            matrix="$(jq -cn --arg codex_multi "${codex_multi_agent_model}" '{
               include: [
-                {name:"codex-security-analyst",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex",agent_role:"security-analyst"},
-                {name:"codex-code-reviewer",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
-                {name:"codex-general-reviewer",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
-                {name:"codex-math-reasoning",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"math-reasoning"},
-                {name:"codex-refactor-advisor",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"refactor-advisor"},
-                {name:"codex-general-critic",provider:"codex",api_url:"subscription-cli",model:"gpt-5.3-codex-spark",agent_role:"general-critic"}
+                {name:"codex-security-analyst",provider:"codex",api_url:"subscription-cli",model:$codex_multi,agent_role:"security-analyst"},
+                {name:"codex-code-reviewer",provider:"codex",api_url:"subscription-cli",model:$codex_multi,agent_role:"code-reviewer"},
+                {name:"codex-general-reviewer",provider:"codex",api_url:"subscription-cli",model:$codex_multi,agent_role:"general-reviewer"},
+                {name:"codex-math-reasoning",provider:"codex",api_url:"subscription-cli",model:$codex_multi,agent_role:"math-reasoning"},
+                {name:"codex-refactor-advisor",provider:"codex",api_url:"subscription-cli",model:$codex_multi,agent_role:"refactor-advisor"},
+                {name:"codex-general-critic",provider:"codex",api_url:"subscription-cli",model:$codex_multi,agent_role:"general-critic"}
               ]
             }')"
           else
             # Keep /vote quorum baseline as 6 lanes minimum (Codex3 + GLM3).
-            matrix="$(jq -cn '{
+            matrix="$(jq -cn --arg codex_multi "${codex_multi_agent_model}" '{
               include: [
-                {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"security-analyst"},
-                {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex",agent_role:"code-reviewer"},
-                {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:"gpt-5.3-codex-spark",agent_role:"general-reviewer"},
+                {name:"codex-security-analyst",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:$codex_multi,agent_role:"security-analyst"},
+                {name:"codex-code-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:$codex_multi,agent_role:"code-reviewer"},
+                {name:"codex-general-reviewer",provider:"codex",api_url:"https://api.openai.com/v1/chat/completions",model:$codex_multi,agent_role:"general-reviewer"},
                 {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"code-reviewer"},
                 {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"general-reviewer"},
                 {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:"glm-5.0",agent_role:"math-reasoning"}
               ]
             }')"
+          fi
+          if [[ "${ci_execution_engine}" != "subscription" && "${glm_subagent_mode}" != "off" ]]; then
+            matrix="$(echo "${matrix}" | jq -c '
+              if any(.include[]; .name == "glm-orchestration-subagent") then .
+              else .include += [{
+                name:"glm-orchestration-subagent",
+                provider:"glm",
+                api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                model:"glm-5.0",
+                agent_role:"orchestration-assistant",
+                agent_directive:"Work as Codex main orchestrator subagent: surface hidden assumptions, unresolved dependencies, and handoff risks."
+              }] end
+            ')"
           fi
           main_signal_lane="codex-main-orchestrator"
           if [[ "${main_provider}" == "claude" ]]; then
@@ -1543,13 +1635,13 @@ jobs:
               }] end
             ')"
           else
-            matrix="$(echo "${matrix}" | jq -c '
+            matrix="$(echo "${matrix}" | jq -c --arg codex_main "${codex_main_model}" '
               if any(.include[]; .name == "codex-main-orchestrator") then .
               else .include += [{
                 name:"codex-main-orchestrator",
                 provider:"codex",
                 api_url:"subscription-cli",
-                model:"gpt-5.3-codex",
+                model:$codex_main,
                 agent_role:"main-orchestrator"
               }] end
             ' )"
@@ -1596,13 +1688,13 @@ jobs:
               ')"
             fi
           elif [[ "${assist_provider}" == "codex" ]]; then
-            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" --arg codex_multi "${codex_multi_agent_model}" '
               if any(.include[]; .name == "codex-orchestration-assist") then .
               else .include += [{
                 name:"codex-orchestration-assist",
                 provider:"codex",
                 api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
-                model:"gpt-5.3-codex-spark",
+                model:$codex_multi,
                 agent_role:"orchestration-assistant"
               }] end
             ')"
@@ -1635,44 +1727,44 @@ jobs:
           fi
 
           if [[ "${multi_agent_mode}" == "enhanced" || "${multi_agent_mode}" == "max" ]]; then
-            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" --arg codex_multi "${codex_multi_agent_model}" '
               if any(.include[]; .name == "codex-architect") then .
               else .include += [{
                 name:"codex-architect",
                 provider:"codex",
                 api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
-                model:"gpt-5.3-codex",
+                model:$codex_multi,
                 agent_role:"architect"
               }] end
             ')"
-            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" --arg codex_multi "${codex_multi_agent_model}" '
               if any(.include[]; .name == "codex-plan-reviewer") then .
               else .include += [{
                 name:"codex-plan-reviewer",
                 provider:"codex",
                 api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
-                model:"gpt-5.3-codex-spark",
+                model:$codex_multi,
                 agent_role:"plan-reviewer"
               }] end
             ')"
             if [[ "${ci_execution_engine}" == "subscription" ]]; then
-              matrix="$(echo "${matrix}" | jq -c '
+              matrix="$(echo "${matrix}" | jq -c --arg codex_multi "${codex_multi_agent_model}" '
                 if any(.include[]; .name == "codex-refactor-advisor-enhanced") then .
                 else .include += [{
                   name:"codex-refactor-advisor-enhanced",
                   provider:"codex",
                   api_url:"subscription-cli",
-                  model:"gpt-5.3-codex-spark",
+                  model:$codex_multi,
                   agent_role:"refactor-advisor"
                 }] end
               ')"
-              matrix="$(echo "${matrix}" | jq -c '
+              matrix="$(echo "${matrix}" | jq -c --arg codex_multi "${codex_multi_agent_model}" '
                 if any(.include[]; .name == "codex-general-critic-enhanced") then .
                 else .include += [{
                   name:"codex-general-critic-enhanced",
                   provider:"codex",
                   api_url:"subscription-cli",
-                  model:"gpt-5.3-codex-spark",
+                  model:$codex_multi,
                   agent_role:"general-critic"
                 }] end
               ')"
@@ -1697,28 +1789,52 @@ jobs:
                   agent_role:"general-critic"
                 }] end
               ')"
+              if [[ "${glm_subagent_mode}" != "off" ]]; then
+                matrix="$(echo "${matrix}" | jq -c '
+                  if any(.include[]; .name == "glm-architect-subagent") then .
+                  else .include += [{
+                    name:"glm-architect-subagent",
+                    provider:"glm",
+                    api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                    model:"glm-5.0",
+                    agent_role:"architect",
+                    agent_directive:"Act as GLM subagent to stress-test the system architecture and expose hidden coupling before implementation."
+                  }] end
+                ')"
+                matrix="$(echo "${matrix}" | jq -c '
+                  if any(.include[]; .name == "glm-plan-reviewer-subagent") then .
+                  else .include += [{
+                    name:"glm-plan-reviewer-subagent",
+                    provider:"glm",
+                    api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                    model:"glm-5.0",
+                    agent_role:"plan-reviewer",
+                    agent_directive:"Act as GLM subagent to challenge plan sequencing, rollback feasibility, and dependency ordering."
+                  }] end
+                ')"
+              fi
             fi
           fi
 
           if [[ "${multi_agent_mode}" == "max" ]]; then
-            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" '
+            matrix="$(echo "${matrix}" | jq -c --arg engine "${ci_execution_engine}" --arg codex_multi "${codex_multi_agent_model}" '
               if any(.include[]; .name == "codex-reliability-engineer") then .
               else .include += [{
                 name:"codex-reliability-engineer",
                 provider:"codex",
                 api_url:(if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end),
-                model:"gpt-5.3-codex-spark",
+                model:$codex_multi,
                 agent_role:"reliability-engineer"
               }] end
             ')"
             if [[ "${ci_execution_engine}" == "subscription" ]]; then
-              matrix="$(echo "${matrix}" | jq -c '
+              matrix="$(echo "${matrix}" | jq -c --arg codex_multi "${codex_multi_agent_model}" '
                 if any(.include[]; .name == "codex-invariants-checker") then .
                 else .include += [{
                   name:"codex-invariants-checker",
                   provider:"codex",
                   api_url:"subscription-cli",
-                  model:"gpt-5.3-codex-spark",
+                  model:$codex_multi,
                   agent_role:"invariants-checker"
                 }] end
               ')"
@@ -1733,6 +1849,19 @@ jobs:
                   agent_role:"invariants-checker"
                 }] end
               ')"
+              if [[ "${glm_subagent_mode}" == "symphony" ]]; then
+                matrix="$(echo "${matrix}" | jq -c '
+                  if any(.include[]; .name == "glm-reliability-subagent") then .
+                  else .include += [{
+                    name:"glm-reliability-subagent",
+                    provider:"glm",
+                    api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
+                    model:"glm-5.0",
+                    agent_role:"reliability-engineer",
+                    agent_directive:"Act as GLM subagent for worst-case operational scenarios, retries, and failure isolation."
+                  }] end
+                ')"
+              fi
             fi
           fi
 
@@ -1743,6 +1872,8 @@ jobs:
             echo "provider_requested=${main_provider_requested}"
             echo "multi_agent_mode=${multi_agent_mode}"
             echo "multi_agent_mode_source=${multi_agent_mode_source}"
+            echo "glm_subagent_mode=${glm_subagent_mode}"
+            echo "glm_subagent_mode_source=${glm_subagent_mode_source}"
             echo "claude_fallback_applied=${main_claude_fallback_applied}"
             echo "claude_fallback_reason=${main_claude_fallback_reason}"
             echo "main_provider=${main_provider}"

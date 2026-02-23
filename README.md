@@ -117,10 +117,13 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
 # gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body hold    -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
+# gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5.3-codex -R <owner/repo> # main orchestrator lane model
+# gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
 # gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body true    -R <owner/repo> # require codex-main-orchestrator=gpt-5.3-codex
 # gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body true    -R <owner/repo> # require claude-opus-assist=CLAUDE_OPUS_MODEL
 # gh variable set FUGUE_API_STRICT_MODE              --body false   -R <owner/repo> # trueでharness/api時もstrict guardを維持
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
+# gh variable set FUGUE_GLM_SUBAGENT_MODE            --body paired  -R <owner/repo> # off|paired|symphony (api/harness時GLM subagentファンアウト)
 # gh variable set FUGUE_EMERGENCY_CONTINUITY_MODE    --body false   -R <owner/repo> # trueでin-flight issueのみ継続処理
 # gh variable set FUGUE_EMERGENCY_ASSIST_POLICY      --body none    -R <owner/repo> # none|codex|claude (continuity時assist縮退先)
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
@@ -167,6 +170,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
+# NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、mainは `gpt-5.3-codex` 固定のまま multi-agent を `gpt-5.3-codex-spark` に寄せられます。
+# NOTE: `FUGUE_GLM_SUBAGENT_MODE=paired|symphony` で GLM subagent レーン（orchestration/architect/plan/reliability）を段階的に増やせます（subscriptionでは自動off）。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
 # NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
@@ -189,7 +194,16 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # 3.7 Orchestrator切替シミュレーション（ローカル・非破壊）
 # ./scripts/sim-orchestrator-switch.sh | column -t -s $'\t'
 
-# 3.8 FUGUE有用スキル同期（Codex/Claude 共通）
+# 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
+# CODEX_MAIN_MODEL=gpt-5.3-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
+#   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
+# NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
+# NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true`（既定）かつ `FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` のとき、
+#       `claude-opus-assist` の direct success が無ければ `ok_to_execute=false` になります。
+# NOTE: Claude rate limit 時は `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded|exhausted` を設定すると、
+#       上記必須ゲートは `not-required` に切り替わります。
+
+# 3.9 FUGUE有用スキル同期（Codex/Claude 共通）
 # required プロファイルのみ同期
 # ./scripts/skills/sync-openclaw-skills.sh --target both
 # optional まで含める

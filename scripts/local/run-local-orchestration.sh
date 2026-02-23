@@ -1,0 +1,487 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Local orchestration runner (no GitHub Actions runner required).
+# - codex/claude lanes: subscription CLI runner
+# - glm lanes: API harness runner
+# This script intentionally runs everything on the current local machine.
+
+REPO="${REPO:-cursorvers/fugue-orchestrator}"
+ISSUE_NUMBER="${ISSUE_NUMBER:-}"
+OUT_DIR="${OUT_DIR:-.fugue/local-run}"
+MAIN_PROVIDER="${MAIN_PROVIDER:-codex}"
+ASSIST_PROVIDER="${ASSIST_PROVIDER:-claude}"
+MULTI_AGENT_MODE="${MULTI_AGENT_MODE:-enhanced}"
+GLM_SUBAGENT_MODE="${GLM_SUBAGENT_MODE:-paired}"
+MAX_PARALLEL="${MAX_PARALLEL:-6}"
+POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
+CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5.3-codex}"
+CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/local/run-local-orchestration.sh --issue <number> [options]
+
+Options:
+  --issue <n>            GitHub issue number (required)
+  --repo <owner/repo>    Repository containing issue (default: cursorvers/fugue-orchestrator)
+  --out-dir <path>       Output directory (default: .fugue/local-run)
+  --main <codex|claude>  Main orchestrator (default: codex)
+  --assist <claude|codex|none>
+                         Assist orchestrator (default: claude)
+  --mode <standard|enhanced|max>
+                         Multi-agent mode (default: enhanced)
+  --glm-mode <off|paired|symphony>
+                         GLM subagent fan-out (default: paired)
+  --max-parallel <n>     Max parallel lanes (default: 6)
+  --comment              Post integrated summary to the issue
+  -h, --help             Show help
+
+Environment:
+  OPENAI_API_KEY         Required for Codex API fallback lanes (if used by harness runner)
+  ZAI_API_KEY            Required for GLM lanes
+  ANTHROPIC_API_KEY      Optional in local CLI mode (Claude CLI is primary path)
+  FUGUE_CLAUDE_RATE_LIMIT_STATE
+                         ok|degraded|exhausted (default: ok)
+  FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST
+                         true|false (default: true; when true + state=ok, claude-opus-assist direct success is mandatory)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --issue)
+      ISSUE_NUMBER="${2:-}"
+      shift 2
+      ;;
+    --repo)
+      REPO="${2:-}"
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    --main)
+      MAIN_PROVIDER="${2:-}"
+      shift 2
+      ;;
+    --assist)
+      ASSIST_PROVIDER="${2:-}"
+      shift 2
+      ;;
+    --mode)
+      MULTI_AGENT_MODE="${2:-}"
+      shift 2
+      ;;
+    --glm-mode)
+      GLM_SUBAGENT_MODE="${2:-}"
+      shift 2
+      ;;
+    --max-parallel)
+      MAX_PARALLEL="${2:-}"
+      shift 2
+      ;;
+    --comment)
+      POST_ISSUE_COMMENT="true"
+      shift 1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "${ISSUE_NUMBER}" ]]; then
+  echo "Error: --issue is required." >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ "${MAIN_PROVIDER}" != "codex" && "${MAIN_PROVIDER}" != "claude" ]]; then
+  echo "Error: --main must be codex or claude." >&2
+  exit 2
+fi
+if [[ "${ASSIST_PROVIDER}" != "claude" && "${ASSIST_PROVIDER}" != "codex" && "${ASSIST_PROVIDER}" != "none" ]]; then
+  echo "Error: --assist must be claude|codex|none." >&2
+  exit 2
+fi
+if [[ "${MULTI_AGENT_MODE}" != "standard" && "${MULTI_AGENT_MODE}" != "enhanced" && "${MULTI_AGENT_MODE}" != "max" ]]; then
+  echo "Error: --mode must be standard|enhanced|max." >&2
+  exit 2
+fi
+if [[ "${GLM_SUBAGENT_MODE}" != "off" && "${GLM_SUBAGENT_MODE}" != "paired" && "${GLM_SUBAGENT_MODE}" != "symphony" ]]; then
+  echo "Error: --glm-mode must be off|paired|symphony." >&2
+  exit 2
+fi
+if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
+  echo "Error: --max-parallel must be a positive integer." >&2
+  exit 2
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: jq is required." >&2
+  exit 2
+fi
+if ! command -v gh >/dev/null 2>&1; then
+  echo "Error: gh is required." >&2
+  exit 2
+fi
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ "${OUT_DIR}" != /* ]]; then
+  OUT_DIR="${ROOT_DIR}/${OUT_DIR}"
+fi
+SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
+HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
+if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" ]]; then
+  echo "Error: required harness runners are missing/executable flags are not set." >&2
+  exit 2
+fi
+
+issue_json="$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" --json number,title,body,url)"
+ISSUE_TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
+ISSUE_BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+ISSUE_URL="$(echo "${issue_json}" | jq -r '.url // ""')"
+
+run_id="$(date +%Y%m%d-%H%M%S)"
+RUN_DIR="${OUT_DIR}/issue-${ISSUE_NUMBER}-${run_id}"
+LANE_DIR="${RUN_DIR}/lanes"
+TMP_DIR="${RUN_DIR}/tmp"
+mkdir -p "${LANE_DIR}" "${TMP_DIR}"
+
+strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-true}"
+strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-true}"
+claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-opus-4-6}"
+subscription_timeout="${FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}"
+claude_assist_policy="${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-hybrid}"
+claude_rate_limit_state="$(echo "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_rate_limit_state}" != "ok" && "${claude_rate_limit_state}" != "degraded" && "${claude_rate_limit_state}" != "exhausted" ]]; then
+  claude_rate_limit_state="ok"
+fi
+local_require_claude_assist="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_require_claude_assist}" != "true" ]]; then
+  local_require_claude_assist="false"
+fi
+
+matrix_file="${RUN_DIR}/matrix.json"
+jq -n --arg multi "${CODEX_MULTI_AGENT_MODEL}" '{
+  include: [
+    {name:"codex-security-analyst",provider:"codex",model:$multi,agent_role:"security-analyst"},
+    {name:"codex-code-reviewer",provider:"codex",model:$multi,agent_role:"code-reviewer"},
+    {name:"codex-general-reviewer",provider:"codex",model:$multi,agent_role:"general-reviewer"},
+    {name:"glm-code-reviewer",provider:"glm",model:"glm-5.0",agent_role:"code-reviewer"},
+    {name:"glm-general-reviewer",provider:"glm",model:"glm-5.0",agent_role:"general-reviewer"},
+    {name:"glm-math-reasoning",provider:"glm",model:"glm-5.0",agent_role:"math-reasoning"}
+  ]
+}' > "${matrix_file}"
+
+if [[ "${MAIN_PROVIDER}" == "claude" ]]; then
+  jq -c --arg opus "${claude_opus_model}" '.include += [{name:"claude-main-orchestrator",provider:"claude",model:$opus,agent_role:"main-orchestrator"}]' "${matrix_file}" > "${TMP_DIR}/m1.json"
+  mv "${TMP_DIR}/m1.json" "${matrix_file}"
+else
+  jq -c --arg main "${CODEX_MAIN_MODEL}" '.include += [{name:"codex-main-orchestrator",provider:"codex",model:$main,agent_role:"main-orchestrator"}]' "${matrix_file}" > "${TMP_DIR}/m1.json"
+  mv "${TMP_DIR}/m1.json" "${matrix_file}"
+fi
+
+if [[ "${ASSIST_PROVIDER}" == "claude" ]]; then
+  jq -c --arg opus "${claude_opus_model}" '.include += [{name:"claude-opus-assist",provider:"claude",model:$opus,agent_role:"orchestration-assistant"}]' "${matrix_file}" > "${TMP_DIR}/m2.json"
+  mv "${TMP_DIR}/m2.json" "${matrix_file}"
+elif [[ "${ASSIST_PROVIDER}" == "codex" ]]; then
+  jq -c --arg multi "${CODEX_MULTI_AGENT_MODEL}" '.include += [{name:"codex-orchestration-assist",provider:"codex",model:$multi,agent_role:"orchestration-assistant"}]' "${matrix_file}" > "${TMP_DIR}/m2.json"
+  mv "${TMP_DIR}/m2.json" "${matrix_file}"
+fi
+
+if [[ "${GLM_SUBAGENT_MODE}" != "off" ]]; then
+  jq -c '.include += [{name:"glm-orchestration-subagent",provider:"glm",model:"glm-5.0",agent_role:"orchestration-assistant",agent_directive:"Work as Codex main orchestrator subagent: surface hidden assumptions, unresolved dependencies, and handoff risks."}]' "${matrix_file}" > "${TMP_DIR}/m3.json"
+  mv "${TMP_DIR}/m3.json" "${matrix_file}"
+fi
+
+if [[ "${MULTI_AGENT_MODE}" == "enhanced" || "${MULTI_AGENT_MODE}" == "max" ]]; then
+  jq -c --arg multi "${CODEX_MULTI_AGENT_MODEL}" '.include += [
+    {name:"codex-architect",provider:"codex",model:$multi,agent_role:"architect"},
+    {name:"codex-plan-reviewer",provider:"codex",model:$multi,agent_role:"plan-reviewer"},
+    {name:"glm-refactor-advisor",provider:"glm",model:"glm-5.0",agent_role:"refactor-advisor"},
+    {name:"glm-general-critic",provider:"glm",model:"glm-5.0",agent_role:"general-critic"}
+  ]' "${matrix_file}" > "${TMP_DIR}/m4.json"
+  mv "${TMP_DIR}/m4.json" "${matrix_file}"
+  if [[ "${GLM_SUBAGENT_MODE}" != "off" ]]; then
+    jq -c '.include += [
+      {name:"glm-architect-subagent",provider:"glm",model:"glm-5.0",agent_role:"architect",agent_directive:"Act as GLM subagent to stress-test the system architecture and expose hidden coupling before implementation."},
+      {name:"glm-plan-reviewer-subagent",provider:"glm",model:"glm-5.0",agent_role:"plan-reviewer",agent_directive:"Act as GLM subagent to challenge plan sequencing, rollback feasibility, and dependency ordering."}
+    ]' "${matrix_file}" > "${TMP_DIR}/m5.json"
+    mv "${TMP_DIR}/m5.json" "${matrix_file}"
+  fi
+fi
+
+if [[ "${MULTI_AGENT_MODE}" == "max" ]]; then
+  jq -c --arg multi "${CODEX_MULTI_AGENT_MODEL}" '.include += [
+    {name:"codex-reliability-engineer",provider:"codex",model:$multi,agent_role:"reliability-engineer"},
+    {name:"glm-invariants-checker",provider:"glm",model:"glm-5.0",agent_role:"invariants-checker"}
+  ]' "${matrix_file}" > "${TMP_DIR}/m6.json"
+  mv "${TMP_DIR}/m6.json" "${matrix_file}"
+  if [[ "${GLM_SUBAGENT_MODE}" == "symphony" ]]; then
+    jq -c '.include += [{name:"glm-reliability-subagent",provider:"glm",model:"glm-5.0",agent_role:"reliability-engineer",agent_directive:"Act as GLM subagent for worst-case operational scenarios, retries, and failure isolation."}]' "${matrix_file}" > "${TMP_DIR}/m7.json"
+    mv "${TMP_DIR}/m7.json" "${matrix_file}"
+  fi
+fi
+
+lanes_total="$(jq -r '.include | length' "${matrix_file}")"
+echo "Running local orchestration: issue=${ISSUE_NUMBER} lanes=${lanes_total} mode=${MULTI_AGENT_MODE} glm_mode=${GLM_SUBAGENT_MODE}" >&2
+
+lane_jobs_file="${RUN_DIR}/lane-jobs.jsonl"
+jq -c '.include[]' "${matrix_file}" > "${lane_jobs_file}"
+
+run_lane() {
+  local lane_json="$1"
+  local lane_name provider model role directive lane_work lane_result lane_log lane_err
+
+  lane_name="$(echo "${lane_json}" | jq -r '.name')"
+  provider="$(echo "${lane_json}" | jq -r '.provider')"
+  model="$(echo "${lane_json}" | jq -r '.model')"
+  role="$(echo "${lane_json}" | jq -r '.agent_role')"
+  directive="$(echo "${lane_json}" | jq -r '.agent_directive // ""')"
+  lane_work="${TMP_DIR}/${lane_name}"
+  lane_result="${LANE_DIR}/agent-${lane_name}.json"
+  lane_log="${LANE_DIR}/${lane_name}.out.log"
+  lane_err="${LANE_DIR}/${lane_name}.err.log"
+  mkdir -p "${lane_work}"
+
+  local api_url
+  api_url="subscription-cli"
+  local runner="${SUBSCRIPTION_RUNNER}"
+  if [[ "${provider}" == "glm" ]]; then
+    runner="${HARNESS_RUNNER}"
+    api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
+  fi
+
+  set +e
+  (
+    cd "${lane_work}"
+    ISSUE_TITLE="${ISSUE_TITLE}" \
+    ISSUE_BODY="${ISSUE_BODY}" \
+    PROVIDER="${provider}" \
+    MODEL="${model}" \
+    AGENT_ROLE="${role}" \
+    AGENT_NAME="${lane_name}" \
+    AGENT_DIRECTIVE="${directive}" \
+    API_URL="${api_url}" \
+    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+    ZAI_API_KEY="${ZAI_API_KEY:-}" \
+    GEMINI_API_KEY="${GEMINI_API_KEY:-}" \
+    XAI_API_KEY="${XAI_API_KEY:-}" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDE_ASSIST_EXECUTION_POLICY="${claude_assist_policy}" \
+    CLAUDE_OPUS_MODEL="${claude_opus_model}" \
+    STRICT_MAIN_CODEX_MODEL="${strict_main}" \
+    STRICT_OPUS_ASSIST_DIRECT="${strict_opus}" \
+    SUBSCRIPTION_CLI_TIMEOUT_SEC="${subscription_timeout}" \
+    CI_EXECUTION_ENGINE="subscription" \
+    EXECUTION_PROFILE="local-direct" \
+    bash "${runner}" >"${lane_log}" 2>"${lane_err}"
+  )
+  rc=$?
+  set -e
+
+  if (( rc == 0 )) && [[ -f "${lane_work}/agent-${lane_name}.json" ]]; then
+    cp "${lane_work}/agent-${lane_name}.json" "${lane_result}"
+  else
+    jq -n \
+      --arg name "${lane_name}" \
+      --arg provider "${provider}" \
+      --arg model "${model}" \
+      --arg role "${role}" \
+      --arg rc "${rc}" \
+      '{
+        name:$name,
+        provider:$provider,
+        model:$model,
+        agent_role:$role,
+        http_code:"runner-error",
+        skipped:true,
+        risk:"MEDIUM",
+        approve:false,
+        findings:["Lane failed before producing JSON artifact", ("exit_code=" + $rc)],
+        recommendation:"Inspect lane logs and retry locally",
+        rationale:"Runner did not output agent JSON",
+        execution_engine:"local-direct"
+      }' > "${lane_result}"
+  fi
+}
+
+export -f run_lane
+export ISSUE_TITLE ISSUE_BODY TMP_DIR LANE_DIR SUBSCRIPTION_RUNNER HARNESS_RUNNER
+export OPENAI_API_KEY ZAI_API_KEY GEMINI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY
+export claude_assist_policy claude_opus_model strict_main strict_opus subscription_timeout
+
+lane_failures=0
+while IFS= read -r lane; do
+  run_lane "${lane}" </dev/null &
+  while (( $(jobs -rp | wc -l | tr -d ' ') >= MAX_PARALLEL )); do
+    sleep 0.2
+  done
+done < <(jq -c '.include[]' "${matrix_file}")
+
+for pid in $(jobs -rp); do
+  if ! wait "${pid}"; then
+    lane_failures=$((lane_failures + 1))
+  fi
+done
+if (( lane_failures > 0 )); then
+  echo "Warning: ${lane_failures} lane(s) exited non-zero; synthesized fallback artifacts may be present." >&2
+fi
+
+all_results="${RUN_DIR}/all-results.json"
+jq -s '.' "${LANE_DIR}"/agent-*.json > "${all_results}"
+
+integrated_json="${RUN_DIR}/integrated.json"
+high_risk_count="$(jq '[.[] | select(.skipped != true and (.risk|ascii_upcase) == "HIGH")] | length' "${all_results}")"
+high_risk="false"
+if [[ "${high_risk_count}" -gt 0 ]]; then
+  high_risk="true"
+fi
+approve_count="$(jq '[.[] | select(.skipped != true and .approve == true)] | length' "${all_results}")"
+total_count="$(jq '[.[] | select(.skipped != true)] | length' "${all_results}")"
+if [[ "${total_count}" -eq 0 ]]; then
+  threshold=1
+else
+  threshold=$(( (total_count * 2 + 2) / 3 ))
+fi
+weighted_total_score="$(jq -r '
+  [ .[] | select(.skipped != true) |
+    (if (.agent_role|test("security-analyst";"i")) then 1.4
+     elif (.agent_role|test("code-reviewer";"i")) then 1.2
+     elif (.agent_role|test("architect";"i")) then 1.1
+     elif (.agent_role|test("reliability-engineer|invariants-checker";"i")) then 1.1
+     elif (.agent_role|test("general-reviewer|plan-reviewer|general-critic";"i")) then 1.0
+     elif (.agent_role|test("refactor-advisor";"i")) then 0.9
+     elif (.agent_role|test("math-reasoning|orchestration-assistant|main-orchestrator|ui-reviewer";"i")) then 0.8
+     elif (.agent_role|test("realtime-info";"i")) then 0.7
+     else 1.0 end)
+  ] | add // 0
+' "${all_results}")"
+weighted_approve_score="$(jq -r '
+  [ .[] | select(.skipped != true and .approve == true) |
+    (if (.agent_role|test("security-analyst";"i")) then 1.4
+     elif (.agent_role|test("code-reviewer";"i")) then 1.2
+     elif (.agent_role|test("architect";"i")) then 1.1
+     elif (.agent_role|test("reliability-engineer|invariants-checker";"i")) then 1.1
+     elif (.agent_role|test("general-reviewer|plan-reviewer|general-critic";"i")) then 1.0
+     elif (.agent_role|test("refactor-advisor";"i")) then 0.9
+     elif (.agent_role|test("math-reasoning|orchestration-assistant|main-orchestrator|ui-reviewer";"i")) then 0.8
+     elif (.agent_role|test("realtime-info";"i")) then 0.7
+     else 1.0 end)
+  ] | add // 0
+' "${all_results}")"
+weighted_threshold="$(awk -v total="${weighted_total_score}" 'BEGIN { printf "%.3f", (2*total)/3 }')"
+weighted_vote_passed="$(awk -v approve="${weighted_approve_score}" -v threshold="${weighted_threshold}" 'BEGIN { if (approve + 1e-9 >= threshold) print "true"; else print "false" }')"
+ok_to_execute="false"
+if [[ "${total_count}" -eq 0 ]]; then
+  weighted_vote_passed="false"
+fi
+
+required_claude_assist_gate="not-required"
+required_claude_assist_reason="assist-not-required"
+if [[ "${ASSIST_PROVIDER}" == "claude" && "${local_require_claude_assist}" == "true" ]]; then
+  if [[ "${claude_rate_limit_state}" == "ok" ]]; then
+    required_claude_assist_gate="fail"
+    required_claude_assist_reason="required-when-claude-ok"
+    if jq -e \
+      --arg opus "${claude_opus_model}" \
+      '[ .[] | select(.name == "claude-opus-assist" and .skipped != true and (.provider|ascii_downcase) == "claude" and (.model|ascii_downcase) == ($opus|ascii_downcase) and ((.http_code|tostring|startswith("cli:")) or (.http_code|tostring) == "200")) ] | length > 0' \
+      "${all_results}" >/dev/null 2>&1; then
+      required_claude_assist_gate="pass"
+      required_claude_assist_reason="claude-opus-assist-direct-success"
+    else
+      required_claude_assist_gate="fail"
+      required_claude_assist_reason="claude-opus-assist-missing-or-failed"
+    fi
+  else
+    required_claude_assist_gate="not-required"
+    required_claude_assist_reason="claude-rate-limit-${claude_rate_limit_state}"
+  fi
+fi
+if [[ "${required_claude_assist_gate}" == "fail" ]]; then
+  weighted_vote_passed="false"
+fi
+if [[ "${weighted_vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
+  ok_to_execute="true"
+fi
+
+jq -n \
+  --arg issue_number "${ISSUE_NUMBER}" \
+  --arg issue_url "${ISSUE_URL}" \
+  --arg run_dir "${RUN_DIR}" \
+  --arg main "${MAIN_PROVIDER}" \
+  --arg assist "${ASSIST_PROVIDER}" \
+  --arg mode "${MULTI_AGENT_MODE}" \
+  --arg glm_mode "${GLM_SUBAGENT_MODE}" \
+  --argjson lanes "${lanes_total}" \
+  --argjson approve_count "${approve_count}" \
+  --argjson total_count "${total_count}" \
+  --argjson threshold "${threshold}" \
+  --arg weighted_approve "${weighted_approve_score}" \
+  --arg weighted_total "${weighted_total_score}" \
+  --arg weighted_threshold "${weighted_threshold}" \
+  --arg weighted_vote "${weighted_vote_passed}" \
+  --arg high_risk "${high_risk}" \
+  --argjson high_risk_count "${high_risk_count}" \
+  --arg ok_to_execute "${ok_to_execute}" \
+  --arg required_claude_assist_gate "${required_claude_assist_gate}" \
+  --arg required_claude_assist_reason "${required_claude_assist_reason}" \
+  '{
+    issue_number:($issue_number|tonumber),
+    issue_url:$issue_url,
+    run_dir:$run_dir,
+    main_orchestrator:$main,
+    assist_orchestrator:$assist,
+    multi_agent_mode:$mode,
+    glm_subagent_mode:$glm_mode,
+    lanes_configured:$lanes,
+    approve_count:$approve_count,
+    total_count:$total_count,
+    threshold:$threshold,
+    weighted_approve_score:($weighted_approve|tonumber),
+    weighted_total_score:($weighted_total|tonumber),
+    weighted_threshold:($weighted_threshold|tonumber),
+    weighted_vote_passed:($weighted_vote=="true"),
+    high_risk:($high_risk=="true"),
+    high_risk_count:$high_risk_count,
+    ok_to_execute:($ok_to_execute=="true"),
+    required_claude_assist_gate:$required_claude_assist_gate,
+    required_claude_assist_reason:$required_claude_assist_reason
+  }' > "${integrated_json}"
+
+summary_md="${RUN_DIR}/summary.md"
+cat > "${summary_md}" <<EOF
+## Local Tutti Integrated Review
+
+- issue: #${ISSUE_NUMBER} (${ISSUE_URL})
+- main orchestrator: ${MAIN_PROVIDER}
+- assist orchestrator: ${ASSIST_PROVIDER}
+- multi-agent mode: ${MULTI_AGENT_MODE}
+- glm subagent mode: ${GLM_SUBAGENT_MODE}
+- lanes configured: ${lanes_total}
+- approvals: ${approve_count}/${total_count} (threshold ${threshold})
+- weighted approvals: ${weighted_approve_score}/${weighted_total_score} (threshold ${weighted_threshold})
+- weighted vote passed: ${weighted_vote_passed}
+- high-risk findings: ${high_risk_count}
+- required claude assist gate: ${required_claude_assist_gate} (${required_claude_assist_reason})
+- ok_to_execute: ${ok_to_execute}
+- run dir: ${RUN_DIR}
+EOF
+
+if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then
+  gh issue comment "${ISSUE_NUMBER}" --repo "${REPO}" --body-file "${summary_md}" >/dev/null
+fi
+
+echo "Local orchestration completed."
+echo "Run directory: ${RUN_DIR}"
+cat "${summary_md}"

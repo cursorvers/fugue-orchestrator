@@ -195,7 +195,10 @@ jobs:
           ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
           subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "hold")"
           subscription_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
+          codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex")"
+          codex_multi_agent_model="$(gh variable get FUGUE_CODEX_MULTI_AGENT_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex-spark")"
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
+          glm_subagent_mode="$(gh variable get FUGUE_GLM_SUBAGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "paired")"
           claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
           claude_assist_execution_policy="$(gh variable get FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "")"
@@ -218,7 +221,10 @@ jobs:
           ci_execution_engine="$(echo "${ci_execution_engine}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           subscription_offline_policy="$(echo "${subscription_offline_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           subscription_runner_label="$(echo "${subscription_runner_label}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          codex_main_model="$(echo "${codex_main_model}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          codex_multi_agent_model="$(echo "${codex_multi_agent_model}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           multi_agent_mode="$(echo "${multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          glm_subagent_mode="$(echo "${glm_subagent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_main_assist_policy="$(echo "${claude_main_assist_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_assist_execution_policy="$(echo "${claude_assist_execution_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -251,8 +257,17 @@ jobs:
           if [[ -z "${subscription_runner_label}" ]]; then
             subscription_runner_label="fugue-subscription"
           fi
+          if [[ -z "${codex_main_model}" ]]; then
+            codex_main_model="gpt-5.3-codex"
+          fi
+          if [[ -z "${codex_multi_agent_model}" ]]; then
+            codex_multi_agent_model="gpt-5.3-codex-spark"
+          fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
             multi_agent_mode="enhanced"
+          fi
+          if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
+            glm_subagent_mode="paired"
           fi
           if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
             claude_main_assist_policy="codex"
@@ -361,8 +376,11 @@ jobs:
           - ci_execution_engine: ${ci_execution_engine}
           - subscription_offline_policy: ${subscription_offline_policy}
           - subscription_runner_label: ${subscription_runner_label}
+          - codex_main_model: ${codex_main_model}
+          - codex_multi_agent_model: ${codex_multi_agent_model}
           - self_hosted_online_count: ${self_hosted_online_count}
           - multi_agent_mode: ${multi_agent_mode}
+          - glm_subagent_mode: ${glm_subagent_mode}
           - claude_main_assist_policy: ${claude_main_assist_policy}
           - claude_max_plan_mode: ${claude_max_plan}
           - claude_assist_execution_policy: ${claude_assist_execution_policy}
