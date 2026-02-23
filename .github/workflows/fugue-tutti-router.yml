@@ -797,7 +797,18 @@ jobs:
             exit 0
           fi
 
-          echo "Queue guard timed out without detecting a confirmed stall (max_watch_sec=${max_watch_sec}, idle_sec=${idle_sec})."
+          final_jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
+          final_total="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
+          final_started="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) > 0))] | length' 2>/dev/null || echo "0")"
+          final_pending="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) == 0) and ((.conclusion // "") == ""))] | length' 2>/dev/null || echo "0")"
+          if (( final_total > 0 && final_pending > 0 && final_started == 0 )); then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lanes remained unstarted after guard window (pending=${final_pending}/${final_total}, started=${final_started}). Task is paused; processing label was cleared."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+            gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+            exit 0
+          fi
+
+          echo "Queue guard timed out without confirmed stall (max_watch_sec=${max_watch_sec}, idle_sec=${idle_sec}, final_pending=${final_pending}, final_started=${final_started})."
 
   integrate:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
