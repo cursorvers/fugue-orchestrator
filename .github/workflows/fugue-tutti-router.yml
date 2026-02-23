@@ -928,6 +928,7 @@ jobs:
         id: integrate
         env:
           ASSIST_PROVIDER_RESOLVED: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
         run: |
           set -euo pipefail
 
@@ -944,9 +945,13 @@ jobs:
           if [[ "${assist_provider_resolved}" != "claude" && "${assist_provider_resolved}" != "codex" && "${assist_provider_resolved}" != "none" ]]; then
             assist_provider_resolved="none"
           fi
+          claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
           required_claude_assist_gate="not-required"
           required_claude_assist_reason="none"
-          if [[ "${assist_provider_resolved}" == "claude" ]]; then
+          if [[ "${assist_provider_resolved}" == "claude" && "${claude_state}" == "ok" ]]; then
             required_claude_assist_gate="pass"
             required_claude_assist_reason="ok"
             claude_opus_lane_total="$(jq '[.[] | select(.name == "claude-opus-assist")] | length' all-results.json)"
@@ -973,6 +978,9 @@ jobs:
               high_risk="true"
               high_risk_count="$((high_risk_count + 1))"
             fi
+          elif [[ "${assist_provider_resolved}" == "claude" ]]; then
+            required_claude_assist_gate="not-required"
+            required_claude_assist_reason="claude-rate-limit-${claude_state}"
           fi
 
           if [[ "${total_count}" -eq 0 ]]; then
@@ -1306,6 +1314,8 @@ jobs:
           API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
           EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
+          HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
         run: |
@@ -1397,8 +1407,11 @@ jobs:
               --assist-provider "${assist_provider}" \
               --force-claude "${force_claude}" \
               --self-hosted-online "${self_hosted_online}" \
+              --claude-state "${CLAUDE_RATE_LIMIT_STATE}" \
               --strict-main-requested "${strict_main_requested}" \
               --strict-opus-requested "${strict_opus_requested}" \
+              --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+              --codex-api-available "${HAS_OPENAI_API_KEY}" \
               --subscription-offline-policy "${subscription_offline_policy}" \
               --api-strict-mode "${api_strict_mode}" \
               --emergency-continuity-mode "${emergency_continuity_mode}" \

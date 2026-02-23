@@ -10,8 +10,11 @@ main_provider="codex"
 assist_provider="claude"
 force_claude="false"
 self_hosted_online="false"
+claude_state="ok"
 strict_main_requested="true"
 strict_opus_requested="true"
+claude_direct_available="true"
+codex_api_available="true"
 api_strict_mode="false"
 emergency_continuity_mode="false"
 emergency_assist_policy="none"
@@ -40,12 +43,24 @@ while [[ $# -gt 0 ]]; do
       self_hosted_online="${2:-false}"
       shift 2
       ;;
+    --claude-state)
+      claude_state="${2:-ok}"
+      shift 2
+      ;;
     --strict-main-requested)
       strict_main_requested="${2:-true}"
       shift 2
       ;;
     --strict-opus-requested)
       strict_opus_requested="${2:-true}"
+      shift 2
+      ;;
+    --claude-direct-available)
+      claude_direct_available="${2:-true}"
+      shift 2
+      ;;
+    --codex-api-available)
+      codex_api_available="${2:-true}"
       shift 2
       ;;
     --api-strict-mode)
@@ -78,8 +93,11 @@ Options:
   --assist-provider VALUE             Resolved assist provider (claude|codex|none)
   --force-claude VALUE                true to bypass assist auto-demotion during continuity fallback
   --self-hosted-online VALUE          true when an online self-hosted runner is available
+  --claude-state VALUE                Claude rate-limit state (ok|degraded|exhausted)
   --strict-main-requested VALUE       Requested strict guard for codex main lane
   --strict-opus-requested VALUE       Requested strict guard for claude opus assist lane
+  --claude-direct-available VALUE     true when Claude direct execution credential is available
+  --codex-api-available VALUE         true when Codex API credential is available for proxy fallback
   --api-strict-mode VALUE             true to keep strict guards active even on api/harness engines
   --emergency-continuity-mode VALUE   true to run inflight-only continuity mode
   --emergency-assist-policy VALUE     Assist policy under continuity fallback (none|codex|claude)
@@ -136,12 +154,34 @@ normalize_offline_policy() {
   printf '%s' "${v}"
 }
 
+resolve_unavailable_claude_fallback() {
+  local requested
+  requested="$(normalize_assist "$1")"
+  if [[ "${requested}" == "none" ]]; then
+    printf 'none'
+    return
+  fi
+  # In non-force fallback paths, avoid keeping Claude when direct execution
+  # is unavailable in the selected engine/profile.
+  if [[ "${requested}" == "claude" ]]; then
+    printf 'codex'
+    return
+  fi
+  printf '%s' "${requested}"
+}
+
 requested_engine="$(normalize_engine "${requested_engine}")"
 assist_provider="$(normalize_assist "${assist_provider}")"
 force_claude="$(normalize_bool "${force_claude}")"
 self_hosted_online="$(normalize_bool "${self_hosted_online}")"
+claude_state="$(lower_trim "${claude_state}")"
+if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+  claude_state="ok"
+fi
 strict_main_requested="$(normalize_bool "${strict_main_requested}")"
 strict_opus_requested="$(normalize_bool "${strict_opus_requested}")"
+claude_direct_available="$(normalize_bool "${claude_direct_available}")"
+codex_api_available="$(normalize_bool "${codex_api_available}")"
 api_strict_mode="$(normalize_bool "${api_strict_mode}")"
 emergency_continuity_mode="$(normalize_bool "${emergency_continuity_mode}")"
 emergency_assist_policy="$(normalize_assist "${emergency_assist_policy}")"
@@ -180,8 +220,8 @@ if [[ "${requested_engine}" == "subscription" ]]; then
       continuity_active="true"
       strict_main_effective="false"
       strict_opus_effective="false"
-      if [[ "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" ]]; then
-        assist_provider_effective="${emergency_assist_policy}"
+      if [[ "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" && ( "${claude_state}" != "ok" || "${claude_direct_available}" != "true" ) ]]; then
+        assist_provider_effective="$(resolve_unavailable_claude_fallback "${emergency_assist_policy}")"
         assist_adjusted_by_profile="true"
         assist_adjustment_reason="subscription-fallback-assist-claude->${assist_provider_effective}"
       fi
@@ -202,8 +242,8 @@ else
     execution_profile="api-continuity"
     execution_profile_reason="emergency-continuity-enabled"
     continuity_active="true"
-    if [[ "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" ]]; then
-      assist_provider_effective="${emergency_assist_policy}"
+    if [[ "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" && ( "${claude_state}" != "ok" || "${claude_direct_available}" != "true" ) ]]; then
+      assist_provider_effective="$(resolve_unavailable_claude_fallback "${emergency_assist_policy}")"
       assist_adjusted_by_profile="true"
       assist_adjustment_reason="emergency-mode-assist-claude->${assist_provider_effective}"
     fi
@@ -219,6 +259,18 @@ else
   else
     strict_main_effective="false"
     strict_opus_effective="false"
+  fi
+fi
+
+# Capability guard for api/harness profiles:
+# when assist=claude cannot execute directly, demote to codex (or none) to
+# keep resolved assist and executable lanes aligned.
+if [[ "${effective_engine}" != "subscription" && "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" && "${claude_direct_available}" != "true" ]]; then
+  fallback_target="$(resolve_unavailable_claude_fallback "${emergency_assist_policy}")"
+  if [[ "${assist_provider_effective}" != "${fallback_target}" ]]; then
+    assist_provider_effective="${fallback_target}"
+    assist_adjusted_by_profile="true"
+    assist_adjustment_reason="api-capability-assist-claude-unavailable->${assist_provider_effective}"
   fi
 fi
 

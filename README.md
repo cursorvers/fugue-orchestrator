@@ -156,6 +156,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 大規模リファクタ/リライト/移行タスクでは、各サイクルで Candidate A/B + Failure Modes + Rollback Check を必須化します。
 # NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
+# NOTE: modified FUGUE では通常運用時、main=claude は assist=codex へ最終調整されます（co-orchestrator維持 + Claude圧迫回避）。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE=subscription` は pay-as-you-go APIを使わず、`codex` / `claude` CLI で /vote レーンを実行します（self-hosted runner前提）。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE` の既定は `subscription` です。`harness/api` は互換用途です。
 # NOTE: `subscription` 要求時は `FUGUE_SUBSCRIPTION_RUNNER_LABEL` が付いた self-hosted runner を必須判定します。

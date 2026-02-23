@@ -288,13 +288,37 @@ jobs:
             body_assist_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*assist[[:space:]]+orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex|none)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
 
+          eval "$(
+            scripts/lib/orchestrator-nl-hints.sh \
+              --title "${title}" \
+              --body "${body}"
+          )"
+
           provider="${label_main_provider}"
+          main_provider_source="label"
           if [[ -z "${provider}" && -n "${body_main_provider}" ]]; then
             provider="${body_main_provider}"
+            main_provider_source="body-structured"
+          fi
+          if [[ -z "${provider}" && -n "${nl_main_hint}" ]]; then
+            provider="${nl_main_hint}"
+            main_provider_source="body-natural-language"
+          fi
+          if [[ -z "${provider}" ]]; then
+            main_provider_source="default"
           fi
           assist_provider="${label_assist_provider}"
+          assist_provider_source="label"
           if [[ -z "${assist_provider}" && -n "${body_assist_provider}" ]]; then
             assist_provider="${body_assist_provider}"
+            assist_provider_source="body-structured"
+          fi
+          if [[ -z "${assist_provider}" && -n "${nl_assist_hint}" ]]; then
+            assist_provider="${nl_assist_hint}"
+            assist_provider_source="body-natural-language"
+          fi
+          if [[ -z "${assist_provider}" ]]; then
+            assist_provider_source="default"
           fi
 
           eval "$(
@@ -313,6 +337,14 @@ jobs:
           requested_assist_provider="${requested_assist}"
           provider="${resolved_main}"
           assist_provider="${resolved_assist}"
+          if [[ "${main_fallback_applied}" == "true" && -n "${main_fallback_reason}" ]]; then
+            main_provider_source="${main_provider_source}+policy(${main_fallback_reason})"
+          fi
+          if [[ "${assist_fallback_applied}" == "true" && -n "${assist_fallback_reason}" ]]; then
+            assist_provider_source="${assist_provider_source}+policy(${assist_fallback_reason})"
+          elif [[ "${pressure_guard_applied}" == "true" && -n "${pressure_guard_reason}" ]]; then
+            assist_provider_source="${assist_provider_source}+policy(${pressure_guard_reason})"
+          fi
 
           main_fallback_note=""
           if [[ "${main_fallback_applied}" == "true" ]]; then
@@ -456,6 +488,13 @@ jobs:
           if [[ -n "${assist_fallback_note}" ]]; then
             assist_provider_line="- Assist orchestrator: ${assist_provider} (requested: ${requested_assist_provider})"
           fi
+          source_line="- Provider source: main=${main_provider_source}, assist=${assist_provider_source}"
+          nl_line=""
+          if [[ "${nl_hint_applied}" == "true" ]]; then
+            nl_line="- Natural-language hints: main=${nl_main_hint:-none}, assist=${nl_assist_hint:-none}"
+          elif [[ -n "${nl_inference_skipped_reason}" ]]; then
+            nl_line="- Natural-language hints: skipped (${nl_inference_skipped_reason})"
+          fi
           fallback_block="$(printf '%s\n%s\n' "${main_fallback_note}" "${assist_fallback_note}" | sed '/^$/d')"
           cat > handoff-comment.md <<EOF
           GHA24 mainframe handoff (natural language)
@@ -463,6 +502,8 @@ jobs:
           - Mode: ${mode}
           ${provider_line}
           ${assist_provider_line}
+          ${source_line}
+          ${nl_line}
           ${confirmation_line}
           - Action: added label \`tutti\`${extra}
           ${fallback_block}

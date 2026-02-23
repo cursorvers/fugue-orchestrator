@@ -42,6 +42,8 @@ FR-3 Claude throttle guard:
 - If Claude rate-limit state is `degraded` or `exhausted`, main provider must auto-fallback to `codex` unless forced.
 - If Claude rate-limit state is `exhausted`, assist provider `claude` must auto-fallback to `none` unless forced.
 - If main provider resolves to `claude` and assist provider also resolves to `claude`, apply pressure guard to reduce Claude lane pressure (`FUGUE_CLAUDE_MAIN_ASSIST_POLICY=codex|none`, default `codex`) unless forced.
+- Architectural invariant (modified FUGUE): if main resolves to `claude`, assist must resolve to `codex` in normal operation (unless explicit force override).
+- If Claude is not rate-limited (`claude_state=ok`) and assist resolves to `claude`, Claude assist lane is required (missing direct success must veto auto-execution).
 - If Claude rate-limit state is `ok` or `degraded`, Sonnet assist lanes should remain eligible.
 - Force override must be explicit (`orchestrator-force:claude` / CLI force option).
 - Fallback reason must be written to issue comments for auditability.
@@ -55,6 +57,7 @@ FR-5 Assist lane behavior:
 - Missing/failed assist provider credentials must not fail quorum.
 - Assist lane failure should be reported as skipped/error in integrated comment.
 - Assist role resolution (control-plane) and execution backend choice (data-plane) must be independently configurable and auditable.
+- In api/harness continuity profiles, if Claude direct execution is unavailable, assist must auto-adjust to an executable fallback (`codex` or `none`) unless explicitly forced.
 
 FR-6 Weighted governance gate:
 - Execution approval uses role-weighted 2/3 consensus (not flat count only).

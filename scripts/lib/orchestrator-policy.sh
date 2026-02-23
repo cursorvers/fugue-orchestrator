@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # Resolve per-issue orchestrator policy with shared fallback/pressure guards.
+# Modified FUGUE invariant: when main=claude, assist is finalized to codex
+# in normal operation (unless explicit --force-claude=true override).
 # Output format is shell env assignments by default so callers can `eval`.
 #
 # Example:
@@ -192,6 +194,16 @@ if [[ "${resolved_main}" == "claude" && "${resolved_assist}" == "claude" && "${f
   resolved_assist="${assist_policy}"
   pressure_guard_applied="true"
   pressure_guard_reason="main-claude-assist-claude->${resolved_assist}"
+fi
+
+# Architectural invariant:
+# when Claude owns the main lane, Codex must be the sub/co-orchestrator lane.
+if [[ "${resolved_main}" == "claude" && "${resolved_assist}" != "codex" && "${force_claude}" != "true" ]]; then
+  resolved_assist="codex"
+  if [[ "${pressure_guard_applied}" != "true" ]]; then
+    pressure_guard_applied="true"
+    pressure_guard_reason="main-claude-requires-assist-codex"
+  fi
 fi
 
 compat_label="codex-implement"

@@ -308,16 +308,30 @@ jobs:
             body_assist_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*assist[[:space:]]+orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex|none)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
 
+          eval "$(
+            scripts/lib/orchestrator-nl-hints.sh \
+              --title "${title}" \
+              --body "${body}"
+          )"
+
           requested_main_provider="${label_main_provider}"
+          main_provider_source="label"
           if [[ -z "${requested_main_provider}" && -n "${body_main_provider}" ]]; then
             requested_main_provider="${body_main_provider}"
+            main_provider_source="body-structured"
+          fi
+          if [[ -z "${requested_main_provider}" && -n "${nl_main_hint}" ]]; then
+            requested_main_provider="${nl_main_hint}"
+            main_provider_source="body-natural-language"
           fi
           if [[ -z "${requested_main_provider}" ]]; then
             requested_main_provider="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
+            main_provider_source="default"
           fi
           requested_main_provider="$(echo "${requested_main_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${requested_main_provider}" != "claude" && "${requested_main_provider}" != "codex" ]]; then
             requested_main_provider="codex"
+            main_provider_source="default"
           fi
           requested_main_provider_initial="${requested_main_provider}"
           orchestration_profile="codex-full"
@@ -348,19 +362,27 @@ jobs:
           fi
 
           requested_assist_provider="${label_assist_provider}"
+          assist_provider_source="label"
           if [[ -z "${requested_assist_provider}" && -n "${body_assist_provider}" ]]; then
             requested_assist_provider="${body_assist_provider}"
+            assist_provider_source="body-structured"
+          fi
+          if [[ -z "${requested_assist_provider}" && -n "${nl_assist_hint}" ]]; then
+            requested_assist_provider="${nl_assist_hint}"
+            assist_provider_source="body-natural-language"
           fi
           assist_explicit="false"
-          if [[ -n "${label_assist_provider}" || -n "${body_assist_provider}" ]]; then
+          if [[ -n "${label_assist_provider}" || -n "${body_assist_provider}" || -n "${nl_assist_hint}" ]]; then
             assist_explicit="true"
           fi
           if [[ -z "${requested_assist_provider}" ]]; then
             requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+            assist_provider_source="default"
           fi
           requested_assist_provider="$(echo "${requested_assist_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${requested_assist_provider}" != "claude" && "${requested_assist_provider}" != "codex" && "${requested_assist_provider}" != "none" ]]; then
             requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+            assist_provider_source="default"
           fi
 
           claude_state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -721,21 +743,26 @@ jobs:
           if [[ "${assist_explicit}" != "true" && "${force_claude}" != "true" && "${requested_assist_provider}" == "none" ]]; then
             if [[ "${sub_auto_escalate}" == "off" ]]; then
               requested_assist_provider="none"
+              assist_provider_source="risk-auto(off)"
               assist_auto_selected="off->none"
             elif [[ "${sub_auto_escalate}" == "medium-high" ]]; then
               if [[ "${risk_tier}" == "medium" || "${risk_tier}" == "high" || "${auto_attach_claude}" == "true" ]]; then
                 requested_assist_provider="claude"
+                assist_provider_source="risk-auto(medium-high)"
                 assist_auto_selected="${risk_tier}->claude(${claude_sub_trigger})"
               else
                 requested_assist_provider="none"
+                assist_provider_source="risk-auto(medium-high)"
                 assist_auto_selected="low->none"
               fi
             else
               if [[ "${auto_attach_claude}" == "true" ]]; then
                 requested_assist_provider="claude"
+                assist_provider_source="risk-auto(high)"
                 assist_auto_selected="${risk_tier}->claude(${claude_sub_trigger})"
               else
                 requested_assist_provider="none"
+                assist_provider_source="risk-auto(high)"
                 assist_auto_selected="${risk_tier}->none"
               fi
             fi
@@ -760,6 +787,14 @@ jobs:
           assist_claude_fallback_reason="${assist_fallback_reason}"
           claude_pressure_guard_applied="${pressure_guard_applied}"
           claude_pressure_guard_reason="${pressure_guard_reason}"
+          if [[ "${main_claude_fallback_applied}" == "true" && -n "${main_claude_fallback_reason}" ]]; then
+            main_provider_source="${main_provider_source}+policy(${main_claude_fallback_reason})"
+          fi
+          if [[ "${assist_claude_fallback_applied}" == "true" && -n "${assist_claude_fallback_reason}" ]]; then
+            assist_provider_source="${assist_provider_source}+policy(${assist_claude_fallback_reason})"
+          elif [[ "${claude_pressure_guard_applied}" == "true" && -n "${claude_pressure_guard_reason}" ]]; then
+            assist_provider_source="${assist_provider_source}+policy(${claude_pressure_guard_reason})"
+          fi
           # Keep low-risk tasks lightweight and high-risk tasks exhaustive when
           # no explicit multi-agent override was provided.
           if [[ -z "${multi_agent_mode_override}" && "${multi_agent_mode_lock}" != "true" ]]; then
@@ -816,6 +851,14 @@ jobs:
             echo "orchestrator_provider=${requested_main_provider}"
             echo "main_orchestrator_provider=${requested_main_provider}"
             echo "assist_orchestrator_provider=${requested_assist_provider}"
+            echo "main_provider_source=${main_provider_source}"
+            echo "assist_provider_source=${assist_provider_source}"
+            echo "nl_hint_applied=${nl_hint_applied}"
+            echo "nl_main_hint=${nl_main_hint}"
+            echo "nl_assist_hint=${nl_assist_hint}"
+            echo "nl_main_reason=${nl_main_reason}"
+            echo "nl_assist_reason=${nl_assist_reason}"
+            echo "nl_inference_skipped_reason=${nl_inference_skipped_reason}"
             echo "claude_fallback_applied=${main_claude_fallback_applied}"
             echo "claude_fallback_reason=${main_claude_fallback_reason}"
             echo "main_claude_fallback_applied=${main_claude_fallback_applied}"
@@ -900,10 +943,22 @@ jobs:
           BUDGET_INITIAL: ${{ steps.ctx.outputs.context_budget_initial }}
           BUDGET_MAX: ${{ steps.ctx.outputs.context_budget_max }}
           ASSIST_AUTO: ${{ steps.ctx.outputs.assist_auto_selected }}
+          MAIN_SOURCE: ${{ steps.ctx.outputs.main_provider_source }}
+          ASSIST_SOURCE: ${{ steps.ctx.outputs.assist_provider_source }}
+          NL_HINT_APPLIED: ${{ steps.ctx.outputs.nl_hint_applied }}
+          NL_MAIN_HINT: ${{ steps.ctx.outputs.nl_main_hint }}
+          NL_ASSIST_HINT: ${{ steps.ctx.outputs.nl_assist_hint }}
+          NL_SKIP_REASON: ${{ steps.ctx.outputs.nl_inference_skipped_reason }}
         run: |
           set -euo pipefail
           override_display="${MODE_OVERRIDE:-none}"
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`."
+          nl_note=""
+          if [[ "${NL_HINT_APPLIED}" == "true" ]]; then
+            nl_note=" natural_language_hint(main=\`${NL_MAIN_HINT:-none}\`, assist=\`${NL_ASSIST_HINT:-none}\`)."
+          elif [[ -n "${NL_SKIP_REASON}" ]]; then
+            nl_note=" natural_language_hint(skipped=\`${NL_SKIP_REASON}\`)."
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${nl_note}"
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
