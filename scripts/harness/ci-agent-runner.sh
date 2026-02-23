@@ -15,6 +15,10 @@ claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' 
 if [[ "${claude_max_plan}" != "true" ]]; then
   claude_max_plan="false"
 fi
+claude_opus_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${claude_opus_model}" ]]; then
+  claude_opus_model="claude-opus-4-6"
+fi
 
 if [[ "${PROVIDER}" == "gemini" && -z "${GEMINI_API_KEY:-}" ]]; then
   result="$(jq -n \
@@ -190,7 +194,7 @@ elif [[ "${PROVIDER}" == "xai" ]]; then
     fi
   done
 elif [[ "${PROVIDER}" == "claude" ]]; then
-  candidates=("${MODEL}" "claude-opus-4-1-20250805" "claude-opus-4-20250514" "claude-3-7-sonnet-latest" "claude-3-5-sonnet-latest")
+  candidates=("${MODEL}" "${claude_opus_model}" "claude-opus-4-1-20250805" "claude-opus-4-20250514" "claude-3-7-sonnet-latest" "claude-3-5-sonnet-latest")
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \

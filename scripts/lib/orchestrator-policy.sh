@@ -82,7 +82,7 @@ Options:
   --force-claude VALUE      true to bypass fallback/pressure guards
   --assist-policy VALUE     Guard policy for main=claude+assist=claude (codex|none)
   --claude-role-policy      Claude role policy (sub-only|flex). Default: flex
-  --degraded-assist-policy  Fallback for assist=claude when state=degraded (none|codex)
+  --degraded-assist-policy  Fallback for assist=claude when state=degraded (none|codex|claude)
   --format VALUE            env (default) or json
 EOF
       exit 0
@@ -153,7 +153,7 @@ if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex"
 fi
 
 degraded_assist_policy="$(normalize_assist "${degraded_assist_policy}")"
-if [[ "${degraded_assist_policy}" != "codex" && "${degraded_assist_policy}" != "none" ]]; then
+if [[ "${degraded_assist_policy}" != "codex" && "${degraded_assist_policy}" != "none" && "${degraded_assist_policy}" != "claude" ]]; then
   degraded_assist_policy="none"
 fi
 
