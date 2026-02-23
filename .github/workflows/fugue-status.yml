@@ -286,7 +286,7 @@ jobs:
           fi
           self_hosted_online_count="n/a"
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
+            self_hosted_online_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" --jq '[.runners[] | select(.status=="online" and .busy != true and ([.labels[].name] | index("self-hosted") != null))] | length' 2>/dev/null || echo "0")"
             self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
             if [[ -z "${self_hosted_online_count}" ]]; then
               self_hosted_online_count="0"
