@@ -102,6 +102,10 @@ if [[ "${PROVIDER}" == "claude" && "${claude_assist_execution_policy}" == "proxy
     CLAUDE_PROXY_MODE="true"
     CLAUDE_PROXY_NOTE="Claude assist execution policy=proxy: executed via Codex proxy."
   else
+    if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
+      echo "Strict guard violation: claude-opus-assist requires direct Claude execution, but proxy prerequisites are unavailable." >&2
+      exit 43
+    fi
     result="$(jq -n \
       --arg name "${AGENT_NAME}" \
       --arg provider "${PROVIDER}" \
@@ -137,6 +141,10 @@ if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     CLAUDE_PROXY_MODE="true"
     CLAUDE_PROXY_NOTE="Claude assist execution policy=hybrid: executed via Codex proxy because ANTHROPIC_API_KEY is not configured."
   else
+    if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
+      echo "Strict guard violation: claude-opus-assist requires direct Claude execution, but ANTHROPIC_API_KEY is not configured." >&2
+      exit 43
+    fi
     result="$(jq -n \
       --arg name "${AGENT_NAME}" \
       --arg provider "${PROVIDER}" \
