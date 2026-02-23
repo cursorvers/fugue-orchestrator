@@ -367,4 +367,4 @@ jobs:
             exit 1
           fi
 
-          echo "Canary passed: regular(main=${expected_regular_main},assist=${expected_regular_assist}), force(main=${expected_force_main},assist=${expected_force_assist}), strict_expected=${strict_expected}"
+          echo "Canary passed: regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), force(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner}), strict_expected=${strict_expected}"
