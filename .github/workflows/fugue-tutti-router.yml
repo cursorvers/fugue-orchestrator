@@ -240,6 +240,8 @@ jobs:
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
+          STRICT_MAIN_CODEX_MODEL: ${{ vars.FUGUE_STRICT_MAIN_CODEX_MODEL || 'false' }}
+          STRICT_OPUS_ASSIST_DIRECT: ${{ vars.FUGUE_STRICT_OPUS_ASSIST_DIRECT || 'false' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'harness' }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}

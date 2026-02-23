@@ -29,6 +29,14 @@ if [[ -z "${claude_assist_execution_policy}" ]]; then
     claude_assist_execution_policy="direct"
   fi
 fi
+strict_main_codex_model="$(echo "${STRICT_MAIN_CODEX_MODEL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${strict_main_codex_model}" != "true" ]]; then
+  strict_main_codex_model="false"
+fi
+strict_opus_assist_direct="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${strict_opus_assist_direct}" != "true" ]]; then
+  strict_opus_assist_direct="false"
+fi
 claude_opus_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -z "${claude_opus_model}" ]]; then
   claude_opus_model="claude-opus-4-6"
@@ -343,6 +351,22 @@ elif [[ "${PROVIDER}" == "claude" && "${http_code}" != "200" ]]; then
     optional_error_note="Claude API rate limited (HTTP 429)"
   else
     optional_error_note="Claude API error (HTTP ${http_code})"
+  fi
+fi
+
+# Fail-closed guards for critical orchestration lanes.
+if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
+  if [[ "${effective_provider}" != "codex" || "${chosen_model}" != "gpt-5.3-codex" || "${http_code}" != "200" ]]; then
+    echo "Strict guard violation: codex-main-orchestrator must execute with provider=codex model=gpt-5.3-codex (http=200)." >&2
+    echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code}" >&2
+    exit 42
+  fi
+fi
+if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
+  if [[ "${effective_provider}" != "claude" || "${chosen_model}" != "${claude_opus_model}" || "${http_code}" != "200" || "${CLAUDE_PROXY_MODE}" == "true" ]]; then
+    echo "Strict guard violation: claude-opus-assist must execute directly with provider=claude model=${claude_opus_model} (http=200, no proxy)." >&2
+    echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code} proxy=${CLAUDE_PROXY_MODE}" >&2
+    exit 43
   fi
 fi
 
