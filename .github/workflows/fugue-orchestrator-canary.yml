@@ -22,6 +22,8 @@ jobs:
       CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
       SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
       SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+      EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
+      API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,6 +67,7 @@ jobs:
           ts="$(date -u +%Y%m%d%H%M%S)"
           failures=0
           online_count=0
+          self_hosted_online="false"
 
           normalize() {
             echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
@@ -101,6 +104,9 @@ jobs:
               exit 0
             fi
           fi
+          if (( online_count > 0 )); then
+            self_hosted_online="true"
+          fi
 
           eval "$(
             ./scripts/lib/orchestrator-policy.sh \
@@ -116,6 +122,23 @@ jobs:
           )"
           expected_regular_main="${resolved_main}"
           expected_regular_assist="${resolved_assist}"
+          eval "$(
+            ./scripts/lib/execution-profile-policy.sh \
+              --requested-engine "${ci_execution_engine}" \
+              --main-provider "${expected_regular_main}" \
+              --assist-provider "${expected_regular_assist}" \
+              --force-claude "false" \
+              --self-hosted-online "${self_hosted_online}" \
+              --strict-main-requested "true" \
+              --strict-opus-requested "true" \
+              --subscription-offline-policy "${subscription_offline_policy}" \
+              --api-strict-mode "${API_STRICT_MODE:-false}" \
+              --emergency-continuity-mode "false" \
+              --emergency-assist-policy "${EMERGENCY_ASSIST_POLICY:-none}"
+          )"
+          expected_regular_assist_effective="${assist_provider_effective}"
+          expected_regular_profile="${execution_profile}"
+          expected_regular_runner="${run_agents_runner}"
 
           eval "$(
             ./scripts/lib/orchestrator-policy.sh \
@@ -131,6 +154,23 @@ jobs:
           )"
           expected_force_main="${resolved_main}"
           expected_force_assist="${resolved_assist}"
+          eval "$(
+            ./scripts/lib/execution-profile-policy.sh \
+              --requested-engine "${ci_execution_engine}" \
+              --main-provider "${expected_force_main}" \
+              --assist-provider "${expected_force_assist}" \
+              --force-claude "true" \
+              --self-hosted-online "${self_hosted_online}" \
+              --strict-main-requested "true" \
+              --strict-opus-requested "true" \
+              --subscription-offline-policy "${subscription_offline_policy}" \
+              --api-strict-mode "${API_STRICT_MODE:-false}" \
+              --emergency-continuity-mode "false" \
+              --emergency-assist-policy "${EMERGENCY_ASSIST_POLICY:-none}"
+          )"
+          expected_force_assist_effective="${assist_provider_effective}"
+          expected_force_profile="${execution_profile}"
+          expected_force_runner="${run_agents_runner}"
 
           gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
           gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
@@ -212,21 +252,22 @@ jobs:
             local issue_num="$1"
             local expected_main="$2"
             local expected_assist="$3"
-            local actual_main="$4"
-            local actual_assist="$5"
-            local actual_profile="$6"
-            local actual_runner="$7"
-            local actual_runner_labels="$8"
-            local actual_lanes="$9"
-            local pass="${10}"
-            local case_name="${11}"
-            local reason="${12}"
+            local expected_profile="$4"
+            local expected_runner="$5"
+            local actual_main="$6"
+            local actual_assist="$7"
+            local actual_profile="$8"
+            local actual_runner="$9"
+            local actual_lanes="${10}"
+            local pass="${11}"
+            local case_name="${12}"
+            local reason="${13}"
             if [[ "${pass}" == "true" ]]; then
-              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\`, profile=\`${actual_profile}\`, runner=\`${actual_runner}\`, lanes=\`${actual_lanes}\`."
+              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\` profile=\`${actual_profile}\` runner=\`${actual_runner}\`, lanes=\`${actual_lanes}\`."
               gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null
               gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification."
             else
-              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\`, profile=\`${actual_profile:-timeout}\`, runner=\`${actual_runner:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
+              gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\` profile=\`${actual_profile:-timeout}\` runner=\`${actual_runner:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
               gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null
             fi
           }
@@ -253,32 +294,30 @@ jobs:
             regular_lanes="${regular_rest#*|}"
             regular_ok="true"
             regular_reason="ok"
-            if [[ "${regular_main}" != "${expected_regular_main}" || "${regular_assist}" != "${expected_regular_assist}" ]]; then
+            if [[ "${regular_main}" != "${expected_regular_main}" || "${regular_assist}" != "${expected_regular_assist_effective}" ]]; then
               regular_ok="false"
               regular_reason="resolved-provider-mismatch"
-            elif [[ "${strict_expected}" == "true" ]]; then
-              if [[ "${regular_profile}" != "subscription-strict" ]]; then
-                regular_ok="false"
-                regular_reason="expected-subscription-strict-profile"
-              elif [[ "${regular_runner}" != "self-hosted" ]]; then
-                regular_ok="false"
-                regular_reason="expected-self-hosted-runner"
-              elif [[ "${regular_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
-                regular_ok="false"
-                regular_reason="required-runner-label-missing"
-              elif [[ -z "${regular_lanes}" || "${regular_lanes}" == "0" ]]; then
-                regular_ok="false"
-                regular_reason="lanes-not-materialized"
-              fi
+            elif [[ "${regular_profile}" != "${expected_regular_profile}" ]]; then
+              regular_ok="false"
+              regular_reason="execution-profile-mismatch"
+            elif [[ "${regular_runner}" != "${expected_regular_runner}" ]]; then
+              regular_ok="false"
+              regular_reason="runner-mismatch"
+            elif [[ "${expected_regular_runner}" == "self-hosted" && "${regular_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
+              regular_ok="false"
+              regular_reason="required-runner-label-missing"
+            elif [[ -z "${regular_lanes}" || "${regular_lanes}" == "0" ]]; then
+              regular_ok="false"
+              regular_reason="lanes-not-materialized"
             fi
             if [[ "${regular_ok}" == "true" ]]; then
-              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_runner_labels}" "${regular_lanes}" "true" "regular" "ok"
+              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "true" "regular" "ok"
             else
-              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_runner_labels}" "${regular_lanes}" "false" "regular" "${regular_reason}"
+              conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "false" "regular" "${regular_reason}"
               failures="$((failures + 1))"
             fi
           else
-            conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist}" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
+            conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
             failures="$((failures + 1))"
           fi
 
@@ -296,32 +335,30 @@ jobs:
             force_lanes="${force_rest#*|}"
             force_ok="true"
             force_reason="ok"
-            if [[ "${force_main}" != "${expected_force_main}" || "${force_assist}" != "${expected_force_assist}" ]]; then
+            if [[ "${force_main}" != "${expected_force_main}" || "${force_assist}" != "${expected_force_assist_effective}" ]]; then
               force_ok="false"
               force_reason="resolved-provider-mismatch"
-            elif [[ "${strict_expected}" == "true" ]]; then
-              if [[ "${force_profile}" != "subscription-strict" ]]; then
-                force_ok="false"
-                force_reason="expected-subscription-strict-profile"
-              elif [[ "${force_runner}" != "self-hosted" ]]; then
-                force_ok="false"
-                force_reason="expected-self-hosted-runner"
-              elif [[ "${force_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
-                force_ok="false"
-                force_reason="required-runner-label-missing"
-              elif [[ -z "${force_lanes}" || "${force_lanes}" == "0" ]]; then
-                force_ok="false"
-                force_reason="lanes-not-materialized"
-              fi
+            elif [[ "${force_profile}" != "${expected_force_profile}" ]]; then
+              force_ok="false"
+              force_reason="execution-profile-mismatch"
+            elif [[ "${force_runner}" != "${expected_force_runner}" ]]; then
+              force_ok="false"
+              force_reason="runner-mismatch"
+            elif [[ "${expected_force_runner}" == "self-hosted" && "${force_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
+              force_ok="false"
+              force_reason="required-runner-label-missing"
+            elif [[ -z "${force_lanes}" || "${force_lanes}" == "0" ]]; then
+              force_ok="false"
+              force_reason="lanes-not-materialized"
             fi
             if [[ "${force_ok}" == "true" ]]; then
-              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_runner_labels}" "${force_lanes}" "true" "force" "ok"
+              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "true" "force" "ok"
             else
-              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_runner_labels}" "${force_lanes}" "false" "force" "${force_reason}"
+              conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "false" "force" "${force_reason}"
               failures="$((failures + 1))"
             fi
           else
-            conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist}" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
+            conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
             failures="$((failures + 1))"
           fi
 
