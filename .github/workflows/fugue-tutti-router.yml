@@ -256,8 +256,24 @@ jobs:
         run: |
           gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
 
+  pause-subscription:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile == 'subscription-paused' }}
+    needs: [prepare, resolve-orchestrator]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Clear processing and post pause notice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ONLINE_COUNT: ${{ needs.resolve-orchestrator.outputs.self_hosted_online_count }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no available self-hosted runner detected (available=${ONLINE_COUNT}). Task is kept pending; no agent lanes were started."
+
   run-agents:
-    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile != 'subscription-paused' }}
     needs: [prepare, resolve-orchestrator]
     runs-on: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
     timeout-minutes: 20
