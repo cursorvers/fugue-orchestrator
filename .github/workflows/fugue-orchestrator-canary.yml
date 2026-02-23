@@ -25,6 +25,8 @@ jobs:
       SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
       EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
       API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
+      HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -134,8 +136,11 @@ jobs:
               --assist-provider "${expected_regular_assist}" \
               --force-claude "false" \
               --self-hosted-online "${self_hosted_online}" \
+              --claude-state "${claude_state}" \
               --strict-main-requested "true" \
               --strict-opus-requested "true" \
+              --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+              --codex-api-available "${HAS_OPENAI_API_KEY}" \
               --subscription-offline-policy "${subscription_offline_policy}" \
               --api-strict-mode "${API_STRICT_MODE:-false}" \
               --emergency-continuity-mode "${emergency_continuity_mode}" \
@@ -166,8 +171,11 @@ jobs:
               --assist-provider "${expected_force_assist}" \
               --force-claude "true" \
               --self-hosted-online "${self_hosted_online}" \
+              --claude-state "${claude_state}" \
               --strict-main-requested "true" \
               --strict-opus-requested "true" \
+              --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+              --codex-api-available "${HAS_OPENAI_API_KEY}" \
               --subscription-offline-policy "${subscription_offline_policy}" \
               --api-strict-mode "${API_STRICT_MODE:-false}" \
               --emergency-continuity-mode "${emergency_continuity_mode}" \
