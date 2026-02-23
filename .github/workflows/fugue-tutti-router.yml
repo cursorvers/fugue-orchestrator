@@ -790,6 +790,13 @@ jobs:
             elapsed=$((elapsed + interval_sec))
           done
 
+          if [[ "${saw_jobs}" != "true" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lanes were not materialized within ${max_watch_sec}s. Task is paused; processing label was cleared."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+            gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+            exit 0
+          fi
+
           echo "Queue guard timed out without detecting a confirmed stall (max_watch_sec=${max_watch_sec}, idle_sec=${idle_sec})."
 
   integrate:
