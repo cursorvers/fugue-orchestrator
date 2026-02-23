@@ -262,13 +262,27 @@ jobs:
             local pass="${11}"
             local case_name="${12}"
             local reason="${13}"
+            local issue_state=""
+            local issue_state_after=""
             if [[ "${pass}" == "true" ]]; then
               gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\` profile=\`${actual_profile}\` runner=\`${actual_runner}\`, lanes=\`${actual_lanes}\`."
-              gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null
-              gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification."
+              if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null 2>&1; then
+                echo "Warning: failed to add completed label to issue #${issue_num}" >&2
+              fi
+              issue_state="$(gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
+              if [[ "${issue_state}" == "OPEN" ]]; then
+                if ! gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification." >/dev/null 2>&1; then
+                  issue_state_after="$(gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
+                  if [[ "${issue_state_after}" != "CLOSED" ]]; then
+                    echo "Warning: failed to close issue #${issue_num} during canary cleanup." >&2
+                  fi
+                fi
+              fi
             else
               gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\` profile=\`${actual_profile:-timeout}\` runner=\`${actual_runner:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
-              gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null
+              if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null 2>&1; then
+                echo "Warning: failed to add needs-human label to issue #${issue_num}" >&2
+              fi
             fi
           }
 
