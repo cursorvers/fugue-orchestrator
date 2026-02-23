@@ -1060,6 +1060,32 @@ jobs:
           if [[ "${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_applied }}" == "true" ]]; then
             claude_pressure_section="- claude pressure guard: applied (\`${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_reason }}\`)"
           fi
+          integrated_meta="$(jq -cn \
+            --arg schema "fugue-integrated-meta/v1" \
+            --arg run_id "${GITHUB_RUN_ID}" \
+            --arg issue_number "${{ needs.prepare.outputs.issue_number }}" \
+            --arg main "${{ needs.resolve-orchestrator.outputs.main_provider }}" \
+            --arg assist "${{ needs.resolve-orchestrator.outputs.assist_provider }}" \
+            --arg profile "${{ needs.resolve-orchestrator.outputs.execution_profile }}" \
+            --arg runner "${{ needs.resolve-orchestrator.outputs.run_agents_runner }}" \
+            --arg runner_labels "${{ needs.resolve-orchestrator.outputs.run_agents_runner_json }}" \
+            --arg lanes "${{ needs.resolve-orchestrator.outputs.expected_lanes }}" \
+            --arg weighted_vote "${weighted_vote_passed}" \
+            --arg high_risk "${high_risk}" \
+            '{
+              schema:$schema,
+              run_id:$run_id,
+              issue_number:$issue_number,
+              main_orchestrator_resolved:$main,
+              assist_orchestrator_resolved:$assist,
+              execution_profile:$profile,
+              run_agents_runner:$runner,
+              run_agents_runner_labels:(try ($runner_labels | fromjson) catch []),
+              lanes_configured:($lanes | tonumber? // 0),
+              weighted_vote_passed:($weighted_vote == "true"),
+              high_risk:($high_risk == "true")
+            }'
+          )"
 
           cat > integrated-comment.md <<COMMENT_EOF
           ## Tutti Integrated Review
@@ -1110,6 +1136,8 @@ jobs:
           - high-risk findings: ${high_risk_count}
           - approving agents: ${approve_agents}
           - non-approving agents: ${reject_agents}
+
+          <!-- FUGUE_INTEGRATED_META:${integrated_meta} -->
           COMMENT_EOF
 
       - name: Post integrated comment

@@ -168,8 +168,27 @@ jobs:
             local max_attempts=45
             local sleep_sec=20
             local attempt=1
+            local comments_json meta_json comment
             while [[ "${attempt}" -le "${max_attempts}" ]]; do
               comments_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}/comments?per_page=100" 4 || echo '[]')"
+              meta_json="$(echo "${comments_json}" | jq -r '
+                [ .[]?.body
+                  | select(contains("FUGUE_INTEGRATED_META:"))
+                  | capture("FUGUE_INTEGRATED_META:(?<json>\\{.*\\})").json
+                ] | last // ""
+              ' 2>/dev/null || echo "")"
+              if [[ -n "${meta_json}" ]] && echo "${meta_json}" | jq -e . >/dev/null 2>&1; then
+                resolved_main="$(echo "${meta_json}" | jq -r '.main_orchestrator_resolved // ""' | tr '[:upper:]' '[:lower:]')"
+                resolved_assist="$(echo "${meta_json}" | jq -r '.assist_orchestrator_resolved // ""' | tr '[:upper:]' '[:lower:]')"
+                resolved_profile="$(echo "${meta_json}" | jq -r '.execution_profile // ""' | tr '[:upper:]' '[:lower:]')"
+                resolved_runner="$(echo "${meta_json}" | jq -r '.run_agents_runner // ""' | tr '[:upper:]' '[:lower:]')"
+                resolved_runner_labels="$(echo "${meta_json}" | jq -c '.run_agents_runner_labels // []')"
+                resolved_lanes="$(echo "${meta_json}" | jq -r '.lanes_configured // ""' | tr -cd '0-9')"
+                if [[ -n "${resolved_main}" && -n "${resolved_assist}" && -n "${resolved_profile}" ]]; then
+                  echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}"
+                  return 0
+                fi
+              fi
               comment="$(echo "${comments_json}" | jq -r '[.[].body | select(contains("## Tutti Integrated Review"))] | last // ""')"
               if [[ -n "${comment}" ]]; then
                 resolved_main="$(printf '%s\n' "${comment}" | sed -n 's/^- main orchestrator resolved: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
