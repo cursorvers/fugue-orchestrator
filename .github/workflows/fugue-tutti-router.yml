@@ -767,11 +767,6 @@ jobs:
             if (( total > 0 )); then
               saw_jobs="true"
             fi
-            if [[ "${saw_jobs}" == "true" ]] && (( pending_count == 0 )); then
-              echo "Queue guard: no pending run-agent lanes remain."
-              exit 0
-            fi
-
             metric=$((started_count + completed_count))
             if (( running_count > 0 || metric > last_metric )); then
               idle_sec=0
