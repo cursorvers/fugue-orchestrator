@@ -14,7 +14,7 @@ permissions:
   issues: write
   contents: write
   pull-requests: write
-  actions: write
+  actions: read
 
 concurrency:
   group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
@@ -906,6 +906,10 @@ jobs:
     if: >-
       needs.ctx.outputs.should_run == 'true'
     needs: [ctx]
+    permissions:
+      issues: write
+      contents: read
+      actions: write
     uses: ./.github/workflows/fugue-tutti-router.yml
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"

@@ -745,38 +745,52 @@ jobs:
             timeout_sec=900
           fi
           interval_sec=10
+          max_watch_sec=$((timeout_sec * 2))
+          if (( max_watch_sec < 120 )); then
+            max_watch_sec=120
+          elif (( max_watch_sec > 300 )); then
+            max_watch_sec=300
+          fi
           elapsed=0
-          started="false"
+          idle_sec=0
+          saw_jobs="false"
+          last_metric=-1
 
-          while (( elapsed < timeout_sec )); do
+          while (( elapsed < max_watch_sec )); do
             jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
             total="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
             started_count="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) > 0))] | length' 2>/dev/null || echo "0")"
-            if (( total > 0 && started_count > 0 )); then
-              started="true"
-              break
+            completed_count="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and ((.conclusion // "") != ""))] | length' 2>/dev/null || echo "0")"
+            running_count="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and .status == "in_progress" and (((.steps // []) | length) > 0))] | length' 2>/dev/null || echo "0")"
+            pending_count="$(echo "${jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) == 0) and ((.conclusion // "") == ""))] | length' 2>/dev/null || echo "0")"
+
+            if (( total > 0 )); then
+              saw_jobs="true"
+            fi
+            if [[ "${saw_jobs}" == "true" && (( pending_count == 0 )) ]]; then
+              echo "Queue guard: no pending run-agent lanes remain."
+              exit 0
+            fi
+
+            metric=$((started_count + completed_count))
+            if (( running_count > 0 || metric > last_metric )); then
+              idle_sec=0
+            else
+              idle_sec=$((idle_sec + interval_sec))
+            fi
+            last_metric="${metric}"
+
+            if [[ "${saw_jobs}" == "true" && (( pending_count > 0 )) && (( idle_sec >= timeout_sec )) ]]; then
+              gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but run-agent lane progress stopped for ${timeout_sec}s (pending=${pending_count}/${total}, started=${started_count}, completed=${completed_count}). Task is paused; processing label was cleared."
+              gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
+              gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+              exit 0
             fi
             sleep "${interval_sec}"
             elapsed=$((elapsed + interval_sec))
           done
 
-          if [[ "${started}" == "true" ]]; then
-            echo "run-agents started within queue guard window."
-            exit 0
-          fi
-
-          final_jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
-          final_total="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
-          final_started="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) > 0))] | length' 2>/dev/null || echo "0")"
-
-          if (( final_total > 0 && final_started == 0 )); then
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but self-hosted lanes did not start for ${timeout_sec}s (started=${final_started}/${final_total}). Task is paused; processing label was cleared."
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
-            gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
-            exit 0
-          fi
-
-          echo "Queue guard found progress or no stalled queue condition (total=${final_total}, started=${final_started})."
+          echo "Queue guard timed out without detecting a confirmed stall (max_watch_sec=${max_watch_sec}, idle_sec=${idle_sec})."
 
   integrate:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
