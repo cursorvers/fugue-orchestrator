@@ -768,16 +768,15 @@ jobs:
           final_jobs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" 2>/dev/null || echo '{}')"
           final_total="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents"))] | length' 2>/dev/null || echo "0")"
           final_started="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) > 0))] | length' 2>/dev/null || echo "0")"
-          final_blocked="$(echo "${final_jobs_json}" | jq '[.jobs[]? | select((.name // "") | contains("run-agents") and (((.steps // []) | length) == 0) and ((.conclusion // "") == ""))] | length' 2>/dev/null || echo "0")"
 
-          if (( final_total > 0 && final_started == 0 && final_blocked == final_total )); then
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but self-hosted lanes did not start for ${timeout_sec}s (blocked=${final_blocked}/${final_total}). Task is paused; processing label was cleared."
+          if (( final_total > 0 && final_started == 0 )); then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription queue guard pause: strict profile selected but self-hosted lanes did not start for ${timeout_sec}s (started=${final_started}/${final_total}). Task is paused; processing label was cleared."
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
             gh run cancel "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
             exit 0
           fi
 
-          echo "Queue guard found progress or no stalled queue condition (total=${final_total}, blocked=${final_blocked}, started=${final_started})."
+          echo "Queue guard found progress or no stalled queue condition (total=${final_total}, started=${final_started})."
 
   integrate:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' }}
