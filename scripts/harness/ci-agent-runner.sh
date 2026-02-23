@@ -204,6 +204,17 @@ effective_provider="${PROVIDER}"
 effective_api_url="${API_URL}"
 http_code=""
 content=""
+attempt_trace=""
+
+append_attempt() {
+  local provider="$1"
+  local model="$2"
+  local code="$3"
+  if [[ -n "${attempt_trace}" ]]; then
+    attempt_trace="${attempt_trace};"
+  fi
+  attempt_trace="${attempt_trace}${provider}:${model}:${code}"
+}
 
 if [[ "${PROVIDER}" == "codex" ]]; then
   candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
@@ -220,6 +231,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
       -H "${auth_header}" \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
+    append_attempt "codex" "${m}" "${http_code}"
     if [[ "${http_code}" == "200" ]]; then
       break
     fi
@@ -239,6 +251,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
       -H "Authorization: Bearer ${ZAI_API_KEY}" \
       -H "Content-Type: application/json" \
       -d "${fallback_req}" || true)"
+    append_attempt "glm" "${chosen_model}" "${http_code}"
   fi
 elif [[ "${PROVIDER}" == "xai" ]]; then
   candidates=("${MODEL}" "grok-3-mini" "grok-2-latest")
@@ -255,6 +268,7 @@ elif [[ "${PROVIDER}" == "xai" ]]; then
       -H "${auth_header}" \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
+    append_attempt "xai" "${m}" "${http_code}"
     if [[ "${http_code}" == "200" ]]; then
       break
     fi
@@ -275,6 +289,7 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
       -H "anthropic-version: 2023-06-01" \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
+    append_attempt "claude" "${m}" "${http_code}"
     if [[ "${http_code}" == "200" ]]; then
       break
     fi
@@ -295,6 +310,7 @@ else
         -H "${auth_header}" \
         -H "Content-Type: application/json" \
         -d "${req}" || true)"
+      append_attempt "glm" "${m}" "${http_code}"
       if [[ "${http_code}" == "200" ]]; then
         break
       fi
@@ -314,6 +330,7 @@ else
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "${fallback_req}" || true)"
+      append_attempt "codex" "${chosen_model}" "${http_code}"
     fi
   else
     gemini_url="${API_URL}/${MODEL}:generateContent?key=${GEMINI_API_KEY}"
@@ -321,6 +338,7 @@ else
       --connect-timeout 10 --max-time 60 --retry 2 \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
+    append_attempt "gemini" "${MODEL}" "${http_code}"
   fi
 fi
 
@@ -367,6 +385,7 @@ if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-o
   if [[ "${effective_provider}" != "codex" || "${chosen_model}" != "gpt-5.3-codex" || "${http_code}" != "200" ]]; then
     echo "Strict guard violation: codex-main-orchestrator must execute with provider=codex model=gpt-5.3-codex (http=200)." >&2
     echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code}" >&2
+    echo "Attempt trace=${attempt_trace}" >&2
     exit 42
   fi
 fi
@@ -374,6 +393,7 @@ if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opu
   if [[ "${effective_provider}" != "claude" || "${chosen_model}" != "${claude_opus_model}" || "${http_code}" != "200" || "${CLAUDE_PROXY_MODE}" == "true" ]]; then
     echo "Strict guard violation: claude-opus-assist must execute directly with provider=claude model=${claude_opus_model} (http=200, no proxy)." >&2
     echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code} proxy=${CLAUDE_PROXY_MODE}" >&2
+    echo "Attempt trace=${attempt_trace}" >&2
     exit 43
   fi
 fi
@@ -450,6 +470,7 @@ result="$(jq -n \
   --arg http_code "${http_code}" \
   --arg skipped "${skipped_flag}" \
   --arg execution_route "${execution_route}" \
+  --arg model_attempts "${attempt_trace}" \
   '{
     name:$name,
     provider:$provider,
@@ -460,6 +481,7 @@ result="$(jq -n \
     requested_model:$requested_model,
     http_code:$http_code,
     skipped:($skipped == "true"),
+    model_attempts:$model_attempts,
     risk:(($payload.risk // "MEDIUM")|ascii_upcase),
     approve:($payload.approve // false),
     findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),
