@@ -22,6 +22,26 @@ This playbook is designed to work the same way when the main orchestrator is `co
 - If a cycle finds a blocker, stop and re-plan instead of pushing forward.
 - Use the same planning standard for verification as for implementation.
 
+## 1.1) Research Artifact First
+
+- Before planning, produce a deep-read research artifact.
+- Recommended path: `.fugue/pre-implement/issue-<N>-research.md`.
+- The artifact should capture:
+  - existing flows and coupling points
+  - hidden constraints and failure modes
+  - likely bug/risk hotspots
+- Do not start implementation before research has been reviewed.
+
+## 1.2) Plan Artifact and Annotation Cycle
+
+- Planning artifact path: `.fugue/pre-implement/issue-<N>-plan.md`.
+- The plan file is a review surface, not just a chat summary.
+- Run an annotation cycle 1-6 times as needed:
+  1. Generate/update plan artifact
+  2. Add inline review notes/constraints
+  3. Return to agent: "address all notes, update plan, don't implement yet"
+- Implementation starts only after explicit approval of the plan artifact.
+
 ## 2) Subagent Strategy
 
 - Use subagents for scoped exploration and parallel analysis.
@@ -32,9 +52,10 @@ This playbook is designed to work the same way when the main orchestrator is `co
 
 ## 2.1) Context Budget (Staged Expansion)
 
-- `low` risk: start with 4 sources, expand only when blocked (max 8).
-- `medium` risk: start with 6 sources, expand only when blocked (max 12).
-- `high` risk: start with 8 sources, expand only when blocked (max 16).
+- `low` risk: start with 6 sources, expand only when blocked (max 12).
+- `medium` risk: start with 8 sources, expand only when blocked (max 16).
+- `high` risk: start with 10 sources, expand only when blocked (max 20).
+- Over-compression guard is always-on: if budget falls below floor/span policy, auto-correct before execution.
 - Always summarize exploration output into short integration notes before continuing.
 
 ## 3) Mandatory Preflight Loop (Before Implementation)
@@ -69,6 +90,9 @@ Apply only integrator-approved changes.
 - Track executable checklist items in `.fugue/pre-implement/issue-<N>-todo.md`.
 - Include a short review/result section in the same file.
 - Mark progress during execution; do not postpone status updates to the end.
+- Use plan artifact as the single source of progress:
+  - mark completed items directly in plan/todo artifacts during execution
+  - avoid drifting status reports that are not reflected in artifacts
 
 ## 6) Self-Improvement Loop
 

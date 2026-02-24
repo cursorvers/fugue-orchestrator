@@ -9,6 +9,11 @@ Usage: workflow-risk-policy.sh [options]
   --labels <comma-separated labels>
   --has-implement <true|false>
   --orchestration-profile <codex-full|claude-light>
+
+Environment overrides:
+  FUGUE_CONTEXT_BUDGET_MIN_INITIAL  Minimum initial source budget floor (default: 6)
+  FUGUE_CONTEXT_BUDGET_MIN_MAX      Minimum max source budget floor (default: 12)
+  FUGUE_CONTEXT_BUDGET_MIN_SPAN     Minimum expansion span max-initial (default: 6, hard floor 4)
 USAGE
 }
 
@@ -56,6 +61,17 @@ has_implement="$(echo "${has_implement}" | tr '[:upper:]' '[:lower:]')"
 if [[ "${has_implement}" != "true" ]]; then
   has_implement="false"
 fi
+
+parse_non_negative_int() {
+  local raw="${1:-}"
+  local fallback="${2:-0}"
+  raw="$(printf '%s' "${raw}" | tr -cd '0-9')"
+  if [[ -z "${raw}" ]]; then
+    printf '%s\n' "${fallback}"
+    return 0
+  fi
+  printf '%s\n' "${raw}"
+}
 
 orchestration_profile="$(echo "${orchestration_profile}" | tr '[:upper:]' '[:lower:]')"
 if [[ "${orchestration_profile}" != "claude-light" ]]; then
@@ -173,22 +189,71 @@ context_budget_initial=6
 context_budget_max=12
 case "${risk_tier}" in
   low)
-    context_budget_initial=4
-    context_budget_max=8
-    ;;
-  medium)
     context_budget_initial=6
     context_budget_max=12
     ;;
-  high)
+  medium)
     context_budget_initial=8
     context_budget_max=16
     ;;
+  high)
+    context_budget_initial=10
+    context_budget_max=20
+    ;;
 esac
+
+context_budget_floor_initial="$(parse_non_negative_int "${FUGUE_CONTEXT_BUDGET_MIN_INITIAL:-6}" "6")"
+context_budget_floor_max="$(parse_non_negative_int "${FUGUE_CONTEXT_BUDGET_MIN_MAX:-12}" "12")"
+context_budget_floor_span="$(parse_non_negative_int "${FUGUE_CONTEXT_BUDGET_MIN_SPAN:-6}" "6")"
+
+if (( context_budget_floor_initial < 6 )); then
+  context_budget_floor_initial=6
+fi
+if (( context_budget_floor_max < 12 )); then
+  context_budget_floor_max=12
+fi
+if (( context_budget_floor_span < 4 )); then
+  context_budget_floor_span=4
+fi
+if (( context_budget_floor_max < context_budget_floor_initial )); then
+  context_budget_floor_max="${context_budget_floor_initial}"
+fi
+
+context_budget_guard_applied="false"
+context_budget_guard_reasons=()
+
+if (( context_budget_initial < context_budget_floor_initial )); then
+  context_budget_initial="${context_budget_floor_initial}"
+  context_budget_guard_applied="true"
+  context_budget_guard_reasons+=("raised-initial-floor")
+fi
+
+if (( context_budget_max < context_budget_floor_max )); then
+  context_budget_max="${context_budget_floor_max}"
+  context_budget_guard_applied="true"
+  context_budget_guard_reasons+=("raised-max-floor")
+fi
+
+if (( context_budget_max < context_budget_initial )); then
+  context_budget_max="${context_budget_initial}"
+  context_budget_guard_applied="true"
+  context_budget_guard_reasons+=("max-not-below-initial")
+fi
+
+if (( (context_budget_max - context_budget_initial) < context_budget_floor_span )); then
+  context_budget_max=$((context_budget_initial + context_budget_floor_span))
+  context_budget_guard_applied="true"
+  context_budget_guard_reasons+=("raised-span-floor")
+fi
 
 risk_reason_string="none"
 if (( ${#risk_reasons[@]} > 0 )); then
   risk_reason_string="$(IFS=,; echo "${risk_reasons[*]}")"
+fi
+
+context_budget_guard_reason_string="none"
+if (( ${#context_budget_guard_reasons[@]} > 0 )); then
+  context_budget_guard_reason_string="$(IFS=,; echo "${context_budget_guard_reasons[*]}")"
 fi
 
 emit() {
@@ -207,3 +272,8 @@ emit correction_signal "${correction_signal}"
 emit lessons_required "${lessons_required}"
 emit context_budget_initial "${context_budget_initial}"
 emit context_budget_max "${context_budget_max}"
+emit context_budget_floor_initial "${context_budget_floor_initial}"
+emit context_budget_floor_max "${context_budget_floor_max}"
+emit context_budget_floor_span "${context_budget_floor_span}"
+emit context_budget_guard_applied "${context_budget_guard_applied}"
+emit context_budget_guard_reasons "${context_budget_guard_reason_string}"

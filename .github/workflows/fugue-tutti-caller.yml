@@ -62,6 +62,11 @@ jobs:
       correction_signal: ${{ steps.ctx.outputs.correction_signal }}
       context_budget_initial: ${{ steps.ctx.outputs.context_budget_initial }}
       context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
+      context_budget_floor_initial: ${{ steps.ctx.outputs.context_budget_floor_initial }}
+      context_budget_floor_max: ${{ steps.ctx.outputs.context_budget_floor_max }}
+      context_budget_floor_span: ${{ steps.ctx.outputs.context_budget_floor_span }}
+      context_budget_guard_applied: ${{ steps.ctx.outputs.context_budget_guard_applied }}
+      context_budget_guard_reasons: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
       assist_auto_selected: ${{ steps.ctx.outputs.assist_auto_selected }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
@@ -102,6 +107,9 @@ jobs:
           IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE || '1' }}
           IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
           IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
+          FUGUE_CONTEXT_BUDGET_MIN_INITIAL: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_INITIAL || '6' }}
+          FUGUE_CONTEXT_BUDGET_MIN_MAX: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_MAX || '12' }}
+          FUGUE_CONTEXT_BUDGET_MIN_SPAN: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_SPAN || '6' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
@@ -889,6 +897,11 @@ jobs:
             echo "correction_signal=${correction_signal}"
             echo "context_budget_initial=${context_budget_initial}"
             echo "context_budget_max=${context_budget_max}"
+            echo "context_budget_floor_initial=${context_budget_floor_initial}"
+            echo "context_budget_floor_max=${context_budget_floor_max}"
+            echo "context_budget_floor_span=${context_budget_floor_span}"
+            echo "context_budget_guard_applied=${context_budget_guard_applied}"
+            echo "context_budget_guard_reasons=${context_budget_guard_reasons}"
             echo "assist_auto_selected=${assist_auto_selected}"
             echo "force_claude=${force_claude}"
             echo "should_run=${should_run}"
@@ -942,6 +955,11 @@ jobs:
           LESSONS_REQUIRED: ${{ steps.ctx.outputs.lessons_required }}
           BUDGET_INITIAL: ${{ steps.ctx.outputs.context_budget_initial }}
           BUDGET_MAX: ${{ steps.ctx.outputs.context_budget_max }}
+          BUDGET_FLOOR_INITIAL: ${{ steps.ctx.outputs.context_budget_floor_initial }}
+          BUDGET_FLOOR_MAX: ${{ steps.ctx.outputs.context_budget_floor_max }}
+          BUDGET_FLOOR_SPAN: ${{ steps.ctx.outputs.context_budget_floor_span }}
+          BUDGET_GUARD_APPLIED: ${{ steps.ctx.outputs.context_budget_guard_applied }}
+          BUDGET_GUARD_REASONS: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
           ASSIST_AUTO: ${{ steps.ctx.outputs.assist_auto_selected }}
           MAIN_SOURCE: ${{ steps.ctx.outputs.main_provider_source }}
           ASSIST_SOURCE: ${{ steps.ctx.outputs.assist_provider_source }}
@@ -958,7 +976,11 @@ jobs:
           elif [[ -n "${NL_SKIP_REASON}" ]]; then
             nl_note=" natural_language_hint(skipped=\`${NL_SKIP_REASON}\`)."
           fi
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${nl_note}"
+          budget_guard_note=""
+          if [[ "${BUDGET_GUARD_APPLIED}" == "true" ]]; then
+            budget_guard_note=" context_guard=applied(\`${BUDGET_GUARD_REASONS:-none}\`) floors=\`${BUDGET_FLOOR_INITIAL}/${BUDGET_FLOOR_MAX}/span${BUDGET_FLOOR_SPAN}\`."
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${budget_guard_note}${nl_note}"
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}

@@ -89,6 +89,11 @@ jobs:
       implementation_dialogue_rounds_floor: ${{ steps.ctx.outputs.implementation_dialogue_rounds_floor }}
       context_budget_initial: ${{ steps.ctx.outputs.context_budget_initial }}
       context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
+      context_budget_floor_initial: ${{ steps.ctx.outputs.context_budget_floor_initial }}
+      context_budget_floor_max: ${{ steps.ctx.outputs.context_budget_floor_max }}
+      context_budget_floor_span: ${{ steps.ctx.outputs.context_budget_floor_span }}
+      context_budget_guard_applied: ${{ steps.ctx.outputs.context_budget_guard_applied }}
+      context_budget_guard_reasons: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
 
     steps:
       - name: Checkout repository
@@ -102,6 +107,9 @@ jobs:
           INPUT_RISK_TIER: ${{ inputs.risk_tier }}
           INPUT_LESSONS_REQUIRED: ${{ inputs.lessons_required }}
           INPUT_CORRECTION_SIGNAL: ${{ inputs.correction_signal }}
+          FUGUE_CONTEXT_BUDGET_MIN_INITIAL: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_INITIAL || '6' }}
+          FUGUE_CONTEXT_BUDGET_MIN_MAX: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_MAX || '12' }}
+          FUGUE_CONTEXT_BUDGET_MIN_SPAN: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_SPAN || '6' }}
         run: |
           set -euo pipefail
 
@@ -181,6 +189,11 @@ jobs:
             echo "implementation_dialogue_rounds_floor=${implementation_dialogue_rounds_floor}"
             echo "context_budget_initial=${context_budget_initial}"
             echo "context_budget_max=${context_budget_max}"
+            echo "context_budget_floor_initial=${context_budget_floor_initial}"
+            echo "context_budget_floor_max=${context_budget_floor_max}"
+            echo "context_budget_floor_span=${context_budget_floor_span}"
+            echo "context_budget_guard_applied=${context_budget_guard_applied}"
+            echo "context_budget_guard_reasons=${context_budget_guard_reasons}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Notify pending implement confirmation
@@ -212,6 +225,9 @@ jobs:
     outputs:
       pr_url: ${{ steps.create-pr.outputs.pr_url }}
       codex_exit: ${{ steps.codex.outputs.exit_code }}
+      research_report_path: ${{ steps.codex.outputs.research_report_path }}
+      plan_report_path: ${{ steps.codex.outputs.plan_report_path }}
+      critic_report_path: ${{ steps.codex.outputs.critic_report_path }}
       preflight_report_path: ${{ steps.codex.outputs.preflight_report_path }}
       implementation_report_path: ${{ steps.codex.outputs.implementation_report_path }}
       todo_report_path: ${{ steps.codex.outputs.todo_report_path }}
@@ -259,6 +275,178 @@ jobs:
         run: |
           git checkout -b "${{ needs.prepare.outputs.branch_name }}"
 
+      - name: Run parallel preflight nodes
+        id: preflight_parallel
+        env:
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          CODEX_MODEL: ${{ inputs.codex_model }}
+          PREFLIGHT_PARALLEL_ENABLED: ${{ vars.FUGUE_PREFLIGHT_PARALLEL_ENABLED || 'true' }}
+          PREFLIGHT_PARALLEL_TIMEOUT_SEC: ${{ vars.FUGUE_PREFLIGHT_PARALLEL_TIMEOUT_SEC || '240' }}
+        run: |
+          set -euo pipefail
+
+          issue_num="${ISSUE_NUMBER}"
+          artifact_dir=".fugue/pre-implement"
+          research_report="${artifact_dir}/issue-${issue_num}-research.md"
+          plan_report="${artifact_dir}/issue-${issue_num}-plan.md"
+          critic_report="${artifact_dir}/issue-${issue_num}-critic.md"
+          log_dir="/tmp/fugue-preflight-parallel-${issue_num}"
+          mkdir -p "${artifact_dir}" "${log_dir}"
+
+          {
+            echo "research_report_path=${research_report}"
+            echo "plan_report_path=${plan_report}"
+            echo "critic_report_path=${critic_report}"
+            echo "parallel_preflight_log_dir=${log_dir}"
+          } >> "${GITHUB_OUTPUT}"
+
+          enabled="$(echo "${PREFLIGHT_PARALLEL_ENABLED:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${enabled}" != "true" ]]; then
+            enabled="false"
+          fi
+          timeout_sec="$(echo "${PREFLIGHT_PARALLEL_TIMEOUT_SEC:-240}" | tr -cd '0-9')"
+          if [[ -z "${timeout_sec}" ]]; then
+            timeout_sec="240"
+          fi
+          if (( timeout_sec < 60 )); then
+            timeout_sec=60
+          elif (( timeout_sec > 900 )); then
+            timeout_sec=900
+          fi
+
+          if [[ "${enabled}" != "true" ]]; then
+            printf '%s\n' \
+              "# Issue #${issue_num} Research Artifact" \
+              "" \
+              "Parallel preflight is disabled. Generate deep research during the main Codex run." > "${research_report}"
+            printf '%s\n' \
+              "# Issue #${issue_num} Plan Artifact" \
+              "" \
+              "Parallel preflight is disabled. Generate and refine plan during the main Codex run." > "${plan_report}"
+            printf '%s\n' \
+              "# Issue #${issue_num} Critic Artifact" \
+              "" \
+              "Parallel preflight is disabled. Generate critical review during the main Codex run." > "${critic_report}"
+            echo "parallel_preflight_enabled=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "parallel_preflight_enabled=true" >> "${GITHUB_OUTPUT}"
+
+          nodes=(research plan critic)
+          work_root="$(mktemp -d "/tmp/fugue-preflight-worktrees-${issue_num}-XXXX")"
+          cleanup() {
+            for node in "${nodes[@]}"; do
+              workdir="${work_root}/${node}"
+              if [[ -d "${workdir}" ]]; then
+                git worktree remove --force "${workdir}" >/dev/null 2>&1 || true
+              fi
+            done
+            rm -rf "${work_root}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          make_fallback() {
+            local node="$1"
+            local outfile="$2"
+            printf '%s\n' \
+              "# Issue #${issue_num} ${node^} Artifact" \
+              "" \
+              "Codex parallel preflight node '${node}' did not produce the artifact file." \
+              "Use this as a fallback seed and replace with concrete findings in the main run." > "${outfile}"
+          }
+
+          pids=()
+          for node in "${nodes[@]}"; do
+            workdir="${work_root}/${node}"
+            prompt_file="${work_root}/${node}.prompt.md"
+            node_out_rel="${artifact_dir}/issue-${issue_num}-${node}.md"
+            git worktree add --detach "${workdir}" HEAD >/dev/null 2>&1
+
+            role_instruction=""
+            case "${node}" in
+              research)
+                role_instruction="Map current implementation touchpoints, hidden coupling, and likely impact files."
+                ;;
+              plan)
+                role_instruction="Propose concrete implementation plan with sequencing, rollback, and verification checkpoints."
+                ;;
+              critic)
+                role_instruction="Challenge weak assumptions, list failure scenarios, and define guardrails/regression tests."
+                ;;
+            esac
+
+            printf '%s\n' \
+              "## Task" \
+              "Issue #${issue_num}: ${ISSUE_TITLE}" \
+              "" \
+              "${ISSUE_BODY}" \
+              "" \
+              "## Role" \
+              "${role_instruction}" \
+              "" \
+              "## Output Contract" \
+              "- Create exactly one markdown file at \`${node_out_rel}\`." \
+              "- Do not modify any other file." \
+              "- Start with heading: \`# Issue #${issue_num} ${node^} Artifact\`." \
+              "- Keep output concise and actionable." > "${prompt_file}"
+
+            (
+              set +e
+              cd "${workdir}"
+              mkdir -p "${artifact_dir}"
+              if command -v timeout >/dev/null 2>&1; then
+                timeout "${timeout_sec}" codex exec \
+                  --model "${CODEX_MODEL}" \
+                  --full-auto \
+                  "$(cat "${prompt_file}")" > "${log_dir}/${node}.log" 2>&1
+              else
+                codex exec \
+                  --model "${CODEX_MODEL}" \
+                  --full-auto \
+                  "$(cat "${prompt_file}")" > "${log_dir}/${node}.log" 2>&1
+              fi
+              rc=$?
+              out_file="${workdir}/${node_out_rel}"
+              if [[ ! -f "${out_file}" ]]; then
+                make_fallback "${node}" "${out_file}"
+              fi
+              echo "${rc}" > "${log_dir}/${node}.rc"
+              exit 0
+            ) &
+            pids+=("$!")
+          done
+
+          for pid in "${pids[@]}"; do
+            wait "${pid}" || true
+          done
+
+          parallel_failures=0
+          for node in "${nodes[@]}"; do
+            src="${work_root}/${node}/${artifact_dir}/issue-${issue_num}-${node}.md"
+            dst="${artifact_dir}/issue-${issue_num}-${node}.md"
+            if [[ -f "${src}" ]]; then
+              cp "${src}" "${dst}"
+            else
+              make_fallback "${node}" "${dst}"
+              parallel_failures=$((parallel_failures + 1))
+            fi
+            if [[ -f "${log_dir}/${node}.rc" ]]; then
+              rc_val="$(cat "${log_dir}/${node}.rc")"
+              if [[ "${rc_val}" != "0" ]]; then
+                parallel_failures=$((parallel_failures + 1))
+              fi
+            fi
+          done
+
+          if (( parallel_failures > 0 )); then
+            echo "parallel preflight completed with ${parallel_failures} degraded node(s)" > "${log_dir}/summary.txt"
+          else
+            echo "parallel preflight completed successfully" > "${log_dir}/summary.txt"
+          fi
+
       - name: Run Codex CLI
         id: codex
         env:
@@ -279,8 +467,17 @@ jobs:
           IMPLEMENTATION_DIALOGUE_ROUNDS_FLOOR: ${{ needs.prepare.outputs.implementation_dialogue_rounds_floor }}
           CONTEXT_BUDGET_INITIAL: ${{ needs.prepare.outputs.context_budget_initial }}
           CONTEXT_BUDGET_MAX: ${{ needs.prepare.outputs.context_budget_max }}
+          CONTEXT_BUDGET_FLOOR_INITIAL: ${{ needs.prepare.outputs.context_budget_floor_initial }}
+          CONTEXT_BUDGET_FLOOR_MAX: ${{ needs.prepare.outputs.context_budget_floor_max }}
+          CONTEXT_BUDGET_FLOOR_SPAN: ${{ needs.prepare.outputs.context_budget_floor_span }}
+          CONTEXT_BUDGET_GUARD_APPLIED: ${{ needs.prepare.outputs.context_budget_guard_applied }}
+          CONTEXT_BUDGET_GUARD_REASONS: ${{ needs.prepare.outputs.context_budget_guard_reasons }}
+          RESEARCH_REPORT_PATH: ${{ steps.preflight_parallel.outputs.research_report_path }}
+          PLAN_REPORT_PATH: ${{ steps.preflight_parallel.outputs.plan_report_path }}
+          CRITIC_REPORT_PATH: ${{ steps.preflight_parallel.outputs.critic_report_path }}
         run: |
           set -euo pipefail
+          : > /tmp/codex-output.log
 
           orchestration_profile="$(echo "${ORCHESTRATION_PROFILE:-codex-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${orchestration_profile}" != "codex-full" && "${orchestration_profile}" != "claude-light" ]]; then
@@ -344,6 +541,9 @@ jobs:
           implementation_report=".fugue/implement/issue-${ISSUE_NUMBER}-implementation-loop.md"
           todo_report=".fugue/pre-implement/issue-${ISSUE_NUMBER}-todo.md"
           lessons_report=".fugue/pre-implement/lessons.md"
+          research_report="${RESEARCH_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-research.md}"
+          plan_report="${PLAN_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-plan.md}"
+          critic_report="${CRITIC_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-critic.md}"
           title_text="$(printf '%s\n' "${ISSUE_TITLE}" | tr '[:upper:]' '[:lower:]')"
           goal_text="$(printf '%s\n' "${ISSUE_BODY}" | awk '
             BEGIN { capture=0 }
@@ -409,8 +609,13 @@ jobs:
             - MUST: preflight loops + implementation dialogue + verification evidence.
             - SHOULD: update lessons when correction signals/postmortem are present.
             - MAY: use extra subagent fan-out only for unresolved uncertainty.
+          - Parallel preflight seed artifacts already exist and MUST be refined (do not delete):
+            - ${research_report}
+            - ${plan_report}
+            - ${critic_report}
           - Risk tier for this issue: ${risk_tier} (score=${RISK_SCORE:-0}, reasons=${RISK_REASONS:-none}).
           - Context budget guidance: initial sources <= ${CONTEXT_BUDGET_INITIAL:-6}, expand only when blocked up to ${CONTEXT_BUDGET_MAX:-12}.
+          - Context over-compression guard: applied=${CONTEXT_BUDGET_GUARD_APPLIED:-false}, reasons=${CONTEXT_BUDGET_GUARD_REASONS:-none}, floors=${CONTEXT_BUDGET_FLOOR_INITIAL:-6}/${CONTEXT_BUDGET_FLOOR_MAX:-12}/span${CONTEXT_BUDGET_FLOOR_SPAN:-6}.
           - Keep checkable execution items in ${todo_report}.
           - ${todo_report} MUST contain these headings:
             - ## Plan
@@ -450,6 +655,17 @@ jobs:
           echo "implementation_report_path=${implementation_report}" >> "${GITHUB_OUTPUT}"
           echo "todo_report_path=${todo_report}" >> "${GITHUB_OUTPUT}"
           echo "lessons_report_path=${lessons_report}" >> "${GITHUB_OUTPUT}"
+          echo "research_report_path=${research_report}" >> "${GITHUB_OUTPUT}"
+          echo "plan_report_path=${plan_report}" >> "${GITHUB_OUTPUT}"
+          echo "critic_report_path=${critic_report}" >> "${GITHUB_OUTPUT}"
+
+          # Enforce research/plan artifacts from parallel preflight stage.
+          for report in "${research_report}" "${plan_report}" "${critic_report}"; do
+            if [[ ! -f "${report}" ]]; then
+              echo "Missing mandatory preflight artifact: ${report}" | tee -a /tmp/codex-output.log
+              EXIT_CODE=1
+            fi
+          done
 
           # Enforce the default refinement protocol before implementation is accepted.
           if [[ ! -f "${preflight_report}" ]]; then
@@ -634,10 +850,14 @@ jobs:
           name: codex-output-log
           path: |
             /tmp/codex-output.log
+            ${{ steps.preflight_parallel.outputs.parallel_preflight_log_dir }}
             ${{ steps.codex.outputs.preflight_report_path }}
             ${{ steps.codex.outputs.implementation_report_path }}
             ${{ steps.codex.outputs.todo_report_path }}
             ${{ steps.codex.outputs.lessons_report_path }}
+            ${{ steps.codex.outputs.research_report_path }}
+            ${{ steps.codex.outputs.plan_report_path }}
+            ${{ steps.codex.outputs.critic_report_path }}
           if-no-files-found: ignore
 
   finalize:

@@ -136,6 +136,11 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_IMPLEMENT_REFINEMENT_CYCLES  --body 3       -R <owner/repo> # default preflight loops before implement
 # gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS    --body 2       -R <owner/repo> # implementation dialogue rounds (default)
 # gh variable set FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --body 1   -R <owner/repo> # implementation dialogue rounds when main=claude
+# gh variable set FUGUE_PREFLIGHT_PARALLEL_ENABLED   --body true    -R <owner/repo> # research/plan/critic preflight nodes in parallel
+# gh variable set FUGUE_PREFLIGHT_PARALLEL_TIMEOUT_SEC --body 240   -R <owner/repo> # timeout per preflight node (seconds)
+# gh variable set FUGUE_CONTEXT_BUDGET_MIN_INITIAL   --body 6       -R <owner/repo> # over-compression guard initial floor (hard floor >=6)
+# gh variable set FUGUE_CONTEXT_BUDGET_MIN_MAX       --body 12      -R <owner/repo> # over-compression guard max floor (hard floor >=12)
+# gh variable set FUGUE_CONTEXT_BUDGET_MIN_SPAN      --body 6       -R <owner/repo> # over-compression guard expansion floor (hard floor >=4)
 # (legacy) gh variable set FUGUE_ORCHESTRATOR_PROVIDER --body codex -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body ok        -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE --body degraded  -R <owner/repo>
@@ -155,6 +160,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: /vote の実行可否は role-weighted 2/3 合議 + HIGH risk veto で判定されます。
 # NOTE: implement 時は Plan→Parallel Simulation→Critical Review→Problem Fix→Replan を 3 サイクル完了後に実装します。
 # NOTE: preflight通過後の実装フェーズでは Implementer/ Critic/ Integrator の対話ループを必須化しています。
+# NOTE: `fugue-codex-implement` は実装前に research/plan/critic ノードを並列起動し、`.fugue/pre-implement` の seed artifact を先に生成します。
 # NOTE: 共有プレイブックに基づき、todo/lessons成果物（.fugue/pre-implement）を必須化しています。
 # NOTE: 大規模リファクタ/リライト/移行タスクでは、各サイクルで Candidate A/B + Failure Modes + Rollback Check を必須化します。
 # NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
@@ -177,7 +183,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
 # NOTE: `risk-tier (low|medium|high)` を算出し、preflight/dialogue最小値と review fan-out を調整します。
 # NOTE: lessons 更新は correction/postmortem シグナル時に必須、それ以外は SHOULD 扱いです。
-# NOTE: コンテキスト探索は staged budget（low:4->8, medium:6->12, high:8->16）で段階拡張します。
+# NOTE: コンテキスト探索は staged budget（low:6->12, medium:8->16, high:10->20）で段階拡張します。
+# NOTE: `workflow-risk-policy.sh` が over-compression guard を常時適用し、floor/span 未満なら自動補正します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 # NOTE: `fugue-watchdog` は Claude state を自動復帰（degraded/exhausted -> ok）できますが、cooldown + 安定性条件を満たす場合のみ実行されます。
 # NOTE: `fugue-orchestrator-canary` が毎日、実Issueベースで regular/force の切替E2Eを自動検証します。
@@ -280,6 +287,8 @@ Orchestrator切替（Codex/Claude）時も同一能力を維持するため、FU
 
 - Playbook: `rules/shared-orchestration-playbook.md`
 - 実装Workflowで強制する成果物:
+  - `.fugue/pre-implement/issue-<N>-research.md`
+  - `.fugue/pre-implement/issue-<N>-plan.md`
   - `.fugue/pre-implement/issue-<N>-todo.md`
   - `.fugue/pre-implement/lessons.md`
 

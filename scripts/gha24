@@ -338,7 +338,7 @@ $( if [[ "${IMPLEMENT}" == "true" ]]; then cat <<PREFLIGHT
 - Before marking done, show concrete verification evidence (tests/logs/diff).
 - For non-trivial fixes, explicitly challenge hacky paths and keep the smallest elegant change surface.
 - Respect policy boundaries: MUST (gates/evidence), SHOULD (lessons on correction), MAY (extra subagent fan-out only when uncertainty remains).
-- Keep context usage staged by risk: low 4->8, medium 6->12, high 8->16 sources.
+- Keep context usage staged by risk: low 6->12, medium 8->16, high 10->20 sources.
 PREFLIGHT
 fi )
 EOF
