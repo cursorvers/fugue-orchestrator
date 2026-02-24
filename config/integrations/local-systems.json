@@ -1,0 +1,25 @@
+{
+  "systems": [
+    {
+      "id": "auto-video",
+      "name": "Auto Video (Remotion)",
+      "description": "Remotion-based auto video pipeline.",
+      "adapter": "scripts/local/integrations/auto-video.sh",
+      "enabled": true
+    },
+    {
+      "id": "note-semi-auto",
+      "name": "note Semi-Auto",
+      "description": "Generate note manuscript draft scaffold from FUGUE issue context.",
+      "adapter": "scripts/local/integrations/note-semi-auto.sh",
+      "enabled": true
+    },
+    {
+      "id": "obsidian-audio-ai",
+      "name": "Obsidian Audio AI",
+      "description": "Create Obsidian intake note and optionally run audio transcription dry-run.",
+      "adapter": "scripts/local/integrations/obsidian-audio-ai.sh",
+      "enabled": true
+    }
+  ]
+}

@@ -157,3 +157,15 @@ Security guardrails:
   - Task tracking artifact (`.fugue/pre-implement/issue-<N>-todo.md`)
   - Lessons artifact (`.fugue/pre-implement/lessons.md`)
   - MUST/SHOULD/MAY boundaries with staged context budget (see `rules/shared-orchestration-playbook.md`)
+
+## 11. Local Linked Systems (Video/Note/Obsidian)
+
+- Local direct mode can chain external systems in parallel after Tutti integration.
+- Source of truth:
+  - `config/integrations/local-systems.json`
+- Linked runner:
+  - `scripts/local/run-linked-systems.sh`
+- Adapter scripts:
+  - `scripts/local/integrations/*.sh`
+- Safety gate:
+  - `run-local-orchestration.sh --linked-mode execute` must only run when `ok_to_execute=true`; otherwise skip.

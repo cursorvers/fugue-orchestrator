@@ -17,6 +17,10 @@ MAX_PARALLEL="${MAX_PARALLEL:-6}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
 CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5.3-codex}"
 CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
+WITH_LINKED_SYSTEMS="${WITH_LINKED_SYSTEMS:-false}"
+LINKED_MODE="${LINKED_MODE:-smoke}"
+LINKED_SYSTEMS="${LINKED_SYSTEMS:-all}"
+LINKED_MAX_PARALLEL="${LINKED_MAX_PARALLEL:-3}"
 
 usage() {
   cat <<'EOF'
@@ -35,6 +39,13 @@ Options:
   --glm-mode <off|paired|symphony>
                          GLM subagent fan-out (default: paired)
   --max-parallel <n>     Max parallel lanes (default: 6)
+  --with-linked-systems  Execute linked local systems after orchestration
+  --linked-mode <smoke|execute>
+                         Linked systems mode (default: smoke)
+  --linked-systems <all|csv>
+                         Linked system IDs (default: all)
+  --linked-max-parallel <n>
+                         Max parallel linked systems (default: 3)
   --comment              Post integrated summary to the issue
   -h, --help             Show help
 
@@ -83,6 +94,22 @@ while [[ $# -gt 0 ]]; do
       MAX_PARALLEL="${2:-}"
       shift 2
       ;;
+    --with-linked-systems)
+      WITH_LINKED_SYSTEMS="true"
+      shift 1
+      ;;
+    --linked-mode)
+      LINKED_MODE="${2:-}"
+      shift 2
+      ;;
+    --linked-systems)
+      LINKED_SYSTEMS="${2:-}"
+      shift 2
+      ;;
+    --linked-max-parallel)
+      LINKED_MAX_PARALLEL="${2:-}"
+      shift 2
+      ;;
     --comment)
       POST_ISSUE_COMMENT="true"
       shift 1
@@ -125,6 +152,14 @@ if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
   echo "Error: --max-parallel must be a positive integer." >&2
   exit 2
 fi
+if [[ "${LINKED_MODE}" != "smoke" && "${LINKED_MODE}" != "execute" ]]; then
+  echo "Error: --linked-mode must be smoke|execute." >&2
+  exit 2
+fi
+if ! [[ "${LINKED_MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( LINKED_MAX_PARALLEL < 1 )); then
+  echo "Error: --linked-max-parallel must be a positive integer." >&2
+  exit 2
+fi
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "Error: jq is required." >&2
@@ -142,8 +177,13 @@ fi
 SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
 HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
 MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
+LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
+  exit 2
+fi
+if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
+  echo "Error: linked systems runner is missing or not executable: ${LINKED_RUNNER}" >&2
   exit 2
 fi
 
@@ -152,7 +192,7 @@ ISSUE_TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
 ISSUE_BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
 ISSUE_URL="$(echo "${issue_json}" | jq -r '.url // ""')"
 
-run_id="$(date +%Y%m%d-%H%M%S)"
+run_id="$(date +%Y%m%d-%H%M%S)-$$"
 RUN_DIR="${OUT_DIR}/issue-${ISSUE_NUMBER}-${run_id}"
 LANE_DIR="${RUN_DIR}/lanes"
 TMP_DIR="${RUN_DIR}/tmp"
@@ -369,6 +409,39 @@ if [[ "${weighted_vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
   ok_to_execute="true"
 fi
 
+linked_status="not-run"
+linked_run_dir=""
+linked_note="disabled"
+if [[ "${WITH_LINKED_SYSTEMS}" == "true" ]]; then
+  linked_note="requested"
+  if [[ "${LINKED_MODE}" == "execute" && "${ok_to_execute}" != "true" ]]; then
+    linked_status="skipped-not-approved"
+    linked_note="execute-mode-blocked-by-orchestration-gate"
+  else
+    linked_out_dir="${RUN_DIR}/linked-systems"
+    mkdir -p "${linked_out_dir}"
+    set +e
+    bash "${LINKED_RUNNER}" \
+      --issue "${ISSUE_NUMBER}" \
+      --repo "${REPO}" \
+      --mode "${LINKED_MODE}" \
+      --systems "${LINKED_SYSTEMS}" \
+      --max-parallel "${LINKED_MAX_PARALLEL}" \
+      --out-dir "${linked_out_dir}" \
+      > "${RUN_DIR}/linked-systems.out.log" 2> "${RUN_DIR}/linked-systems.err.log"
+    linked_rc=$?
+    set -e
+    linked_run_dir="$(ls -dt "${linked_out_dir}"/linked-issue-"${ISSUE_NUMBER}"-* 2>/dev/null | head -n1 || true)"
+    if (( linked_rc == 0 )); then
+      linked_status="ok"
+      linked_note="linked-systems-completed"
+    else
+      linked_status="error"
+      linked_note="linked-systems-failed-see-logs"
+    fi
+  fi
+fi
+
 jq -n \
   --arg issue_number "${ISSUE_NUMBER}" \
   --arg issue_url "${ISSUE_URL}" \
@@ -388,6 +461,11 @@ jq -n \
   --arg high_risk "${high_risk}" \
   --argjson high_risk_count "${high_risk_count}" \
   --arg ok_to_execute "${ok_to_execute}" \
+  --arg linked_mode "${LINKED_MODE}" \
+  --arg linked_systems "${LINKED_SYSTEMS}" \
+  --arg linked_status "${linked_status}" \
+  --arg linked_run_dir "${linked_run_dir}" \
+  --arg linked_note "${linked_note}" \
   --arg required_claude_assist_gate "${required_claude_assist_gate}" \
   --arg required_claude_assist_reason "${required_claude_assist_reason}" \
   '{
@@ -409,6 +487,11 @@ jq -n \
     high_risk:($high_risk=="true"),
     high_risk_count:$high_risk_count,
     ok_to_execute:($ok_to_execute=="true"),
+    linked_systems_mode:$linked_mode,
+    linked_systems_selection:$linked_systems,
+    linked_systems_status:$linked_status,
+    linked_systems_run_dir:$linked_run_dir,
+    linked_systems_note:$linked_note,
     required_claude_assist_gate:$required_claude_assist_gate,
     required_claude_assist_reason:$required_claude_assist_reason
   }' > "${integrated_json}"
@@ -427,6 +510,9 @@ cat > "${summary_md}" <<EOF
 - weighted approvals: ${weighted_approve_score}/${weighted_total_score} (threshold ${weighted_threshold})
 - weighted vote passed: ${weighted_vote_passed}
 - high-risk findings: ${high_risk_count}
+- linked systems mode: ${LINKED_MODE} (selection ${LINKED_SYSTEMS})
+- linked systems status: ${linked_status} (${linked_note})
+- linked systems run dir: ${linked_run_dir}
 - required claude assist gate: ${required_claude_assist_gate} (${required_claude_assist_reason})
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}

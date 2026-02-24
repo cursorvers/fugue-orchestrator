@@ -205,6 +205,17 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: Claude rate limit 時は `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded|exhausted` を設定すると、
 #       上記必須ゲートは `not-required` に切り替わります。
 
+# 3.8b 外部システム連結（自動動画 / note半自動 / Obsidian音声AI）
+# 連結システムのみを並列スモーク実行:
+#   ./scripts/local/run-linked-systems.sh --issue 176 --mode smoke --systems all --max-parallel 3
+# 本体オーケストレーション完了後に連結システムを自動実行:
+#   ./scripts/local/run-local-orchestration.sh --issue 176 --mode enhanced --glm-mode paired \
+#     --with-linked-systems --linked-mode smoke --linked-systems all --linked-max-parallel 3
+# NOTE: 連結定義は `config/integrations/local-systems.json`。
+# NOTE: `--linked-mode execute` は本体の `ok_to_execute=true` のときのみ起動します。
+# NOTE: Obsidian音声AIのdry-run文字起こしは `OBSIDIAN_AUDIO_ENABLE_TRANSCRIBE=true` で有効化します。
+# NOTE: 連結定義の整合検証は `./scripts/check-linked-systems-integrity.sh`。
+
 # 3.9 FUGUE有用スキル同期（Codex/Claude 共通）
 # required プロファイルのみ同期
 # ./scripts/skills/sync-openclaw-skills.sh --target both

@@ -7,8 +7,12 @@ on:
       - '.github/workflows/fugue-matrix-parity.yml'
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/local/run-linked-systems.sh'
+      - 'scripts/local/integrations/**'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-linked-systems-integrity.sh'
+      - 'config/integrations/local-systems.json'
   push:
     branches:
       - main
@@ -17,8 +21,12 @@ on:
       - '.github/workflows/fugue-matrix-parity.yml'
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/local/run-linked-systems.sh'
+      - 'scripts/local/integrations/**'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-linked-systems-integrity.sh'
+      - 'config/integrations/local-systems.json'
   workflow_dispatch:
 
 permissions:
@@ -37,11 +45,14 @@ jobs:
           set -euo pipefail
           bash -n scripts/lib/build-agent-matrix.sh
           bash -n scripts/local/run-local-orchestration.sh
+          bash -n scripts/local/run-linked-systems.sh
           bash -n scripts/sim-orchestrator-switch.sh
           bash -n scripts/check-agent-matrix-parity.sh
+          bash -n scripts/check-linked-systems-integrity.sh
 
       - name: Matrix parity check
         run: |
           set -euo pipefail
-          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh
           ./scripts/check-agent-matrix-parity.sh
+          ./scripts/check-linked-systems-integrity.sh
