@@ -1,0 +1,18 @@
+# Issue #178 Research Artifact
+
+## Implementation touchpoints
+- `.github/workflows/fugue-codex-implement.yml:170-197` (`prepare` job) calls `scripts/lib/workflow-risk-policy.sh`, captures the risk/context budget outputs, and exposes `context_budget_guard_applied` plus `context_budget_guard_reasons` so downstream steps and logs can prove the guard ran.
+- `.github/workflows/fugue-codex-implement.yml:278-448` (`implement` job, `Run parallel preflight nodes` step) spins up detached worktrees for `research`, `plan`, and `critic`, prompts each with the issue body + role-specific guidance, and writes results to `.fugue/pre-implement/issue-<n>-research|plan|critic.md` while also emitting `parallel_preflight_log_dir`/`parallel_preflight_enabled` for log inspection.
+- `.github/workflows/fugue-codex-implement.yml:450-660` (`Run Codex CLI` step) reuses those three artifacts, insists they exist before continuing, and mandates the full five-step preflight loop + dialogue loop, so any missing parallel artifact or context guard failure (missing `context_budget` guidance) surfaces as an error.
+- `scripts/lib/workflow-risk-policy.sh:188-279` sets the context budgets per risk tier, applies the floors configured by `FUGUE_CONTEXT_BUDGET_MIN_INITIAL/MAX/SPAN`, and records which floors were raised so `prepare` can report the guard details.
+
+## Verification guidance
+1. Trigger `fugue-codex-implement` (e.g., `gh workflow run fugue-codex-implement --field issue_number=<178> --wait` or via the control-plane router) and confirm the `implement` job enters `Run parallel preflight nodes`. `gh run view <run-id> --log` should show the step completed and created `/tmp/fugue-preflight-parallel-<n>/summary.txt` with either "completed successfully" or explicit degradation counts (`.github/workflows/fugue-codex-implement.yml:444-448`).
+2. After the run, inspect the workspace or artifact downloads to ensure `.fugue/pre-implement/issue-178-research.md`, `issue-178-plan.md`, and `issue-178-critic.md` exist; these files are emitted by the parallel step (`:291-448`). The `Run Codex CLI` log will also note `Missing mandatory preflight artifact` if they vanished (`:654-672`).
+3. Verify the context guard by reading the `prepare` step outputs: `context_budget_guard_applied` should be `true`/`false` and `context_budget_guard_reasons` lists whichever floor raised anything (`:170-196`). Cross-check that `Run Codex CLI` embeds the values in its instruction (lines `617-633`) so downstream runs obey the floors computed in `scripts/lib/workflow-risk-policy.sh:188-247`.
+4. Ensure the workflow run ultimately completes (success/failure) by checking `gh run view <run-id>` for a terminal conclusion; failure is acceptable as long as it reports missing artifacts or guard violations that explain the stop (the job writes `exit_code`/`no_changes` in `Run Codex CLI`).
+
+## Context guard knobs to watch
+- Default floors are `FUGUE_CONTEXT_BUDGET_MIN_INITIAL=6`, `FUGUE_CONTEXT_BUDGET_MIN_MAX=12`, `FUGUE_CONTEXT_BUDGET_MIN_SPAN=6`; the guard raises `context_budget_initial`, `context_budget_max`, or the span difference when heuristics/budgets would otherwise violate those minima (`scripts/lib/workflow-risk-policy.sh:205-247`).
+- Override these vars via repo-level `vars` (see `README.md` lines ~136-140 on `gh variable set`) to push the guard in either direction, then rerun `fugue-codex-implement` and confirm `context_budget_guard_reasons` reflects the change.
+- Keep an eye on `.fugue/pre-implement/issue-178-preflight.md` later in the run; the five-cycle structure is enforced based on the computed `preflight_cycles_floor` and ensures the guard never lets the run skip critical reasoning steps (`Run Codex CLI` lines `562-634`).
