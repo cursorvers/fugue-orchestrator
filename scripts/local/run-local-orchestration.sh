@@ -141,7 +141,8 @@ if [[ "${OUT_DIR}" != /* ]]; then
 fi
 SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
 HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
-if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" ]]; then
+MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
+if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
   exit 2
 fi
@@ -172,68 +173,21 @@ if [[ "${local_require_claude_assist}" != "true" ]]; then
 fi
 
 matrix_file="${RUN_DIR}/matrix.json"
-jq -n --arg multi "${CODEX_MULTI_AGENT_MODEL}" '{
-  include: [
-    {name:"codex-security-analyst",provider:"codex",model:$multi,agent_role:"security-analyst"},
-    {name:"codex-code-reviewer",provider:"codex",model:$multi,agent_role:"code-reviewer"},
-    {name:"codex-general-reviewer",provider:"codex",model:$multi,agent_role:"general-reviewer"},
-    {name:"glm-code-reviewer",provider:"glm",model:"glm-5.0",agent_role:"code-reviewer"},
-    {name:"glm-general-reviewer",provider:"glm",model:"glm-5.0",agent_role:"general-reviewer"},
-    {name:"glm-math-reasoning",provider:"glm",model:"glm-5.0",agent_role:"math-reasoning"}
-  ]
-}' > "${matrix_file}"
-
-if [[ "${MAIN_PROVIDER}" == "claude" ]]; then
-  jq -c --arg opus "${claude_opus_model}" '.include += [{name:"claude-main-orchestrator",provider:"claude",model:$opus,agent_role:"main-orchestrator"}]' "${matrix_file}" > "${TMP_DIR}/m1.json"
-  mv "${TMP_DIR}/m1.json" "${matrix_file}"
-else
-  jq -c --arg main "${CODEX_MAIN_MODEL}" '.include += [{name:"codex-main-orchestrator",provider:"codex",model:$main,agent_role:"main-orchestrator"}]' "${matrix_file}" > "${TMP_DIR}/m1.json"
-  mv "${TMP_DIR}/m1.json" "${matrix_file}"
-fi
-
-if [[ "${ASSIST_PROVIDER}" == "claude" ]]; then
-  jq -c --arg opus "${claude_opus_model}" '.include += [{name:"claude-opus-assist",provider:"claude",model:$opus,agent_role:"orchestration-assistant"}]' "${matrix_file}" > "${TMP_DIR}/m2.json"
-  mv "${TMP_DIR}/m2.json" "${matrix_file}"
-elif [[ "${ASSIST_PROVIDER}" == "codex" ]]; then
-  jq -c --arg multi "${CODEX_MULTI_AGENT_MODEL}" '.include += [{name:"codex-orchestration-assist",provider:"codex",model:$multi,agent_role:"orchestration-assistant"}]' "${matrix_file}" > "${TMP_DIR}/m2.json"
-  mv "${TMP_DIR}/m2.json" "${matrix_file}"
-fi
-
-if [[ "${GLM_SUBAGENT_MODE}" != "off" ]]; then
-  jq -c '.include += [{name:"glm-orchestration-subagent",provider:"glm",model:"glm-5.0",agent_role:"orchestration-assistant",agent_directive:"Work as Codex main orchestrator subagent: surface hidden assumptions, unresolved dependencies, and handoff risks."}]' "${matrix_file}" > "${TMP_DIR}/m3.json"
-  mv "${TMP_DIR}/m3.json" "${matrix_file}"
-fi
-
-if [[ "${MULTI_AGENT_MODE}" == "enhanced" || "${MULTI_AGENT_MODE}" == "max" ]]; then
-  jq -c --arg multi "${CODEX_MULTI_AGENT_MODEL}" '.include += [
-    {name:"codex-architect",provider:"codex",model:$multi,agent_role:"architect"},
-    {name:"codex-plan-reviewer",provider:"codex",model:$multi,agent_role:"plan-reviewer"},
-    {name:"glm-refactor-advisor",provider:"glm",model:"glm-5.0",agent_role:"refactor-advisor"},
-    {name:"glm-general-critic",provider:"glm",model:"glm-5.0",agent_role:"general-critic"}
-  ]' "${matrix_file}" > "${TMP_DIR}/m4.json"
-  mv "${TMP_DIR}/m4.json" "${matrix_file}"
-  if [[ "${GLM_SUBAGENT_MODE}" != "off" ]]; then
-    jq -c '.include += [
-      {name:"glm-architect-subagent",provider:"glm",model:"glm-5.0",agent_role:"architect",agent_directive:"Act as GLM subagent to stress-test the system architecture and expose hidden coupling before implementation."},
-      {name:"glm-plan-reviewer-subagent",provider:"glm",model:"glm-5.0",agent_role:"plan-reviewer",agent_directive:"Act as GLM subagent to challenge plan sequencing, rollback feasibility, and dependency ordering."}
-    ]' "${matrix_file}" > "${TMP_DIR}/m5.json"
-    mv "${TMP_DIR}/m5.json" "${matrix_file}"
-  fi
-fi
-
-if [[ "${MULTI_AGENT_MODE}" == "max" ]]; then
-  jq -c --arg multi "${CODEX_MULTI_AGENT_MODEL}" '.include += [
-    {name:"codex-reliability-engineer",provider:"codex",model:$multi,agent_role:"reliability-engineer"},
-    {name:"glm-invariants-checker",provider:"glm",model:"glm-5.0",agent_role:"invariants-checker"}
-  ]' "${matrix_file}" > "${TMP_DIR}/m6.json"
-  mv "${TMP_DIR}/m6.json" "${matrix_file}"
-  if [[ "${GLM_SUBAGENT_MODE}" == "symphony" ]]; then
-    jq -c '.include += [{name:"glm-reliability-subagent",provider:"glm",model:"glm-5.0",agent_role:"reliability-engineer",agent_directive:"Act as GLM subagent for worst-case operational scenarios, retries, and failure isolation."}]' "${matrix_file}" > "${TMP_DIR}/m7.json"
-    mv "${TMP_DIR}/m7.json" "${matrix_file}"
-  fi
-fi
-
-lanes_total="$(jq -r '.include | length' "${matrix_file}")"
+matrix_payload="$("${MATRIX_BUILDER}" \
+  --engine "subscription" \
+  --main-provider "${MAIN_PROVIDER}" \
+  --assist-provider "${ASSIST_PROVIDER}" \
+  --multi-agent-mode "${MULTI_AGENT_MODE}" \
+  --glm-subagent-mode "${GLM_SUBAGENT_MODE}" \
+  --allow-glm-in-subscription "true" \
+  --wants-gemini "false" \
+  --wants-xai "false" \
+  --codex-main-model "${CODEX_MAIN_MODEL}" \
+  --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
+  --claude-opus-model "${claude_opus_model}" \
+  --format "json")"
+echo "${matrix_payload}" | jq -c '.matrix' > "${matrix_file}"
+lanes_total="$(echo "${matrix_payload}" | jq -r '.lanes')"
 echo "Running local orchestration: issue=${ISSUE_NUMBER} lanes=${lanes_total} mode=${MULTI_AGENT_MODE} glm_mode=${GLM_SUBAGENT_MODE}" >&2
 
 lane_jobs_file="${RUN_DIR}/lane-jobs.jsonl"

@@ -43,6 +43,26 @@ glm_subagent_mode_default="$(echo "${FUGUE_GLM_SUBAGENT_MODE:-paired}" | tr '[:u
 if [[ "${glm_subagent_mode_default}" != "off" && "${glm_subagent_mode_default}" != "paired" && "${glm_subagent_mode_default}" != "symphony" ]]; then
   glm_subagent_mode_default="paired"
 fi
+codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5.3-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${codex_main_model_default}" ]]; then
+  codex_main_model_default="gpt-5.3-codex"
+fi
+codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${codex_multi_agent_model_default}" ]]; then
+  codex_multi_agent_model_default="gpt-5.3-codex-spark"
+fi
+claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${claude_opus_model_default}" ]]; then
+  claude_opus_model_default="claude-opus-4-6"
+fi
+claude_sonnet4_model_default="$(echo "${FUGUE_CLAUDE_SONNET4_MODEL:-claude-3-7-sonnet-latest}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${claude_sonnet4_model_default}" ]]; then
+  claude_sonnet4_model_default="claude-3-7-sonnet-latest"
+fi
+claude_sonnet6_model_default="$(echo "${FUGUE_CLAUDE_SONNET6_MODEL:-claude-3-5-sonnet-latest}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${claude_sonnet6_model_default}" ]]; then
+  claude_sonnet6_model_default="claude-3-5-sonnet-latest"
+fi
 sim_claude_direct_available="$(echo "${FUGUE_SIM_CLAUDE_DIRECT_AVAILABLE:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${sim_claude_direct_available}" != "true" ]]; then
   sim_claude_direct_available="false"
@@ -134,22 +154,6 @@ run_case() {
     note_parts+=("profile:${assist_adjustment_reason}")
   fi
 
-  local main_signal_lane
-  if [[ "${resolved_main}" == "claude" ]]; then
-    main_signal_lane="claude-main-orchestrator"
-  else
-    main_signal_lane="codex-main-orchestrator"
-  fi
-  local assist_lane_count=0
-  if [[ "${effective_assist}" == "claude" ]]; then
-    if [[ "${effective_engine}" == "subscription" ]]; then
-      assist_lane_count=1
-    else
-      assist_lane_count=3
-    fi
-  elif [[ "${effective_assist}" == "codex" ]]; then
-    assist_lane_count=1
-  fi
   local effective_glm_subagent_mode="${glm_subagent_mode_default}"
   if [[ "${effective_engine}" == "subscription" ]]; then
     effective_glm_subagent_mode="off"
@@ -157,25 +161,26 @@ run_case() {
     effective_glm_subagent_mode="symphony"
   fi
 
-  local baseline_lanes=6
-  if [[ "${effective_engine}" != "subscription" && "${effective_glm_subagent_mode}" != "off" ]]; then
-    baseline_lanes=$((baseline_lanes + 1))
-  fi
-  if [[ "${multi_agent_mode_default}" == "enhanced" || "${multi_agent_mode_default}" == "max" ]]; then
-    baseline_lanes=$((baseline_lanes + 2))
-    baseline_lanes=$((baseline_lanes + 2))
-    if [[ "${effective_engine}" != "subscription" && "${effective_glm_subagent_mode}" != "off" ]]; then
-      baseline_lanes=$((baseline_lanes + 2))
-    fi
-  fi
-  if [[ "${multi_agent_mode_default}" == "max" ]]; then
-    baseline_lanes=$((baseline_lanes + 1))
-    baseline_lanes=$((baseline_lanes + 1))
-    if [[ "${effective_engine}" != "subscription" && "${effective_glm_subagent_mode}" == "symphony" ]]; then
-      baseline_lanes=$((baseline_lanes + 1))
-    fi
-  fi
-  local expected_lanes=$((baseline_lanes + 1 + assist_lane_count))
+  local matrix_payload
+  matrix_payload="$(scripts/lib/build-agent-matrix.sh \
+    --engine "${effective_engine}" \
+    --main-provider "${resolved_main}" \
+    --assist-provider "${effective_assist}" \
+    --multi-agent-mode "${multi_agent_mode_default}" \
+    --glm-subagent-mode "${effective_glm_subagent_mode}" \
+    --wants-gemini "false" \
+    --wants-xai "false" \
+    --allow-glm-in-subscription "false" \
+    --codex-main-model "${codex_main_model_default}" \
+    --codex-multi-agent-model "${codex_multi_agent_model_default}" \
+    --claude-opus-model "${claude_opus_model_default}" \
+    --claude-sonnet4-model "${claude_sonnet4_model_default}" \
+    --claude-sonnet6-model "${claude_sonnet6_model_default}" \
+    --format "json")"
+  local expected_lanes
+  expected_lanes="$(echo "${matrix_payload}" | jq -r '.lanes')"
+  local main_signal_lane
+  main_signal_lane="$(echo "${matrix_payload}" | jq -r '.main_signal_lane')"
 
   local impl_gate="no-implement"
   if [[ "${mode}" == "implement" && "${weighted_vote}" == "pass" && "${high_risk}" == "false" ]]; then

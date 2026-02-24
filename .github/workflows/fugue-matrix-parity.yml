@@ -1,0 +1,47 @@
+name: fugue-matrix-parity
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fugue-tutti-router.yml'
+      - '.github/workflows/fugue-matrix-parity.yml'
+      - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/check-agent-matrix-parity.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fugue-tutti-router.yml'
+      - '.github/workflows/fugue-matrix-parity.yml'
+      - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/check-agent-matrix-parity.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Shell syntax checks
+        run: |
+          set -euo pipefail
+          bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/local/run-local-orchestration.sh
+          bash -n scripts/sim-orchestrator-switch.sh
+          bash -n scripts/check-agent-matrix-parity.sh
+
+      - name: Matrix parity check
+        run: |
+          set -euo pipefail
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh
+          ./scripts/check-agent-matrix-parity.sh

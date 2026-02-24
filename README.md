@@ -193,6 +193,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.7 Orchestrator切替シミュレーション（ローカル・非破壊）
 # ./scripts/sim-orchestrator-switch.sh | column -t -s $'\t'
+# NOTE: lane構成のSSOTは `scripts/lib/build-agent-matrix.sh` です。
+# NOTE: ドリフト検知は `./scripts/check-agent-matrix-parity.sh` で実行できます。
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
 # CODEX_MAIN_MODEL=gpt-5.3-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
