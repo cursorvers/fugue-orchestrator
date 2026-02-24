@@ -904,7 +904,7 @@ jobs:
           RUNNER_LABEL: ${{ steps.ctx.outputs.subscription_runner_label }}
         run: |
           set -euo pipefail
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed. Local fallback: \`./scripts/local/run-local-orchestration.sh --issue ${ISSUE_NUMBER} --repo ${GITHUB_REPOSITORY} --mode enhanced --glm-mode paired --max-parallel 4\`"
 
       - name: Comment translation gateway decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.translation_event == 'true' }}

@@ -317,7 +317,7 @@ jobs:
           ONLINE_COUNT: ${{ steps.ctx.outputs.self_hosted_online_count }}
           RUNNER_LABEL: ${{ steps.ctx.outputs.subscription_runner_label }}
         run: |
-          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed."
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed. Local fallback: \`./scripts/local/run-local-orchestration.sh --issue ${ISSUE} --repo ${GITHUB_REPOSITORY} --mode enhanced --glm-mode paired --max-parallel 4\`"
 
   pause-subscription:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile == 'subscription-paused' }}
@@ -354,7 +354,7 @@ jobs:
             return 1
           }
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "processing" || true
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no available self-hosted runner detected for required label \`${RUNNER_LABEL}\` (available=${ONLINE_COUNT}). Task is kept pending; no agent lanes were started."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no available self-hosted runner detected for required label \`${RUNNER_LABEL}\` (available=${ONLINE_COUNT}). Task is kept pending; no agent lanes were started. Local fallback: \`./scripts/local/run-local-orchestration.sh --issue ${ISSUE_NUMBER} --repo ${GITHUB_REPOSITORY} --mode enhanced --glm-mode paired --max-parallel 4\`"
 
   run-agents:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && needs.resolve-orchestrator.outputs.execution_profile != 'subscription-paused' }}
