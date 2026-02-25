@@ -15,7 +15,7 @@ MULTI_AGENT_MODE="${MULTI_AGENT_MODE:-enhanced}"
 GLM_SUBAGENT_MODE="${GLM_SUBAGENT_MODE:-paired}"
 MAX_PARALLEL="${MAX_PARALLEL:-6}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
-CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5.3-codex}"
+CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5-codex}"
 CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
 WITH_LINKED_SYSTEMS="${WITH_LINKED_SYSTEMS:-false}"
 LINKED_MODE="${LINKED_MODE:-smoke}"
@@ -57,6 +57,8 @@ Environment:
                          ok|degraded|exhausted (default: ok)
   FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST
                          true|false (default: true; when true + state=ok, claude-opus-assist direct success is mandatory)
+  FUGUE_CLAUDE_SESSION_HANDOFF
+                         true|false (default: true; persist claude lane session IDs for resume/handoff)
 EOF
 }
 
@@ -177,9 +179,14 @@ fi
 SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
 HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
 MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
+MODEL_POLICY="${ROOT_DIR}/scripts/lib/model-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
+  exit 2
+fi
+if [[ ! -x "${MODEL_POLICY}" ]]; then
+  echo "Error: required model policy script is missing or not executable: ${MODEL_POLICY}" >&2
   exit 2
 fi
 if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
@@ -200,7 +207,19 @@ mkdir -p "${LANE_DIR}" "${TMP_DIR}"
 
 strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-true}"
 strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-true}"
-claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-opus-4-6}"
+claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}"
+eval "$("${MODEL_POLICY}" \
+  --codex-main-model "${CODEX_MAIN_MODEL}" \
+  --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
+  --claude-model "${claude_opus_model}" \
+  --glm-model "glm-5.0" \
+  --gemini-model "gemini-3.1-pro" \
+  --gemini-fallback-model "gemini-3-flash" \
+  --xai-model "grok-4" \
+  --format env)"
+CODEX_MAIN_MODEL="${codex_main_model}"
+CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
+claude_opus_model="${claude_model}"
 subscription_timeout="${FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}"
 claude_assist_policy="${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-hybrid}"
 claude_rate_limit_state="$(echo "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -210,6 +229,14 @@ fi
 local_require_claude_assist="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${local_require_claude_assist}" != "true" ]]; then
   local_require_claude_assist="false"
+fi
+claude_session_handoff="$(echo "${FUGUE_CLAUDE_SESSION_HANDOFF:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_session_handoff}" != "true" ]]; then
+  claude_session_handoff="false"
+fi
+CLAUDE_SESSION_DIR="${RUN_DIR}/claude-sessions"
+if [[ "${claude_session_handoff}" == "true" ]]; then
+  mkdir -p "${CLAUDE_SESSION_DIR}"
 fi
 
 matrix_file="${RUN_DIR}/matrix.json"
@@ -235,7 +262,7 @@ jq -c '.include[]' "${matrix_file}" > "${lane_jobs_file}"
 
 run_lane() {
   local lane_json="$1"
-  local lane_name provider model role directive lane_work lane_result lane_log lane_err
+  local lane_name provider model role directive lane_work lane_result lane_log lane_err lane_session_id session_file
 
   lane_name="$(echo "${lane_json}" | jq -r '.name')"
   provider="$(echo "${lane_json}" | jq -r '.provider')"
@@ -247,6 +274,21 @@ run_lane() {
   lane_log="${LANE_DIR}/${lane_name}.out.log"
   lane_err="${LANE_DIR}/${lane_name}.err.log"
   mkdir -p "${lane_work}"
+  lane_session_id=""
+  if [[ "${provider}" == "claude" && "${claude_session_handoff}" == "true" ]]; then
+    session_file="${CLAUDE_SESSION_DIR}/${lane_name}.session-id"
+    if [[ -f "${session_file}" ]]; then
+      lane_session_id="$(head -n 1 "${session_file}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    fi
+    if [[ -z "${lane_session_id}" ]]; then
+      if command -v uuidgen >/dev/null 2>&1; then
+        lane_session_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+      else
+        lane_session_id="$(date +%s)-${RANDOM}-${RANDOM}"
+      fi
+      printf '%s\n' "${lane_session_id}" > "${session_file}"
+    fi
+  fi
 
   local api_url
   api_url="subscription-cli"
@@ -266,7 +308,11 @@ run_lane() {
     AGENT_ROLE="${role}" \
     AGENT_NAME="${lane_name}" \
     AGENT_DIRECTIVE="${directive}" \
+    ISSUE_NUMBER="${ISSUE_NUMBER}" \
+    CLAUDE_SESSION_ID="${lane_session_id}" \
     API_URL="${api_url}" \
+    CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL}" \
+    CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     ZAI_API_KEY="${ZAI_API_KEY:-}" \
     GEMINI_API_KEY="${GEMINI_API_KEY:-}" \
@@ -311,9 +357,10 @@ run_lane() {
 }
 
 export -f run_lane
-export ISSUE_TITLE ISSUE_BODY TMP_DIR LANE_DIR SUBSCRIPTION_RUNNER HARNESS_RUNNER
+export ISSUE_TITLE ISSUE_BODY ISSUE_NUMBER TMP_DIR LANE_DIR SUBSCRIPTION_RUNNER HARNESS_RUNNER
 export OPENAI_API_KEY ZAI_API_KEY GEMINI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY
 export claude_assist_policy claude_opus_model strict_main strict_opus subscription_timeout
+export claude_session_handoff CLAUDE_SESSION_DIR
 
 lane_failures=0
 while IFS= read -r lane; do
@@ -334,6 +381,20 @@ fi
 
 all_results="${RUN_DIR}/all-results.json"
 jq -s '.' "${LANE_DIR}"/agent-*.json > "${all_results}"
+claude_sessions_file="${RUN_DIR}/claude-sessions.json"
+jq '
+  [ .[]
+    | select((.provider // "" | ascii_downcase) == "claude")
+    | select((.session_id // "") != "")
+    | {name, model, session_id}
+  ]
+' "${all_results}" > "${claude_sessions_file}"
+claude_session_count="$(jq 'length' "${claude_sessions_file}")"
+claude_resume_hint="N/A"
+if [[ "${claude_session_count}" -gt 0 ]]; then
+  first_session_id="$(jq -r '.[0].session_id' "${claude_sessions_file}")"
+  claude_resume_hint="claude --resume ${first_session_id}"
+fi
 
 integrated_json="${RUN_DIR}/integrated.json"
 high_risk_count="$(jq '[.[] | select(.skipped != true and (.risk|ascii_upcase) == "HIGH")] | length' "${all_results}")"
@@ -468,6 +529,9 @@ jq -n \
   --arg linked_note "${linked_note}" \
   --arg required_claude_assist_gate "${required_claude_assist_gate}" \
   --arg required_claude_assist_reason "${required_claude_assist_reason}" \
+  --argjson claude_session_count "${claude_session_count}" \
+  --arg claude_sessions_file "${claude_sessions_file}" \
+  --arg claude_resume_hint "${claude_resume_hint}" \
   '{
     issue_number:($issue_number|tonumber),
     issue_url:$issue_url,
@@ -493,7 +557,10 @@ jq -n \
     linked_systems_run_dir:$linked_run_dir,
     linked_systems_note:$linked_note,
     required_claude_assist_gate:$required_claude_assist_gate,
-    required_claude_assist_reason:$required_claude_assist_reason
+    required_claude_assist_reason:$required_claude_assist_reason,
+    claude_session_count:$claude_session_count,
+    claude_sessions_file:$claude_sessions_file,
+    claude_resume_hint:$claude_resume_hint
   }' > "${integrated_json}"
 
 summary_md="${RUN_DIR}/summary.md"
@@ -514,6 +581,9 @@ cat > "${summary_md}" <<EOF
 - linked systems status: ${linked_status} (${linked_note})
 - linked systems run dir: ${linked_run_dir}
 - required claude assist gate: ${required_claude_assist_gate} (${required_claude_assist_reason})
+- claude session handoff: ${claude_session_handoff} (sessions ${claude_session_count})
+- claude sessions file: ${claude_sessions_file}
+- claude resume hint: ${claude_resume_hint}
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}
 EOF

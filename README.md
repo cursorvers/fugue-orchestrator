@@ -117,9 +117,9 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
 # gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body hold    -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
-# gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5.3-codex -R <owner/repo> # main orchestrator lane model
+# gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5-codex -R <owner/repo> # main orchestrator lane model
 # gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
-# gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body true    -R <owner/repo> # require codex-main-orchestrator=gpt-5.3-codex
+# gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body true    -R <owner/repo> # require codex-main-orchestrator=gpt-5-codex
 # gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body true    -R <owner/repo> # require claude-opus-assist=CLAUDE_OPUS_MODEL
 # gh variable set FUGUE_API_STRICT_MODE              --body false   -R <owner/repo> # trueでharness/api時もstrict guardを維持
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
@@ -130,7 +130,12 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body flex     -R <owner/repo> # sub-only|flex
 # gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body claude -R <owner/repo> # none|codex|claude
 # gh variable set FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --body hybrid -R <owner/repo> # direct|hybrid|proxy
-# gh variable set FUGUE_CLAUDE_OPUS_MODEL            --body claude-opus-4-6 -R <owner/repo>
+# gh variable set FUGUE_CLAUDE_OPUS_MODEL            --body claude-sonnet-4-6 -R <owner/repo> # default assist model (compat var name)
+# gh variable set FUGUE_CLAUDE_SONNET4_MODEL         --body claude-sonnet-4-6 -R <owner/repo> # keep non-subscription assist lanes on Sonnet 4.6 only
+# gh variable set FUGUE_CLAUDE_SONNET6_MODEL         --body claude-sonnet-4-6 -R <owner/repo> # keep non-subscription assist lanes on Sonnet 4.6 only
+# gh variable set FUGUE_GEMINI_MODEL                 --body gemini-3.1-pro -R <owner/repo> # Gemini primary latest lane
+# gh variable set FUGUE_GEMINI_FALLBACK_MODEL        --body gemini-3-flash -R <owner/repo> # Gemini fallback lane
+# gh variable set FUGUE_XAI_MODEL                    --body grok-4 -R <owner/repo> # xAI latest lane
 # gh variable set FUGUE_CLAUDE_SUB_AUTO_ESCALATE     --body high    -R <owner/repo> # off|high|medium-high
 # gh variable set FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE --body 90    -R <owner/repo> # 0-100 (translation gate score threshold)
 # gh variable set FUGUE_IMPLEMENT_REFINEMENT_CYCLES  --body 3       -R <owner/repo> # default preflight loops before implement
@@ -153,7 +158,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `direct` は Anthropic 直実行のみ、`hybrid` は Anthropic 未設定時に Codex proxy、`proxy` は常に Codex proxy を試行します。
 # NOTE: assist既定は claude（co-orchestrator 常時有効）。
 # NOTE: 曖昧性シグナルは `FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE` 以上の高スコア時のみ昇格し、常時コンテキスト圧迫を避けます。
-# NOTE: state が ok かつ assist=claude のとき、/vote に Claude assist レーンが参加します（subscription では Opus を常時優先）。
+# NOTE: state が ok かつ assist=claude のとき、/vote に Claude assist レーンが参加します（subscription では `FUGUE_CLAUDE_OPUS_MODEL` 既定: Sonnet 4.6）。
 # NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
 # NOTE: 互換既定では `FUGUE_CLAUDE_MAX_PLAN=true` のとき execution policy は `hybrid`、false のとき `direct` として扱います。
 # NOTE: `FUGUE_CLAUDE_OPUS_MODEL` は claude-opus-assist/main の既定モデル指定に使われます。
@@ -176,7 +181,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
-# NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、mainは `gpt-5.3-codex` 固定のまま multi-agent を `gpt-5.3-codex-spark` に寄せられます。
+# NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、mainは `gpt-5-codex` 固定のまま multi-agent を `gpt-5.3-codex-spark` に寄せられます。
 # NOTE: `FUGUE_GLM_SUBAGENT_MODE=paired|symphony` で GLM subagent レーン（orchestration/architect/plan/reliability）を段階的に増やせます（subscriptionでは自動off）。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
 # NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。
@@ -194,7 +199,18 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gha24 "完遂: API障害対応" --implement --orchestrator claude
 # gha24 "完遂: API障害対応" --implement --orchestrator codex --assist-orchestrator claude
 # gha24 "完遂: API障害対応" --implement --orchestrator claude --force-claude
+# gha24 "完遂: API障害対応" --local-run   # issue作成直後にローカル本実行を強制
 # NOTE: `gha24` はデフォルト implement。レビューのみは `--review` か `レビューのみ` 指示で明示します。
+# NOTE: `gha24` は `GHA24_LOCAL_RUN_MODE=force`（既定）で、issue作成後に
+#       `scripts/local/run-local-orchestration.sh` を自動起動します（ローカル主運用）。
+# NOTE: GHAのみで動かしたいときは `--gha-only` か `GHA24_LOCAL_RUN_MODE=off` を指定します（例: 就寝時）。
+# NOTE: フラグなしでも、タスク文に「ローカルで実行」「ローカル優先」「GHA使わない」を含めると local-run 強制、
+#       「GHAのみ」「ローカル実行しない」を含めると GHA-only に自動解釈します。
+# NOTE: フラグなしでも、タスク文に「メインはclaude」「assistはcodex/claude/none」を含めると
+#       orchestrator/assist override に自動解釈します。
+# 例:
+#   gha24 "この修正、メインはcodex、assistはclaudeでローカル実行"
+#   gha24 "寝るのでGHAのみで回して。assistはnone"
 # あるいは:
 # GHA24_ORCHESTRATOR_PROVIDER=claude gha24 "完遂: API障害対応" --implement
 
@@ -204,13 +220,18 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: ドリフト検知は `./scripts/check-agent-matrix-parity.sh` で実行できます。
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
-# CODEX_MAIN_MODEL=gpt-5.3-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
+# CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
 # NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
 # NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true`（既定）かつ `FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` のとき、
 #       `claude-opus-assist` の direct success が無ければ `ok_to_execute=false` になります。
 # NOTE: Claude rate limit 時は `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded|exhausted` を設定すると、
 #       上記必須ゲートは `not-required` に切り替わります。
+# NOTE: `FUGUE_CLAUDE_SESSION_HANDOFF=true`（既定）で Claude lane の `session_id` を保存します。
+#       直近 run の引き継ぎ確認は `./scripts/local/claude-handoff-summary.sh`。
+# NOTE: assistモデルは Sonnet 4.6固定（`FUGUE_CLAUDE_OPUS_MODEL=claude-sonnet-4-6`）。
+# NOTE: model policy (latest track): Claude=Sonnet 4.6 only / GLM=5.0 only / Gemini=3.1-pro(primary)+3-flash(fallback) / xAI=Grok 4 family.
+# NOTE: `scripts/lib/model-policy.sh` が実行時に上記トラックへ自動正規化します（古い指定値は補正）。
 
 # 3.8b 外部システム連結（自動動画 / note半自動 / Obsidian音声AI）
 # 連結システムのみを並列スモーク実行:

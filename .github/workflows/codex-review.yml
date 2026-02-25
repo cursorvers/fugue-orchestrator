@@ -108,7 +108,7 @@ jobs:
           USED_MODEL=""
           API_RESPONSE=""
 
-          for model in gpt-5.3-codex-spark gpt-5.3-codex gpt-5.2-codex gpt-5.1-codex; do
+          for model in gpt-5.3-codex-spark gpt-5-codex gpt-5.3-codex; do
             REQUEST_BODY=$(jq -n \
               --arg model "${model}" \
               --arg prompt "$(cat /tmp/code_review_prompt.md)" \
@@ -195,7 +195,7 @@ jobs:
           USED_MODEL=""
           API_RESPONSE=""
 
-          for model in gpt-5.3-codex-spark gpt-5.3-codex gpt-5.2-codex gpt-5.1-codex; do
+          for model in gpt-5.3-codex-spark gpt-5-codex gpt-5.3-codex; do
             REQUEST_BODY=$(jq -n \
               --arg model "${model}" \
               --arg prompt "$(cat /tmp/security_prompt.md)" \

@@ -19,6 +19,7 @@ effective_provider="${PROVIDER}"
 http_code=""
 execution_route="subscription-cli"
 attempt_trace=""
+session_id=""
 
 strict_main_codex_model="$(echo "${STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_main_codex_model}" != "true" ]]; then
@@ -28,9 +29,39 @@ strict_opus_assist_direct="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:u
 if [[ "${strict_opus_assist_direct}" != "true" ]]; then
   strict_opus_assist_direct="false"
 fi
-claude_opus_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${claude_opus_model}" ]]; then
-  claude_opus_model="claude-opus-4-6"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+model_policy_script="${script_dir}/../lib/model-policy.sh"
+raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -x "${model_policy_script}" ]]; then
+  eval "$("${model_policy_script}" \
+    --codex-main-model "${raw_codex_main_model}" \
+    --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
+    --claude-model "${raw_claude_model}" \
+    --glm-model "glm-5.0" \
+    --gemini-model "gemini-3.1-pro" \
+    --gemini-fallback-model "gemini-3-flash" \
+    --xai-model "grok-4" \
+    --format env)"
+  claude_opus_model="${claude_model}"
+else
+  claude_opus_model="claude-sonnet-4-6"
+  codex_main_model="gpt-5-codex"
+  codex_multi_agent_model="gpt-5.3-codex-spark"
+fi
+
+requested_model="$(echo "${MODEL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${PROVIDER}" == "codex" ]]; then
+  if [[ "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
+    MODEL="${codex_main_model}"
+  elif [[ -n "${requested_model}" && "${requested_model}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+    MODEL="${requested_model}"
+  else
+    MODEL="${codex_multi_agent_model}"
+  fi
+elif [[ "${PROVIDER}" == "claude" ]]; then
+  MODEL="${claude_opus_model}"
 fi
 
 subscription_timeout_sec="$(echo "${SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}" | tr -cd '0-9')"
@@ -115,6 +146,7 @@ write_skipped_result() {
     --arg http_code "skipped" \
     --arg execution_route "${route}" \
     --arg model_attempts "${attempt_trace}" \
+    --arg session_id "${session_id}" \
     '{
       name:$name,
       provider:$provider,
@@ -126,6 +158,7 @@ write_skipped_result() {
       http_code:$http_code,
       skipped:true,
       model_attempts:$model_attempts,
+      session_id:(if $session_id == "" then null else $session_id end),
       risk:(($payload.risk // "MEDIUM")|ascii_upcase),
       approve:($payload.approve // false),
       findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),
@@ -200,21 +233,32 @@ execute_claude_model() {
   local model="$1"
   local out_file="${tmp_dir}/claude-${model}-out.json"
   local err_file="${tmp_dir}/claude-${model}-stderr.log"
+  local configured_session_id
+  local -a claude_cmd
   local prompt
   prompt="${sys_prompt}
 
 ${user_prompt}
 
 Return ONLY valid JSON."
+  configured_session_id="$(echo "${CLAUDE_SESSION_ID:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  claude_cmd=(
+    claude
+    --print
+    --output-format json
+    --permission-mode bypassPermissions
+    --model "${model}"
+  )
+  if [[ -n "${configured_session_id}" ]]; then
+    claude_cmd+=(
+      --session-id "${configured_session_id}"
+    )
+  fi
+  claude_cmd+=("${prompt}")
 
   set +e
   run_with_timeout "${subscription_timeout_sec}" \
-    claude \
-      --print \
-      --output-format json \
-      --permission-mode bypassPermissions \
-      --model "${model}" \
-      "${prompt}" >"${out_file}" 2>"${err_file}"
+    "${claude_cmd[@]}" >"${out_file}" 2>"${err_file}"
   local rc=$?
   set -e
 
@@ -235,6 +279,10 @@ Return ONLY valid JSON."
   if ! parsed="$(extract_json_object "${result_text}")"; then
     append_attempt "claude" "${model}" "parse-failed"
     return 1
+  fi
+  session_id="$(jq -r '.session_id // empty' "${out_file}" 2>/dev/null || true)"
+  if [[ -z "${session_id}" && -n "${configured_session_id}" ]]; then
+    session_id="${configured_session_id}"
   fi
 
   chosen_model="${model}"
@@ -257,11 +305,13 @@ if [[ "${PROVIDER}" == "codex" ]]; then
       "codex executable was not found in PATH" \
       "codex-cli-unavailable"
   fi
-  candidates=("${MODEL}")
-  if [[ -z "${MODEL}" ]]; then
-    candidates=("gpt-5.3-codex")
-  elif [[ "${MODEL}" != "gpt-5.3-codex" ]]; then
-    candidates+=("gpt-5.3-codex")
+  required_codex_main_model="${MODEL:-${codex_main_model}}"
+  candidates=("${required_codex_main_model}")
+  if [[ "${required_codex_main_model}" != "${codex_main_model}" ]]; then
+    candidates+=("${codex_main_model}")
+  fi
+  if [[ "${required_codex_main_model}" != "${codex_multi_agent_model}" ]]; then
+    candidates+=("${codex_multi_agent_model}")
   fi
   ok="false"
   for m in "${candidates[@]}"; do
@@ -272,7 +322,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
   done
   if [[ "${ok}" != "true" ]]; then
     if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
-      echo "Strict guard violation: codex-main-orchestrator must execute with codex CLI model gpt-5.3-codex." >&2
+      echo "Strict guard violation: codex-main-orchestrator must execute with codex CLI model=${required_codex_main_model}." >&2
       echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code}" >&2
       echo "Attempt trace=${attempt_trace}" >&2
       exit 42
@@ -331,8 +381,9 @@ fi
 
 # Fail-closed guards for critical orchestration lanes.
 if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
-  if [[ "${effective_provider}" != "codex" || "${chosen_model}" != "gpt-5.3-codex" || "${http_code}" != "cli:0" ]]; then
-    echo "Strict guard violation: codex-main-orchestrator must execute with provider=codex model=gpt-5.3-codex (subscription-cli)." >&2
+  required_codex_main_model="${MODEL:-${codex_main_model}}"
+  if [[ "${effective_provider}" != "codex" || "${chosen_model}" != "${required_codex_main_model}" || "${http_code}" != "cli:0" ]]; then
+    echo "Strict guard violation: codex-main-orchestrator must execute with provider=codex model=${required_codex_main_model} (subscription-cli)." >&2
     echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code}" >&2
     echo "Attempt trace=${attempt_trace}" >&2
     exit 42
@@ -359,6 +410,7 @@ result="$(jq -n \
   --arg http_code "${http_code}" \
   --arg execution_route "${execution_route}" \
   --arg model_attempts "${attempt_trace}" \
+  --arg session_id "${session_id}" \
   '{
     name:$name,
     provider:$provider,
@@ -370,6 +422,7 @@ result="$(jq -n \
     http_code:$http_code,
     skipped:false,
     model_attempts:$model_attempts,
+    session_id:(if $session_id == "" then null else $session_id end),
     risk:(($payload.risk // "MEDIUM")|ascii_upcase),
     approve:($payload.approve // false),
     findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),

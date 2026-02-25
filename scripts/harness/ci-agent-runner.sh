@@ -37,10 +37,66 @@ strict_opus_assist_direct="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:u
 if [[ "${strict_opus_assist_direct}" != "true" ]]; then
   strict_opus_assist_direct="false"
 fi
-claude_opus_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${claude_opus_model}" ]]; then
-  claude_opus_model="claude-opus-4-6"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+model_policy_script="${script_dir}/../lib/model-policy.sh"
+raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -x "${model_policy_script}" ]]; then
+  eval "$("${model_policy_script}" \
+    --codex-main-model "${raw_codex_main_model}" \
+    --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
+    --claude-model "${raw_claude_model}" \
+    --glm-model "glm-5.0" \
+    --gemini-model "gemini-3.1-pro" \
+    --gemini-fallback-model "${raw_gemini_fallback_model}" \
+    --xai-model "${raw_xai_model}" \
+    --format env)"
+  claude_opus_model="${claude_model}"
+  xai_latest_model="${xai_model}"
+else
+  claude_opus_model="claude-sonnet-4-6"
+  codex_main_model="gpt-5-codex"
+  codex_multi_agent_model="gpt-5.3-codex-spark"
+  xai_latest_model="grok-4"
+  gemini_fallback_model="gemini-3-flash"
 fi
+
+# Force requested model onto the latest-track policy for each provider.
+requested_model="$(echo "${MODEL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${PROVIDER}" in
+  codex)
+    if [[ "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
+      MODEL="${codex_main_model}"
+    elif [[ -n "${requested_model}" && "${requested_model}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+      MODEL="${requested_model}"
+    else
+      MODEL="${codex_multi_agent_model}"
+    fi
+    ;;
+  claude)
+    MODEL="${claude_opus_model}"
+    ;;
+  glm)
+    MODEL="glm-5.0"
+    ;;
+  gemini)
+    if [[ "${requested_model}" == "gemini-3.1-pro" || "${requested_model}" == "gemini-3-flash" ]]; then
+      MODEL="${requested_model}"
+    else
+      MODEL="gemini-3.1-pro"
+    fi
+    ;;
+  xai)
+    if [[ -n "${requested_model}" && "${requested_model}" =~ ^grok-4([.-].+)?$ ]]; then
+      MODEL="${requested_model}"
+    else
+      MODEL="${xai_latest_model}"
+    fi
+    ;;
+esac
 
 if [[ "${PROVIDER}" == "gemini" && -z "${GEMINI_API_KEY:-}" ]]; then
   result="$(jq -n \
@@ -98,7 +154,7 @@ if [[ "${PROVIDER}" == "claude" && "${claude_assist_execution_policy}" == "proxy
   if [[ -n "${OPENAI_API_KEY:-}" ]]; then
     PROVIDER="codex"
     API_URL="https://api.openai.com/v1/chat/completions"
-    MODEL="gpt-5.3-codex-spark"
+    MODEL="${codex_multi_agent_model}"
     CLAUDE_PROXY_MODE="true"
     CLAUDE_PROXY_NOTE="Claude assist execution policy=proxy: executed via Codex proxy."
   else
@@ -137,7 +193,7 @@ if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
   if [[ "${claude_assist_execution_policy}" == "hybrid" && -n "${OPENAI_API_KEY:-}" ]]; then
     PROVIDER="codex"
     API_URL="https://api.openai.com/v1/chat/completions"
-    MODEL="gpt-5.3-codex-spark"
+    MODEL="${codex_multi_agent_model}"
     CLAUDE_PROXY_MODE="true"
     CLAUDE_PROXY_NOTE="Claude assist execution policy=hybrid: executed via Codex proxy because ANTHROPIC_API_KEY is not configured."
   else
@@ -217,7 +273,7 @@ append_attempt() {
 }
 
 if [[ "${PROVIDER}" == "codex" ]]; then
-  candidates=("${MODEL}" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
+  candidates=("${MODEL}" "${codex_main_model}" "${codex_multi_agent_model}" "gpt-5-codex")
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \
@@ -254,7 +310,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
     append_attempt "glm" "${chosen_model}" "${http_code}"
   fi
 elif [[ "${PROVIDER}" == "xai" ]]; then
-  candidates=("${MODEL}" "grok-3-mini" "grok-2-latest")
+  candidates=("${MODEL}" "${xai_latest_model}" "grok-4-fast-reasoning" "grok-4-fast-non-reasoning")
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \
@@ -274,7 +330,7 @@ elif [[ "${PROVIDER}" == "xai" ]]; then
     fi
   done
 elif [[ "${PROVIDER}" == "claude" ]]; then
-  candidates=("${MODEL}" "${claude_opus_model}" "claude-opus-4-1-20250805" "claude-opus-4-20250514" "claude-3-7-sonnet-latest" "claude-3-5-sonnet-latest")
+  candidates=("${MODEL}" "${claude_opus_model}")
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \
@@ -296,7 +352,7 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
   done
 else
   if [[ "${PROVIDER}" == "glm" ]]; then
-    candidates=("${MODEL}" "glm-5.0" "glm-4.5")
+    candidates=("${MODEL}" "glm-5.0")
     for m in "${candidates[@]}"; do
       chosen_model="${m}"
       req="$(jq -n \
@@ -319,7 +375,7 @@ else
     if [[ "${http_code}" != "200" && -n "${OPENAI_API_KEY:-}" ]]; then
       effective_provider="codex"
       effective_api_url="https://api.openai.com/v1/chat/completions"
-      chosen_model="gpt-5.3-codex-spark"
+      chosen_model="${codex_multi_agent_model}"
       fallback_req="$(jq -n \
         --arg model "${chosen_model}" \
         --arg s "${sys_prompt}" \
@@ -333,12 +389,22 @@ else
       append_attempt "codex" "${chosen_model}" "${http_code}"
     fi
   else
-    gemini_url="${API_URL}/${MODEL}:generateContent?key=${GEMINI_API_KEY}"
-    http_code="$(curl -sS -o response.json -w "%{http_code}" "${gemini_url}" \
-      --connect-timeout 10 --max-time 60 --retry 2 \
-      -H "Content-Type: application/json" \
-      -d "${req}" || true)"
-    append_attempt "gemini" "${MODEL}" "${http_code}"
+    gemini_candidates=("${MODEL}")
+    if [[ -n "${gemini_fallback_model}" && "${MODEL}" != "${gemini_fallback_model}" ]]; then
+      gemini_candidates+=("${gemini_fallback_model}")
+    fi
+    for gm in "${gemini_candidates[@]}"; do
+      chosen_model="${gm}"
+      gemini_url="${API_URL}/${gm}:generateContent?key=${GEMINI_API_KEY}"
+      http_code="$(curl -sS -o response.json -w "%{http_code}" "${gemini_url}" \
+        --connect-timeout 10 --max-time 60 --retry 2 \
+        -H "Content-Type: application/json" \
+        -d "${req}" || true)"
+      append_attempt "gemini" "${gm}" "${http_code}"
+      if [[ "${http_code}" == "200" ]]; then
+        break
+      fi
+    done
   fi
 fi
 
@@ -382,8 +448,9 @@ fi
 
 # Fail-closed guards for critical orchestration lanes.
 if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
-  if [[ "${effective_provider}" != "codex" || "${chosen_model}" != "gpt-5.3-codex" || "${http_code}" != "200" ]]; then
-    echo "Strict guard violation: codex-main-orchestrator must execute with provider=codex model=gpt-5.3-codex (http=200)." >&2
+  required_codex_main_model="${MODEL:-${codex_main_model}}"
+  if [[ "${effective_provider}" != "codex" || "${chosen_model}" != "${required_codex_main_model}" || "${http_code}" != "200" ]]; then
+    echo "Strict guard violation: codex-main-orchestrator must execute with provider=codex model=${required_codex_main_model} (http=200)." >&2
     echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code}" >&2
     echo "Attempt trace=${attempt_trace}" >&2
     exit 42

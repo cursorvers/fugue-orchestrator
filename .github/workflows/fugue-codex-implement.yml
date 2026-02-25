@@ -21,7 +21,7 @@ on:
         description: "Codex model to use"
         required: false
         type: string
-        default: "gpt-5.1-codex-mini"
+        default: "gpt-5-codex"
       refinement_cycles:
         description: "Pre-implementation refinement cycles (Plan/Parallel Simulation/Critical Review/Fix/Replan)"
         required: false

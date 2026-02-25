@@ -43,26 +43,26 @@ glm_subagent_mode_default="$(echo "${FUGUE_GLM_SUBAGENT_MODE:-paired}" | tr '[:u
 if [[ "${glm_subagent_mode_default}" != "off" && "${glm_subagent_mode_default}" != "paired" && "${glm_subagent_mode_default}" != "symphony" ]]; then
   glm_subagent_mode_default="paired"
 fi
-codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5.3-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${codex_main_model_default}" ]]; then
-  codex_main_model_default="gpt-5.3-codex"
-fi
+codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${codex_multi_agent_model_default}" ]]; then
-  codex_multi_agent_model_default="gpt-5.3-codex-spark"
+claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+model_policy_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)/model-policy.sh"
+if [[ -x "${model_policy_script}" ]]; then
+  eval "$("${model_policy_script}" \
+    --codex-main-model "${codex_main_model_default}" \
+    --codex-multi-agent-model "${codex_multi_agent_model_default}" \
+    --claude-model "${claude_opus_model_default}" \
+    --glm-model "glm-5.0" \
+    --gemini-model "gemini-3.1-pro" \
+    --gemini-fallback-model "gemini-3-flash" \
+    --xai-model "grok-4" \
+    --format env)"
+  codex_main_model_default="${codex_main_model}"
+  codex_multi_agent_model_default="${codex_multi_agent_model}"
+  claude_opus_model_default="${claude_model}"
 fi
-claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${claude_opus_model_default}" ]]; then
-  claude_opus_model_default="claude-opus-4-6"
-fi
-claude_sonnet4_model_default="$(echo "${FUGUE_CLAUDE_SONNET4_MODEL:-claude-3-7-sonnet-latest}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${claude_sonnet4_model_default}" ]]; then
-  claude_sonnet4_model_default="claude-3-7-sonnet-latest"
-fi
-claude_sonnet6_model_default="$(echo "${FUGUE_CLAUDE_SONNET6_MODEL:-claude-3-5-sonnet-latest}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -z "${claude_sonnet6_model_default}" ]]; then
-  claude_sonnet6_model_default="claude-3-5-sonnet-latest"
-fi
+claude_sonnet4_model_default="${claude_opus_model_default}"
+claude_sonnet6_model_default="${claude_opus_model_default}"
 sim_claude_direct_available="$(echo "${FUGUE_SIM_CLAUDE_DIRECT_AVAILABLE:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${sim_claude_direct_available}" != "true" ]]; then
   sim_claude_direct_available="false"

@@ -98,7 +98,9 @@ jobs:
           CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT || '90' }}
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
-          CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-3-7-sonnet-latest' }}
+          CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-sonnet-4-6' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
           DEFAULT_MULTI_AGENT_MODE_LOCK: ${{ vars.FUGUE_MULTI_AGENT_MODE_LOCK || 'false' }}
           CLAUDE_LIGHT_MULTI_AGENT_MODE: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE || 'standard' }}
@@ -450,11 +452,18 @@ jobs:
           translation_event="false"
           translation_payload=""
           normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
+          CODEX_MAIN_MODEL="gpt-5-codex"
+          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+            CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+          fi
+          if [[ "${CLAUDE_TRANSLATOR_MODEL}" != "claude-sonnet-4-6" ]]; then
+            CLAUDE_TRANSLATOR_MODEL="claude-sonnet-4-6"
+          fi
 
           if [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
             judge_sys_prompt="You are Codex Orchestrator gate. Decide if Claude translation should be inserted before orchestration. Return ONLY compact JSON: {\"score\":0-100,\"should_translate\":true|false,\"reason\":\"short\",\"signals\":[\"...\"]}."
             judge_user_prompt="Analyze this issue text for ambiguity/conflict/risk/implicit constraints. Prioritize translation when requirements are unclear, mixed-language, or high-risk refactor/migration. Text:\n${normalized_text}"
-            judge_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
+            judge_candidates=("${CODEX_MULTI_AGENT_MODEL}" "${CODEX_MAIN_MODEL}" "gpt-5-codex")
             judge_json=""
             for judge_model in "${judge_candidates[@]}"; do
               judge_req="$(jq -n \
@@ -532,7 +541,7 @@ jobs:
                 fi
               elif [[ "${claude_max_plan}" == "true" && -n "${OPENAI_API_KEY:-}" ]]; then
                 translation_provider="claude-max-proxy-codex"
-                proxy_candidates=("gpt-5.3-codex-spark" "gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.1-codex" "gpt-4.1" "gpt-4o-mini")
+                proxy_candidates=("${CODEX_MULTI_AGENT_MODEL}" "${CODEX_MAIN_MODEL}" "gpt-5-codex")
                 for proxy_model in "${proxy_candidates[@]}"; do
                   proxy_req="$(jq -n \
                     --arg model "${proxy_model}" \

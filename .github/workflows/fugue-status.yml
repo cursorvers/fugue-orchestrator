@@ -195,7 +195,7 @@ jobs:
           ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
           subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "hold")"
           subscription_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
-          codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex")"
+          codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5-codex")"
           codex_multi_agent_model="$(gh variable get FUGUE_CODEX_MULTI_AGENT_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex-spark")"
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
           glm_subagent_mode="$(gh variable get FUGUE_GLM_SUBAGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "paired")"
@@ -258,7 +258,7 @@ jobs:
             subscription_runner_label="fugue-subscription"
           fi
           if [[ -z "${codex_main_model}" ]]; then
-            codex_main_model="gpt-5.3-codex"
+            codex_main_model="gpt-5-codex"
           fi
           if [[ -z "${codex_multi_agent_model}" ]]; then
             codex_multi_agent_model="gpt-5.3-codex-spark"
