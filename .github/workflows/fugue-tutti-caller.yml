@@ -91,6 +91,7 @@ jobs:
       force_claude: ${{ steps.ctx.outputs.force_claude }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
+      subscription_offline_policy: ${{ steps.ctx.outputs.subscription_offline_policy }}
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
@@ -909,6 +910,7 @@ jobs:
             echo "has_implement_confirmed=${has_implement_confirmed}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "subscription_runner_label=${subscription_runner_label}"
+            echo "subscription_offline_policy=${subscription_offline_policy}"
             echo "trust_subject=${trust_subject}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_main_provider}"
@@ -1091,6 +1093,7 @@ jobs:
       force_claude: "${{ needs.ctx.outputs.force_claude }}"
       multi_agent_mode_override: "${{ needs.ctx.outputs.multi_agent_mode_override }}"
       multi_agent_mode_lock: "${{ needs.ctx.outputs.multi_agent_mode_lock }}"
+      subscription_offline_policy_override: "${{ needs.ctx.outputs.subscription_offline_policy }}"
       trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
       allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
       extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"

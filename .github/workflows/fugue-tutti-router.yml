@@ -67,6 +67,11 @@ on:
         required: false
         type: string
         default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for this run (hold|continuity)"
+        required: false
+        type: string
+        default: ""
       extra_issue_instruction:
         description: "Optional additional instruction text (for example from /vote comments)"
         required: false
@@ -170,6 +175,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TRUST_SUBJECT_INPUT: ${{ inputs.trust_subject || '' }}
           ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           EXTRA_ISSUE_INSTRUCTION_INPUT: ${{ inputs.extra_issue_instruction || '' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
@@ -233,6 +239,10 @@ jobs:
           subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
             subscription_offline_policy="continuity"
+          fi
+          subscription_offline_policy_override="$(echo "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+            subscription_offline_policy="${subscription_offline_policy_override}"
           fi
           emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${emergency_continuity_mode}" != "true" ]]; then
@@ -1554,6 +1564,7 @@ jobs:
           FORCE_CLAUDE: ${{ inputs.force_claude }}
           MULTI_AGENT_MODE_OVERRIDE: ${{ inputs.multi_agent_mode_override }}
           MULTI_AGENT_MODE_LOCK: ${{ inputs.multi_agent_mode_lock }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
@@ -1658,6 +1669,10 @@ jobs:
           subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
             subscription_offline_policy="continuity"
+          fi
+          subscription_offline_policy_override="$(echo "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+            subscription_offline_policy="${subscription_offline_policy_override}"
           fi
           api_strict_mode="$(echo "${API_STRICT_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${api_strict_mode}" != "true" ]]; then
