@@ -117,6 +117,7 @@ Required/optional repo variables:
 - `FUGUE_SUBSCRIPTION_RUNNER_LABEL` (default `fugue-subscription`; required self-hosted label for `subscription-strict` lane execution)
 - `FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC` (default `180`; timeout seconds for each `codex` / `claude` CLI lane in `subscription` mode)
 - `FUGUE_SUBSCRIPTION_OFFLINE_POLICY` (`hold|continuity`, default `continuity`; behavior when `subscription` is requested but no required-label self-hosted runner is online)
+- `FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE` (`inherit|hold|continuity`, default `continuity`; canary-only override for runner-offline behavior under `subscription`)
 - `FUGUE_CANARY_LABEL_WAIT_ATTEMPTS` (default `10`; retry count while waiting for `tutti` label reflection before canary dispatch, clamped `1..60`)
 - `FUGUE_CANARY_LABEL_WAIT_SLEEP_SEC` (default `2`; sleep seconds between canary label reflection checks, clamped `1..30`)
 - `FUGUE_CANARY_WAIT_FAST_ATTEMPTS` (default `12`; fast-phase polling attempts for integrated review resolution in canary, clamped `1..60`)
