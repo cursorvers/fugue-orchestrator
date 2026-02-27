@@ -127,7 +127,7 @@ jobs:
         id: claude_state_guard
         env:
           GH_TOKEN: ${{ github.token }}
-          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || '' }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
         run: |
@@ -405,16 +405,56 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Discord alert when unhealthy
-        if: ${{ steps.decide.outputs.should_alert == 'true' }}
+        if: ${{ steps.decide.outputs.should_alert == 'true' && (secrets.DISCORD_WEBHOOK_URL != '' || secrets.DISCORD_SYSTEM_WEBHOOK != '') }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
         run: |
           set -euo pipefail
 
+          webhook_url="${DISCORD_WEBHOOK_URL:-${DISCORD_SYSTEM_WEBHOOK:-}}"
+          if [[ -z "${webhook_url}" ]]; then
+            exit 0
+          fi
           PAYLOAD="$(jq -n --arg content "${{ steps.decide.outputs.message }}" '{content:$content}')"
-          curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
+          curl -fsS -X POST "${webhook_url}" \
             -H "Content-Type: application/json" \
             -d "${PAYLOAD}"
+
+      - name: LINE alert when unhealthy
+        if: ${{ steps.decide.outputs.should_alert == 'true' && (secrets.LINE_WEBHOOK_URL != '' || (secrets.LINE_CHANNEL_ACCESS_TOKEN != '' && secrets.LINE_TO != '') || secrets.LINE_NOTIFY_TOKEN != '' || secrets.LINE_NOTIFY_ACCESS_TOKEN != '') }}
+        env:
+          LINE_WEBHOOK_URL: ${{ secrets.LINE_WEBHOOK_URL }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+          LINE_PUSH_API_URL: ${{ vars.LINE_PUSH_API_URL || 'https://api.line.me/v2/bot/message/push' }}
+          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+          LINE_NOTIFY_ACCESS_TOKEN: ${{ secrets.LINE_NOTIFY_ACCESS_TOKEN }}
+          LINE_NOTIFY_API_URL: ${{ vars.LINE_NOTIFY_API_URL || 'https://notify-api.line.me/api/notify' }}
+        run: |
+          set -euo pipefail
+
+          message="${{ steps.decide.outputs.message }}"
+          if (( ${#message} > 900 )); then
+            message="${message:0:897}..."
+          fi
+          if [[ -n "${LINE_WEBHOOK_URL:-}" ]]; then
+            PAYLOAD="$(jq -n --arg text "${message}" '{text:$text}')"
+            curl -fsS -X POST "${LINE_WEBHOOK_URL}" \
+              -H "Content-Type: application/json" \
+              -d "${PAYLOAD}"
+          elif [[ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" && -n "${LINE_TO:-}" ]]; then
+            PAYLOAD="$(jq -n --arg to "${LINE_TO}" --arg text "${message}" '{to:$to,messages:[{type:"text",text:$text}]}')"
+            curl -fsS -X POST "${LINE_PUSH_API_URL}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+              -d "${PAYLOAD}"
+          elif [[ -n "${LINE_NOTIFY_TOKEN:-${LINE_NOTIFY_ACCESS_TOKEN:-}}" ]]; then
+            line_notify_token="${LINE_NOTIFY_TOKEN:-${LINE_NOTIFY_ACCESS_TOKEN:-}}"
+            curl -fsS -X POST "${LINE_NOTIFY_API_URL}" \
+              -H "Authorization: Bearer ${line_notify_token}" \
+              --data-urlencode "message=${message}"
+          fi
 
   reconcile:
     runs-on: ubuntu-latest

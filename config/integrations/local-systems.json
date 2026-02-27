@@ -20,6 +20,20 @@
       "description": "Create Obsidian intake note and optionally run audio transcription dry-run.",
       "adapter": "scripts/local/integrations/obsidian-audio-ai.sh",
       "enabled": true
+    },
+    {
+      "id": "discord-notify",
+      "name": "Discord Notify",
+      "description": "Send linked-run health notifications to Discord webhook.",
+      "adapter": "scripts/local/integrations/discord-notify.sh",
+      "enabled": true
+    },
+    {
+      "id": "line-notify",
+      "name": "LINE Notify",
+      "description": "Send linked-run health notifications to LINE (webhook or Messaging API push).",
+      "adapter": "scripts/local/integrations/line-notify.sh",
+      "enabled": true
     }
   ]
 }
