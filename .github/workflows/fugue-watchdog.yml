@@ -431,31 +431,16 @@ jobs:
           LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
           LINE_NOTIFY_ACCESS_TOKEN: ${{ secrets.LINE_NOTIFY_ACCESS_TOKEN }}
           LINE_NOTIFY_API_URL: ${{ vars.LINE_NOTIFY_API_URL || 'https://notify-api.line.me/api/notify' }}
+          LINE_NOTIFY_MESSAGE: ${{ steps.decide.outputs.message }}
+          LINE_NOTIFY_REQUIRED_ON_EXECUTE: "false"
+          LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK: ${{ vars.LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK || 'false' }}
         run: |
           set -euo pipefail
-
-          message="${{ steps.decide.outputs.message }}"
-          if (( ${#message} > 900 )); then
-            message="${message:0:897}..."
-          fi
-          if [[ -n "${LINE_WEBHOOK_URL:-}" ]]; then
-            PAYLOAD="$(jq -n --arg text "${message}" '{text:$text}')"
-            curl -fsS -X POST "${LINE_WEBHOOK_URL}" \
-              -H "Content-Type: application/json" \
-              -d "${PAYLOAD}"
-          elif [[ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" && -n "${LINE_TO:-}" ]]; then
-            PAYLOAD="$(jq -n --arg to "${LINE_TO}" --arg text "${message}" '{to:$to,messages:[{type:"text",text:$text}]}')"
-            curl -fsS -X POST "${LINE_PUSH_API_URL}" \
-              -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
-              -d "${PAYLOAD}"
-          elif [[ -n "${LINE_NOTIFY_TOKEN:-${LINE_NOTIFY_ACCESS_TOKEN:-}}" ]]; then
-            line_notify_token="${LINE_NOTIFY_TOKEN:-${LINE_NOTIFY_ACCESS_TOKEN:-}}"
-            curl -fsS -X POST "${LINE_NOTIFY_API_URL}" \
-              -H "Authorization: Bearer ${line_notify_token}" \
-              --data-urlencode "message=${message}"
-          else
-            echo "LINE notify config missing; skipping."
+          run_dir="$(mktemp -d)"
+          trap 'rm -rf "${run_dir}"' EXIT
+          scripts/local/integrations/line-notify.sh --mode execute --run-dir "${run_dir}"
+          if [[ -f "${run_dir}/line-notify.meta" ]]; then
+            cat "${run_dir}/line-notify.meta"
           fi
 
   reconcile:
