@@ -18,6 +18,7 @@ LINE_NOTIFY_SMOKE_SEND="${LINE_NOTIFY_SMOKE_SEND:-false}"
 LINE_NOTIFY_MESSAGE="${LINE_NOTIFY_MESSAGE:-}"
 LINE_NOTIFY_GUARD_ENABLED="${LINE_NOTIFY_GUARD_ENABLED:-true}"
 LINE_NOTIFY_GUARD_FILE="${LINE_NOTIFY_GUARD_FILE:-${ROOT_DIR}/.fugue/state/line-notify-guard.json}"
+LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK:-false}"
 LINE_NOTIFY_DEDUP_TTL_SECONDS="${LINE_NOTIFY_DEDUP_TTL_SECONDS:-21600}"
 LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS:-3600}"
 LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS="${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS:-5}"
@@ -48,6 +49,8 @@ Environment:
   LINE_NOTIFY_GUARD_ENABLED=true|false
                                   Suppress duplicate payloads and recent repeated failures (default: true).
   LINE_NOTIFY_GUARD_FILE          Guard state file path (default: <repo>/.fugue/state/line-notify-guard.json).
+  LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true|false
+                                  If false (default), reject inbound webhook URLs such as /webhook/line-bot.
   LINE_NOTIFY_DEDUP_TTL_SECONDS   Duplicate suppression window in seconds (default: 21600).
   LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS
                                   Failure cooldown window in seconds (default: 3600).
@@ -157,6 +160,7 @@ save_guard_json() {
 LINE_NOTIFY_REQUIRED_ON_EXECUTE="$(to_bool "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}")"
 LINE_NOTIFY_SMOKE_SEND="$(to_bool "${LINE_NOTIFY_SMOKE_SEND}")"
 LINE_NOTIFY_GUARD_ENABLED="$(to_bool "${LINE_NOTIFY_GUARD_ENABLED}")"
+LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="$(to_bool "${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK}")"
 LINE_NOTIFY_DEDUP_TTL_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_DEDUP_TTL_SECONDS}" "21600")"
 LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS}" "3600")"
 LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" "5")"
@@ -180,6 +184,19 @@ if [[ "${transport}" == "none" ]]; then
   echo "line-notify: configuration is missing; skipping (${MODE})."
   write_meta "skipped-missing-config" "sent=false"
   exit 0
+fi
+
+if [[ "${transport}" == "webhook" ]]; then
+  webhook_url_lc="$(printf '%s' "${LINE_WEBHOOK_URL}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK}" != "true" ]] && [[ "${webhook_url_lc}" =~ /webhook(-test)?/line-bot([/?#].*)?$ ]]; then
+    echo "line-notify: LINE_WEBHOOK_URL points to inbound line-bot webhook and is not suitable for outbound notifications." >&2
+    echo "line-notify: use LINE_CHANNEL_ACCESS_TOKEN + LINE_TO, or set LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true to bypass." >&2
+    write_meta "error-inbound-webhook-url" \
+      "transport=webhook" \
+      "sent=false" \
+      "line_webhook_url=${LINE_WEBHOOK_URL}"
+    exit 1
+  fi
 fi
 
 should_send="false"

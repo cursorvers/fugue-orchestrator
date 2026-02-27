@@ -43,6 +43,7 @@ FUGUEのローカル実行に、以下の外部システムを連結するため
   - Legacy Notifyモード: `LINE_NOTIFY_TOKEN`（alias: `LINE_NOTIFY_ACCESS_TOKEN`, optional: `LINE_NOTIFY_API_URL`）
   - ガードレール: `LINE_NOTIFY_GUARD_ENABLED=true|false`（default true）
   - ガード状態ファイル: `LINE_NOTIFY_GUARD_FILE`（default: `.fugue/state/line-notify-guard.json`）
+  - inbound webhook許可: `LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true|false`（default false）
   - 重複抑止TTL: `LINE_NOTIFY_DEDUP_TTL_SECONDS`（default 21600）
   - 失敗クールダウン: `LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS`（default 3600）
   - 任意本文: `LINE_NOTIFY_MESSAGE`
