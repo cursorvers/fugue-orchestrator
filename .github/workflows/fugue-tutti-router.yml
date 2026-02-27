@@ -1492,10 +1492,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Resolve orchestrator workflow ref
+        id: orch_ref
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_WORKFLOW_REF##*@}"
+          if [[ -z "${ref}" ]]; then
+            ref="main"
+          fi
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout orchestrator scripts
         uses: actions/checkout@v4
         with:
           repository: cursorvers/fugue-orchestrator
+          ref: ${{ steps.orch_ref.outputs.ref }}
           path: .fugue-orchestrator
 
       - name: Resolve orchestrator profile and lane matrix
@@ -1539,6 +1550,27 @@ jobs:
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
         run: |
           set -euo pipefail
+
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
 
           orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
           if [[ ! -d "${orchestrator_lib_dir}" ]]; then
