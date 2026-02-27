@@ -451,6 +451,12 @@ jobs:
             -H "Content-Type: application/json" \
             -d "${PAYLOAD}"
 
+      - name: Checkout repository (for line-notify script)
+        if: ${{ steps.decide.outputs.should_alert == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: LINE alert when unhealthy
         if: ${{ steps.decide.outputs.should_alert == 'true' }}
         env:
