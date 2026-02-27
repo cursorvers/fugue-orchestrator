@@ -32,7 +32,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}-${{ github.event_name == 'issues' && format('label-{0}', github.event.label.name) || 'dispatch' }}
   cancel-in-progress: true
 
 jobs:
