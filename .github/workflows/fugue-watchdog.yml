@@ -405,7 +405,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Discord alert when unhealthy
-        if: ${{ steps.decide.outputs.should_alert == 'true' && (secrets.DISCORD_WEBHOOK_URL != '' || secrets.DISCORD_SYSTEM_WEBHOOK != '') }}
+        if: ${{ steps.decide.outputs.should_alert == 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
@@ -422,7 +422,7 @@ jobs:
             -d "${PAYLOAD}"
 
       - name: LINE alert when unhealthy
-        if: ${{ steps.decide.outputs.should_alert == 'true' && (secrets.LINE_WEBHOOK_URL != '' || (secrets.LINE_CHANNEL_ACCESS_TOKEN != '' && secrets.LINE_TO != '') || secrets.LINE_NOTIFY_TOKEN != '' || secrets.LINE_NOTIFY_ACCESS_TOKEN != '') }}
+        if: ${{ steps.decide.outputs.should_alert == 'true' }}
         env:
           LINE_WEBHOOK_URL: ${{ secrets.LINE_WEBHOOK_URL }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
@@ -454,6 +454,8 @@ jobs:
             curl -fsS -X POST "${LINE_NOTIFY_API_URL}" \
               -H "Authorization: Bearer ${line_notify_token}" \
               --data-urlencode "message=${message}"
+          else
+            echo "LINE notify config missing; skipping."
           fi
 
   reconcile:
