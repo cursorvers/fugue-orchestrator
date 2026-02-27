@@ -1608,9 +1608,9 @@ jobs:
             return 1
           }
 
-          orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
+          orchestrator_lib_dir="scripts/lib"
           if [[ ! -d "${orchestrator_lib_dir}" ]]; then
-            orchestrator_lib_dir="scripts/lib"
+            orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
           fi
 
           force_claude="$(echo "${FORCE_CLAUDE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"

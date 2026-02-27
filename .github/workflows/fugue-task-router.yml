@@ -345,9 +345,9 @@ jobs:
             body_assist_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*assist[[:space:]]+orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex|none)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
 
-          orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
+          orchestrator_lib_dir="scripts/lib"
           if [[ ! -d "${orchestrator_lib_dir}" ]]; then
-            orchestrator_lib_dir="scripts/lib"
+            orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
           fi
 
           nl_main_hint=""
