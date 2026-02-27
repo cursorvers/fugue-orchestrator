@@ -4,6 +4,19 @@ on:
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
+    inputs:
+      force_line_alert:
+        description: "Force LINE alert once for manual delivery test"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      line_alert_message:
+        description: "Optional LINE alert message override when force_line_alert=true"
+        required: false
+        type: string
 
 permissions:
   issues: write
@@ -291,6 +304,8 @@ jobs:
         id: decide
         env:
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+          FORCE_LINE_ALERT: ${{ github.event.inputs.force_line_alert || 'false' }}
+          LINE_ALERT_MESSAGE: ${{ github.event.inputs.line_alert_message || '' }}
         run: |
           set -euo pipefail
 
@@ -307,6 +322,11 @@ jobs:
           claude_can_manage_variables="${{ steps.claude_state_guard.outputs.can_manage_variables }}"
           claude_state="$(echo "${claude_state:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          force_line_alert="$(echo "${FORCE_LINE_ALERT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${force_line_alert}" != "true" ]]; then
+            force_line_alert="false"
+          fi
+          line_alert_message="${LINE_ALERT_MESSAGE:-}"
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
           fi
@@ -375,6 +395,11 @@ jobs:
             fi
           fi
 
+          if [[ "${force_line_alert}" == "true" ]]; then
+            should_alert="true"
+            reasons+=("manual-force-line")
+          fi
+
           msg="fugue-watchdog alert
           repo: ${GITHUB_REPOSITORY}
           reasons: ${reasons[*]:-none}
@@ -397,15 +422,20 @@ jobs:
           mainframe_hours_since_success: ${mainframe_hours}
           mainframe_last_success_at: ${{ steps.mainframe_success.outputs.last_time }}"
 
+          if [[ "${force_line_alert}" == "true" && -n "${line_alert_message}" ]]; then
+            msg="${line_alert_message}"
+          fi
+
           {
             echo "should_alert=${should_alert}"
+            echo "force_line_alert=${force_line_alert}"
             echo "message<<EOF"
             echo "${msg}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Discord alert when unhealthy
-        if: ${{ steps.decide.outputs.should_alert == 'true' }}
+        if: ${{ steps.decide.outputs.should_alert == 'true' && steps.decide.outputs.force_line_alert != 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
@@ -424,6 +454,7 @@ jobs:
       - name: LINE alert when unhealthy
         if: ${{ steps.decide.outputs.should_alert == 'true' }}
         env:
+          FORCE_LINE_ALERT: ${{ steps.decide.outputs.force_line_alert }}
           LINE_WEBHOOK_URL: ${{ secrets.LINE_WEBHOOK_URL }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
@@ -436,6 +467,10 @@ jobs:
           LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK: ${{ vars.LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK || 'false' }}
         run: |
           set -euo pipefail
+          force_line_alert="$(echo "${FORCE_LINE_ALERT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${force_line_alert}" == "true" ]]; then
+            export LINE_NOTIFY_GUARD_ENABLED="false"
+          fi
           run_dir="$(mktemp -d)"
           trap 'rm -rf "${run_dir}"' EXIT
           scripts/local/integrations/line-notify.sh --mode execute --run-dir "${run_dir}"
