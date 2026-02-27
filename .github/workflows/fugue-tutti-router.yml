@@ -1823,7 +1823,6 @@ jobs:
             --glm-subagent-mode "${glm_subagent_mode}" \
             --wants-gemini "${wants_gemini}" \
             --wants-xai "${wants_xai}" \
-            --dual-main-signal "${dual_main_signal}" \
             --allow-glm-in-subscription "${allow_glm_in_subscription}" \
             --codex-main-model "${codex_main_model}" \
             --codex-multi-agent-model "${codex_multi_agent_model}" \
