@@ -19,6 +19,11 @@ on:
         required: false
         type: string
         default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for this dispatch (hold|continuity)"
+        required: false
+        type: string
+        default: ""
       vote_instruction_b64:
         description: "Optional /vote instruction payload (base64-encoded)"
         required: false
@@ -100,6 +105,7 @@ jobs:
           ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
           TRUST_SUBJECT_INPUT: ${{ github.event.inputs.trust_subject || '' }}
           ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -201,6 +207,10 @@ jobs:
           subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
             subscription_offline_policy="hold"
+          fi
+          subscription_offline_policy_override="$(echo "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+            subscription_offline_policy="${subscription_offline_policy_override}"
           fi
           emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${emergency_continuity_mode}" != "true" ]]; then
