@@ -1861,24 +1861,31 @@ jobs:
             codex_multi_agent_model="gpt-5.3-codex-spark"
           fi
 
-          matrix_payload="$(bash "${orchestrator_lib_dir}/build-agent-matrix.sh" \
-            --engine "${ci_execution_engine}" \
-            --main-provider "${main_provider}" \
-            --assist-provider "${assist_provider}" \
-            --multi-agent-mode "${multi_agent_mode}" \
-            --glm-subagent-mode "${glm_subagent_mode}" \
-            --wants-gemini "${wants_gemini}" \
-            --wants-xai "${wants_xai}" \
-            --dual-main-signal "${dual_main_signal}" \
-            --allow-glm-in-subscription "${allow_glm_in_subscription}" \
-            --codex-main-model "${codex_main_model}" \
-            --codex-multi-agent-model "${codex_multi_agent_model}" \
-            --claude-opus-model "${CLAUDE_OPUS_MODEL}" \
-            --claude-sonnet4-model "${CLAUDE_SONNET4_MODEL}" \
-            --claude-sonnet6-model "${CLAUDE_SONNET6_MODEL}" \
-            --gemini-model "${GEMINI_MODEL}" \
-            --xai-model "${XAI_MODEL}" \
-            --format "json")"
+          matrix_args=(
+            --engine "${ci_execution_engine}"
+            --main-provider "${main_provider}"
+            --assist-provider "${assist_provider}"
+            --multi-agent-mode "${multi_agent_mode}"
+            --glm-subagent-mode "${glm_subagent_mode}"
+            --wants-gemini "${wants_gemini}"
+            --wants-xai "${wants_xai}"
+            --allow-glm-in-subscription "${allow_glm_in_subscription}"
+            --codex-main-model "${codex_main_model}"
+            --codex-multi-agent-model "${codex_multi_agent_model}"
+            --claude-opus-model "${CLAUDE_OPUS_MODEL}"
+            --claude-sonnet4-model "${CLAUDE_SONNET4_MODEL}"
+            --claude-sonnet6-model "${CLAUDE_SONNET6_MODEL}"
+            --gemini-model "${GEMINI_MODEL}"
+            --xai-model "${XAI_MODEL}"
+            --format "json"
+          )
+
+          # Backward compatibility: older orchestrator libs may not support this flag yet.
+          if bash "${orchestrator_lib_dir}/build-agent-matrix.sh" --help 2>&1 | grep -q -- '--dual-main-signal'; then
+            matrix_args+=(--dual-main-signal "${dual_main_signal}")
+          fi
+
+          matrix_payload="$(bash "${orchestrator_lib_dir}/build-agent-matrix.sh" "${matrix_args[@]}")"
           matrix="$(echo "${matrix_payload}" | jq -c '.matrix')"
           lanes="$(echo "${matrix_payload}" | jq -r '.lanes')"
           main_signal_lane="$(echo "${matrix_payload}" | jq -r '.main_signal_lane')"
