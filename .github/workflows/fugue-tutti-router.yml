@@ -402,6 +402,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout orchestrator scripts
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          ref: v7
+          path: .fugue-orchestrator
+
       - name: Call agent engine
         id: call
         env:
@@ -439,24 +446,29 @@ jobs:
         run: |
           set -euo pipefail
 
+          harness_dir="scripts/harness"
+          if [[ ! -d "${harness_dir}" && -d ".fugue-orchestrator/scripts/harness" ]]; then
+            harness_dir=".fugue-orchestrator/scripts/harness"
+          fi
+
           ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
           fi
           if [[ "${ci_execution_engine}" == "harness" ]]; then
-            if [[ ! -x "scripts/harness/ci-agent-runner.sh" ]]; then
+            if [[ ! -x "${harness_dir}/ci-agent-runner.sh" ]]; then
               echo "harness execution engine is enabled, but scripts/harness/ci-agent-runner.sh is missing or not executable." >&2
               exit 1
             fi
-            bash scripts/harness/ci-agent-runner.sh
+            bash "${harness_dir}/ci-agent-runner.sh"
             exit 0
           fi
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            if [[ ! -x "scripts/harness/subscription-agent-runner.sh" ]]; then
+            if [[ ! -x "${harness_dir}/subscription-agent-runner.sh" ]]; then
               echo "subscription execution engine is enabled, but scripts/harness/subscription-agent-runner.sh is missing or not executable." >&2
               exit 1
             fi
-            bash scripts/harness/subscription-agent-runner.sh
+            bash "${harness_dir}/subscription-agent-runner.sh"
             exit 0
           fi
 
