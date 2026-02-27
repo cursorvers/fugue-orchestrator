@@ -248,7 +248,17 @@ if [[ "${should_send}" == "true" ]]; then
 
   set +e
   if [[ "${transport}" == "webhook" ]]; then
-    payload="$(jq -n --arg text "${message}" '{text:$text}')"
+    payload="$(jq -n \
+      --arg text "${message}" \
+      --arg mode "${MODE}" \
+      --arg issue_number "${issue_number}" \
+      '{
+        text:$text,
+        message:$text,
+        source:"fugue-line-notify",
+        mode:$mode,
+        issue_number:$issue_number
+      }')"
     http_status="$(curl -sS -X POST "${LINE_WEBHOOK_URL}" \
       --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
       --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
@@ -291,6 +301,16 @@ if [[ "${should_send}" == "true" ]]; then
   fi
 
   if (( curl_exit_code == 0 )) && [[ "${http_status}" =~ ^2[0-9]{2}$ ]]; then
+    response_message="$(printf '%s' "${response_body}" | jq -r 'if type=="object" then (.message // .status // .result // empty) else empty end' 2>/dev/null || true)"
+    delivery_state="delivered"
+    if [[ "${transport}" == "webhook" && -z "${line_request_id}" ]]; then
+      delivery_state="accepted-upstream"
+      if [[ -n "${response_message}" ]]; then
+        echo "line-notify: upstream webhook accepted request (${response_message}); downstream LINE delivery must be confirmed by webhook system logs."
+      else
+        echo "line-notify: upstream webhook accepted request; downstream LINE delivery must be confirmed by webhook system logs."
+      fi
+    fi
     if [[ "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]]; then
       guard_json="$(read_guard_json)"
       updated_guard="$(printf '%s' "${guard_json}" | jq --arg key "${message_hash}" --argjson now "${epoch_now}" '
@@ -305,6 +325,8 @@ if [[ "${should_send}" == "true" ]]; then
       "sent=true" \
       "http_code=${code_display}" \
       "line_request_id=${line_request_id}" \
+      "delivery_state=${delivery_state}" \
+      "response_message=${response_message}" \
       "message_hash=${message_hash}" \
       "guard=${guard_action}"
   else
