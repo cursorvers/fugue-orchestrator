@@ -114,16 +114,25 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_MAX_PLAN              --body true    -R <owner/repo>
 # gh variable set FUGUE_CLAUDE_PLAN_TIER             --body max20   -R <owner/repo>
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body subscription -R <owner/repo> # harness|api|subscription
+# gh variable set FUGUE_ALLOW_GLM_IN_SUBSCRIPTION    --body true    -R <owner/repo> # trueでsubscriptionでもGLM baseline voter(+design時Gemini)を許可
 # gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
-# gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body hold    -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
+# gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body continuity -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
+# gh variable set FUGUE_DUAL_MAIN_SIGNAL             --body true    -R <owner/repo> # trueで codex-main / claude-main signal lane を両建て
 # gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5-codex -R <owner/repo> # main orchestrator lane model
 # gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
-# gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body true    -R <owner/repo> # require codex-main-orchestrator=gpt-5-codex
-# gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body true    -R <owner/repo> # require claude-opus-assist=CLAUDE_OPUS_MODEL
+# gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body false   -R <owner/repo> # trueで codex-main-orchestrator=gpt-5-codex を厳格要求
+# gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body false   -R <owner/repo> # trueで claude-opus-assist=CLAUDE_OPUS_MODEL を厳格要求
+# gh variable set FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST --body false   -R <owner/repo> # trueで /vote 時に claude-opus-assist direct success を必須化
+# gh variable set FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX --body true   -R <owner/repo> # trueで assist=claude かつ high-risk/ambiguity タスク時に claude sub gate を必須化
+# gh variable set FUGUE_MIN_CONSENSUS_LANES          --body 6       -R <owner/repo> # integer >=6 (resolved lane count floor; underflow is fail-fast)
 # gh variable set FUGUE_API_STRICT_MODE              --body false   -R <owner/repo> # trueでharness/api時もstrict guardを維持
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
 # gh variable set FUGUE_GLM_SUBAGENT_MODE            --body paired  -R <owner/repo> # off|paired|symphony (api/harness時GLM subagentファンアウト)
+# gh variable set FUGUE_CODEX_RECURSIVE_DELEGATION   --body false   -R <owner/repo> # trueで codex laneに再帰委譲(parent->child->grandchild)を有効化
+# gh variable set FUGUE_CODEX_RECURSIVE_MAX_DEPTH    --body 3       -R <owner/repo> # >=2, 推奨3
+# gh variable set FUGUE_CODEX_RECURSIVE_TARGET_LANES --body "codex-main-orchestrator,codex-orchestration-assist" -R <owner/repo> # CSV or all
+# gh variable set FUGUE_CODEX_RECURSIVE_DRY_RUN      --body false   -R <owner/repo> # trueで再帰委譲を合成結果で検証
 # gh variable set FUGUE_EMERGENCY_CONTINUITY_MODE    --body false   -R <owner/repo> # trueでin-flight issueのみ継続処理
 # gh variable set FUGUE_EMERGENCY_ASSIST_POLICY      --body none    -R <owner/repo> # none|codex|claude (continuity時assist縮退先)
 # gh variable set FUGUE_CLAUDE_MAIN_ASSIST_POLICY    --body codex   -R <owner/repo> # codex|none (main=claude時のassist自動調整)
@@ -160,9 +169,11 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: 曖昧性シグナルは `FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE` 以上の高スコア時のみ昇格し、常時コンテキスト圧迫を避けます。
 # NOTE: state が ok かつ assist=claude のとき、/vote に Claude assist レーンが参加します（subscription では `FUGUE_CLAUDE_OPUS_MODEL` 既定: Sonnet 4.6）。
 # NOTE: main orchestrator resolved結果に応じて main signal lane（codex/claude）が /vote に追加されます。
+# NOTE: `FUGUE_DUAL_MAIN_SIGNAL=true`（既定）では、resolved main に加えて反対側の main signal lane も同時投入します（例: main=codex でも claude-main-orchestrator を追加）。
 # NOTE: 互換既定では `FUGUE_CLAUDE_MAX_PLAN=true` のとき execution policy は `hybrid`、false のとき `direct` として扱います。
 # NOTE: `FUGUE_CLAUDE_OPUS_MODEL` は claude-opus-assist/main の既定モデル指定に使われます。
 # NOTE: /vote の実行可否は role-weighted 2/3 合議 + HIGH risk veto で判定されます。
+# NOTE: `FUGUE_MIN_CONSENSUS_LANES`（既定6）は lane数の下限ガードです。解決された lane 数が下回る場合は fail-fast で停止します。
 # NOTE: implement 時は Plan→Parallel Simulation→Critical Review→Problem Fix→Replan を 3 サイクル完了後に実装します。
 # NOTE: preflight通過後の実装フェーズでは Implementer/ Critic/ Integrator の対話ループを必須化しています。
 # NOTE: `fugue-codex-implement` は実装前に research/plan/critic ノードを並列起動し、`.fugue/pre-implement` の seed artifact を先に生成します。
@@ -171,22 +182,28 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
 # NOTE: modified FUGUE では通常運用時、main=claude は assist=codex へ最終調整されます（co-orchestrator維持 + Claude圧迫回避）。
-# NOTE: `FUGUE_CI_EXECUTION_ENGINE=subscription` は pay-as-you-go APIを使わず、`codex` / `claude` CLI で /vote レーンを実行します（self-hosted runner前提）。
+# NOTE: `FUGUE_CI_EXECUTION_ENGINE=subscription` は `codex` / `claude` をCLIで実行します（self-hosted runner前提）。
+# NOTE: `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=true`（既定）では、subscriptionでも GLM baseline voter をAPI実行し、デザイン系タスクではGemini specialist laneを追加できます。
 # NOTE: `FUGUE_CI_EXECUTION_ENGINE` の既定は `subscription` です。`harness/api` は互換用途です。
 # NOTE: `subscription` 要求時は `FUGUE_SUBSCRIPTION_RUNNER_LABEL` が付いた self-hosted runner を必須判定します。
 # NOTE: 上記ラベルを持つ runner が online でない場合、`FUGUE_SUBSCRIPTION_OFFLINE_POLICY` に従います。
-# NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`（既定）では処理を安全停止し、API縮退しません。
-# NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity` では `api-continuity` (harness) に縮退します。
+# NOTE: 既定は `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity` で、runner不在時は `api-continuity` (harness) に縮退します。
+# NOTE: `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold` を指定すると処理を安全停止し、API縮退しません。
 # NOTE: `api-continuity` では strict guard は既定で無効化されます（`FUGUE_API_STRICT_MODE=true` で明示的に有効化可能）。
+# NOTE: `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST=true` のときのみ、/vote で `claude-opus-assist` の direct success を必須化します（既定は非必須）。
+# NOTE: `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true`（既定）では、assist=claude かつ `risk_tier=high` または ambiguity translation-gate=true のタスクで claude-opus-assist 成功を必須化します。未達時は `ok_to_execute=false` になります。
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
 # NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、mainは `gpt-5-codex` 固定のまま multi-agent を `gpt-5.3-codex-spark` に寄せられます。
-# NOTE: `FUGUE_GLM_SUBAGENT_MODE=paired|symphony` で GLM subagent レーン（orchestration/architect/plan/reliability）を段階的に増やせます（subscriptionでは自動off）。
+# NOTE: `FUGUE_GLM_SUBAGENT_MODE=paired|symphony` で GLM subagent レーン（orchestration/architect/plan/reliability）を段階的に増やせます（`FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=false` の場合のみ subscription で自動off）。
+# NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
+# NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
 # NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
 # NOTE: `risk-tier (low|medium|high)` を算出し、preflight/dialogue最小値と review fan-out を調整します。
+# NOTE: local 実行でも `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX=true`（既定）により assist=claude かつ high-risk（または `FUGUE_LOCAL_AMBIGUITY_SIGNAL=true`）時に claude-opus-assist 成功が必須になります。
 # NOTE: lessons 更新は correction/postmortem シグナル時に必須、それ以外は SHOULD 扱いです。
 # NOTE: コンテキスト探索は staged budget（low:6->12, medium:8->16, high:10->20）で段階拡張します。
 # NOTE: `workflow-risk-policy.sh` が over-compression guard を常時適用し、floor/span 未満なら自動補正します。
@@ -223,7 +240,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
 # NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
-# NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true`（既定）かつ `FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` のとき、
+# NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true` のときのみ、`FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` で
 #       `claude-opus-assist` の direct success が無ければ `ok_to_execute=false` になります。
 # NOTE: Claude rate limit 時は `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded|exhausted` を設定すると、
 #       上記必須ゲートは `not-required` に切り替わります。
@@ -240,6 +257,12 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --mode enhanced --glm-mode paired \
 #     --with-linked-systems --linked-mode smoke --linked-systems all --linked-max-parallel 3
 # NOTE: 連結定義は `config/integrations/local-systems.json`。
+# NOTE: 既定の連結には `discord-notify` / `line-notify` も含まれます（通知設定未投入時は `execute` で失敗）。
+# NOTE: Discord: `DISCORD_NOTIFY_WEBHOOK_URL`（fallback: `DISCORD_WEBHOOK_URL` / `DISCORD_SYSTEM_WEBHOOK`）
+# NOTE: LINE: `LINE_WEBHOOK_URL` または `LINE_CHANNEL_ACCESS_TOKEN` + `LINE_TO`（legacy fallback: `LINE_NOTIFY_TOKEN` / `LINE_NOTIFY_ACCESS_TOKEN`）
+# NOTE: line-notify は重複送信抑止と失敗クールダウンを標準有効化しています（`LINE_NOTIFY_GUARD_ENABLED=true`）。
+# NOTE: ガード状態は `LINE_NOTIFY_GUARD_FILE`（既定: `.fugue/state/line-notify-guard.json`）に永続化されます。
+# NOTE: 抑止窓は `LINE_NOTIFY_DEDUP_TTL_SECONDS` / `LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS` で調整できます。
 # NOTE: `--linked-mode execute` は本体の `ok_to_execute=true` のときのみ起動します。
 # NOTE: Obsidian音声AIのdry-run文字起こしは `OBSIDIAN_AUDIO_ENABLE_TRANSCRIBE=true` で有効化します。
 # NOTE: 連結定義の整合検証は `./scripts/check-linked-systems-integrity.sh`。
