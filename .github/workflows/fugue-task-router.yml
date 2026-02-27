@@ -150,23 +150,12 @@ jobs:
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         uses: actions/checkout@v4
 
-      - name: Resolve orchestrator workflow ref
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
-        id: orch_ref
-        run: |
-          set -euo pipefail
-          ref="${GITHUB_WORKFLOW_REF##*@}"
-          if [[ -z "${ref}" ]]; then
-            ref="main"
-          fi
-          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
-
       - name: Checkout orchestrator scripts
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: cursorvers/fugue-orchestrator
-          ref: ${{ steps.orch_ref.outputs.ref }}
+          ref: v5
           path: .fugue-orchestrator
 
       - name: Annotate target project (label + title prefix)
