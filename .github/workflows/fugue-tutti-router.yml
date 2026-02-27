@@ -37,6 +37,31 @@ on:
         required: false
         type: string
         default: "false"
+      risk_tier:
+        description: "Risk tier inferred by caller (low|medium|high)"
+        required: false
+        type: string
+        default: ""
+      ambiguity_translation_gate:
+        description: "true when caller ambiguity/translation gate requested Claude sub attention"
+        required: false
+        type: string
+        default: "false"
+      ambiguity_translation_score:
+        description: "Caller ambiguity/translation score (0-100)"
+        required: false
+        type: string
+        default: "0"
+      claude_sub_trigger:
+        description: "Caller assist auto-selection trigger text"
+        required: false
+        type: string
+        default: "none"
+      extra_issue_instruction:
+        description: "Optional additional instruction text (for example from /vote comments)"
+        required: false
+        type: string
+        default: ""
     outputs:
       ok_to_execute:
         description: "true when approvals >= 2/3 and no HIGH risk was detected"
@@ -83,6 +108,9 @@ on:
       resolved_glm_subagent_mode_source:
         description: "where the resolved GLM subagent mode came from"
         value: ${{ jobs.resolve-orchestrator.outputs.glm_subagent_mode_source }}
+      resolved_main_signal_lanes:
+        description: "resolved main signal lanes for this run"
+        value: ${{ jobs.resolve-orchestrator.outputs.main_signal_lanes }}
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -127,8 +155,9 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          EXTRA_ISSUE_INSTRUCTION: ${{ inputs.extra_issue_instruction }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
-          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
           SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: |
@@ -168,6 +197,10 @@ jobs:
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+          extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -n "${extra_issue_instruction}" ]]; then
+            BODY="$(printf '%s\n\n## Vote Instruction\n%s\n' "${BODY}" "${extra_issue_instruction}")"
+          fi
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
@@ -177,9 +210,9 @@ jobs:
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
           fi
-          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
-            subscription_offline_policy="hold"
+            subscription_offline_policy="continuity"
           fi
           emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${emergency_continuity_mode}" != "true" ]]; then
@@ -393,6 +426,10 @@ jobs:
           CI_EXECUTION_ENGINE: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
           EXECUTION_PROFILE: ${{ needs.resolve-orchestrator.outputs.execution_profile }}
           SUBSCRIPTION_CLI_TIMEOUT_SEC: ${{ vars.FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC || '180' }}
+          FUGUE_CODEX_RECURSIVE_DELEGATION: ${{ vars.FUGUE_CODEX_RECURSIVE_DELEGATION || 'false' }}
+          FUGUE_CODEX_RECURSIVE_MAX_DEPTH: ${{ vars.FUGUE_CODEX_RECURSIVE_MAX_DEPTH || '3' }}
+          FUGUE_CODEX_RECURSIVE_TARGET_LANES: ${{ vars.FUGUE_CODEX_RECURSIVE_TARGET_LANES || 'codex-main-orchestrator,codex-orchestration-assist' }}
+          FUGUE_CODEX_RECURSIVE_DRY_RUN: ${{ vars.FUGUE_CODEX_RECURSIVE_DRY_RUN || 'false' }}
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
@@ -1007,6 +1044,12 @@ jobs:
         env:
           ASSIST_PROVIDER_RESOLVED: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+          REQUIRE_DIRECT_CLAUDE_ASSIST: ${{ vars.FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST || 'false' }}
+          REQUIRE_CLAUDE_SUB_ON_COMPLEX: ${{ vars.FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX || 'true' }}
+          INPUT_RISK_TIER: ${{ inputs.risk_tier }}
+          INPUT_AMBIGUITY_TRANSLATION_GATE: ${{ inputs.ambiguity_translation_gate }}
+          INPUT_AMBIGUITY_TRANSLATION_SCORE: ${{ inputs.ambiguity_translation_score }}
+          INPUT_CLAUDE_SUB_TRIGGER: ${{ inputs.claude_sub_trigger }}
         run: |
           set -euo pipefail
 
@@ -1027,38 +1070,106 @@ jobs:
           if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
             claude_state="ok"
           fi
+          require_direct_claude_assist="$(echo "${REQUIRE_DIRECT_CLAUDE_ASSIST:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${require_direct_claude_assist}" != "true" ]]; then
+            require_direct_claude_assist="false"
+          fi
+          require_claude_sub_on_complex="$(echo "${REQUIRE_CLAUDE_SUB_ON_COMPLEX:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${require_claude_sub_on_complex}" != "false" ]]; then
+            require_claude_sub_on_complex="true"
+          fi
+          input_risk_tier="$(echo "${INPUT_RISK_TIER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${input_risk_tier}" != "low" && "${input_risk_tier}" != "medium" && "${input_risk_tier}" != "high" ]]; then
+            input_risk_tier=""
+          fi
+          ambiguity_translation_gate="$(echo "${INPUT_AMBIGUITY_TRANSLATION_GATE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${ambiguity_translation_gate}" != "true" ]]; then
+            ambiguity_translation_gate="false"
+          fi
+          ambiguity_translation_score="$(echo "${INPUT_AMBIGUITY_TRANSLATION_SCORE:-0}" | tr -cd '0-9')"
+          if [[ -z "${ambiguity_translation_score}" ]]; then
+            ambiguity_translation_score="0"
+          fi
+          claude_sub_trigger="$(echo "${INPUT_CLAUDE_SUB_TRIGGER:-none}" | tr '\n\r' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${claude_sub_trigger}" ]]; then
+            claude_sub_trigger="none"
+          fi
+          complex_claude_sub_required="false"
+          complex_claude_sub_reason="not-required"
+          if [[ "${require_claude_sub_on_complex}" == "true" ]]; then
+            if [[ "${assist_provider_resolved}" != "claude" ]]; then
+              complex_claude_sub_reason="complex-policy-assist-${assist_provider_resolved}"
+            elif [[ "${input_risk_tier}" == "high" ]]; then
+              complex_claude_sub_required="true"
+              complex_claude_sub_reason="risk-high"
+            elif [[ "${ambiguity_translation_gate}" == "true" ]]; then
+              complex_claude_sub_required="true"
+              complex_claude_sub_reason="ambiguity-translation-gate(score=${ambiguity_translation_score},trigger=${claude_sub_trigger})"
+            else
+              complex_claude_sub_reason="complex-not-required"
+            fi
+          else
+            complex_claude_sub_reason="complex-policy-disabled"
+          fi
+          claude_opus_lane_total="$(jq '[.[] | select(.name == "claude-opus-assist")] | length' all-results.json)"
+          claude_opus_lane_success="$(jq '[
+            .[] | select(
+              .name == "claude-opus-assist"
+              and .skipped != true
+              and ((.provider // "" | ascii_downcase) == "claude")
+              and (
+                ((.http_code // "" | tostring) == "200")
+                or
+                ((.http_code // "" | tostring | startswith("cli:0")))
+              )
+            )
+          ] | length' all-results.json)"
+          gate_required="false"
+          gate_requirement_kind="none"
+          if [[ "${complex_claude_sub_required}" == "true" ]]; then
+            gate_required="true"
+            gate_requirement_kind="complex"
+          fi
+          if [[ "${assist_provider_resolved}" == "claude" && "${claude_state}" == "ok" && "${require_direct_claude_assist}" == "true" ]]; then
+            gate_required="true"
+            if [[ "${gate_requirement_kind}" == "complex" ]]; then
+              gate_requirement_kind="complex+direct"
+            else
+              gate_requirement_kind="direct"
+            fi
+          fi
           required_claude_assist_gate="not-required"
           required_claude_assist_reason="none"
-          if [[ "${assist_provider_resolved}" == "claude" && "${claude_state}" == "ok" ]]; then
+          if [[ "${gate_required}" == "true" ]]; then
             required_claude_assist_gate="pass"
-            required_claude_assist_reason="ok"
-            claude_opus_lane_total="$(jq '[.[] | select(.name == "claude-opus-assist")] | length' all-results.json)"
-            claude_opus_lane_success="$(jq '[
-              .[] | select(
-                .name == "claude-opus-assist"
-                and .skipped != true
-                and ((.provider // "" | ascii_downcase) == "claude")
-                and (
-                  ((.http_code // "" | tostring) == "200")
-                  or
-                  ((.http_code // "" | tostring | startswith("cli:0")))
-                )
-              )
-            ] | length' all-results.json)"
-            if [[ "${claude_opus_lane_total}" -eq 0 ]]; then
+            required_claude_assist_reason="${gate_requirement_kind}-ok"
+            if [[ "${assist_provider_resolved}" != "claude" ]]; then
               required_claude_assist_gate="fail"
-              required_claude_assist_reason="missing-claude-opus-assist-lane"
+              required_claude_assist_reason="${gate_requirement_kind}-assist-${assist_provider_resolved}"
+            elif [[ "${claude_state}" == "exhausted" ]]; then
+              required_claude_assist_gate="fail"
+              required_claude_assist_reason="${gate_requirement_kind}-claude-rate-limit-exhausted"
+            elif [[ "${claude_opus_lane_total}" -eq 0 ]]; then
+              required_claude_assist_gate="fail"
+              required_claude_assist_reason="${gate_requirement_kind}-missing-claude-opus-assist-lane"
             elif [[ "${claude_opus_lane_success}" -eq 0 ]]; then
               required_claude_assist_gate="fail"
-              required_claude_assist_reason="claude-opus-assist-not-direct-success"
+              required_claude_assist_reason="${gate_requirement_kind}-claude-opus-assist-not-success"
             fi
             if [[ "${required_claude_assist_gate}" == "fail" ]]; then
               high_risk="true"
               high_risk_count="$((high_risk_count + 1))"
             fi
-          elif [[ "${assist_provider_resolved}" == "claude" ]]; then
-            required_claude_assist_gate="not-required"
-            required_claude_assist_reason="claude-rate-limit-${claude_state}"
+          else
+            if [[ "${assist_provider_resolved}" == "claude" && "${claude_state}" != "ok" ]]; then
+              required_claude_assist_reason="claude-rate-limit-${claude_state}"
+            elif [[ "${complex_claude_sub_required}" != "true" && "${require_claude_sub_on_complex}" == "true" ]]; then
+              required_claude_assist_reason="${complex_claude_sub_reason}"
+            elif [[ "${require_direct_claude_assist}" != "true" ]]; then
+              required_claude_assist_reason="direct-policy-disabled"
+            else
+              required_claude_assist_reason="policy-disabled"
+            fi
           fi
 
           if [[ "${total_count}" -eq 0 ]]; then
@@ -1184,6 +1295,7 @@ jobs:
           elif [[ "${required_claude_assist_gate}" == "fail" ]]; then
             required_assist_section="- required claude assist gate: fail (\`${required_claude_assist_reason}\`)"
           fi
+          complex_assist_section="- complex claude-sub requirement: ${complex_claude_sub_required} (\`${complex_claude_sub_reason}\`)"
           integrated_meta="$(jq -cn \
             --arg schema "fugue-integrated-meta/v1" \
             --arg run_id "${GITHUB_RUN_ID}" \
@@ -1200,6 +1312,8 @@ jobs:
             --arg high_risk "${high_risk}" \
             --arg required_claude_assist_gate "${required_claude_assist_gate}" \
             --arg required_claude_assist_reason "${required_claude_assist_reason}" \
+            --arg complex_claude_sub_required "${complex_claude_sub_required}" \
+            --arg complex_claude_sub_reason "${complex_claude_sub_reason}" \
             '{
               schema:$schema,
               run_id:$run_id,
@@ -1215,7 +1329,9 @@ jobs:
               weighted_vote_passed:($weighted_vote == "true"),
               high_risk:($high_risk == "true"),
               required_claude_assist_gate:$required_claude_assist_gate,
-              required_claude_assist_reason:$required_claude_assist_reason
+              required_claude_assist_reason:$required_claude_assist_reason,
+              complex_claude_sub_required:($complex_claude_sub_required == "true"),
+              complex_claude_sub_reason:$complex_claude_sub_reason
             }'
           )"
 
@@ -1225,6 +1341,7 @@ jobs:
           - main orchestrator requested: ${{ needs.resolve-orchestrator.outputs.main_provider_requested }}
           - main orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.main_provider }}
           - main orchestrator signal lane: ${{ needs.resolve-orchestrator.outputs.main_signal_lane }}
+          - main orchestrator signal lanes: ${{ needs.resolve-orchestrator.outputs.main_signal_lanes }}
           - assist orchestrator requested: ${{ needs.resolve-orchestrator.outputs.assist_provider_requested }}
           - assist orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           - multi-agent mode: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
@@ -1245,6 +1362,7 @@ jobs:
           ${main_fallback_section}
           ${assist_fallback_section}
           ${claude_pressure_section}
+          ${complex_assist_section}
           ${required_assist_section}
           - lanes configured: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
 
@@ -1367,6 +1485,7 @@ jobs:
       assist_adjusted_by_execution_profile: ${{ steps.resolve.outputs.assist_adjusted_by_execution_profile }}
       assist_adjustment_reason: ${{ steps.resolve.outputs.assist_adjustment_reason }}
       main_signal_lane: ${{ steps.resolve.outputs.main_signal_lane }}
+      main_signal_lanes: ${{ steps.resolve.outputs.main_signal_lanes }}
       expected_lanes: ${{ steps.resolve.outputs.expected_lanes }}
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
     steps:
@@ -1386,25 +1505,28 @@ jobs:
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'enhanced' }}
+          MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'standard' }}
           GLM_SUBAGENT_MODE: ${{ vars.FUGUE_GLM_SUBAGENT_MODE || 'paired' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
           CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-sonnet-4-6' }}
           CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-sonnet-4-6' }}
           GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro' }}
           XAI_MODEL: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
+          ALLOW_GLM_IN_SUBSCRIPTION: ${{ vars.FUGUE_ALLOW_GLM_IN_SUBSCRIPTION || 'true' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
           CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
+          DUAL_MAIN_SIGNAL: ${{ vars.FUGUE_DUAL_MAIN_SIGNAL || '' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
-          STRICT_MAIN_CODEX_MODEL: ${{ vars.FUGUE_STRICT_MAIN_CODEX_MODEL || 'true' }}
-          STRICT_OPUS_ASSIST_DIRECT: ${{ vars.FUGUE_STRICT_OPUS_ASSIST_DIRECT || 'true' }}
-          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          STRICT_MAIN_CODEX_MODEL: ${{ vars.FUGUE_STRICT_MAIN_CODEX_MODEL || 'false' }}
+          STRICT_OPUS_ASSIST_DIRECT: ${{ vars.FUGUE_STRICT_OPUS_ASSIST_DIRECT || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
           SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
           API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
           EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
+          MIN_CONSENSUS_LANES: ${{ vars.FUGUE_MIN_CONSENSUS_LANES || '6' }}
           HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
           HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
@@ -1446,17 +1568,17 @@ jobs:
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
           fi
-          strict_main_requested="$(echo "${STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          strict_main_requested="$(echo "${STRICT_MAIN_CODEX_MODEL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${strict_main_requested}" != "true" ]]; then
             strict_main_requested="false"
           fi
-          strict_opus_requested="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          strict_opus_requested="$(echo "${STRICT_OPUS_ASSIST_DIRECT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${strict_opus_requested}" != "true" ]]; then
             strict_opus_requested="false"
           fi
-          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
-            subscription_offline_policy="hold"
+            subscription_offline_policy="continuity"
           fi
           api_strict_mode="$(echo "${API_STRICT_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${api_strict_mode}" != "true" ]]; then
@@ -1523,7 +1645,7 @@ jobs:
               assist_claude_fallback_reason="${assist_adjustment_reason}"
             fi
           fi
-          multi_agent_mode="$(echo "${MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          multi_agent_mode="$(echo "${MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           mode_override="$(echo "${MULTI_AGENT_MODE_OVERRIDE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           mode_lock="$(echo "${MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           multi_agent_mode_source="repo-default"
@@ -1581,13 +1703,17 @@ jobs:
             fi
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
-            multi_agent_mode="enhanced"
+            multi_agent_mode="standard"
             multi_agent_mode_source="repo-default"
           fi
           glm_subagent_mode="$(echo "${GLM_SUBAGENT_MODE:-paired}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           glm_subagent_mode_source="repo-default"
           if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
             glm_subagent_mode="paired"
+          fi
+          allow_glm_in_subscription="$(echo "${ALLOW_GLM_IN_SUBSCRIPTION:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${allow_glm_in_subscription}" != "true" ]]; then
+            allow_glm_in_subscription="false"
           fi
           if [[ "${mode_lock}" != "true" ]]; then
             body_glm_subagent_mode="$(printf '%s\n' "${ISSUE_BODY}" | awk '
@@ -1619,16 +1745,30 @@ jobs:
             glm_subagent_mode="symphony"
             glm_subagent_mode_source="complexity-heuristic"
           fi
-          if [[ "${ci_execution_engine}" == "subscription" && "${glm_subagent_mode}" != "off" ]]; then
+          if [[ "${ci_execution_engine}" == "subscription" && "${allow_glm_in_subscription}" != "true" && "${glm_subagent_mode}" != "off" ]]; then
             glm_subagent_mode="off"
             glm_subagent_mode_source="subscription-engine"
           fi
           wants_gemini="false"
           wants_xai="false"
-          if [[ "${ci_execution_engine}" != "subscription" ]]; then
+          dual_main_signal_raw="$(echo "${DUAL_MAIN_SIGNAL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${dual_main_signal_raw}" == "true" ]]; then
+            dual_main_signal="true"
+          elif [[ "${dual_main_signal_raw}" == "false" ]]; then
+            dual_main_signal="false"
+          elif [[ "${multi_agent_mode}" == "max" ]]; then
+            # Keep high-risk mode redundant by default.
+            dual_main_signal="true"
+          else
+            # Keep standard/enhanced mode lightweight by default.
+            dual_main_signal="false"
+          fi
+          if [[ "${ci_execution_engine}" != "subscription" || "${allow_glm_in_subscription}" == "true" ]]; then
             if echo "${text}" | grep -Eqi '(ui|ux|ui[[:space:]]*design|ux[[:space:]]*design|figma|mockup|wireframe|screenshot|layout|デザイン|画面|画像|スクリーンショット|レイアウト|pencil)'; then
               wants_gemini="true"
             fi
+          fi
+          if [[ "${ci_execution_engine}" != "subscription" ]]; then
             if echo "${text}" | grep -Eqi '(x/twitter|twitter|tweet|tweets|xai|grok|x検索|トレンド|リアルタイム|速報|timeline|タイムライン)'; then
               wants_xai="true"
             fi
@@ -1650,7 +1790,8 @@ jobs:
             --glm-subagent-mode "${glm_subagent_mode}" \
             --wants-gemini "${wants_gemini}" \
             --wants-xai "${wants_xai}" \
-            --allow-glm-in-subscription "false" \
+            --dual-main-signal "${dual_main_signal}" \
+            --allow-glm-in-subscription "${allow_glm_in_subscription}" \
             --codex-main-model "${codex_main_model}" \
             --codex-multi-agent-model "${codex_multi_agent_model}" \
             --claude-opus-model "${CLAUDE_OPUS_MODEL}" \
@@ -1662,6 +1803,23 @@ jobs:
           matrix="$(echo "${matrix_payload}" | jq -c '.matrix')"
           lanes="$(echo "${matrix_payload}" | jq -r '.lanes')"
           main_signal_lane="$(echo "${matrix_payload}" | jq -r '.main_signal_lane')"
+          main_signal_lanes="$(echo "${matrix_payload}" | jq -c '.main_signal_lanes // []')"
+          min_consensus_lanes="$(echo "${MIN_CONSENSUS_LANES:-6}" | tr -cd '0-9')"
+          if [[ -z "${min_consensus_lanes}" ]]; then
+            min_consensus_lanes="6"
+          fi
+          if (( 10#${min_consensus_lanes} < 6 )); then
+            min_consensus_lanes="6"
+          fi
+          lanes_num="$(echo "${lanes}" | tr -cd '0-9')"
+          if [[ -z "${lanes_num}" ]]; then
+            echo "Failed to resolve lane count from build-agent-matrix output (lanes=${lanes})." >&2
+            exit 1
+          fi
+          if (( 10#${lanes_num} < 10#${min_consensus_lanes} )); then
+            echo "Resolved lane count (${lanes_num}) is below FUGUE_MIN_CONSENSUS_LANES (${min_consensus_lanes}); refusing to run under-minimum consensus." >&2
+            exit 1
+          fi
 
           {
             echo "provider=${main_provider}"
@@ -1670,6 +1828,7 @@ jobs:
             echo "multi_agent_mode_source=${multi_agent_mode_source}"
             echo "glm_subagent_mode=${glm_subagent_mode}"
             echo "glm_subagent_mode_source=${glm_subagent_mode_source}"
+            echo "allow_glm_in_subscription=${allow_glm_in_subscription}"
             echo "claude_fallback_applied=${main_claude_fallback_applied}"
             echo "claude_fallback_reason=${main_claude_fallback_reason}"
             echo "main_provider=${main_provider}"
@@ -1696,6 +1855,8 @@ jobs:
             echo "assist_adjusted_by_execution_profile=${assist_adjusted_by_execution_profile}"
             echo "assist_adjustment_reason=${assist_adjustment_reason}"
             echo "main_signal_lane=${main_signal_lane}"
+            echo "main_signal_lanes=${main_signal_lanes}"
             echo "expected_lanes=${lanes}"
+            echo "min_consensus_lanes=${min_consensus_lanes}"
             echo "agent_matrix=${matrix}"
           } >> "${GITHUB_OUTPUT}"

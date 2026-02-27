@@ -11,9 +11,10 @@ ISSUE_NUMBER="${ISSUE_NUMBER:-}"
 OUT_DIR="${OUT_DIR:-.fugue/local-run}"
 MAIN_PROVIDER="${MAIN_PROVIDER:-codex}"
 ASSIST_PROVIDER="${ASSIST_PROVIDER:-claude}"
-MULTI_AGENT_MODE="${MULTI_AGENT_MODE:-enhanced}"
+MULTI_AGENT_MODE="${MULTI_AGENT_MODE:-standard}"
 GLM_SUBAGENT_MODE="${GLM_SUBAGENT_MODE:-paired}"
 MAX_PARALLEL="${MAX_PARALLEL:-6}"
+MIN_CONSENSUS_LANES="${MIN_CONSENSUS_LANES:-${FUGUE_MIN_CONSENSUS_LANES:-6}}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
 CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5-codex}"
 CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
@@ -21,6 +22,13 @@ WITH_LINKED_SYSTEMS="${WITH_LINKED_SYSTEMS:-false}"
 LINKED_MODE="${LINKED_MODE:-smoke}"
 LINKED_SYSTEMS="${LINKED_SYSTEMS:-all}"
 LINKED_MAX_PARALLEL="${LINKED_MAX_PARALLEL:-3}"
+EXTRA_ISSUE_INSTRUCTION="${EXTRA_ISSUE_INSTRUCTION:-${FUGUE_LOCAL_EXTRA_ISSUE_INSTRUCTION:-}}"
+ISSUE_TITLE_INPUT="${ISSUE_TITLE_INPUT:-${FUGUE_LOCAL_ISSUE_TITLE:-}}"
+ISSUE_BODY_INPUT="${ISSUE_BODY_INPUT:-${FUGUE_LOCAL_ISSUE_BODY:-}}"
+ISSUE_BODY_FILE="${ISSUE_BODY_FILE:-${FUGUE_LOCAL_ISSUE_BODY_FILE:-}}"
+ISSUE_URL_INPUT="${ISSUE_URL_INPUT:-${FUGUE_LOCAL_ISSUE_URL:-}}"
+ISSUE_LABELS_CSV_INPUT="${ISSUE_LABELS_CSV_INPUT:-${FUGUE_LOCAL_ISSUE_LABELS_CSV:-}}"
+FORCE_MANUAL_CONTEXT="${FORCE_MANUAL_CONTEXT:-${FUGUE_LOCAL_FORCE_MANUAL_CONTEXT:-false}}"
 
 usage() {
   cat <<'EOF'
@@ -35,10 +43,17 @@ Options:
   --assist <claude|codex|none>
                          Assist orchestrator (default: claude)
   --mode <standard|enhanced|max>
-                         Multi-agent mode (default: enhanced)
+                         Multi-agent mode (default: standard)
   --glm-mode <off|paired|symphony>
                          GLM subagent fan-out (default: paired)
   --max-parallel <n>     Max parallel lanes (default: 6)
+  --issue-title <text>   Manual issue title override (offline fallback)
+  --issue-body <text>    Manual issue body override (offline fallback)
+  --issue-body-file <p>  Read manual issue body from file (offline fallback)
+  --issue-url <url>      Manual issue URL override
+  --labels-csv <csv>     Manual labels CSV override (default: fugue-task)
+  --force-manual-context Skip GitHub issue fetch and use manual context directly
+  --instruction <text>   Extra instruction appended to issue body for this local vote run
   --with-linked-systems  Execute linked local systems after orchestration
   --linked-mode <smoke|execute>
                          Linked systems mode (default: smoke)
@@ -56,7 +71,23 @@ Environment:
   FUGUE_CLAUDE_RATE_LIMIT_STATE
                          ok|degraded|exhausted (default: ok)
   FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST
-                         true|false (default: true; when true + state=ok, claude-opus-assist direct success is mandatory)
+                         true|false (default: false; when true + state=ok, claude-opus-assist direct success is mandatory)
+  FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX
+                         true|false (default: true; when true + assist=claude, high-risk or ambiguity-signaled tasks require claude-opus-assist success)
+  FUGUE_LOCAL_AMBIGUITY_SIGNAL
+                         true|false (default: false; explicit local ambiguity signal used by complex-gate)
+  FUGUE_DUAL_MAIN_SIGNAL
+                         true|false (default: auto; true in max mode, false otherwise)
+  FUGUE_MIN_CONSENSUS_LANES
+                         integer >= 6 (default: 6; fail-fast when resolved lane count is below this floor)
+  FUGUE_LOCAL_EXTRA_ISSUE_INSTRUCTION
+                         Optional extra instruction text appended to issue body for this local run
+  FUGUE_LOCAL_ISSUE_TITLE / FUGUE_LOCAL_ISSUE_BODY / FUGUE_LOCAL_ISSUE_BODY_FILE
+                         Manual issue context overrides for GitHub API fallback
+  FUGUE_LOCAL_ISSUE_URL / FUGUE_LOCAL_ISSUE_LABELS_CSV
+                         Optional manual URL/labels overrides
+  FUGUE_LOCAL_FORCE_MANUAL_CONTEXT
+                         true|false (default: false; when true, skip GitHub issue fetch entirely)
   FUGUE_CLAUDE_SESSION_HANDOFF
                          true|false (default: true; persist claude lane session IDs for resume/handoff)
 EOF
@@ -96,6 +127,34 @@ while [[ $# -gt 0 ]]; do
       MAX_PARALLEL="${2:-}"
       shift 2
       ;;
+    --issue-title)
+      ISSUE_TITLE_INPUT="${2:-}"
+      shift 2
+      ;;
+    --issue-body)
+      ISSUE_BODY_INPUT="${2:-}"
+      shift 2
+      ;;
+    --issue-body-file)
+      ISSUE_BODY_FILE="${2:-}"
+      shift 2
+      ;;
+    --issue-url)
+      ISSUE_URL_INPUT="${2:-}"
+      shift 2
+      ;;
+    --labels-csv)
+      ISSUE_LABELS_CSV_INPUT="${2:-}"
+      shift 2
+      ;;
+    --force-manual-context)
+      FORCE_MANUAL_CONTEXT="true"
+      shift 1
+      ;;
+    --instruction)
+      EXTRA_ISSUE_INSTRUCTION="${2:-}"
+      shift 2
+      ;;
     --with-linked-systems)
       WITH_LINKED_SYSTEMS="true"
       shift 1
@@ -133,6 +192,18 @@ if [[ -z "${ISSUE_NUMBER}" ]]; then
   usage >&2
   exit 2
 fi
+if [[ -n "${ISSUE_BODY_FILE}" && -n "${ISSUE_BODY_INPUT}" ]]; then
+  echo "Error: use either --issue-body or --issue-body-file, not both." >&2
+  exit 2
+fi
+if [[ -n "${ISSUE_BODY_FILE}" && ! -f "${ISSUE_BODY_FILE}" ]]; then
+  echo "Error: --issue-body-file does not exist: ${ISSUE_BODY_FILE}" >&2
+  exit 2
+fi
+force_manual_context="$(echo "${FORCE_MANUAL_CONTEXT}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${force_manual_context}" != "true" ]]; then
+  force_manual_context="false"
+fi
 
 if [[ "${MAIN_PROVIDER}" != "codex" && "${MAIN_PROVIDER}" != "claude" ]]; then
   echo "Error: --main must be codex or claude." >&2
@@ -154,6 +225,10 @@ if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
   echo "Error: --max-parallel must be a positive integer." >&2
   exit 2
 fi
+if ! [[ "${MIN_CONSENSUS_LANES}" =~ ^[0-9]+$ ]] || (( MIN_CONSENSUS_LANES < 6 )); then
+  echo "Error: FUGUE_MIN_CONSENSUS_LANES (or MIN_CONSENSUS_LANES) must be an integer >= 6." >&2
+  exit 2
+fi
 if [[ "${LINKED_MODE}" != "smoke" && "${LINKED_MODE}" != "execute" ]]; then
   echo "Error: --linked-mode must be smoke|execute." >&2
   exit 2
@@ -167,10 +242,6 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "Error: jq is required." >&2
   exit 2
 fi
-if ! command -v gh >/dev/null 2>&1; then
-  echo "Error: gh is required." >&2
-  exit 2
-fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [[ "${OUT_DIR}" != /* ]]; then
@@ -180,6 +251,7 @@ SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
 HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
 MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
 MODEL_POLICY="${ROOT_DIR}/scripts/lib/model-policy.sh"
+WORKFLOW_RISK_POLICY="${ROOT_DIR}/scripts/lib/workflow-risk-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
@@ -189,15 +261,98 @@ if [[ ! -x "${MODEL_POLICY}" ]]; then
   echo "Error: required model policy script is missing or not executable: ${MODEL_POLICY}" >&2
   exit 2
 fi
+if [[ ! -x "${WORKFLOW_RISK_POLICY}" ]]; then
+  echo "Error: required workflow risk policy script is missing or not executable: ${WORKFLOW_RISK_POLICY}" >&2
+  exit 2
+fi
 if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
   echo "Error: linked systems runner is missing or not executable: ${LINKED_RUNNER}" >&2
   exit 2
 fi
 
-issue_json="$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" --json number,title,body,url)"
-ISSUE_TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
-ISSUE_BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
-ISSUE_URL="$(echo "${issue_json}" | jq -r '.url // ""')"
+manual_issue_title="$(printf '%s' "${ISSUE_TITLE_INPUT}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+manual_issue_body="${ISSUE_BODY_INPUT}"
+if [[ -n "${ISSUE_BODY_FILE}" ]]; then
+  manual_issue_body="$(cat "${ISSUE_BODY_FILE}")"
+fi
+manual_issue_url="$(printf '%s' "${ISSUE_URL_INPUT}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+manual_issue_labels_csv="$(printf '%s' "${ISSUE_LABELS_CSV_INPUT}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${manual_issue_labels_csv}" ]]; then
+  manual_issue_labels_csv="fugue-task"
+fi
+has_manual_context="false"
+if [[ -n "${manual_issue_title}" && -n "${manual_issue_body}" ]]; then
+  has_manual_context="true"
+fi
+
+gh_available="false"
+if command -v gh >/dev/null 2>&1; then
+  gh_available="true"
+fi
+if [[ "${POST_ISSUE_COMMENT}" == "true" && "${gh_available}" != "true" ]]; then
+  echo "Error: --comment requires gh command." >&2
+  exit 2
+fi
+if [[ "${WITH_LINKED_SYSTEMS}" == "true" && "${gh_available}" != "true" ]]; then
+  echo "Error: --with-linked-systems requires gh command." >&2
+  exit 2
+fi
+
+ISSUE_TITLE=""
+ISSUE_BODY=""
+ISSUE_URL=""
+ISSUE_LABELS_CSV=""
+issue_context_source=""
+if [[ "${force_manual_context}" == "true" ]]; then
+  if [[ "${has_manual_context}" != "true" ]]; then
+    echo "Error: --force-manual-context requires --issue-title and --issue-body/--issue-body-file." >&2
+    exit 2
+  fi
+  ISSUE_TITLE="${manual_issue_title}"
+  ISSUE_BODY="${manual_issue_body}"
+  ISSUE_URL="${manual_issue_url}"
+  ISSUE_LABELS_CSV="${manual_issue_labels_csv}"
+  issue_context_source="manual-forced"
+else
+  if [[ "${gh_available}" == "true" ]]; then
+    if issue_json="$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" --json number,title,body,url,labels 2>/dev/null)"; then
+      ISSUE_TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
+      ISSUE_BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+      ISSUE_URL="$(echo "${issue_json}" | jq -r '.url // ""')"
+      ISSUE_LABELS_CSV="$(echo "${issue_json}" | jq -r '[.labels[].name // empty] | join(",")')"
+      issue_context_source="github"
+    elif [[ "${has_manual_context}" == "true" ]]; then
+      ISSUE_TITLE="${manual_issue_title}"
+      ISSUE_BODY="${manual_issue_body}"
+      ISSUE_URL="${manual_issue_url}"
+      ISSUE_LABELS_CSV="${manual_issue_labels_csv}"
+      issue_context_source="manual-fallback"
+      echo "Warning: gh issue fetch failed; using manual context fallback." >&2
+    else
+      echo "Error: failed to fetch issue via gh and no manual fallback context was provided." >&2
+      exit 2
+    fi
+  elif [[ "${has_manual_context}" == "true" ]]; then
+    ISSUE_TITLE="${manual_issue_title}"
+    ISSUE_BODY="${manual_issue_body}"
+    ISSUE_URL="${manual_issue_url}"
+    ISSUE_LABELS_CSV="${manual_issue_labels_csv}"
+    issue_context_source="manual-no-gh"
+    echo "Warning: gh command not found; using manual context fallback." >&2
+  else
+    echo "Error: gh is unavailable and no manual context was provided." >&2
+    exit 2
+  fi
+fi
+if [[ -z "${ISSUE_LABELS_CSV}" ]]; then
+  ISSUE_LABELS_CSV="${manual_issue_labels_csv}"
+fi
+extra_issue_instruction_trimmed="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -n "${extra_issue_instruction_trimmed}" ]]; then
+  ISSUE_BODY="$(printf '%s\n\n## Vote Instruction\n%s\n' "${ISSUE_BODY}" "${extra_issue_instruction_trimmed}")"
+  echo "Applied local vote instruction override to issue context." >&2
+fi
+echo "Issue context source: ${issue_context_source}" >&2
 
 run_id="$(date +%Y%m%d-%H%M%S)-$$"
 RUN_DIR="${OUT_DIR}/issue-${ISSUE_NUMBER}-${run_id}"
@@ -205,8 +360,8 @@ LANE_DIR="${RUN_DIR}/lanes"
 TMP_DIR="${RUN_DIR}/tmp"
 mkdir -p "${LANE_DIR}" "${TMP_DIR}"
 
-strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-true}"
-strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-true}"
+strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}"
+strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}"
 claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}"
 eval "$("${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
@@ -226,10 +381,27 @@ claude_rate_limit_state="$(echo "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:u
 if [[ "${claude_rate_limit_state}" != "ok" && "${claude_rate_limit_state}" != "degraded" && "${claude_rate_limit_state}" != "exhausted" ]]; then
   claude_rate_limit_state="ok"
 fi
-local_require_claude_assist="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+local_require_claude_assist="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${local_require_claude_assist}" != "true" ]]; then
   local_require_claude_assist="false"
 fi
+local_require_claude_assist_on_complex="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_require_claude_assist_on_complex}" != "false" ]]; then
+  local_require_claude_assist_on_complex="true"
+fi
+local_ambiguity_signal="$(echo "${FUGUE_LOCAL_AMBIGUITY_SIGNAL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_ambiguity_signal}" != "true" ]]; then
+  local_ambiguity_signal="false"
+fi
+eval "$("${WORKFLOW_RISK_POLICY}" \
+  --title "${ISSUE_TITLE}" \
+  --body "${ISSUE_BODY}" \
+  --labels "${ISSUE_LABELS_CSV}" \
+  --has-implement "false" \
+  --orchestration-profile "codex-full")"
+issue_risk_tier="${risk_tier}"
+issue_risk_score="${risk_score}"
+issue_risk_reasons="${risk_reasons}"
 claude_session_handoff="$(echo "${FUGUE_CLAUDE_SESSION_HANDOFF:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${claude_session_handoff}" != "true" ]]; then
   claude_session_handoff="false"
@@ -240,12 +412,23 @@ if [[ "${claude_session_handoff}" == "true" ]]; then
 fi
 
 matrix_file="${RUN_DIR}/matrix.json"
+dual_main_signal_raw="$(echo "${FUGUE_DUAL_MAIN_SIGNAL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${dual_main_signal_raw}" == "true" ]]; then
+  dual_main_signal="true"
+elif [[ "${dual_main_signal_raw}" == "false" ]]; then
+  dual_main_signal="false"
+elif [[ "${MULTI_AGENT_MODE}" == "max" ]]; then
+  dual_main_signal="true"
+else
+  dual_main_signal="false"
+fi
 matrix_payload="$("${MATRIX_BUILDER}" \
   --engine "subscription" \
   --main-provider "${MAIN_PROVIDER}" \
   --assist-provider "${ASSIST_PROVIDER}" \
   --multi-agent-mode "${MULTI_AGENT_MODE}" \
   --glm-subagent-mode "${GLM_SUBAGENT_MODE}" \
+  --dual-main-signal "${dual_main_signal}" \
   --allow-glm-in-subscription "true" \
   --wants-gemini "false" \
   --wants-xai "false" \
@@ -255,7 +438,15 @@ matrix_payload="$("${MATRIX_BUILDER}" \
   --format "json")"
 echo "${matrix_payload}" | jq -c '.matrix' > "${matrix_file}"
 lanes_total="$(echo "${matrix_payload}" | jq -r '.lanes')"
-echo "Running local orchestration: issue=${ISSUE_NUMBER} lanes=${lanes_total} mode=${MULTI_AGENT_MODE} glm_mode=${GLM_SUBAGENT_MODE}" >&2
+if ! [[ "${lanes_total}" =~ ^[0-9]+$ ]]; then
+  echo "Error: resolved lane count is not numeric (lanes=${lanes_total})." >&2
+  exit 2
+fi
+if (( lanes_total < MIN_CONSENSUS_LANES )); then
+  echo "Error: resolved lane count (${lanes_total}) is below minimum consensus floor (${MIN_CONSENSUS_LANES})." >&2
+  exit 2
+fi
+echo "Running local orchestration: issue=${ISSUE_NUMBER} lanes=${lanes_total} mode=${MULTI_AGENT_MODE} glm_mode=${GLM_SUBAGENT_MODE} dual_main=${dual_main_signal}" >&2
 
 lane_jobs_file="${RUN_DIR}/lane-jobs.jsonl"
 jq -c '.include[]' "${matrix_file}" > "${lane_jobs_file}"
@@ -444,23 +635,61 @@ fi
 
 required_claude_assist_gate="not-required"
 required_claude_assist_reason="assist-not-required"
+complex_claude_sub_required="false"
+complex_claude_sub_reason="complex-not-required"
+if [[ "${local_require_claude_assist_on_complex}" == "true" ]]; then
+  if [[ "${ASSIST_PROVIDER}" != "claude" ]]; then
+    complex_claude_sub_reason="complex-policy-assist-${ASSIST_PROVIDER}"
+  elif [[ "${issue_risk_tier}" == "high" ]]; then
+    complex_claude_sub_required="true"
+    complex_claude_sub_reason="risk-high(score=${issue_risk_score},reasons=${issue_risk_reasons})"
+  elif [[ "${local_ambiguity_signal}" == "true" ]]; then
+    complex_claude_sub_required="true"
+    complex_claude_sub_reason="ambiguity-signal"
+  fi
+else
+  complex_claude_sub_reason="complex-policy-disabled"
+fi
+gate_required="false"
+gate_requirement_kind="none"
+if [[ "${complex_claude_sub_required}" == "true" ]]; then
+  gate_required="true"
+  gate_requirement_kind="complex"
+fi
 if [[ "${ASSIST_PROVIDER}" == "claude" && "${local_require_claude_assist}" == "true" ]]; then
-  if [[ "${claude_rate_limit_state}" == "ok" ]]; then
-    required_claude_assist_gate="fail"
-    required_claude_assist_reason="required-when-claude-ok"
-    if jq -e \
-      --arg opus "${claude_opus_model}" \
-      '[ .[] | select(.name == "claude-opus-assist" and .skipped != true and (.provider|ascii_downcase) == "claude" and (.model|ascii_downcase) == ($opus|ascii_downcase) and ((.http_code|tostring|startswith("cli:")) or (.http_code|tostring) == "200")) ] | length > 0' \
-      "${all_results}" >/dev/null 2>&1; then
-      required_claude_assist_gate="pass"
-      required_claude_assist_reason="claude-opus-assist-direct-success"
-    else
-      required_claude_assist_gate="fail"
-      required_claude_assist_reason="claude-opus-assist-missing-or-failed"
-    fi
+  gate_required="true"
+  if [[ "${gate_requirement_kind}" == "complex" ]]; then
+    gate_requirement_kind="complex+direct"
   else
-    required_claude_assist_gate="not-required"
-    required_claude_assist_reason="claude-rate-limit-${claude_rate_limit_state}"
+    gate_requirement_kind="direct"
+  fi
+fi
+if [[ "${gate_required}" == "true" ]]; then
+  required_claude_assist_gate="pass"
+  required_claude_assist_reason="${gate_requirement_kind}-ok"
+  if [[ "${ASSIST_PROVIDER}" != "claude" ]]; then
+    required_claude_assist_gate="fail"
+    required_claude_assist_reason="${gate_requirement_kind}-assist-${ASSIST_PROVIDER}"
+  elif [[ "${claude_rate_limit_state}" != "ok" ]]; then
+    required_claude_assist_gate="fail"
+    required_claude_assist_reason="${gate_requirement_kind}-claude-rate-limit-${claude_rate_limit_state}"
+  elif jq -e \
+    --arg opus "${claude_opus_model}" \
+    '[ .[] | select(.name == "claude-opus-assist" and .skipped != true and (.provider|ascii_downcase) == "claude" and (.model|ascii_downcase) == ($opus|ascii_downcase) and ((.http_code|tostring|startswith("cli:")) or (.http_code|tostring) == "200")) ] | length > 0' \
+    "${all_results}" >/dev/null 2>&1; then
+    required_claude_assist_gate="pass"
+    required_claude_assist_reason="${gate_requirement_kind}-claude-opus-assist-success"
+  else
+    required_claude_assist_gate="fail"
+    required_claude_assist_reason="${gate_requirement_kind}-claude-opus-assist-missing-or-failed"
+  fi
+else
+  if [[ "${complex_claude_sub_required}" != "true" && "${local_require_claude_assist_on_complex}" == "true" ]]; then
+    required_claude_assist_reason="${complex_claude_sub_reason}"
+  elif [[ "${local_require_claude_assist}" != "true" ]]; then
+    required_claude_assist_reason="direct-policy-disabled"
+  else
+    required_claude_assist_reason="policy-disabled"
   fi
 fi
 if [[ "${required_claude_assist_gate}" == "fail" ]]; then
@@ -512,6 +741,7 @@ jq -n \
   --arg mode "${MULTI_AGENT_MODE}" \
   --arg glm_mode "${GLM_SUBAGENT_MODE}" \
   --argjson lanes "${lanes_total}" \
+  --argjson min_consensus_lanes "${MIN_CONSENSUS_LANES}" \
   --argjson approve_count "${approve_count}" \
   --argjson total_count "${total_count}" \
   --argjson threshold "${threshold}" \
@@ -527,6 +757,14 @@ jq -n \
   --arg linked_status "${linked_status}" \
   --arg linked_run_dir "${linked_run_dir}" \
   --arg linked_note "${linked_note}" \
+  --arg issue_risk_tier "${issue_risk_tier}" \
+  --arg issue_risk_score "${issue_risk_score}" \
+  --arg issue_risk_reasons "${issue_risk_reasons}" \
+  --arg local_ambiguity_signal "${local_ambiguity_signal}" \
+  --arg complex_claude_sub_required "${complex_claude_sub_required}" \
+  --arg complex_claude_sub_reason "${complex_claude_sub_reason}" \
+  --arg claude_sub_gate_required "${gate_required}" \
+  --arg claude_sub_gate_requirement_kind "${gate_requirement_kind}" \
   --arg required_claude_assist_gate "${required_claude_assist_gate}" \
   --arg required_claude_assist_reason "${required_claude_assist_reason}" \
   --argjson claude_session_count "${claude_session_count}" \
@@ -541,6 +779,7 @@ jq -n \
     multi_agent_mode:$mode,
     glm_subagent_mode:$glm_mode,
     lanes_configured:$lanes,
+    minimum_consensus_lanes:$min_consensus_lanes,
     approve_count:$approve_count,
     total_count:$total_count,
     threshold:$threshold,
@@ -556,6 +795,14 @@ jq -n \
     linked_systems_status:$linked_status,
     linked_systems_run_dir:$linked_run_dir,
     linked_systems_note:$linked_note,
+    issue_risk_tier:$issue_risk_tier,
+    issue_risk_score:($issue_risk_score|tonumber? // 0),
+    issue_risk_reasons:$issue_risk_reasons,
+    local_ambiguity_signal:($local_ambiguity_signal=="true"),
+    complex_claude_sub_required:($complex_claude_sub_required=="true"),
+    complex_claude_sub_reason:$complex_claude_sub_reason,
+    claude_sub_gate_required:($claude_sub_gate_required=="true"),
+    claude_sub_gate_requirement_kind:$claude_sub_gate_requirement_kind,
     required_claude_assist_gate:$required_claude_assist_gate,
     required_claude_assist_reason:$required_claude_assist_reason,
     claude_session_count:$claude_session_count,
@@ -568,15 +815,21 @@ cat > "${summary_md}" <<EOF
 ## Local Tutti Integrated Review
 
 - issue: #${ISSUE_NUMBER} (${ISSUE_URL})
+- issue context source: ${issue_context_source}
 - main orchestrator: ${MAIN_PROVIDER}
 - assist orchestrator: ${ASSIST_PROVIDER}
 - multi-agent mode: ${MULTI_AGENT_MODE}
 - glm subagent mode: ${GLM_SUBAGENT_MODE}
 - lanes configured: ${lanes_total}
+- minimum consensus lanes: ${MIN_CONSENSUS_LANES}
 - approvals: ${approve_count}/${total_count} (threshold ${threshold})
 - weighted approvals: ${weighted_approve_score}/${weighted_total_score} (threshold ${weighted_threshold})
 - weighted vote passed: ${weighted_vote_passed}
 - high-risk findings: ${high_risk_count}
+- issue risk tier: ${issue_risk_tier} (score=${issue_risk_score}, reasons=${issue_risk_reasons})
+- local ambiguity signal: ${local_ambiguity_signal}
+- complex claude-sub requirement: ${complex_claude_sub_required} (${complex_claude_sub_reason})
+- claude sub gate required: ${gate_required} (${gate_requirement_kind})
 - linked systems mode: ${LINKED_MODE} (selection ${LINKED_SYSTEMS})
 - linked systems status: ${linked_status} (${linked_note})
 - linked systems run dir: ${linked_run_dir}
