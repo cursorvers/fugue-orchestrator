@@ -210,6 +210,22 @@ jobs:
             url="$("${cmd[@]}")"
             local issue_num="${url##*/}"
             gh issue edit "${issue_num}" --repo "${repo}" --add-label "tutti" >/dev/null
+            local has_tutti="false"
+            local label_attempt=1
+            local issue_json
+            while [[ "${label_attempt}" -le 10 ]]; do
+              issue_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}" 4 || echo '{}')"
+              has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null' 2>/dev/null || echo "false")"
+              if [[ "${has_tutti}" == "true" ]]; then
+                break
+              fi
+              sleep 2
+              label_attempt="$((label_attempt + 1))"
+            done
+            if [[ "${has_tutti}" != "true" ]]; then
+              echo "Failed to confirm 'tutti' label before dispatch for issue #${issue_num}." >&2
+              return 1
+            fi
             gh workflow run fugue-tutti-caller.yml \
               --repo "${repo}" \
               -f issue_number="${issue_num}" >/dev/null
@@ -344,7 +360,7 @@ jobs:
               failures="$((failures + 1))"
             fi
           else
-            conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
+            conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
             failures="$((failures + 1))"
           fi
 
@@ -385,7 +401,7 @@ jobs:
               failures="$((failures + 1))"
             fi
           else
-            conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
+            conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
             failures="$((failures + 1))"
           fi
 
