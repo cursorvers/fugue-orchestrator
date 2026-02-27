@@ -283,9 +283,17 @@ jobs:
               echo "Failed to confirm 'tutti' label before dispatch for issue #${issue_num}." >&2
               return 1
             fi
-            gh workflow run fugue-tutti-caller.yml \
+            local dispatch_offline_policy=""
+            if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
+              dispatch_offline_policy="${canary_offline_policy_override}"
+            fi
+            local run_cmd=(gh workflow run fugue-tutti-caller.yml \
               --repo "${repo}" \
-              -f issue_number="${issue_num}" >/dev/null
+              -f issue_number="${issue_num}")
+            if [[ -n "${dispatch_offline_policy}" ]]; then
+              run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
+            fi
+            "${run_cmd[@]}" >/dev/null
             echo "${issue_num}"
           }
 
