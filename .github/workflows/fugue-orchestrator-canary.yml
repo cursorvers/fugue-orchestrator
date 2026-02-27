@@ -27,6 +27,12 @@ jobs:
       API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
       HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+      CANARY_LABEL_WAIT_ATTEMPTS: ${{ vars.FUGUE_CANARY_LABEL_WAIT_ATTEMPTS || '10' }}
+      CANARY_LABEL_WAIT_SLEEP_SEC: ${{ vars.FUGUE_CANARY_LABEL_WAIT_SLEEP_SEC || '2' }}
+      CANARY_WAIT_FAST_ATTEMPTS: ${{ vars.FUGUE_CANARY_WAIT_FAST_ATTEMPTS || '12' }}
+      CANARY_WAIT_FAST_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_FAST_SLEEP_SEC || '10' }}
+      CANARY_WAIT_SLOW_ATTEMPTS: ${{ vars.FUGUE_CANARY_WAIT_SLOW_ATTEMPTS || '9' }}
+      CANARY_WAIT_SLOW_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC || '20' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,6 +81,17 @@ jobs:
           normalize() {
             echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
           }
+          clamp_num() {
+            local value="$1"
+            local min="$2"
+            local max="$3"
+            if (( value < min )); then
+              value="${min}"
+            elif (( value > max )); then
+              value="${max}"
+            fi
+            echo "${value}"
+          }
 
           claude_state="$(normalize "${CLAUDE_RATE_LIMIT_STATE:-ok}")"
           role_policy="$(normalize "${CLAUDE_ROLE_POLICY:-flex}")"
@@ -96,6 +113,36 @@ jobs:
           if [[ -z "${subscription_runner_label}" ]]; then
             subscription_runner_label="fugue-subscription"
           fi
+          canary_label_wait_attempts="$(echo "${CANARY_LABEL_WAIT_ATTEMPTS:-10}" | tr -cd '0-9')"
+          if [[ -z "${canary_label_wait_attempts}" || "${canary_label_wait_attempts}" == "0" ]]; then
+            canary_label_wait_attempts="10"
+          fi
+          canary_label_wait_attempts="$(clamp_num "${canary_label_wait_attempts}" 1 60)"
+          canary_label_wait_sleep_sec="$(echo "${CANARY_LABEL_WAIT_SLEEP_SEC:-2}" | tr -cd '0-9')"
+          if [[ -z "${canary_label_wait_sleep_sec}" ]]; then
+            canary_label_wait_sleep_sec="2"
+          fi
+          canary_label_wait_sleep_sec="$(clamp_num "${canary_label_wait_sleep_sec}" 1 30)"
+          canary_wait_fast_attempts="$(echo "${CANARY_WAIT_FAST_ATTEMPTS:-12}" | tr -cd '0-9')"
+          if [[ -z "${canary_wait_fast_attempts}" || "${canary_wait_fast_attempts}" == "0" ]]; then
+            canary_wait_fast_attempts="12"
+          fi
+          canary_wait_fast_attempts="$(clamp_num "${canary_wait_fast_attempts}" 1 60)"
+          canary_wait_fast_sleep_sec="$(echo "${CANARY_WAIT_FAST_SLEEP_SEC:-10}" | tr -cd '0-9')"
+          if [[ -z "${canary_wait_fast_sleep_sec}" ]]; then
+            canary_wait_fast_sleep_sec="10"
+          fi
+          canary_wait_fast_sleep_sec="$(clamp_num "${canary_wait_fast_sleep_sec}" 1 60)"
+          canary_wait_slow_attempts="$(echo "${CANARY_WAIT_SLOW_ATTEMPTS:-9}" | tr -cd '0-9')"
+          if [[ -z "${canary_wait_slow_attempts}" ]]; then
+            canary_wait_slow_attempts="9"
+          fi
+          canary_wait_slow_attempts="$(clamp_num "${canary_wait_slow_attempts}" 0 60)"
+          canary_wait_slow_sleep_sec="$(echo "${CANARY_WAIT_SLOW_SLEEP_SEC:-20}" | tr -cd '0-9')"
+          if [[ -z "${canary_wait_slow_sleep_sec}" ]]; then
+            canary_wait_slow_sleep_sec="20"
+          fi
+          canary_wait_slow_sleep_sec="$(clamp_num "${canary_wait_slow_sleep_sec}" 1 120)"
 
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
             runners_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 5 || echo '{}')"
@@ -213,13 +260,13 @@ jobs:
             local has_tutti="false"
             local label_attempt=1
             local issue_json
-            while [[ "${label_attempt}" -le 10 ]]; do
+            while [[ "${label_attempt}" -le "${canary_label_wait_attempts}" ]]; do
               issue_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}" 4 || echo '{}')"
               has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null' 2>/dev/null || echo "false")"
               if [[ "${has_tutti}" == "true" ]]; then
                 break
               fi
-              sleep 2
+              sleep "${canary_label_wait_sleep_sec}"
               label_attempt="$((label_attempt + 1))"
             done
             if [[ "${has_tutti}" != "true" ]]; then
@@ -234,11 +281,12 @@ jobs:
 
           wait_for_resolved_orchestrators() {
             local issue_num="$1"
-            local max_attempts=45
-            local sleep_sec=20
+            local phase="fast"
+            local max_attempts="${canary_wait_fast_attempts}"
+            local sleep_sec="${canary_wait_fast_sleep_sec}"
             local attempt=1
             local comments_json meta_json comment
-            while [[ "${attempt}" -le "${max_attempts}" ]]; do
+            while true; do
               comments_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}/comments?per_page=100" 4 || echo '[]')"
               meta_json="$(echo "${comments_json}" | jq -r '
                 [ .[]?.body
@@ -270,6 +318,16 @@ jobs:
                   echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}"
                   return 0
                 fi
+              fi
+              if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+                if [[ "${phase}" == "fast" && "${canary_wait_slow_attempts}" != "0" ]]; then
+                  phase="slow"
+                  max_attempts="${canary_wait_slow_attempts}"
+                  sleep_sec="${canary_wait_slow_sleep_sec}"
+                  attempt=1
+                  continue
+                fi
+                break
               fi
               sleep "${sleep_sec}"
               attempt="$((attempt + 1))"
@@ -323,8 +381,33 @@ jobs:
           regular_issue="$(create_issue "[canary] regular claude request ${ts}" "")"
           force_issue="$(create_issue "[canary] forced claude request ${ts}" "orchestrator-force:claude")"
 
+          regular_pair_file="$(mktemp)"
+          force_pair_file="$(mktemp)"
+          cleanup_wait_files() {
+            rm -f "${regular_pair_file}" "${force_pair_file}"
+          }
+          trap cleanup_wait_files EXIT
+
+          wait_for_resolved_orchestrators "${regular_issue}" >"${regular_pair_file}" &
+          regular_wait_pid="$!"
+          wait_for_resolved_orchestrators "${force_issue}" >"${force_pair_file}" &
+          force_wait_pid="$!"
+
           regular_pair=""
-          if regular_pair="$(wait_for_resolved_orchestrators "${regular_issue}")"; then
+          regular_wait_ok="false"
+          if wait "${regular_wait_pid}"; then
+            regular_pair="$(tail -n1 "${regular_pair_file}" | tr -d '\r')"
+            regular_wait_ok="true"
+          fi
+
+          force_pair=""
+          force_wait_ok="false"
+          if wait "${force_wait_pid}"; then
+            force_pair="$(tail -n1 "${force_pair_file}" | tr -d '\r')"
+            force_wait_ok="true"
+          fi
+
+          if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
             regular_main="${regular_pair%%|*}"
             regular_rest="${regular_pair#*|}"
             regular_assist="${regular_rest%%|*}"
@@ -364,8 +447,7 @@ jobs:
             failures="$((failures + 1))"
           fi
 
-          force_pair=""
-          if force_pair="$(wait_for_resolved_orchestrators "${force_issue}")"; then
+          if [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
             force_main="${force_pair%%|*}"
             force_rest="${force_pair#*|}"
             force_assist="${force_rest%%|*}"
