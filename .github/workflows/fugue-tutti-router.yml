@@ -1092,6 +1092,7 @@ jobs:
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           REQUIRE_DIRECT_CLAUDE_ASSIST: ${{ vars.FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST || 'false' }}
           REQUIRE_CLAUDE_SUB_ON_COMPLEX: ${{ vars.FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX || 'true' }}
+          REQUIRE_BASELINE_TRIO: ${{ vars.FUGUE_REQUIRE_BASELINE_TRIO || 'true' }}
           INPUT_RISK_TIER: ${{ inputs.risk_tier }}
           INPUT_AMBIGUITY_TRANSLATION_GATE: ${{ inputs.ambiguity_translation_gate }}
           INPUT_AMBIGUITY_TRANSLATION_SCORE: ${{ inputs.ambiguity_translation_score }}
@@ -1123,6 +1124,10 @@ jobs:
           require_claude_sub_on_complex="$(echo "${REQUIRE_CLAUDE_SUB_ON_COMPLEX:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${require_claude_sub_on_complex}" != "false" ]]; then
             require_claude_sub_on_complex="true"
+          fi
+          require_baseline_trio="$(echo "${REQUIRE_BASELINE_TRIO:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${require_baseline_trio}" != "false" ]]; then
+            require_baseline_trio="true"
           fi
           input_risk_tier="$(echo "${INPUT_RISK_TIER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${input_risk_tier}" != "low" && "${input_risk_tier}" != "medium" && "${input_risk_tier}" != "high" ]]; then
@@ -1218,6 +1223,64 @@ jobs:
             fi
           fi
 
+          baseline_trio_gate="not-required"
+          baseline_trio_reason="policy-disabled"
+          codex_baseline_success="$(jq '[
+            .[] | select(
+              .skipped != true
+              and ((.provider // "" | ascii_downcase) == "codex")
+              and (
+                ((.http_code // "" | tostring) == "200")
+                or
+                ((.http_code // "" | tostring | startswith("cli:0")))
+              )
+            )
+          ] | length' all-results.json)"
+          claude_baseline_success="$(jq '[
+            .[] | select(
+              .skipped != true
+              and ((.provider // "" | ascii_downcase) == "claude")
+              and (
+                ((.http_code // "" | tostring) == "200")
+                or
+                ((.http_code // "" | tostring | startswith("cli:0")))
+              )
+            )
+          ] | length' all-results.json)"
+          glm_baseline_success="$(jq '[
+            .[] | select(
+              .skipped != true
+              and ((.provider // "" | ascii_downcase) == "glm")
+              and ((.name // "") | test("^glm-.*-subagent$") | not)
+              and (
+                ((.http_code // "" | tostring) == "200")
+                or
+                ((.http_code // "" | tostring | startswith("cli:0")))
+              )
+            )
+          ] | length' all-results.json)"
+          if [[ "${require_baseline_trio}" == "true" ]]; then
+            baseline_trio_gate="pass"
+            baseline_missing=()
+            if [[ "${codex_baseline_success}" -eq 0 ]]; then
+              baseline_missing+=("codex")
+            fi
+            if [[ "${claude_baseline_success}" -eq 0 ]]; then
+              baseline_missing+=("claude")
+            fi
+            if [[ "${glm_baseline_success}" -eq 0 ]]; then
+              baseline_missing+=("glm")
+            fi
+            if (( ${#baseline_missing[@]} > 0 )); then
+              baseline_trio_gate="fail"
+              baseline_trio_reason="missing-$(IFS=,; echo "${baseline_missing[*]}")"
+              high_risk="true"
+              high_risk_count="$((high_risk_count + 1))"
+            else
+              baseline_trio_reason="codex+claude+glm-ok"
+            fi
+          fi
+
           if [[ "${total_count}" -eq 0 ]]; then
             threshold=1
           else
@@ -1252,7 +1315,7 @@ jobs:
           weighted_threshold="$(awk -v total="${weighted_total_score}" 'BEGIN {printf "%.3f", (2*total)/3}')"
           weighted_vote_passed="$(awk -v approve="${weighted_approve_score}" -v threshold="${weighted_threshold}" 'BEGIN { if (approve + 1e-9 >= threshold) print "true"; else print "false" }')"
           ok_to_execute="false"
-          if [[ "${required_claude_assist_gate}" == "fail" ]]; then
+          if [[ "${required_claude_assist_gate}" == "fail" || "${baseline_trio_gate}" == "fail" ]]; then
             weighted_vote_passed="false"
           fi
           if [[ "${weighted_vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
@@ -1341,6 +1404,12 @@ jobs:
           elif [[ "${required_claude_assist_gate}" == "fail" ]]; then
             required_assist_section="- required claude assist gate: fail (\`${required_claude_assist_reason}\`)"
           fi
+          baseline_trio_section="- baseline trio gate (codex+claude+glm): not-required"
+          if [[ "${baseline_trio_gate}" == "pass" ]]; then
+            baseline_trio_section="- baseline trio gate (codex+claude+glm): pass (\`${baseline_trio_reason}\`, codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})"
+          elif [[ "${baseline_trio_gate}" == "fail" ]]; then
+            baseline_trio_section="- baseline trio gate (codex+claude+glm): fail (\`${baseline_trio_reason}\`, codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})"
+          fi
           complex_assist_section="- complex claude-sub requirement: ${complex_claude_sub_required} (\`${complex_claude_sub_reason}\`)"
           integrated_meta="$(jq -cn \
             --arg schema "fugue-integrated-meta/v1" \
@@ -1358,6 +1427,11 @@ jobs:
             --arg high_risk "${high_risk}" \
             --arg required_claude_assist_gate "${required_claude_assist_gate}" \
             --arg required_claude_assist_reason "${required_claude_assist_reason}" \
+            --arg baseline_trio_gate "${baseline_trio_gate}" \
+            --arg baseline_trio_reason "${baseline_trio_reason}" \
+            --arg codex_baseline_success "${codex_baseline_success}" \
+            --arg claude_baseline_success "${claude_baseline_success}" \
+            --arg glm_baseline_success "${glm_baseline_success}" \
             --arg complex_claude_sub_required "${complex_claude_sub_required}" \
             --arg complex_claude_sub_reason "${complex_claude_sub_reason}" \
             '{
@@ -1376,6 +1450,11 @@ jobs:
               high_risk:($high_risk == "true"),
               required_claude_assist_gate:$required_claude_assist_gate,
               required_claude_assist_reason:$required_claude_assist_reason,
+              baseline_trio_gate:$baseline_trio_gate,
+              baseline_trio_reason:$baseline_trio_reason,
+              codex_baseline_success:($codex_baseline_success | tonumber? // 0),
+              claude_baseline_success:($claude_baseline_success | tonumber? // 0),
+              glm_baseline_success:($glm_baseline_success | tonumber? // 0),
               complex_claude_sub_required:($complex_claude_sub_required == "true"),
               complex_claude_sub_reason:$complex_claude_sub_reason
             }'
@@ -1410,6 +1489,7 @@ jobs:
           ${claude_pressure_section}
           ${complex_assist_section}
           ${required_assist_section}
+          ${baseline_trio_section}
           - lanes configured: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
 
           **Rule a: Security criticism (unconditionally adopted)**
