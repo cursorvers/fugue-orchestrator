@@ -46,6 +46,14 @@ fi
 codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+sim_codex_spark_only="$(echo "${FUGUE_SIM_CODEX_SPARK_ONLY:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${sim_codex_spark_only}" != "false" ]]; then
+  sim_codex_spark_only="true"
+fi
+sim_codex_spark_model="$(echo "${FUGUE_SIM_CODEX_SPARK_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if ! [[ "${sim_codex_spark_model}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+  sim_codex_spark_model="gpt-5.3-codex-spark"
+fi
 model_policy_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)/model-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
   eval "$("${model_policy_script}" \
@@ -60,6 +68,12 @@ if [[ -x "${model_policy_script}" ]]; then
   codex_main_model_default="${codex_main_model}"
   codex_multi_agent_model_default="${codex_multi_agent_model}"
   claude_opus_model_default="${claude_model}"
+fi
+# Simulation common rule: keep simulation iterations fast by using codex-spark only
+# unless explicitly disabled.
+if [[ "${sim_codex_spark_only}" == "true" ]]; then
+  codex_main_model_default="${sim_codex_spark_model}"
+  codex_multi_agent_model_default="${sim_codex_spark_model}"
 fi
 claude_sonnet4_model_default="${claude_opus_model_default}"
 claude_sonnet6_model_default="${claude_opus_model_default}"
