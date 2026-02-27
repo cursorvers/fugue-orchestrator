@@ -54,8 +54,16 @@ jobs:
           set -euo pipefail
 
           COMMENT_BODY=""
+          IS_VOTE_COMMAND="false"
+          VOTE_INSTRUCTION=""
           if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
             COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+            comment_trimmed="$(printf '%s\n' "${COMMENT_BODY}" | sed -E 's/^[[:space:]]+//')"
+            if printf '%s\n' "${comment_trimmed}" | grep -Eqi '^/vote([[:space:]]|$)'; then
+              IS_VOTE_COMMAND="true"
+              VOTE_INSTRUCTION="$(printf '%s' "${comment_trimmed}" | sed -E '1s%^[[:space:]]*/vote[[:space:]]*%%')"
+              VOTE_INSTRUCTION="$(printf '%s' "${VOTE_INSTRUCTION}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            fi
           fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
@@ -98,10 +106,10 @@ jobs:
           elif [[ "${HAS_GHA24}" == "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="handled-by-gha24"
-          elif [[ "${HAS_TUTTI}" == "true" ]]; then
+          elif [[ "${HAS_TUTTI}" == "true" && "${IS_VOTE_COMMAND}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="handled-by-tutti"
-          elif [[ "${HAS_PROCESSING}" == "true" ]]; then
+          elif [[ "${HAS_PROCESSING}" == "true" && "${IS_VOTE_COMMAND}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="already-processing"
           fi
@@ -116,6 +124,10 @@ jobs:
             echo "EOF"
             echo "comment_body<<EOF"
             echo "${COMMENT_BODY}"
+            echo "EOF"
+            echo "is_vote_command=${IS_VOTE_COMMAND}"
+            echo "vote_instruction<<EOF"
+            echo "${VOTE_INSTRUCTION}"
             echo "EOF"
             echo "author=${AUTHOR}"
             echo "author_association=${AUTHOR_ASSOC}"
@@ -137,6 +149,13 @@ jobs:
       - name: Checkout repository
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         uses: actions/checkout@v4
+
+      - name: Checkout orchestrator scripts
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          path: .fugue-orchestrator
 
       - name: Annotate target project (label + title prefix)
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
@@ -213,6 +232,9 @@ jobs:
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+          COMMENT_BODY: ${{ steps.ctx.outputs.comment_body }}
+          IS_VOTE_COMMAND: ${{ steps.ctx.outputs.is_vote_command }}
+          VOTE_INSTRUCTION: ${{ steps.ctx.outputs.vote_instruction }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
@@ -224,7 +246,9 @@ jobs:
 
           title="${ISSUE_TITLE}"
           body="${ISSUE_BODY}"
-          text="$(printf '%s\n%s\n' "${title}" "${body}")"
+          comment="${COMMENT_BODY}"
+          vote_instruction="$(printf '%s' "${VOTE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
 
           extract_heading_value() {
             local source="$1"
@@ -288,11 +312,24 @@ jobs:
             body_assist_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*assist[[:space:]]+orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex|none)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
 
-          eval "$(
-            scripts/lib/orchestrator-nl-hints.sh \
-              --title "${title}" \
-              --body "${body}"
-          )"
+          orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
+          if [[ ! -d "${orchestrator_lib_dir}" ]]; then
+            orchestrator_lib_dir="scripts/lib"
+          fi
+
+          nl_main_hint=""
+          nl_assist_hint=""
+          nl_hint_applied="false"
+          nl_inference_skipped_reason=""
+          if [[ -f "${orchestrator_lib_dir}/orchestrator-nl-hints.sh" ]]; then
+            eval "$(
+              bash "${orchestrator_lib_dir}/orchestrator-nl-hints.sh" \
+                --title "${title}" \
+                --body "${body}"
+            )"
+          else
+            nl_inference_skipped_reason="missing-orchestrator-nl-hints-script"
+          fi
 
           provider="${label_main_provider}"
           main_provider_source="label"
@@ -321,18 +358,32 @@ jobs:
             assist_provider_source="default"
           fi
 
-          eval "$(
-            scripts/lib/orchestrator-policy.sh \
-              --main "${provider}" \
-              --assist "${assist_provider}" \
-              --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
-              --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
-              --claude-state "${CLAUDE_RATE_LIMIT_STATE}" \
-              --force-claude "${force_claude}" \
-              --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}" \
-              --claude-role-policy "${CLAUDE_ROLE_POLICY}" \
-              --degraded-assist-policy "${CLAUDE_DEGRADED_ASSIST_POLICY}"
-          )"
+          requested_main="${provider}"
+          requested_assist="${assist_provider}"
+          resolved_main="${provider:-${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}}"
+          resolved_assist="${assist_provider:-${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}}"
+          main_fallback_applied="false"
+          main_fallback_reason=""
+          assist_fallback_applied="false"
+          assist_fallback_reason=""
+          pressure_guard_applied="false"
+          pressure_guard_reason=""
+          if [[ -f "${orchestrator_lib_dir}/orchestrator-policy.sh" ]]; then
+            eval "$(
+              bash "${orchestrator_lib_dir}/orchestrator-policy.sh" \
+                --main "${provider}" \
+                --assist "${assist_provider}" \
+                --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
+                --default-assist "${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}" \
+                --claude-state "${CLAUDE_RATE_LIMIT_STATE}" \
+                --force-claude "${force_claude}" \
+                --assist-policy "${CLAUDE_MAIN_ASSIST_POLICY}" \
+                --claude-role-policy "${CLAUDE_ROLE_POLICY}" \
+                --degraded-assist-policy "${CLAUDE_DEGRADED_ASSIST_POLICY}"
+            )"
+          else
+            main_fallback_reason="missing-orchestrator-policy-script"
+          fi
           requested_provider="${requested_main}"
           requested_assist_provider="${requested_assist}"
           provider="${resolved_main}"
@@ -480,6 +531,16 @@ jobs:
               confirm_note="Implementation intent is set, but execution is blocked until \`implement-confirmed\` is present."
             fi
           fi
+          vote_instruction_line=""
+          vote_instruction_b64=""
+          if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+            if [[ -n "${vote_instruction}" ]]; then
+              vote_instruction_line="- Vote instruction: accepted from \`/vote\` comment"
+              vote_instruction_b64="$(printf '%s' "${vote_instruction}" | base64 | tr -d '\n')"
+            else
+              vote_instruction_line="- Vote instruction: none (command only)"
+            fi
+          fi
           provider_line="- Orchestrator: ${provider}"
           if [[ -n "${main_fallback_note}" ]]; then
             provider_line="- Orchestrator: ${provider} (requested: ${requested_provider})"
@@ -504,6 +565,7 @@ jobs:
           ${assist_provider_line}
           ${source_line}
           ${nl_line}
+          ${vote_instruction_line}
           ${confirmation_line}
           - Action: added label \`tutti\`${extra}
           ${fallback_block}
@@ -515,9 +577,14 @@ jobs:
 
           # IMPORTANT: label events created by GitHub Actions' GITHUB_TOKEN do NOT trigger other workflows.
           # We must dispatch the mainframe workflow explicitly.
-          gh workflow run fugue-tutti-caller.yml \
-            --repo "${GITHUB_REPOSITORY}" \
-            -f issue_number="${ISSUE_NUMBER}" >/dev/null
+          dispatch_args=(
+            --repo "${GITHUB_REPOSITORY}"
+            -f issue_number="${ISSUE_NUMBER}"
+          )
+          if [[ -n "${vote_instruction_b64}" ]]; then
+            dispatch_args+=(-f vote_instruction_b64="${vote_instruction_b64}")
+          fi
+          gh workflow run fugue-tutti-caller.yml "${dispatch_args[@]}" >/dev/null
 
           echo "handoff=true" >> "${GITHUB_OUTPUT}"
           echo "mode=${mode}" >> "${GITHUB_OUTPUT}"

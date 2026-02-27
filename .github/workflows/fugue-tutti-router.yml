@@ -1492,6 +1492,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout orchestrator scripts
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          path: .fugue-orchestrator
+
       - name: Resolve orchestrator profile and lane matrix
         id: resolve
         env:
@@ -1534,13 +1540,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
+          if [[ ! -d "${orchestrator_lib_dir}" ]]; then
+            orchestrator_lib_dir="scripts/lib"
+          fi
+
           force_claude="$(echo "${FORCE_CLAUDE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${force_claude}" != "true" ]]; then
             force_claude="false"
           fi
 
           eval "$(
-            scripts/lib/orchestrator-policy.sh \
+            bash "${orchestrator_lib_dir}/orchestrator-policy.sh" \
               --main "${REQUESTED_PROVIDER}" \
               --assist "${REQUESTED_ASSIST_PROVIDER}" \
               --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
@@ -1614,7 +1625,7 @@ jobs:
           fi
           assist_before_execution_profile="${assist_provider}"
           eval "$(
-            scripts/lib/execution-profile-policy.sh \
+            bash "${orchestrator_lib_dir}/execution-profile-policy.sh" \
               --requested-engine "${ci_execution_engine}" \
               --main-provider "${main_provider}" \
               --assist-provider "${assist_provider}" \
@@ -1782,7 +1793,7 @@ jobs:
             codex_multi_agent_model="gpt-5.3-codex-spark"
           fi
 
-          matrix_payload="$(scripts/lib/build-agent-matrix.sh \
+          matrix_payload="$(bash "${orchestrator_lib_dir}/build-agent-matrix.sh" \
             --engine "${ci_execution_engine}" \
             --main-provider "${main_provider}" \
             --assist-provider "${assist_provider}" \
