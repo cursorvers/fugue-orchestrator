@@ -9,6 +9,21 @@ on:
         description: "Issue number to process (used for automated handoff)"
         required: true
         type: string
+      trust_subject:
+        description: "Optional trusted actor login for permission checks"
+        required: false
+        type: string
+        default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      vote_instruction_b64:
+        description: "Optional /vote instruction payload (base64-encoded)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   issues: write
@@ -18,7 +33,7 @@ permissions:
 
 concurrency:
   group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   ctx:
@@ -71,6 +86,9 @@ jobs:
       force_claude: ${{ steps.ctx.outputs.force_claude }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
+      trust_subject: ${{ steps.ctx.outputs.trust_subject }}
+      allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
+      vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -80,6 +98,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
+          TRUST_SUBJECT_INPUT: ${{ github.event.inputs.trust_subject || '' }}
+          ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
+          VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -153,6 +174,20 @@ jobs:
           fi
           title="$(echo "${issue_json}" | jq -r '.title // ""')"
           body="$(echo "${issue_json}" | jq -r '.body // ""')"
+          trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -n "${trust_subject}" ]]; then
+            trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+          fi
+          allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${allow_processing_rerun}" != "true" ]]; then
+            allow_processing_rerun="false"
+          fi
+          vote_instruction=""
+          vote_instruction_b64="$(echo "${VOTE_INSTRUCTION_B64_INPUT:-}" | tr -d '\n\r[:space:]')"
+          if [[ -n "${vote_instruction_b64}" ]]; then
+            vote_instruction="$(printf '%s' "${vote_instruction_b64}" | base64 --decode 2>/dev/null || true)"
+            vote_instruction="$(printf '%s' "${vote_instruction}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          fi
           owner="${GITHUB_REPOSITORY%%/*}"
 
           has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
@@ -864,6 +899,7 @@ jobs:
             echo "has_implement_confirmed=${has_implement_confirmed}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "subscription_runner_label=${subscription_runner_label}"
+            echo "trust_subject=${trust_subject}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_main_provider}"
             echo "main_orchestrator_provider=${requested_main_provider}"
@@ -913,6 +949,10 @@ jobs:
             echo "context_budget_guard_reasons=${context_budget_guard_reasons}"
             echo "assist_auto_selected=${assist_auto_selected}"
             echo "force_claude=${force_claude}"
+            echo "allow_processing_rerun=${allow_processing_rerun}"
+            echo "vote_instruction<<EOF"
+            echo "${vote_instruction}"
+            echo "EOF"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
@@ -1041,6 +1081,9 @@ jobs:
       force_claude: "${{ needs.ctx.outputs.force_claude }}"
       multi_agent_mode_override: "${{ needs.ctx.outputs.multi_agent_mode_override }}"
       multi_agent_mode_lock: "${{ needs.ctx.outputs.multi_agent_mode_lock }}"
+      trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
+      allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
+      extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}

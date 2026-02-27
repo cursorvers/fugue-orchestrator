@@ -57,6 +57,16 @@ on:
         required: false
         type: string
         default: "none"
+      trust_subject:
+        description: "Optional trusted actor login for permission checks"
+        required: false
+        type: string
+        default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
       extra_issue_instruction:
         description: "Optional additional instruction text (for example from /vote comments)"
         required: false
@@ -130,7 +140,7 @@ permissions:
 
 concurrency:
   group: fugue-tutti-${{ github.repository }}-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   prepare:
@@ -142,11 +152,14 @@ jobs:
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       issue_title: ${{ steps.ctx.outputs.issue_title }}
       issue_body: ${{ steps.ctx.outputs.issue_body }}
+      extra_issue_instruction: ${{ steps.ctx.outputs.extra_issue_instruction }}
       author: ${{ steps.ctx.outputs.author }}
+      trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       emergency_continuity_mode: ${{ steps.ctx.outputs.emergency_continuity_mode }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
+      allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
 
@@ -155,7 +168,9 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
-          EXTRA_ISSUE_INSTRUCTION: ${{ inputs.extra_issue_instruction }}
+          TRUST_SUBJECT_INPUT: ${{ inputs.trust_subject || '' }}
+          ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
+          EXTRA_ISSUE_INSTRUCTION_INPUT: ${{ inputs.extra_issue_instruction || '' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
@@ -197,9 +212,14 @@ jobs:
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
-          extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ -n "${extra_issue_instruction}" ]]; then
-            BODY="$(printf '%s\n\n## Vote Instruction\n%s\n' "${BODY}" "${extra_issue_instruction}")"
+          trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -n "${trust_subject}" ]]; then
+            trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+          fi
+          extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${allow_processing_rerun}" != "true" ]]; then
+            allow_processing_rerun="false"
           fi
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
@@ -248,7 +268,7 @@ jobs:
               SHOULD_RUN="false"
               SKIP_REASON="emergency-inflight-only"
             fi
-          elif [[ "${HAS_PROCESSING}" == "true" ]]; then
+          elif [[ "${HAS_PROCESSING}" == "true" && "${allow_processing_rerun}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="already-processing"
           fi
@@ -261,11 +281,16 @@ jobs:
             echo "issue_body<<EOF"
             echo "${BODY}"
             echo "EOF"
+            echo "extra_issue_instruction<<EOF"
+            echo "${extra_issue_instruction}"
+            echo "EOF"
             echo "author=${AUTHOR}"
+            echo "trust_subject=${trust_subject}"
             echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
             echo "emergency_continuity_mode=${emergency_continuity_mode}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "subscription_runner_label=${subscription_runner_label}"
+            echo "allow_processing_rerun=${allow_processing_rerun}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
@@ -298,10 +323,13 @@ jobs:
             return 1
           }
 
-          AUTHOR="${{ steps.ctx.outputs.author }}"
+          TRUST_SUBJECT="${{ steps.ctx.outputs.trust_subject }}"
+          if [[ -z "${TRUST_SUBJECT}" ]]; then
+            TRUST_SUBJECT="${{ steps.ctx.outputs.author }}"
+          fi
           PERM="none"
 
-          perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission"
+          perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission"
           perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
           if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
             PERM="$(echo "${perm_json}" | jq -r '.permission')"
@@ -407,6 +435,7 @@ jobs:
         env:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          EXTRA_ISSUE_INSTRUCTION: ${{ needs.prepare.outputs.extra_issue_instruction }}
           ORCHESTRATOR_PROVIDER: ${{ needs.resolve-orchestrator.outputs.main_provider }}
           ASSIST_ORCHESTRATOR_PROVIDER: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -439,6 +468,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          issue_body_effective="${ISSUE_BODY}"
+          extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -n "${extra_issue_instruction}" ]]; then
+            issue_body_effective="$(printf '%s\n\n## Vote Instruction\n%s\n' "${issue_body_effective}" "${extra_issue_instruction}")"
+          fi
+          export ISSUE_BODY="${issue_body_effective}"
+
           ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
@@ -468,7 +504,7 @@ jobs:
           user_prompt="Issue Title: ${ISSUE_TITLE}
 
           Issue Body:
-          ${ISSUE_BODY}"
+          ${issue_body_effective}"
 
           CLAUDE_PROXY_MODE="false"
           CLAUDE_PROXY_NOTE=""
