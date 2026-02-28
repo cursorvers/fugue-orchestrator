@@ -1117,15 +1117,15 @@ jobs:
       ok_to_execute: ${{ steps.integrate.outputs.ok_to_execute }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: agent-result-*
           path: agent-results
           merge-multiple: true
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       - name: Integrate results with jq rules
         id: integrate
