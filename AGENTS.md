@@ -32,6 +32,10 @@ Adapter files such as `CLAUDE.md` must stay thin and reference this file.
 - `codex` serves as assist sidecar when Claude is main (architectural invariant).
 - Claude subscription assumption is `FUGUE_CLAUDE_PLAN_TIER=max20` with `FUGUE_CLAUDE_MAX_PLAN=true`.
 - State transitions and PR actions are owned by control plane workflows, not by sidecar advice.
+- **v8.5 Tuning** (Claude consumption optimization):
+  - `FUGUE_CLAUDE_TRANSLATOR_THRESHOLD` raised to `90` (from `75`) to reduce translation gateway triggers.
+  - Claude assist lanes reduced to 1 in subscription mode (Opus only).
+  - Target: Claude weekly consumption ≤ 30-40% of MAX20 allocation.
 
 ## 3. Provider Resolution Contract
 
@@ -88,13 +92,14 @@ Auditability:
 - GLM baseline model: `glm-5.0`.
 - `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=true` (default) keeps GLM baseline voters active even when `FUGUE_CI_EXECUTION_ENGINE=subscription` (hybrid: codex/claude via CLI, GLM via API).
 - Codex recursive delegation (`parent -> child -> grandchild`) can be enabled per-lane:
-  - `FUGUE_CODEX_RECURSIVE_DELEGATION` (`true|false`, default `false`)
-  - `FUGUE_CODEX_RECURSIVE_MAX_DEPTH` (minimum `2`, default `3`)
+  - `FUGUE_CODEX_RECURSIVE_DELEGATION` (`true|false`, default `true` since v8.5)
+  - `FUGUE_CODEX_RECURSIVE_MAX_DEPTH` (minimum `2`, default `2` since v8.5, previously `3`)
   - `FUGUE_CODEX_RECURSIVE_TARGET_LANES` (CSV lane list or `all`, default `codex-main-orchestrator,codex-orchestration-assist`)
   - `FUGUE_CODEX_RECURSIVE_DRY_RUN` (`true|false`, default `false`, synthetic verification mode)
-- GLM subagent fan-out is controlled by `FUGUE_GLM_SUBAGENT_MODE=off|paired|symphony` (default `paired`).
+  - Implementation timeout extended to 90 minutes when recursive delegation is active.
+- GLM subagent fan-out is controlled by `FUGUE_GLM_SUBAGENT_MODE=off|paired|symphony` (default `symphony` since v8.5, previously `paired`).
   - `paired`: adds GLM orchestration subagent lane and mirrors architect/plan checks in enhanced/max.
-  - `symphony`: adds the above plus GLM reliability subagent in max mode.
+  - `symphony`: adds the above plus GLM reliability subagent in max mode (v8.5 default; adds `glm-reliability-subagent` lane).
   - When `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=false`, subscription mode forces GLM subagent fan-out to `off`.
   - `*-subagent` lanes are optional/non-blocking on provider-side API failure.
 - When assist is `claude` and state is not `exhausted`, add Claude assist lanes (Opus + Sonnet).

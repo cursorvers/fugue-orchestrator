@@ -299,4 +299,19 @@ run_case "S12" "claude" "claude" "ok"        "false" "implement" "pass"   "false
 run_case "S13" "claude" "claude" "degraded"  "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
 run_case "S14" "claude" "claude" "exhausted" "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
 run_case "S15" "claude" "claude" "ok"        "false" "review"    "pass"   "true"  "subscription" "true"  "false" "hold"
+
+# v8.5: Hybrid + Codex recursive delegation depth=2 scenarios.
+# Override GLM subagent mode to symphony for S19-S20.
+run_case "S16" "claude" "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S17" "claude" "claude" "ok"        "false" "review"    "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S18" "claude" "claude" "degraded"  "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+
+# v8.5: Hybrid + GLM symphony mode (5+ lanes).
+glm_subagent_mode_default="symphony"
+multi_agent_mode_default="max"
+run_case "S19" "claude" "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S20" "claude" "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+glm_subagent_mode_default="paired"
+multi_agent_mode_default="enhanced"
+
 execution_provider_default=""
