@@ -1,0 +1,152 @@
+name: fugue-orchestration-gate
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fugue-orchestration-gate.yml'
+      - '.github/workflows/fugue-orchestrator-canary.yml'
+      - '.github/workflows/fugue-tutti-caller.yml'
+      - '.github/workflows/fugue-tutti-router.yml'
+      - '.github/workflows/fugue-task-router.yml'
+      - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/execution-profile-policy.sh'
+      - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/local/run-linked-systems.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fugue-orchestration-gate.yml'
+      - '.github/workflows/fugue-orchestrator-canary.yml'
+      - '.github/workflows/fugue-tutti-caller.yml'
+      - '.github/workflows/fugue-tutti-router.yml'
+      - '.github/workflows/fugue-task-router.yml'
+      - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/execution-profile-policy.sh'
+      - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/local/run-linked-systems.sh'
+  workflow_dispatch:
+    inputs:
+      run_canary_lite:
+        description: "Also run blocking canary-lite (dispatches canary workflow in lite mode)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  fast-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Shell syntax checks
+        run: |
+          set -euo pipefail
+          bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/lib/execution-profile-policy.sh
+          bash -n scripts/lib/orchestrator-policy.sh
+          bash -n scripts/local/run-local-orchestration.sh
+          bash -n scripts/local/run-linked-systems.sh
+          bash -n scripts/sim-orchestrator-switch.sh
+          bash -n scripts/check-agent-matrix-parity.sh
+          bash -n scripts/check-linked-systems-integrity.sh
+
+      - name: Workflow YAML parse checks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import yaml
+          files = [
+              ".github/workflows/fugue-orchestrator-canary.yml",
+              ".github/workflows/fugue-orchestration-gate.yml",
+              ".github/workflows/fugue-tutti-caller.yml",
+              ".github/workflows/fugue-tutti-router.yml",
+              ".github/workflows/fugue-task-router.yml",
+          ]
+          for p in files:
+              with open(p, "r", encoding="utf-8") as f:
+                  yaml.safe_load(f)
+          print("workflow-yaml-parse-ok")
+          PY
+
+      - name: Matrix parity checks
+        run: |
+          set -euo pipefail
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh
+          ./scripts/check-agent-matrix-parity.sh
+          ./scripts/check-linked-systems-integrity.sh
+
+      - name: Deterministic switch simulation
+        run: |
+          set -euo pipefail
+          sim_out="$(mktemp)"
+          ./scripts/sim-orchestrator-switch.sh > "${sim_out}"
+          rows="$(( $(wc -l < "${sim_out}") - 1 ))"
+          if (( rows < 10 )); then
+            echo "Expected at least 10 scenario rows from sim-orchestrator-switch, got ${rows}" >&2
+            cat "${sim_out}" >&2
+            exit 1
+          fi
+          echo "sim-orchestrator-switch rows=${rows}"
+
+  canary-lite:
+    needs: [fast-gate]
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_canary_lite) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Trigger canary lite
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          start_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          gh workflow run fugue-orchestrator-canary.yml \
+            --repo "${repo}" \
+            --ref main \
+            -f canary_mode=lite
+
+          target_sha=""
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            target_sha="${GITHUB_SHA}"
+          fi
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            runs_json="$(gh run list --repo "${repo}" --workflow fugue-orchestrator-canary.yml --event workflow_dispatch --limit 20 --json databaseId,createdAt,headSha)"
+            if [[ -n "${target_sha}" ]]; then
+              run_id="$(echo "${runs_json}" | jq -r --arg start "${start_iso}" --arg sha "${target_sha}" '[.[] | select(.createdAt >= $start and .headSha == $sha)][0].databaseId // empty')"
+            fi
+            if [[ -z "${run_id}" ]]; then
+              run_id="$(echo "${runs_json}" | jq -r --arg start "${start_iso}" '[.[] | select(.createdAt >= $start)][0].databaseId // empty')"
+            fi
+            if [[ -n "${run_id}" ]]; then
+              break
+            fi
+            sleep 3
+          done
+
+          if [[ -z "${run_id}" ]]; then
+            echo "Failed to locate dispatched canary-lite run id." >&2
+            exit 1
+          fi
+
+          echo "Watching canary-lite run ${run_id}"
+          gh run watch "${run_id}" --repo "${repo}" --exit-status
+          gh run view "${run_id}" --repo "${repo}" --json status,conclusion,url,createdAt,updatedAt

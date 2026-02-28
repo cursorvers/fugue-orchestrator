@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "43 2 * * *"
   workflow_dispatch:
+    inputs:
+      canary_mode:
+        description: "Run mode: full (regular+force) or lite (regular only)"
+        required: false
+        type: choice
+        options:
+          - full
+          - lite
+        default: full
 
 permissions:
   issues: write
@@ -38,10 +47,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run canary (regular + forced claude)
+      - name: Run canary (mode-aware)
         env:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
         run: |
           set -euo pipefail
           gh_api_retry() {
@@ -78,6 +88,8 @@ jobs:
           failures=0
           online_count=0
           self_hosted_online="false"
+          canary_mode="full"
+          run_force_case="true"
 
           normalize() {
             echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
@@ -95,6 +107,13 @@ jobs:
           }
 
           claude_state="$(normalize "${CLAUDE_RATE_LIMIT_STATE:-ok}")"
+          canary_mode="$(normalize "${CANARY_MODE_INPUT:-full}")"
+          if [[ "${canary_mode}" != "full" && "${canary_mode}" != "lite" ]]; then
+            canary_mode="full"
+          fi
+          if [[ "${canary_mode}" == "lite" ]]; then
+            run_force_case="false"
+          fi
           role_policy="$(normalize "${CLAUDE_ROLE_POLICY:-flex}")"
           degraded_assist_policy="$(normalize "${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}")"
           main_assist_policy="$(normalize "${CLAUDE_MAIN_ASSIST_POLICY:-codex}")"
@@ -396,8 +415,15 @@ jobs:
             strict_expected="true"
           fi
 
-          regular_issue="$(create_issue "[canary] regular claude request ${ts}" "")"
-          force_issue="$(create_issue "[canary] forced claude request ${ts}" "orchestrator-force:claude")"
+          issue_prefix="[canary]"
+          if [[ "${canary_mode}" == "lite" ]]; then
+            issue_prefix="[canary-lite]"
+          fi
+          regular_issue="$(create_issue "${issue_prefix} regular claude request ${ts}" "")"
+          force_issue=""
+          if [[ "${run_force_case}" == "true" ]]; then
+            force_issue="$(create_issue "${issue_prefix} forced claude request ${ts}" "orchestrator-force:claude")"
+          fi
 
           regular_pair_file="$(mktemp)"
           force_pair_file="$(mktemp)"
@@ -408,8 +434,11 @@ jobs:
 
           wait_for_resolved_orchestrators "${regular_issue}" >"${regular_pair_file}" &
           regular_wait_pid="$!"
-          wait_for_resolved_orchestrators "${force_issue}" >"${force_pair_file}" &
-          force_wait_pid="$!"
+          force_wait_pid=""
+          if [[ "${run_force_case}" == "true" ]]; then
+            wait_for_resolved_orchestrators "${force_issue}" >"${force_pair_file}" &
+            force_wait_pid="$!"
+          fi
 
           regular_pair=""
           regular_wait_ok="false"
@@ -420,7 +449,9 @@ jobs:
 
           force_pair=""
           force_wait_ok="false"
-          if wait "${force_wait_pid}"; then
+          if [[ "${run_force_case}" != "true" ]]; then
+            force_wait_ok="false"
+          elif wait "${force_wait_pid}"; then
             force_pair="$(tail -n1 "${force_pair_file}" | tr -d '\r')"
             force_wait_ok="true"
           fi
@@ -465,7 +496,9 @@ jobs:
             failures="$((failures + 1))"
           fi
 
-          if [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
+          if [[ "${run_force_case}" != "true" ]]; then
+            echo "Canary lite mode: skipped forced-claude case."
+          elif [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
             force_main="${force_pair%%|*}"
             force_rest="${force_pair#*|}"
             force_assist="${force_rest%%|*}"
@@ -510,4 +543,8 @@ jobs:
             exit 1
           fi
 
-          echo "Canary passed: regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), force(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner}), strict_expected=${strict_expected}"
+          if [[ "${run_force_case}" == "true" ]]; then
+            echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), force(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner}), strict_expected=${strict_expected}"
+          else
+            echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), force=skipped, strict_expected=${strict_expected}"
+          fi
