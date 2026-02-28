@@ -216,7 +216,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `workflow-risk-policy.sh` が over-compression guard を常時適用し、floor/span 未満なら自動補正します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 # NOTE: `fugue-watchdog` は Claude state を自動復帰（degraded/exhausted -> ok）できますが、cooldown + 安定性条件を満たす場合のみ実行されます。
-# NOTE: `fugue-orchestrator-canary` が毎日、実Issueベースで regular/force の切替E2Eを自動検証します。
+# NOTE: `fugue-orchestration-gate` が PR で Fast Gate（syntax/yaml/parity/sim）を同期実行し、main push で canary-lite（regularのみ）を同期実行します。
+# NOTE: `fugue-orchestrator-canary` は full canary（regular+force）の定期検証です。`workflow_dispatch` では `canary_mode=full|lite` を選択できます。
 # NOTE: canaryは既定で `FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE=continuity` として、subscription runner 不在でも検証継続します（`hold` または `inherit` で従来どおりスキップ可能）。
 # NOTE: canaryは regular/force ケースの統合コメント待機を並列化し、待機上限は fast/slow 2段（上記 `FUGUE_CANARY_WAIT_*`）で調整できます。
 # NOTE: `fugue-orchestration-weekly-review` が週次で assist昇格率と high-risk時の昇格カバレッジを status issue に投稿します。
