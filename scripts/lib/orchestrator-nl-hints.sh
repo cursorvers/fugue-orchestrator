@@ -135,10 +135,10 @@ else
 
   # Main-only hint.
   if [[ -z "${nl_main_hint}" ]]; then
-    if contains '(main[[:space:]_-]*orchestrator.{0,16}claude|claude.{0,16}main[[:space:]_-]*orchestrator|claudeがmain|メイン[[:space:]]*orchestrator.{0,16}claude)'; then
+    if contains '(main[[:space:]_-]*orchestrator.{0,16}claude|claude.{0,16}main[[:space:]_-]*orchestrator|claude[をが].{0,4}main|claude as main|メイン[[:space:]]*orchestrator.{0,16}claude)'; then
       nl_main_hint="claude"
       nl_main_reason="main-claude"
-    elif contains '(main[[:space:]_-]*orchestrator.{0,16}codex|codex.{0,16}main[[:space:]_-]*orchestrator|codexがmain|メイン[[:space:]]*orchestrator.{0,16}codex)'; then
+    elif contains '(main[[:space:]_-]*orchestrator.{0,16}codex|codex.{0,16}main[[:space:]_-]*orchestrator|codex[をが].{0,4}main|codex as main|メイン[[:space:]]*orchestrator.{0,16}codex)'; then
       nl_main_hint="codex"
       nl_main_reason="main-codex"
     fi
