@@ -81,6 +81,7 @@ allow_repo_secrets="$(json_get '.allow_repo_secrets[]?' | sed '/^null$/d' || tru
 # Fetch org secrets list (names + visibility).
 org_secrets_json="$(gh api "orgs/${ORG}/actions/secrets" --paginate)"
 tmpdir="$(mktemp -d)"
+chmod 700 "${tmpdir}"
 trap 'rm -rf "${tmpdir}"' EXIT
 
 org_secrets_tsv="${tmpdir}/org-secrets.tsv"

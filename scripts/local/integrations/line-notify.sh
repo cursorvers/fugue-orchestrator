@@ -172,6 +172,7 @@ save_guard_json() {
   guard_dir="$(dirname "${LINE_NOTIFY_GUARD_FILE}")"
   mkdir -p "${guard_dir}"
   tmp_file="$(mktemp "${guard_dir}/line-notify-guard.XXXXXX.tmp")"
+  chmod 600 "${tmp_file}"
   printf '%s' "${json_input}" > "${tmp_file}"
   mv "${tmp_file}" "${LINE_NOTIFY_GUARD_FILE}"
 }
@@ -346,6 +347,7 @@ if [[ "${should_send}" == "true" ]]; then
 
   headers_file="$(mktemp)"
   body_file="$(mktemp)"
+  chmod 600 "${headers_file}" "${body_file}"
   trap 'rm -f "${headers_file}" "${body_file}"' EXIT
 
   while :; do

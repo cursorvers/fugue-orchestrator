@@ -178,15 +178,17 @@ wants_gemini="$(normalize_bool "${wants_gemini}")"
 wants_xai="$(normalize_bool "${wants_xai}")"
 allow_glm_in_subscription="$(normalize_bool "${allow_glm_in_subscription}")"
 dual_main_signal="$(normalize_bool "${dual_main_signal}")"
+# shellcheck source=safe-eval-policy.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
-  eval "$("${model_policy_script}" \
+  safe_eval_policy "${model_policy_script}" \
     --codex-main-model "${codex_main_model}" \
     --codex-multi-agent-model "${codex_multi_agent_model}" \
     --claude-model "${claude_opus_model}" \
     --glm-model "${glm_model}" \
     --gemini-model "${gemini_model}" \
     --xai-model "${xai_model}" \
-    --format env)"
+    --format env
   claude_opus_model="${claude_model}"
   claude_sonnet4_model="${claude_model}"
   claude_sonnet6_model="${claude_model}"
@@ -446,6 +448,15 @@ matrix="$(jq -cn \
   ' )"
 
 lanes="$(echo "${matrix}" | jq -r '.include | length')"
+
+# Validate matrix before output.
+validate_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/validate-agent-matrix.sh"
+if [[ -x "${validate_script}" ]]; then
+  "${validate_script}" \
+    --matrix "${matrix}" \
+    --lanes "${lanes}" \
+    --main-signal-lane "${main_signal_lane}" >&2 || exit 1
+fi
 
 if [[ "${format}" == "env" ]]; then
   printf 'matrix=%q\n' "${matrix}"

@@ -46,8 +46,10 @@ raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-sp
 raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+# shellcheck source=../lib/safe-eval-policy.sh
+source "${script_dir}/../lib/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
-  eval "$("${model_policy_script}" \
+  safe_eval_policy "${model_policy_script}" \
     --codex-main-model "${raw_codex_main_model}" \
     --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
     --claude-model "${raw_claude_model}" \
@@ -55,7 +57,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
     --xai-model "${raw_xai_model}" \
-    --format env)"
+    --format env
   claude_opus_model="${claude_model}"
   xai_latest_model="${xai_model}"
 else
@@ -79,14 +81,14 @@ recursive_target_lanes="${recursive_targets_raw}"
 recursive_depth="3"
 recursive_dry_run="false"
 if [[ -x "${recursive_policy_script}" ]]; then
-  eval "$("${recursive_policy_script}" \
+  safe_eval_policy "${recursive_policy_script}" \
     --enabled "${recursive_enabled_raw}" \
     --provider "${PROVIDER:-}" \
     --lane "${AGENT_NAME:-}" \
     --depth "${recursive_depth_raw}" \
     --target-lanes "${recursive_targets_raw}" \
     --dry-run "${recursive_dry_run_raw}" \
-    --format env)"
+    --format env
 fi
 
 # Force requested model onto the latest-track policy for each provider.

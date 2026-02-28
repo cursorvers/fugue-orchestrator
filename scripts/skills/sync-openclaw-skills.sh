@@ -191,6 +191,7 @@ main() {
 
   local snapshot_root
   TMP_DIR="$(mktemp -d)"
+  chmod 700 "${TMP_DIR}"
   trap 'if [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR}" ]]; then rm -rf "${TMP_DIR}"; fi' EXIT
 
   download_openclaw_snapshot "${TMP_DIR}"

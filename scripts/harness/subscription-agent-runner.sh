@@ -38,8 +38,10 @@ raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-sp
 raw_glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-3.1-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+# shellcheck source=../lib/safe-eval-policy.sh
+source "${script_dir}/../lib/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
-  eval "$("${model_policy_script}" \
+  safe_eval_policy "${model_policy_script}" \
     --codex-main-model "${raw_codex_main_model}" \
     --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
     --claude-model "${raw_claude_model}" \
@@ -47,7 +49,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --gemini-model "${raw_gemini_model}" \
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
     --xai-model "grok-4" \
-    --format env)"
+    --format env
   claude_opus_model="${claude_model}"
 else
   claude_opus_model="claude-sonnet-4-6"
@@ -70,14 +72,14 @@ recursive_target_lanes="${recursive_targets_raw}"
 recursive_depth="3"
 recursive_dry_run="false"
 if [[ -x "${recursive_policy_script}" ]]; then
-  eval "$("${recursive_policy_script}" \
+  safe_eval_policy "${recursive_policy_script}" \
     --enabled "${recursive_enabled_raw}" \
     --provider "${PROVIDER:-}" \
     --lane "${AGENT_NAME:-}" \
     --depth "${recursive_depth_raw}" \
     --target-lanes "${recursive_targets_raw}" \
     --dry-run "${recursive_dry_run_raw}" \
-    --format env)"
+    --format env
 fi
 
 requested_model="$(echo "${MODEL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -219,11 +221,13 @@ write_skipped_result() {
 }
 
 schema_file="$(mktemp)"
+chmod 600 "${schema_file}"
 cat > "${schema_file}" <<'JSON'
 {"type":"object","properties":{"risk":{"type":"string"},"approve":{"type":"boolean"},"findings":{"type":"array","items":{"type":"string"}},"recommendation":{"type":"string"},"rationale":{"type":"string"}},"required":["risk","approve","findings","recommendation","rationale"],"additionalProperties":false}
 JSON
 
 tmp_dir="$(mktemp -d)"
+chmod 700 "${tmp_dir}"
 cleanup() {
   rm -rf "${tmp_dir}" "${schema_file}"
 }

@@ -55,8 +55,10 @@ if ! [[ "${sim_codex_spark_model}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
   sim_codex_spark_model="gpt-5.3-codex-spark"
 fi
 model_policy_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)/model-policy.sh"
+# shellcheck source=lib/safe-eval-policy.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
-  eval "$("${model_policy_script}" \
+  safe_eval_policy "${model_policy_script}" \
     --codex-main-model "${codex_main_model_default}" \
     --codex-multi-agent-model "${codex_multi_agent_model_default}" \
     --claude-model "${claude_opus_model_default}" \
@@ -64,7 +66,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "gemini-3-flash" \
     --xai-model "grok-4" \
-    --format env)"
+    --format env
   codex_main_model_default="${codex_main_model}"
   codex_multi_agent_model_default="${codex_multi_agent_model}"
   claude_opus_model_default="${claude_model}"
@@ -135,8 +137,7 @@ run_case() {
   local emergency_mode="${11:-false}"
   local subscription_offline_policy="${12:-${subscription_offline_policy_default}}"
 
-  eval "$(
-    scripts/lib/orchestrator-policy.sh \
+  safe_eval_policy scripts/lib/orchestrator-policy.sh \
       --main "${requested_main}" \
       --assist "${requested_assist}" \
       --default-main "${default_main_provider}" \
@@ -146,7 +147,6 @@ run_case() {
       --assist-policy "${claude_main_assist_policy}" \
       --claude-role-policy "${claude_role_policy}" \
       --degraded-assist-policy "${claude_degraded_assist_policy}"
-  )"
   local resolved_main="${resolved_main}"
   local resolved_assist="${resolved_assist}"
   local note_parts=()
@@ -160,8 +160,7 @@ run_case() {
     note_parts+=("pressure:${pressure_guard_reason}")
   fi
 
-  eval "$(
-    scripts/lib/execution-profile-policy.sh \
+  safe_eval_policy scripts/lib/execution-profile-policy.sh \
       --requested-engine "${requested_engine}" \
       --main-provider "${resolved_main}" \
       --assist-provider "${resolved_assist}" \
@@ -175,7 +174,6 @@ run_case() {
       --api-strict-mode "${api_strict_mode}" \
       --emergency-continuity-mode "${emergency_mode}" \
       --emergency-assist-policy "${emergency_assist_policy}"
-  )"
   local effective_assist="${assist_provider_effective}"
   if [[ "${assist_adjusted_by_profile}" == "true" && -n "${assist_adjustment_reason}" ]]; then
     note_parts+=("profile:${assist_adjustment_reason}")

@@ -365,7 +365,9 @@ mkdir -p "${LANE_DIR}" "${TMP_DIR}"
 strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}"
 strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}"
 claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}"
-eval "$("${MODEL_POLICY}" \
+# shellcheck source=../lib/safe-eval-policy.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/safe-eval-policy.sh"
+safe_eval_policy "${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --claude-model "${claude_opus_model}" \
@@ -373,7 +375,7 @@ eval "$("${MODEL_POLICY}" \
   --gemini-model "gemini-3.1-pro" \
   --gemini-fallback-model "gemini-3-flash" \
   --xai-model "grok-4" \
-  --format env)"
+  --format env
 CODEX_MAIN_MODEL="${codex_main_model}"
 CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
 GLM_MODEL="${glm_model}"
@@ -400,12 +402,12 @@ local_ambiguity_signal="$(echo "${FUGUE_LOCAL_AMBIGUITY_SIGNAL:-false}" | tr '[:
 if [[ "${local_ambiguity_signal}" != "true" ]]; then
   local_ambiguity_signal="false"
 fi
-eval "$("${WORKFLOW_RISK_POLICY}" \
+safe_eval_policy "${WORKFLOW_RISK_POLICY}" \
   --title "${ISSUE_TITLE}" \
   --body "${ISSUE_BODY}" \
   --labels "${ISSUE_LABELS_CSV}" \
   --has-implement "false" \
-  --orchestration-profile "codex-full")"
+  --orchestration-profile "codex-full"
 issue_risk_tier="${risk_tier}"
 issue_risk_score="${risk_score}"
 issue_risk_reasons="${risk_reasons}"
