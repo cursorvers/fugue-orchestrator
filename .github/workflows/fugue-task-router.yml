@@ -634,6 +634,8 @@ jobs:
             --repo "${GITHUB_REPOSITORY}"
             -f issue_number="${ISSUE_NUMBER}"
           )
+          dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
+          dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
           trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -n "${trust_subject}" ]]; then
             dispatch_args+=(-f trust_subject="${trust_subject}")

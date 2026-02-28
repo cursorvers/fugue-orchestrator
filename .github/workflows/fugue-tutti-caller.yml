@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: ""
+      dispatch_nonce:
+        description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   issues: write
@@ -37,8 +42,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}-${{ github.event_name == 'issues' && format('label-{0}', github.event.label.name) || 'dispatch' }}
-  cancel-in-progress: true
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}-${{ github.event_name == 'issues' && format('label-{0}', github.event.label.name) || format('dispatch-{0}', github.event.inputs.dispatch_nonce || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'issues' }}
 
 jobs:
   ctx:
@@ -1142,6 +1147,7 @@ jobs:
       trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
       allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
       extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
+      dispatch_nonce: "${{ github.event.inputs.dispatch_nonce || github.run_id }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}

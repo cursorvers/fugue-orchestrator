@@ -77,6 +77,11 @@ on:
         required: false
         type: string
         default: ""
+      dispatch_nonce:
+        description: "Optional unique nonce to isolate concurrent workflow_call runs"
+        required: false
+        type: string
+        default: ""
     outputs:
       ok_to_execute:
         description: "true when approvals >= 2/3 and no HIGH risk was detected"
@@ -144,8 +149,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: fugue-tutti-${{ github.repository }}-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
-  cancel-in-progress: true
+  group: fugue-tutti-${{ github.repository }}-${{ github.event.issue.number || inputs.issue_number || github.run_id }}-${{ github.event_name == 'workflow_call' && format('call-{0}', inputs.dispatch_nonce || github.run_id) || format('dispatch-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
   prepare:
