@@ -275,7 +275,7 @@ append_attempt() {
 }
 
 if [[ "${PROVIDER}" == "codex" ]]; then
-  candidates=("${MODEL}" "${codex_main_model}" "${codex_multi_agent_model}" "gpt-5-codex")
+  candidates=("${MODEL}" "${codex_main_model}" "${codex_multi_agent_model}" "gpt-5-codex" "gpt-5" "gpt-4.1")
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \
@@ -298,18 +298,24 @@ if [[ "${PROVIDER}" == "codex" ]]; then
   if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
     effective_provider="glm"
     effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
-    chosen_model="${glm_model}"
-    fallback_req="$(jq -n \
-      --arg model "${chosen_model}" \
-      --arg s "${sys_prompt}" \
-      --arg u "${user_prompt}" \
-      '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
-    http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
-      --connect-timeout 10 --max-time 60 --retry 2 \
-      -H "Authorization: Bearer ${ZAI_API_KEY}" \
-      -H "Content-Type: application/json" \
-      -d "${fallback_req}" || true)"
-    append_attempt "glm" "${chosen_model}" "${http_code}"
+    glm_fallback_candidates=("${glm_model}" "glm-4.5")
+    for gm in "${glm_fallback_candidates[@]}"; do
+      chosen_model="${gm}"
+      fallback_req="$(jq -n \
+        --arg model "${chosen_model}" \
+        --arg s "${sys_prompt}" \
+        --arg u "${user_prompt}" \
+        '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+      http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
+        --connect-timeout 10 --max-time 60 --retry 2 \
+        -H "Authorization: Bearer ${ZAI_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "${fallback_req}" || true)"
+      append_attempt "glm" "${chosen_model}" "${http_code}"
+      if [[ "${http_code}" == "200" ]]; then
+        break
+      fi
+    done
   fi
 elif [[ "${PROVIDER}" == "xai" ]]; then
   candidates=("${MODEL}" "${xai_latest_model}" "grok-4-fast-reasoning" "grok-4-fast-non-reasoning")

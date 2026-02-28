@@ -694,7 +694,7 @@ jobs:
 
           if [[ "${PROVIDER}" == "codex" ]]; then
             # Prefer latest Codex family + configured repository defaults.
-            candidates=("${MODEL}" "${CODEX_MAIN_MODEL}" "${CODEX_MULTI_AGENT_MODEL}" "gpt-5-codex")
+            candidates=("${MODEL}" "${CODEX_MAIN_MODEL}" "${CODEX_MULTI_AGENT_MODEL}" "gpt-5-codex" "gpt-5" "gpt-4.1")
             for m in "${candidates[@]}"; do
               chosen_model="${m}"
               req="$(jq -n \
@@ -718,17 +718,23 @@ jobs:
             if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
               effective_provider="glm"
               effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
-              chosen_model="${GLM_MODEL}"
-              fallback_req="$(jq -n \
-                --arg model "${chosen_model}" \
-                --arg s "${sys_prompt}" \
-                --arg u "${user_prompt}" \
-                '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
-              http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
-                --connect-timeout 10 --max-time 60 --retry 2 \
-                -H "Authorization: Bearer ${ZAI_API_KEY}" \
-                -H "Content-Type: application/json" \
-                -d "${fallback_req}" || true)"
+              glm_fallback_candidates=("${GLM_MODEL}" "glm-4.5")
+              for gm in "${glm_fallback_candidates[@]}"; do
+                chosen_model="${gm}"
+                fallback_req="$(jq -n \
+                  --arg model "${chosen_model}" \
+                  --arg s "${sys_prompt}" \
+                  --arg u "${user_prompt}" \
+                  '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+                http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
+                  --connect-timeout 10 --max-time 60 --retry 2 \
+                  -H "Authorization: Bearer ${ZAI_API_KEY}" \
+                  -H "Content-Type: application/json" \
+                  -d "${fallback_req}" || true)"
+                if [[ "${http_code}" == "200" ]]; then
+                  break
+                fi
+              done
             fi
           elif [[ "${PROVIDER}" == "xai" ]]; then
             candidates=("${MODEL}" "${XAI_MODEL_LATEST}" "grok-4-fast-reasoning" "grok-4-fast-non-reasoning")
@@ -1183,13 +1189,27 @@ jobs:
               )
             )
           ] | length' all-results.json)"
+          claude_lane_http_error_count="$(jq '[
+            .[] | select(
+              ((.provider // "" | ascii_downcase) == "claude")
+              and (
+                ((.http_code // "" | tostring) | test("^[45][0-9][0-9]$"))
+              )
+            )
+          ] | length' all-results.json)"
+          claude_state_effective="${claude_state}"
+          claude_state_adjustment="none"
+          if [[ "${claude_state}" == "ok" && "${claude_opus_lane_total}" -gt 0 && "${claude_opus_lane_success}" -eq 0 && "${claude_lane_http_error_count}" -gt 0 ]]; then
+            claude_state_effective="degraded"
+            claude_state_adjustment="auto-degraded-claude-http-errors"
+          fi
           gate_required="false"
           gate_requirement_kind="none"
           if [[ "${complex_claude_sub_required}" == "true" ]]; then
             gate_required="true"
             gate_requirement_kind="complex"
           fi
-          if [[ "${assist_provider_resolved}" == "claude" && "${claude_state}" == "ok" && "${require_direct_claude_assist}" == "true" ]]; then
+          if [[ "${assist_provider_resolved}" == "claude" && "${claude_state_effective}" == "ok" && "${require_direct_claude_assist}" == "true" ]]; then
             gate_required="true"
             if [[ "${gate_requirement_kind}" == "complex" ]]; then
               gate_requirement_kind="complex+direct"
@@ -1205,7 +1225,7 @@ jobs:
             if [[ "${assist_provider_resolved}" != "claude" ]]; then
               required_claude_assist_gate="fail"
               required_claude_assist_reason="${gate_requirement_kind}-assist-${assist_provider_resolved}"
-            elif [[ "${claude_state}" == "exhausted" ]]; then
+            elif [[ "${claude_state_effective}" == "exhausted" ]]; then
               required_claude_assist_gate="fail"
               required_claude_assist_reason="${gate_requirement_kind}-claude-rate-limit-exhausted"
             elif [[ "${claude_opus_lane_total}" -eq 0 ]]; then
@@ -1220,8 +1240,11 @@ jobs:
               high_risk_count="$((high_risk_count + 1))"
             fi
           else
-            if [[ "${assist_provider_resolved}" == "claude" && "${claude_state}" != "ok" ]]; then
-              required_claude_assist_reason="claude-rate-limit-${claude_state}"
+            if [[ "${assist_provider_resolved}" == "claude" && "${claude_state_effective}" != "ok" ]]; then
+              required_claude_assist_reason="claude-rate-limit-${claude_state_effective}"
+              if [[ "${claude_state_adjustment}" != "none" ]]; then
+                required_claude_assist_reason="${required_claude_assist_reason}+${claude_state_adjustment}"
+              fi
             elif [[ "${complex_claude_sub_required}" != "true" && "${require_claude_sub_on_complex}" == "true" ]]; then
               required_claude_assist_reason="${complex_claude_sub_reason}"
             elif [[ "${require_direct_claude_assist}" != "true" ]]; then
@@ -1270,10 +1293,14 @@ jobs:
           if [[ "${require_baseline_trio}" == "true" ]]; then
             baseline_trio_gate="pass"
             baseline_missing=()
+            require_claude_baseline="true"
+            if [[ "${assist_provider_resolved}" == "claude" && "${claude_state_effective}" != "ok" ]]; then
+              require_claude_baseline="false"
+            fi
             if [[ "${codex_baseline_success}" -eq 0 ]]; then
               baseline_missing+=("codex")
             fi
-            if [[ "${claude_baseline_success}" -eq 0 ]]; then
+            if [[ "${require_claude_baseline}" == "true" && "${claude_baseline_success}" -eq 0 ]]; then
               baseline_missing+=("claude")
             fi
             if [[ "${glm_baseline_success}" -eq 0 ]]; then
@@ -1285,7 +1312,11 @@ jobs:
               high_risk="true"
               high_risk_count="$((high_risk_count + 1))"
             else
-              baseline_trio_reason="codex+claude+glm-ok"
+              if [[ "${require_claude_baseline}" == "true" ]]; then
+                baseline_trio_reason="codex+claude+glm-ok"
+              else
+                baseline_trio_reason="codex+glm-ok(claude-waived-${claude_state_effective})"
+              fi
             fi
           fi
 
