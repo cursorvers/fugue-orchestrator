@@ -1180,6 +1180,9 @@ jobs:
           TRANSLATION_PROVIDER: ${{ needs.ctx.outputs.translation_provider }}
           TRANSLATION_SCORE: ${{ needs.ctx.outputs.translation_score }}
           TRANSLATION_THRESHOLD: ${{ needs.ctx.outputs.translation_threshold }}
+          MAIN_PROVIDER: ${{ needs.ctx.outputs.main_orchestrator_provider }}
+          ASSIST_PROVIDER: ${{ needs.ctx.outputs.assist_orchestrator_provider }}
+          HYBRID_MODE: ${{ needs.ctx.outputs.hybrid_conductor_mode }}
         run: |
           set -euo pipefail
 
@@ -1203,6 +1206,21 @@ jobs:
           if (( duration_sec < 1 )); then
             duration_sec=1
           fi
+
+          # v8.5 metrics: count Claude/translation/MCP calls for consumption tracking.
+          claude_calls=0
+          if [[ "${MAIN_PROVIDER}" == "claude" ]]; then
+            claude_calls=$((claude_calls + 1))
+          fi
+          if [[ "${ASSIST_PROVIDER}" == "claude" ]]; then
+            claude_calls=$((claude_calls + 1))
+          fi
+          translation_calls=0
+          if [[ "${TRANSLATION_APPLIED}" == "true" ]]; then
+            translation_calls=1
+            claude_calls=$((claude_calls + 1))
+          fi
+          mcp_calls=0
 
           lanes="$(echo "${EXPECTED_LANES:-0}" | tr -cd '0-9')"
           if [[ -z "${lanes}" || "${lanes}" == "0" ]]; then
@@ -1294,6 +1312,8 @@ jobs:
           | OFF | ${tr_off_quality} | $(fmt_min "${tr_off_time}") | ${tr_off_fail} |
 
           Note: scorecard is an estimated counterfactual from this run (not separate A/B executions).
+
+          <!-- fugue-v8-metrics: claude_calls=${claude_calls}, translation_calls=${translation_calls}, mcp_calls=${mcp_calls}, total_duration=${duration_sec}s -->
           EOF
 
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/fugue-scorecard.md
