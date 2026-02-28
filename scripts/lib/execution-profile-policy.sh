@@ -170,6 +170,15 @@ resolve_unavailable_claude_fallback() {
   printf '%s' "${requested}"
 }
 
+# Engine-layer guard: claude assist unavailable when rate-limited or direct
+# path not reachable.  Separate from orchestrator-policy.sh which handles
+# provider selection; this checks engine-specific execution capability.
+should_demote_claude_assist() {
+  [[ "${assist_provider_effective}" == "claude" \
+    && "${force_claude}" != "true" \
+    && ( "${claude_state}" != "ok" || "${claude_direct_available}" != "true" ) ]]
+}
+
 requested_engine="$(normalize_engine "${requested_engine}")"
 assist_provider="$(normalize_assist "${assist_provider}")"
 force_claude="$(normalize_bool "${force_claude}")"
@@ -220,7 +229,7 @@ if [[ "${requested_engine}" == "subscription" ]]; then
       continuity_active="true"
       strict_main_effective="false"
       strict_opus_effective="false"
-      if [[ "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" && ( "${claude_state}" != "ok" || "${claude_direct_available}" != "true" ) ]]; then
+      if should_demote_claude_assist; then
         assist_provider_effective="$(resolve_unavailable_claude_fallback "${emergency_assist_policy}")"
         assist_adjusted_by_profile="true"
         assist_adjustment_reason="subscription-fallback-assist-claude->${assist_provider_effective}"
@@ -242,7 +251,7 @@ else
     execution_profile="api-continuity"
     execution_profile_reason="emergency-continuity-enabled"
     continuity_active="true"
-    if [[ "${assist_provider_effective}" == "claude" && "${force_claude}" != "true" && ( "${claude_state}" != "ok" || "${claude_direct_available}" != "true" ) ]]; then
+    if should_demote_claude_assist; then
       assist_provider_effective="$(resolve_unavailable_claude_fallback "${emergency_assist_policy}")"
       assist_adjusted_by_profile="true"
       assist_adjustment_reason="emergency-mode-assist-claude->${assist_provider_effective}"
