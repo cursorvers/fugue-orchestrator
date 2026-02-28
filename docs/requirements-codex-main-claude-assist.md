@@ -150,6 +150,8 @@ Required/optional repo variables:
 - `FUGUE_GEMINI_FALLBACK_MODEL` (optional, default `gemini-3-flash`; Gemini specialist fallback model)
 - `FUGUE_XAI_MODEL` (optional, default `grok-4`; xAI specialist primary model)
 - Runtime model normalization is enforced by `scripts/lib/model-policy.sh` (stale values are auto-corrected to supported latest-track families).
+- `FUGUE_SIM_CODEX_SPARK_ONLY` (`true|false`, default `true`; deterministic simulation common rule to pin both codex-main and codex multi-agent lanes to codex-spark for faster verification)
+- `FUGUE_SIM_CODEX_SPARK_MODEL` (optional, default `gpt-5.3-codex-spark`; spark-family model used when simulation spark-only rule is active)
 - `FUGUE_IMPLEMENT_REFINEMENT_CYCLES` (`1-5`, default `3`; enforce pre-implementation refinement loops)
 - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS` (`1-5`, default `2`; implementation collaboration rounds)
 - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE` (`1-5`, default `1`; implementation collaboration rounds when main=claude)

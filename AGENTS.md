@@ -13,9 +13,23 @@ Adapter files such as `CLAUDE.md` must stay thin and reference this file.
 ## 2. Control Plane Contract
 
 - Main orchestrator is provider-agnostic by design.
-- Operational default is `codex` (main), with `claude` as assist sidecar.
-- Operational default is `codex` when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted`.
-- `claude` can run as assist sidecar for ambiguity resolution and integration quality.
+- Operational default is `claude` (main conductor), with `codex` as execution provider.
+- **Hybrid Conductor Mode**: When `FUGUE_EXECUTION_PROVIDER` differs from main orchestrator:
+  - Main orchestrator (Claude) handles routing, MCP operations, and Tutti signal.
+  - Execution provider (Codex) handles all code implementation.
+  - Implementation profile follows `execution_provider` (codex-full), not main (claude-light).
+  - Multi-agent mode is NOT locked to `standard` in Hybrid — full lane depth applies.
+- **Hybrid Handoff Contract** (applies when Hybrid Conductor Mode is active):
+  - Claude resolves routing, MCP artifacts, and Tutti voting topology.
+  - Codex receives implementation dispatch via `fugue-codex-implement.yml` with `execution_profile=codex-full`.
+  - MCP operations (Pencil, Stripe, Supabase, etc.) are Claude-exclusive; never bridged through Codex.
+  - Implementation parameters (`preflight_cycles`, `dialogue_rounds`, `multi_agent_mode`) follow `execution_profile`, not `orchestration_profile`.
+- **Hybrid Failover** (when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted` during Hybrid):
+  - Throttle guard demotes main to `codex`, deactivating Hybrid Conductor Mode.
+  - All tasks run through codex-only (no MCP access). MCP-dependent tasks will fail and require manual retry after Claude recovery.
+  - Partial failover (MCP task queuing) is reserved for future implementation.
+- Operational default is `codex` (both main and execution) when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted`.
+- `codex` serves as assist sidecar when Claude is main (architectural invariant).
 - Claude subscription assumption is `FUGUE_CLAUDE_PLAN_TIER=max20` with `FUGUE_CLAUDE_MAX_PLAN=true`.
 - State transitions and PR actions are owned by control plane workflows, not by sidecar advice.
 
@@ -25,7 +39,12 @@ Main resolution order:
 1. Issue label (`orchestrator:claude` or `orchestrator:codex`)
 2. Issue body hint (`## Orchestrator provider` or `orchestrator provider: ...`)
 3. Repository variable `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (legacy fallback `FUGUE_ORCHESTRATOR_PROVIDER`)
-4. Fallback default `codex`
+4. Fallback default `claude`
+
+Execution provider resolution:
+1. Repository variable `FUGUE_EXECUTION_PROVIDER`
+2. Fallback: same as resolved main provider
+- When `FUGUE_EXECUTION_PROVIDER` differs from resolved main, Hybrid Conductor Mode activates.
 
 Assist resolution order:
 1. Issue label (`orchestrator-assist:claude|codex|none`)
@@ -50,6 +69,7 @@ Auditability:
 - Add one main-provider signal lane after resolution:
   - `codex-main-orchestrator` when main is `codex`
   - `claude-main-orchestrator` when main is `claude`
+- In Hybrid Conductor Mode (main != execution_provider), implementation dispatch always uses `codex-full` profile regardless of main provider.
 - `FUGUE_DUAL_MAIN_SIGNAL=true` (default) adds the opposite main signal lane as a secondary vote signal.
 - Execution profile is resolved per run:
   - Primary: `subscription-strict` (`FUGUE_CI_EXECUTION_ENGINE=subscription` + online self-hosted runner with required label `FUGUE_SUBSCRIPTION_RUNNER_LABEL`)
@@ -60,6 +80,7 @@ Auditability:
 - Strict guards (`FUGUE_STRICT_MAIN_CODEX_MODEL`, `FUGUE_STRICT_OPUS_ASSIST_DIRECT`) are enforced in `subscription-strict` and disabled by default in API continuity mode unless `FUGUE_API_STRICT_MODE=true`.
 - `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST=true` enables hard gate for `claude-opus-assist` direct success in `/vote` integration (default disabled).
 - `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true` enforces Claude sub gate on complex tasks (`risk_tier=high` or ambiguity translation-gate=true) **when assist is `claude`**; missing Claude Opus assist success turns `ok_to_execute=false` (default enabled).
+- `FUGUE_REQUIRE_BASELINE_TRIO=true` enforces baseline trio success (`codex` + `claude` + `glm`) before execution approval (default enabled).
 - Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
 - Codex lane model split:
   - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.3-codex`)
@@ -104,7 +125,7 @@ Auditability:
   Repeat default 3 cycles (`FUGUE_IMPLEMENT_REFINEMENT_CYCLES=3`).
 - After preflight passes, implement mode must run implementation collaboration dialogue rounds:
   - `Implementer Proposal` -> `Critic Challenge` -> `Integrator Decision` -> `Applied Change` -> `Verification`
-  - Default rounds: `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS=2` (or `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE=1` when main is `claude`).
+  - Default rounds: `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS=2` (or `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE=1` when `execution_profile` is `claude-light`; in Hybrid Conductor Mode, `execution_profile=codex-full` applies full rounds).
 - Parallel Simulation and Critical Review are hard gates and must not be skipped.
 - For large refactor/rewrite/migration tasks, each cycle must explicitly compare at least two candidates and include failure-mode/rollback checks (`large-refactor` label or task-text detection).
 - Risk-tier policy (`low|medium|high`) adjusts minimum loop depth and default review fan-out; low-risk defaults should stay lightweight.
@@ -139,6 +160,10 @@ Use deterministic simulation before changing orchestration logic:
 ```bash
 scripts/sim-orchestrator-switch.sh
 ```
+
+Simulation common rule:
+- `FUGUE_SIM_CODEX_SPARK_ONLY=true` (default) forces simulation to run `codex-main` and codex multi-agent lanes on `gpt-5.3-codex-spark` for faster turnaround.
+- Set `FUGUE_SIM_CODEX_SPARK_ONLY=false` only when main-model parity testing against `gpt-5-codex` is explicitly required.
 
 Use live rehearsal only when needed and clean up synthetic issues after verification.
 
