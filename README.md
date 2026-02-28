@@ -118,6 +118,13 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
 # gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body continuity -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
+# gh variable set FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE --body continuity -R <owner/repo> # inherit|hold|continuity (canary専用: runner不在時の扱い)
+# gh variable set FUGUE_CANARY_LABEL_WAIT_ATTEMPTS   --body 10      -R <owner/repo> # canary issue label反映待機リトライ回数
+# gh variable set FUGUE_CANARY_LABEL_WAIT_SLEEP_SEC  --body 2       -R <owner/repo> # canary issue label反映待機秒
+# gh variable set FUGUE_CANARY_WAIT_FAST_ATTEMPTS    --body 12      -R <owner/repo> # canary統合コメント待機(高速フェーズ)試行回数
+# gh variable set FUGUE_CANARY_WAIT_FAST_SLEEP_SEC   --body 10      -R <owner/repo> # canary統合コメント待機(高速フェーズ)秒
+# gh variable set FUGUE_CANARY_WAIT_SLOW_ATTEMPTS    --body 9       -R <owner/repo> # canary統合コメント待機(保守フェーズ)試行回数
+# gh variable set FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC   --body 20      -R <owner/repo> # canary統合コメント待機(保守フェーズ)秒
 # gh variable set FUGUE_DUAL_MAIN_SIGNAL             --body true    -R <owner/repo> # trueで codex-main / claude-main signal lane を両建て
 # gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5-codex -R <owner/repo> # main orchestrator lane model
 # gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
@@ -212,7 +219,10 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `workflow-risk-policy.sh` が over-compression guard を常時適用し、floor/span 未満なら自動補正します。
 # NOTE: `gha24` が事前フォールバックした場合は、Issueに監査コメントが自動投稿されます。
 # NOTE: `fugue-watchdog` は Claude state を自動復帰（degraded/exhausted -> ok）できますが、cooldown + 安定性条件を満たす場合のみ実行されます。
-# NOTE: `fugue-orchestrator-canary` が毎日、実Issueベースで regular/force の切替E2Eを自動検証します。
+# NOTE: `fugue-orchestration-gate` が PR で Fast Gate（syntax/yaml/parity/sim）を同期実行し、main push で canary-lite（regularのみ）を同期実行します。
+# NOTE: `fugue-orchestrator-canary` は full canary（regular+force）の定期検証です。`workflow_dispatch` では `canary_mode=full|lite` を選択できます。
+# NOTE: canaryは既定で `FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE=continuity` として、subscription runner 不在でも検証継続します（`hold` または `inherit` で従来どおりスキップ可能）。
+# NOTE: canaryは regular/force ケースの統合コメント待機を並列化し、待機上限は fast/slow 2段（上記 `FUGUE_CANARY_WAIT_*`）で調整できます。
 # NOTE: `fugue-orchestration-weekly-review` が週次で assist昇格率と high-risk時の昇格カバレッジを status issue に投稿します。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）

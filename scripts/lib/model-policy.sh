@@ -126,7 +126,7 @@ if [[ -n "${claude_raw}" ]]; then
 fi
 
 if [[ -n "${glm_raw}" ]]; then
-  if [[ "${glm_raw}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
+  if [[ "${glm_raw}" == "glm-4.5" || "${glm_raw}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
     normalized_glm="${glm_raw}"
   else
     adjusted="true"

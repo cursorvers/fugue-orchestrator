@@ -43,6 +43,7 @@ recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -x "${model_policy_script}" ]]; then
@@ -50,7 +51,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --codex-main-model "${raw_codex_main_model}" \
     --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
     --claude-model "${raw_claude_model}" \
-    --glm-model "glm-5.0" \
+    --glm-model "${raw_glm_model}" \
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
     --xai-model "${raw_xai_model}" \
@@ -61,6 +62,7 @@ else
   claude_opus_model="claude-sonnet-4-6"
   codex_main_model="gpt-5-codex"
   codex_multi_agent_model="gpt-5.3-codex-spark"
+  glm_model="glm-5.0"
   xai_latest_model="grok-4"
   gemini_fallback_model="gemini-3-flash"
 fi
@@ -103,7 +105,7 @@ case "${PROVIDER}" in
     MODEL="${claude_opus_model}"
     ;;
   glm)
-    MODEL="glm-5.0"
+    MODEL="${glm_model}"
     ;;
   gemini)
     if [[ "${requested_model}" == "gemini-3.1-pro" || "${requested_model}" == "gemini-3-flash" ]]; then
@@ -360,7 +362,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
   if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
     effective_provider="glm"
     effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
-    chosen_model="glm-5.0"
+    chosen_model="${glm_model}"
     fallback_req="$(jq -n \
       --arg model "${chosen_model}" \
       --arg s "${sys_prompt}" \
@@ -416,7 +418,7 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
   done
 else
   if [[ "${PROVIDER}" == "glm" ]]; then
-    candidates=("${MODEL}" "glm-5.0")
+    candidates=("${MODEL}" "${glm_model}" "glm-4.5")
     for m in "${candidates[@]}"; do
       chosen_model="${m}"
       req="$(jq -n \

@@ -369,13 +369,14 @@ eval "$("${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --claude-model "${claude_opus_model}" \
-  --glm-model "glm-5.0" \
+  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" \
   --gemini-model "gemini-3.1-pro" \
   --gemini-fallback-model "gemini-3-flash" \
   --xai-model "grok-4" \
   --format env)"
 CODEX_MAIN_MODEL="${codex_main_model}"
 CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
+GLM_MODEL="${glm_model}"
 claude_opus_model="${claude_model}"
 subscription_timeout="${FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}"
 claude_assist_policy="${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-hybrid}"
@@ -440,6 +441,7 @@ matrix_payload="$("${MATRIX_BUILDER}" \
   --wants-xai "false" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
+  --glm-model "${GLM_MODEL}" \
   --claude-opus-model "${claude_opus_model}" \
   --format "json")"
 echo "${matrix_payload}" | jq -c '.matrix' > "${matrix_file}"
@@ -510,6 +512,7 @@ run_lane() {
     API_URL="${api_url}" \
     CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL}" \
     CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL}" \
+    GLM_MODEL="${GLM_MODEL}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     ZAI_API_KEY="${ZAI_API_KEY:-}" \
     GEMINI_API_KEY="${GEMINI_API_KEY:-}" \

@@ -54,10 +54,12 @@ jobs:
           set -euo pipefail
 
           COMMENT_BODY=""
+          COMMENT_AUTHOR=""
           IS_VOTE_COMMAND="false"
           VOTE_INSTRUCTION=""
           if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
             COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+            COMMENT_AUTHOR="$(jq -r '.comment.user.login // ""' "${GITHUB_EVENT_PATH}")"
             comment_trimmed="$(printf '%s\n' "${COMMENT_BODY}" | sed -E 's/^[[:space:]]+//')"
             if printf '%s\n' "${comment_trimmed}" | grep -Eqi '^/vote([[:space:]]|$)'; then
               IS_VOTE_COMMAND="true"
@@ -82,10 +84,14 @@ jobs:
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           AUTHOR_ASSOC="$(echo "${issue_json}" | jq -r '.author_association // "NONE"')"
 
-          # Trust gate (write/maintain/admin). Used to prevent untrusted users
-          # from dispatching the mainframe workflows.
+          # Trust gate (write/maintain/admin). For issue comments, evaluate the
+          # comment actor (triggering user), not the issue author.
+          TRUST_SUBJECT="${AUTHOR}"
+          if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
+            TRUST_SUBJECT="${COMMENT_AUTHOR}"
+          fi
           PERM="none"
-          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission" 2>/dev/null || echo '{}')"
           if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
             PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
           fi
@@ -100,20 +106,18 @@ jobs:
 
           SHOULD_RUN="true"
           SKIP_REASON=""
-          if [[ "${IS_VOTE_COMMAND}" != "true" ]]; then
-            if [[ "${HAS_FUGUE}" != "true" ]]; then
-              SHOULD_RUN="false"
-              SKIP_REASON="missing-fugue-task-label"
-            elif [[ "${HAS_GHA24}" == "true" ]]; then
-              SHOULD_RUN="false"
-              SKIP_REASON="handled-by-gha24"
-            elif [[ "${HAS_TUTTI}" == "true" ]]; then
-              SHOULD_RUN="false"
-              SKIP_REASON="handled-by-tutti"
-            elif [[ "${HAS_PROCESSING}" == "true" ]]; then
-              SHOULD_RUN="false"
-              SKIP_REASON="already-processing"
-            fi
+          if [[ "${HAS_FUGUE}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-fugue-task-label"
+          elif [[ "${HAS_GHA24}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="handled-by-gha24"
+          elif [[ "${HAS_TUTTI}" == "true" && "${IS_VOTE_COMMAND}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="handled-by-tutti"
+          elif [[ "${HAS_PROCESSING}" == "true" && "${IS_VOTE_COMMAND}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="already-processing"
           fi
 
           {
@@ -127,11 +131,13 @@ jobs:
             echo "comment_body<<EOF"
             echo "${COMMENT_BODY}"
             echo "EOF"
+            echo "comment_author=${COMMENT_AUTHOR}"
             echo "is_vote_command=${IS_VOTE_COMMAND}"
             echo "vote_instruction<<EOF"
             echo "${VOTE_INSTRUCTION}"
             echo "EOF"
             echo "author=${AUTHOR}"
+            echo "trust_subject=${TRUST_SUBJECT}"
             echo "author_association=${AUTHOR_ASSOC}"
             echo "trusted=${TRUSTED}"
             echo "permission=${PERM}"
@@ -152,12 +158,23 @@ jobs:
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         uses: actions/checkout@v4
 
+      - name: Resolve orchestrator workflow ref
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        id: orch_ref
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_WORKFLOW_REF##*@}"
+          if [[ -z "${ref}" ]]; then
+            ref="main"
+          fi
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout orchestrator scripts
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: cursorvers/fugue-orchestrator
-          ref: v5
+          ref: ${{ steps.orch_ref.outputs.ref }}
           path: .fugue-orchestrator
 
       - name: Annotate target project (label + title prefix)
@@ -168,13 +185,20 @@ jobs:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
           COMMENT_BODY: ${{ steps.ctx.outputs.comment_body }}
+          IS_VOTE_COMMAND: ${{ steps.ctx.outputs.is_vote_command }}
         run: |
           set -euo pipefail
 
           title="${ISSUE_TITLE}"
           body="${ISSUE_BODY}"
           comment="${COMMENT_BODY}"
-          text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
+          is_vote_command="$(echo "${IS_VOTE_COMMAND:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${is_vote_command}" == "true" ]]; then
+            # Ignore /vote comment body for routing metadata extraction.
+            text="$(printf '%s\n%s\n' "${title}" "${body}")"
+          else
+            text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
+          fi
 
           owner="${GITHUB_REPOSITORY%%/*}"
 
@@ -238,6 +262,7 @@ jobs:
           COMMENT_BODY: ${{ steps.ctx.outputs.comment_body }}
           IS_VOTE_COMMAND: ${{ steps.ctx.outputs.is_vote_command }}
           VOTE_INSTRUCTION: ${{ steps.ctx.outputs.vote_instruction }}
+          TRUST_SUBJECT: ${{ steps.ctx.outputs.trust_subject }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
@@ -251,7 +276,12 @@ jobs:
           body="${ISSUE_BODY}"
           comment="${COMMENT_BODY}"
           vote_instruction="$(printf '%s' "${VOTE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
+          if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+            # Keep structured parsing immune to comment-injected headings.
+            text="$(printf '%s\n%s\n' "${title}" "${body}")"
+          else
+            text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
+          fi
 
           extract_heading_value() {
             local source="$1"
@@ -315,9 +345,9 @@ jobs:
             body_assist_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*assist[[:space:]]+orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex|none)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
           fi
 
-          orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
+          orchestrator_lib_dir="scripts/lib"
           if [[ ! -d "${orchestrator_lib_dir}" ]]; then
-            orchestrator_lib_dir="scripts/lib"
+            orchestrator_lib_dir=".fugue-orchestrator/scripts/lib"
           fi
 
           nl_main_hint=""
@@ -604,11 +634,15 @@ jobs:
             --repo "${GITHUB_REPOSITORY}"
             -f issue_number="${ISSUE_NUMBER}"
           )
-          if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
-            dispatch_args+=(-f vote_command=true)
+          trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -n "${trust_subject}" ]]; then
+            dispatch_args+=(-f trust_subject="${trust_subject}")
           fi
           if [[ -n "${vote_instruction_b64}" ]]; then
             dispatch_args+=(-f vote_instruction_b64="${vote_instruction_b64}")
+          fi
+          if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+            dispatch_args+=(-f allow_processing_rerun="true")
           fi
           gh workflow run fugue-tutti-caller.yml "${dispatch_args[@]}" >/dev/null
 
@@ -628,7 +662,7 @@ jobs:
           echo "has_tutti=${HAS_TUTTI}" >> "${GITHUB_OUTPUT}"
 
       - name: Add processing label
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -645,7 +679,7 @@ jobs:
 
       - name: Classify intent (Node.js decision table)
         id: classify
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
         env:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
@@ -683,15 +717,18 @@ jobs:
 
       - name: Check author trust
         id: trust
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          AUTHOR="${{ steps.ctx.outputs.author }}"
+          TRUST_SUBJECT="${{ steps.ctx.outputs.trust_subject }}"
+          if [[ -z "${TRUST_SUBJECT}" ]]; then
+            TRUST_SUBJECT="${{ steps.ctx.outputs.author }}"
+          fi
 
           PERM="none"
-          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission" 2>/dev/null || echo '{}')"
           if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
             PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
           fi
@@ -708,7 +745,7 @@ jobs:
 
       - name: Resolve final tier
         id: final
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
         run: |
           BASE_TIER="${{ steps.classify.outputs.tier }}"
           TRUSTED="${{ steps.trust.outputs.trusted }}"
@@ -719,7 +756,7 @@ jobs:
           echo "tier=${FINAL_TIER}" >> "${GITHUB_OUTPUT}"
 
       - name: Execute agent and post result (Tier 0-2)
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.final.outputs.tier != '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.final.outputs.tier != '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -862,7 +899,7 @@ jobs:
           fi
 
       - name: Tier 3 fallback
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.final.outputs.tier == '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.final.outputs.tier == '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -872,7 +909,7 @@ jobs:
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
 
       - name: Remove processing label
-        if: ${{ always() && steps.ctx.outputs.should_run == 'true' }}
+        if: ${{ always() && steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

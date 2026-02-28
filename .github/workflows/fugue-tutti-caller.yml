@@ -9,16 +9,26 @@ on:
         description: "Issue number to process (used for automated handoff)"
         required: true
         type: string
+      trust_subject:
+        description: "Optional trusted actor login for permission checks"
+        required: false
+        type: string
+        default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for this dispatch (hold|continuity)"
+        required: false
+        type: string
+        default: ""
       vote_instruction_b64:
         description: "Optional /vote instruction payload (base64-encoded)"
         required: false
         type: string
         default: ""
-      vote_command:
-        description: "true when triggered from /vote command path"
-        required: false
-        type: string
-        default: "false"
 
 permissions:
   issues: write
@@ -27,8 +37,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
-  cancel-in-progress: false
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}-${{ github.event_name == 'issues' && format('label-{0}', github.event.label.name) || 'dispatch' }}
+  cancel-in-progress: true
 
 jobs:
   ctx:
@@ -84,8 +94,10 @@ jobs:
       hybrid_conductor_mode: ${{ steps.ctx.outputs.hybrid_conductor_mode }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
+      subscription_offline_policy: ${{ steps.ctx.outputs.subscription_offline_policy }}
+      trust_subject: ${{ steps.ctx.outputs.trust_subject }}
+      allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
-      vote_command: ${{ steps.ctx.outputs.vote_command }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -95,8 +107,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
+          TRUST_SUBJECT_INPUT: ${{ github.event.inputs.trust_subject || '' }}
+          ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
-          VOTE_COMMAND_INPUT: ${{ github.event.inputs.vote_command || 'false' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -171,21 +185,19 @@ jobs:
           fi
           title="$(echo "${issue_json}" | jq -r '.title // ""')"
           body="$(echo "${issue_json}" | jq -r '.body // ""')"
+          trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -n "${trust_subject}" ]]; then
+            trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+          fi
+          allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${allow_processing_rerun}" != "true" ]]; then
+            allow_processing_rerun="false"
+          fi
           vote_instruction=""
           vote_instruction_b64="$(echo "${VOTE_INSTRUCTION_B64_INPUT:-}" | tr -d '\n\r[:space:]')"
           if [[ -n "${vote_instruction_b64}" ]]; then
             vote_instruction="$(printf '%s' "${vote_instruction_b64}" | base64 --decode 2>/dev/null || true)"
             vote_instruction="$(printf '%s' "${vote_instruction}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          fi
-          if [[ -n "${vote_instruction}" ]]; then
-            body="$(printf '%s\n\n## Vote Instruction\n%s\n' "${body}" "${vote_instruction}")"
-          fi
-          vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${vote_command}" != "true" ]]; then
-            vote_command="false"
-          fi
-          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
-            vote_command="false"
           fi
           owner="${GITHUB_REPOSITORY%%/*}"
 
@@ -200,6 +212,10 @@ jobs:
           subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
             subscription_offline_policy="continuity"
+          fi
+          subscription_offline_policy_override="$(echo "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+            subscription_offline_policy="${subscription_offline_policy_override}"
           fi
           emergency_continuity_mode="$(echo "${EMERGENCY_CONTINUITY_MODE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${emergency_continuity_mode}" != "true" ]]; then
@@ -921,6 +937,8 @@ jobs:
             echo "has_implement_confirmed=${has_implement_confirmed}"
             echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "subscription_runner_label=${subscription_runner_label}"
+            echo "subscription_offline_policy=${subscription_offline_policy}"
+            echo "trust_subject=${trust_subject}"
             echo "target_repo=${target_repo}"
             echo "orchestrator_provider=${requested_main_provider}"
             echo "main_orchestrator_provider=${requested_main_provider}"
@@ -973,10 +991,12 @@ jobs:
             echo "execution_provider=${execution_provider}"
             echo "execution_profile=${execution_profile}"
             echo "hybrid_conductor_mode=${hybrid_conductor_mode}"
+            echo "subscription_offline_policy=${subscription_offline_policy}"
+            echo "trust_subject=${trust_subject}"
+            echo "allow_processing_rerun=${allow_processing_rerun}"
             echo "vote_instruction<<EOF"
             echo "${vote_instruction}"
             echo "EOF"
-            echo "vote_command=${vote_command}"
             echo "should_run=${should_run}"
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
@@ -1109,8 +1129,10 @@ jobs:
       ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
       ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"
       claude_sub_trigger: "${{ needs.ctx.outputs.assist_auto_selected }}"
+      subscription_offline_policy_override: "${{ needs.ctx.outputs.subscription_offline_policy }}"
+      trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
+      allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
       extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
-      vote_command: "${{ needs.ctx.outputs.vote_command }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
