@@ -406,6 +406,15 @@ jobs:
           if [[ "${multi_agent_mode_lock}" != "true" ]]; then
             multi_agent_mode_lock="false"
           fi
+          # Early Hybrid Conductor Mode detection for multi-agent restriction check.
+          # Full computation happens later (line ~733); this is a safe forward-read.
+          _exec_prov_early="$(echo "${EXECUTION_PROVIDER_DEFAULT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          hybrid_conductor_mode="false"
+          if [[ "${_exec_prov_early}" == "codex" || "${_exec_prov_early}" == "claude" ]]; then
+            if [[ "${requested_main_provider}" != "${_exec_prov_early}" ]]; then
+              hybrid_conductor_mode="true"
+            fi
+          fi
           # Apply claude-light multi-agent restrictions only when NOT in Hybrid Conductor Mode.
           # In Hybrid, Claude is main but execution is Codex — full multi-agent depth is desired.
           if [[ "${orchestration_profile}" == "claude-light" && "${hybrid_conductor_mode}" != "true" ]]; then
