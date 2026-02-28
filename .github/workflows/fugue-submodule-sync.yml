@@ -1,6 +1,8 @@
 name: FUGUE Submodule Sync (claude-config)
 
 on:
+  schedule:
+    - cron: '15 */6 * * *'  # Every 6 hours (public repo = free)
   repository_dispatch:
     types: [claude-config-updated]
   workflow_dispatch:
