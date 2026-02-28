@@ -1220,7 +1220,15 @@ jobs:
             translation_calls=1
             claude_calls=$((claude_calls + 1))
           fi
+          # MCP REST bridge: count actual CI-accessible MCP service calls.
           mcp_calls=0
+          if [[ -x "scripts/lib/mcp-rest-bridge.sh" ]]; then
+            bridge_result="$(bash scripts/lib/mcp-rest-bridge.sh --smoke 2>/dev/null || echo '{}')"
+            bridge_count="$(printf '%s' "${bridge_result}" | jq -r '.mcp_calls // 0' 2>/dev/null || echo "0")"
+            if [[ "${bridge_count}" =~ ^[0-9]+$ ]]; then
+              mcp_calls="${bridge_count}"
+            fi
+          fi
 
           lanes="$(echo "${EXPECTED_LANES:-0}" | tr -cd '0-9')"
           if [[ -z "${lanes}" || "${lanes}" == "0" ]]; then

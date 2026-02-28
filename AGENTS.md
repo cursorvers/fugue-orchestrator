@@ -24,6 +24,12 @@ Adapter files such as `CLAUDE.md` must stay thin and reference this file.
   - Codex receives implementation dispatch via `fugue-codex-implement.yml` with `execution_profile=codex-full`.
   - MCP operations (Pencil, Stripe, Supabase, etc.) are Claude-exclusive; never bridged through Codex.
   - Implementation parameters (`preflight_cycles`, `dialogue_rounds`, `multi_agent_mode`) follow `execution_profile`, not `orchestration_profile`.
+- **MCP REST Bridge** (v8.6): CI can directly access Supabase and Stripe via REST API, bypassing MCP protocol.
+  - Bridge script: `scripts/lib/mcp-rest-bridge.sh`
+  - Supabase: PostgREST API with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
+  - Stripe: REST API with existing `STRIPE_API_KEY`
+  - CI-inaccessible MCP (Claude-session-only): Pencil, Excalidraw, Slack, Vercel
+  - Scorecard `mcp_calls` counter now reflects actual bridge calls instead of hardcoded `0`.
 - **Hybrid Failover** (when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted` during Hybrid):
   - Throttle guard demotes main to `codex`, deactivating Hybrid Conductor Mode.
   - All tasks run through codex-only (no MCP access). MCP-dependent tasks will fail and require manual retry after Claude recovery.
@@ -150,6 +156,14 @@ Auditability:
 - Operational health:
   - `.github/workflows/fugue-watchdog.yml`
   - `.github/workflows/fugue-status.yml`
+- Cross-repo dispatch-back (v8.6):
+  - Consumer repos receive FUGUE results via `repository_dispatch` event type `fugue-linked-result`.
+  - Triggered from `run-linked-systems.sh` when `CONSUMER_REPO` and `TARGET_REPO_PAT` are set.
+  - Consumer repos install `.github/workflows/templates/fugue-result-receiver.yml` to post results to issues.
+  - Payload: `{issue, status, success_count, error_count, mode, source_issue}`.
+- Submodule auto-sync (v8.6):
+  - `.github/workflows/fugue-submodule-sync.yml` auto-updates `.claude` submodule on `claude-config` push.
+  - Creates auto-merge PR on ref change; requires `TARGET_REPO_PAT` for cross-repo checkout.
 
 ## 7. Adapter Contract
 
@@ -217,3 +231,7 @@ Security guardrails:
   - `scripts/local/integrations/*.sh`
 - Safety gate:
   - `run-local-orchestration.sh --linked-mode execute` must only run when `ok_to_execute=true`; otherwise skip.
+- **v8.6**: Issue comment posting is now default (`POST_ISSUE_COMMENT=true`).
+  - `run-local-orchestration.sh --with-linked-systems` auto-passes `--comment` to the linked runner.
+  - Results from Remotion, note-manuscript, Obsidian, Discord, LINE are auto-posted to the originating issue.
+  - Consumer repo dispatch-back: set `CONSUMER_REPO` and `TARGET_REPO_PAT` env vars to send results via `repository_dispatch`.

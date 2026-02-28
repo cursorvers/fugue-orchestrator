@@ -7,7 +7,7 @@ MODE="${MODE:-smoke}" # smoke|execute
 MAX_PARALLEL="${MAX_PARALLEL:-3}"
 SYSTEMS="${SYSTEMS:-all}" # all|id1,id2
 OUT_DIR="${OUT_DIR:-.fugue/local-run}"
-POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
+POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-true}"
 MANIFEST_PATH="${MANIFEST_PATH:-config/integrations/local-systems.json}"
 
 usage() {
@@ -269,6 +269,38 @@ jq -n \
 
 if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then
   gh issue comment "${ISSUE_NUMBER}" --repo "${REPO}" --body-file "${summary_md}" >/dev/null
+fi
+
+# Dispatch results back to consumer repo if configured.
+if [[ -n "${CONSUMER_REPO:-}" && -n "${TARGET_REPO_PAT:-}" ]]; then
+  dispatch_payload="$(jq -n \
+    --arg event_type "fugue-linked-result" \
+    --arg issue "${CONSUMER_ISSUE:-}" \
+    --arg status "${overall_status}" \
+    --argjson success "${ok_count}" \
+    --argjson error "${error_count}" \
+    --arg mode "${MODE}" \
+    --arg source_issue "${ISSUE_NUMBER}" \
+    '{
+      event_type: $event_type,
+      client_payload: {
+        issue: $issue,
+        status: $status,
+        success_count: $success,
+        error_count: $error,
+        mode: $mode,
+        source_issue: $source_issue
+      }
+    }')"
+  if curl -sS -o /dev/null -w "%{http_code}" \
+    -X POST "https://api.github.com/repos/${CONSUMER_REPO}/dispatches" \
+    -H "Authorization: token ${TARGET_REPO_PAT}" \
+    -H "Accept: application/vnd.github+json" \
+    -d "${dispatch_payload}" | grep -q "^2"; then
+    echo "Dispatched result to ${CONSUMER_REPO}."
+  else
+    echo "Warning: failed to dispatch result to ${CONSUMER_REPO}." >&2
+  fi
 fi
 
 echo "Linked systems completed."

@@ -787,6 +787,7 @@ if [[ "${WITH_LINKED_SYSTEMS}" == "true" ]]; then
       --systems "${LINKED_SYSTEMS}" \
       --max-parallel "${LINKED_MAX_PARALLEL}" \
       --out-dir "${linked_out_dir}" \
+      --comment \
       > "${RUN_DIR}/linked-systems.out.log" 2> "${RUN_DIR}/linked-systems.err.log"
     linked_rc=$?
     set -e
