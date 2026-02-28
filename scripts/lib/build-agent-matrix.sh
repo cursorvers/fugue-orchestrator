@@ -255,195 +255,109 @@ matrix="$(jq -cn \
   --argjson use_glm_baseline "$( [[ "${use_glm_baseline}" == "true" ]] && echo true || echo false )" \
   --argjson dual_main_signal "$( [[ "${dual_main_signal}" == "true" ]] && echo true || echo false )" \
   '
-  def codex_api($engine):
-    if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end;
-  def claude_api($engine):
-    if $engine == "subscription" then "subscription-cli" else "https://api.anthropic.com/v1/messages" end;
+  # --- Provider API URL resolvers ---
+  def codex_api: if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end;
+  def claude_api: if $engine == "subscription" then "subscription-cli" else "https://api.anthropic.com/v1/messages" end;
+  def glm_api: "https://api.z.ai/api/coding/paas/v4/chat/completions";
+  def gemini_api: "https://generativelanguage.googleapis.com/v1beta/models";
+  def xai_api: "https://api.x.ai/v1/chat/completions";
 
-  def base($use_glm_baseline; $codex_multi_agent_model):
+  # --- Lane constructors ---
+  def L(n;p;u;m;r): {name:n, provider:p, api_url:u, model:m, agent_role:r};
+  def Ld(n;p;u;m;r;d): L(n;p;u;m;r) + {agent_directive:d};
+  def codex(n;r): L(n; "codex"; codex_api; $codex_multi_agent_model; r);
+  def codex_sub(n;r): L(n; "codex"; "subscription-cli"; $codex_multi_agent_model; r);
+  def glm(n;r): L(n; "glm"; glm_api; $glm_model; r);
+  def glmd(n;r;d): Ld(n; "glm"; glm_api; $glm_model; r; d);
+  def enhanced_or_max: ($multi_agent_mode == "enhanced" or $multi_agent_mode == "max");
+
+  # --- Base lanes ---
+  def base:
     if $use_glm_baseline then
-      [
-        {name:"codex-security-analyst",provider:"codex",api_url:codex_api($engine),model:$codex_multi_agent_model,agent_role:"security-analyst"},
-        {name:"codex-code-reviewer",provider:"codex",api_url:codex_api($engine),model:$codex_multi_agent_model,agent_role:"code-reviewer"},
-        {name:"codex-general-reviewer",provider:"codex",api_url:codex_api($engine),model:$codex_multi_agent_model,agent_role:"general-reviewer"},
-        {name:"glm-code-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:$glm_model,agent_role:"code-reviewer"},
-        {name:"glm-general-reviewer",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:$glm_model,agent_role:"general-reviewer"},
-        {name:"glm-math-reasoning",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:$glm_model,agent_role:"math-reasoning"}
-      ]
+      [ codex("codex-security-analyst";"security-analyst"),
+        codex("codex-code-reviewer";"code-reviewer"),
+        codex("codex-general-reviewer";"general-reviewer"),
+        glm("glm-code-reviewer";"code-reviewer"),
+        glm("glm-general-reviewer";"general-reviewer"),
+        glm("glm-math-reasoning";"math-reasoning") ]
     else
-      [
-        {name:"codex-security-analyst",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"security-analyst"},
-        {name:"codex-code-reviewer",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"code-reviewer"},
-        {name:"codex-general-reviewer",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"general-reviewer"},
-        {name:"codex-math-reasoning",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"math-reasoning"},
-        {name:"codex-refactor-advisor",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"refactor-advisor"},
-        {name:"codex-general-critic",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"general-critic"}
-      ]
+      [ codex_sub("codex-security-analyst";"security-analyst"),
+        codex_sub("codex-code-reviewer";"code-reviewer"),
+        codex_sub("codex-general-reviewer";"general-reviewer"),
+        codex_sub("codex-math-reasoning";"math-reasoning"),
+        codex_sub("codex-refactor-advisor";"refactor-advisor"),
+        codex_sub("codex-general-critic";"general-critic") ]
     end;
 
-  {include: base($use_glm_baseline; $codex_multi_agent_model)}
+  {include: base}
+  # GLM orchestration subagent
   | if ($use_glm_baseline and $glm_subagent_mode != "off") then
-      .include += [{
-        name:"glm-orchestration-subagent",
-        provider:"glm",
-        api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-        model:$glm_model,
-        agent_role:"orchestration-assistant",
-        agent_directive:"Work as Codex main orchestrator subagent: surface hidden assumptions, unresolved dependencies, and handoff risks."
-      }]
+      .include += [glmd("glm-orchestration-subagent";"orchestration-assistant";
+        "Work as Codex main orchestrator subagent: surface hidden assumptions, unresolved dependencies, and handoff risks.")]
     else . end
+  # Main orchestrator lane
   | if $main_provider == "claude" then
-      .include += [{
-        name:"claude-main-orchestrator",
-        provider:"claude",
-        api_url:claude_api($engine),
-        model:$claude_opus_model,
-        agent_role:"main-orchestrator"
-      }]
+      .include += [L("claude-main-orchestrator";"claude";claude_api;$claude_opus_model;"main-orchestrator")]
     else
-      .include += [{
-        name:"codex-main-orchestrator",
-        provider:"codex",
-        api_url:codex_api($engine),
-        model:$codex_main_model,
-        agent_role:"main-orchestrator"
-      }]
+      .include += [L("codex-main-orchestrator";"codex";codex_api;$codex_main_model;"main-orchestrator")]
     end
+  # Dual main signal (secondary)
   | if $dual_main_signal then
       if $main_provider == "claude" then
-        .include += [{
-          name:"codex-main-orchestrator",
-          provider:"codex",
-          api_url:codex_api($engine),
-          model:$codex_main_model,
-          agent_role:"main-orchestrator"
-        }]
+        .include += [L("codex-main-orchestrator";"codex";codex_api;$codex_main_model;"main-orchestrator")]
       else
-        .include += [{
-          name:"claude-main-orchestrator",
-          provider:"claude",
-          api_url:claude_api($engine),
-          model:$claude_opus_model,
-          agent_role:"main-orchestrator"
-        }]
+        .include += [L("claude-main-orchestrator";"claude";claude_api;$claude_opus_model;"main-orchestrator")]
       end
     else . end
+  # Assist lanes
   | if $assist_provider == "claude" then
-      .include += [{
-        name:"claude-opus-assist",
-        provider:"claude",
-        api_url:claude_api($engine),
-        model:$claude_opus_model,
-        agent_role:"orchestration-assistant"
-      }]
+      .include += [L("claude-opus-assist";"claude";claude_api;$claude_opus_model;"orchestration-assistant")]
     else . end
   | if $assist_provider == "claude" and $engine != "subscription" then
       .include += [
-        {name:"claude-sonnet4-assist",provider:"claude",api_url:claude_api($engine),model:$claude_sonnet4_model,agent_role:"orchestration-assistant"},
-        {name:"claude-sonnet6-assist",provider:"claude",api_url:claude_api($engine),model:$claude_sonnet6_model,agent_role:"orchestration-assistant"}
-      ]
+        L("claude-sonnet4-assist";"claude";claude_api;$claude_sonnet4_model;"orchestration-assistant"),
+        L("claude-sonnet6-assist";"claude";claude_api;$claude_sonnet6_model;"orchestration-assistant")]
     else . end
   | if $assist_provider == "codex" then
-      .include += [{
-        name:"codex-orchestration-assist",
-        provider:"codex",
-        api_url:codex_api($engine),
-        model:$codex_multi_agent_model,
-        agent_role:"orchestration-assistant"
-      }]
+      .include += [codex("codex-orchestration-assist";"orchestration-assistant")]
     else . end
+  # Optional provider lanes
   | if $wants_gemini then
-      .include += [{
-        name:"gemini-visual-reviewer",
-        provider:"gemini",
-        api_url:"https://generativelanguage.googleapis.com/v1beta/models",
-        model:$gemini_model,
-        agent_role:"ui-reviewer"
-      }]
+      .include += [L("gemini-visual-reviewer";"gemini";gemini_api;$gemini_model;"ui-reviewer")]
     else . end
   | if $wants_xai then
-      .include += [{
-        name:"xai-realtime-info",
-        provider:"xai",
-        api_url:"https://api.x.ai/v1/chat/completions",
-        model:$xai_model,
-        agent_role:"realtime-info"
-      }]
+      .include += [L("xai-realtime-info";"xai";xai_api;$xai_model;"realtime-info")]
     else . end
-  | if ($multi_agent_mode == "enhanced" or $multi_agent_mode == "max") then
+  # Enhanced/Max mode lanes
+  | if enhanced_or_max then
+      .include += [codex("codex-architect";"architect"), codex("codex-plan-reviewer";"plan-reviewer")]
+    else . end
+  | if enhanced_or_max and ($use_glm_baseline | not) then
+      .include += [codex_sub("codex-refactor-advisor-enhanced";"refactor-advisor"), codex_sub("codex-general-critic-enhanced";"general-critic")]
+    else . end
+  | if enhanced_or_max and $use_glm_baseline then
+      .include += [glm("glm-refactor-advisor";"refactor-advisor"), glm("glm-general-critic";"general-critic")]
+    else . end
+  | if enhanced_or_max and $use_glm_baseline and $glm_subagent_mode != "off" then
       .include += [
-        {name:"codex-architect",provider:"codex",api_url:codex_api($engine),model:$codex_multi_agent_model,agent_role:"architect"},
-        {name:"codex-plan-reviewer",provider:"codex",api_url:codex_api($engine),model:$codex_multi_agent_model,agent_role:"plan-reviewer"}
-      ]
+        glmd("glm-architect-subagent";"architect";
+          "Act as GLM subagent to stress-test the system architecture and expose hidden coupling before implementation."),
+        glmd("glm-plan-reviewer-subagent";"plan-reviewer";
+          "Act as GLM subagent to challenge plan sequencing, rollback feasibility, and dependency ordering.")]
     else . end
-  | if ($multi_agent_mode == "enhanced" or $multi_agent_mode == "max") and ($use_glm_baseline | not) then
-      .include += [
-        {name:"codex-refactor-advisor-enhanced",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"refactor-advisor"},
-        {name:"codex-general-critic-enhanced",provider:"codex",api_url:"subscription-cli",model:$codex_multi_agent_model,agent_role:"general-critic"}
-      ]
-    else . end
-  | if ($multi_agent_mode == "enhanced" or $multi_agent_mode == "max") and $use_glm_baseline then
-      .include += [
-        {name:"glm-refactor-advisor",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:$glm_model,agent_role:"refactor-advisor"},
-        {name:"glm-general-critic",provider:"glm",api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",model:$glm_model,agent_role:"general-critic"}
-      ]
-    else . end
-  | if ($multi_agent_mode == "enhanced" or $multi_agent_mode == "max") and $use_glm_baseline and $glm_subagent_mode != "off" then
-      .include += [
-        {
-          name:"glm-architect-subagent",
-          provider:"glm",
-          api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-          model:$glm_model,
-          agent_role:"architect",
-          agent_directive:"Act as GLM subagent to stress-test the system architecture and expose hidden coupling before implementation."
-        },
-        {
-          name:"glm-plan-reviewer-subagent",
-          provider:"glm",
-          api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-          model:$glm_model,
-          agent_role:"plan-reviewer",
-          agent_directive:"Act as GLM subagent to challenge plan sequencing, rollback feasibility, and dependency ordering."
-        }
-      ]
-    else . end
+  # Max-only lanes
   | if $multi_agent_mode == "max" then
-      .include += [{
-        name:"codex-reliability-engineer",
-        provider:"codex",
-        api_url:codex_api($engine),
-        model:$codex_multi_agent_model,
-        agent_role:"reliability-engineer"
-      }]
+      .include += [codex("codex-reliability-engineer";"reliability-engineer")]
     else . end
   | if $multi_agent_mode == "max" and ($use_glm_baseline | not) then
-      .include += [{
-        name:"codex-invariants-checker",
-        provider:"codex",
-        api_url:"subscription-cli",
-        model:$codex_multi_agent_model,
-        agent_role:"invariants-checker"
-      }]
+      .include += [codex_sub("codex-invariants-checker";"invariants-checker")]
     else . end
   | if $multi_agent_mode == "max" and $use_glm_baseline then
-      .include += [{
-        name:"glm-invariants-checker",
-        provider:"glm",
-        api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-        model:$glm_model,
-        agent_role:"invariants-checker"
-      }]
+      .include += [glm("glm-invariants-checker";"invariants-checker")]
     else . end
   | if $multi_agent_mode == "max" and $use_glm_baseline and $glm_subagent_mode == "symphony" then
-      .include += [{
-        name:"glm-reliability-subagent",
-        provider:"glm",
-        api_url:"https://api.z.ai/api/coding/paas/v4/chat/completions",
-        model:$glm_model,
-        agent_role:"reliability-engineer",
-        agent_directive:"Act as GLM subagent for worst-case operational scenarios, retries, and failure isolation."
-      }]
+      .include += [glmd("glm-reliability-subagent";"reliability-engineer";
+        "Act as GLM subagent for worst-case operational scenarios, retries, and failure isolation.")]
     else . end
   ' )"
 
