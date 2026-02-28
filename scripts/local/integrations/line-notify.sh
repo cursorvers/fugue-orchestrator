@@ -11,6 +11,7 @@ LINE_WEBHOOK_URL="${LINE_WEBHOOK_URL:-}"
 LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN:-}"
 LINE_TO="${LINE_TO:-}"
 LINE_PUSH_API_URL="${LINE_PUSH_API_URL:-https://api.line.me/v2/bot/message/push}"
+LINE_BROADCAST_API_URL="${LINE_BROADCAST_API_URL:-https://api.line.me/v2/bot/message/broadcast}"
 LINE_NOTIFY_TOKEN="${LINE_NOTIFY_TOKEN:-${LINE_NOTIFY_ACCESS_TOKEN:-}}"
 LINE_NOTIFY_API_URL="${LINE_NOTIFY_API_URL:-https://notify-api.line.me/api/notify}"
 LINE_NOTIFY_REQUIRED_ON_EXECUTE="${LINE_NOTIFY_REQUIRED_ON_EXECUTE:-true}"
@@ -19,6 +20,7 @@ LINE_NOTIFY_MESSAGE="${LINE_NOTIFY_MESSAGE:-}"
 LINE_NOTIFY_GUARD_ENABLED="${LINE_NOTIFY_GUARD_ENABLED:-true}"
 LINE_NOTIFY_GUARD_FILE="${LINE_NOTIFY_GUARD_FILE:-${ROOT_DIR}/.fugue/state/line-notify-guard.json}"
 LINE_NOTIFY_PREFER_PUSH="${LINE_NOTIFY_PREFER_PUSH:-false}"
+LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK="${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK:-false}"
 LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK:-false}"
 LINE_NOTIFY_DEDUP_TTL_SECONDS="${LINE_NOTIFY_DEDUP_TTL_SECONDS:-21600}"
 LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS:-3600}"
@@ -44,6 +46,7 @@ Environment:
   LINE_CHANNEL_ACCESS_TOKEN    LINE Messaging API channel access token
   LINE_TO                      LINE user/group ID for push messages
   LINE_PUSH_API_URL            Override push endpoint (default: official LINE Messaging API)
+  LINE_BROADCAST_API_URL       Override broadcast endpoint (default: official LINE Messaging API)
   LINE_NOTIFY_TOKEN            Legacy LINE Notify token (fallback)
   LINE_NOTIFY_ACCESS_TOKEN     Legacy alias for LINE_NOTIFY_TOKEN
   LINE_NOTIFY_API_URL          Override legacy LINE Notify endpoint
@@ -57,6 +60,8 @@ Environment:
   LINE_NOTIFY_GUARD_FILE          Guard state file path (default: <repo>/.fugue/state/line-notify-guard.json).
   LINE_NOTIFY_PREFER_PUSH=true|false
                                   If true, prefer LINE push API over webhook when both are configured.
+  LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK=true|false
+                                  If true, fallback to LINE broadcast API when LINE_TO is unset.
   LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true|false
                                   If false (default), reject inbound webhook URLs such as /webhook/line-bot.
   LINE_NOTIFY_DEDUP_TTL_SECONDS   Duplicate suppression window in seconds (default: 21600).
@@ -175,6 +180,7 @@ LINE_NOTIFY_REQUIRED_ON_EXECUTE="$(to_bool "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}")
 LINE_NOTIFY_SMOKE_SEND="$(to_bool "${LINE_NOTIFY_SMOKE_SEND}")"
 LINE_NOTIFY_GUARD_ENABLED="$(to_bool "${LINE_NOTIFY_GUARD_ENABLED}")"
 LINE_NOTIFY_PREFER_PUSH="$(to_bool "${LINE_NOTIFY_PREFER_PUSH}")"
+LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK="$(to_bool "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}")"
 LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="$(to_bool "${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK}")"
 LINE_NOTIFY_DEDUP_TTL_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_DEDUP_TTL_SECONDS}" "21600")"
 LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS}" "3600")"
@@ -199,6 +205,8 @@ if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" ]]; then
   transport_selection="push-first"
   if [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
     transport="push"
+  elif [[ "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}" == "true" && -n "${LINE_CHANNEL_ACCESS_TOKEN}" ]]; then
+    transport="broadcast"
   elif [[ -n "${LINE_WEBHOOK_URL}" ]]; then
     transport="webhook"
   elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
@@ -209,13 +217,17 @@ else
     transport="webhook"
   elif [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
     transport="push"
+  elif [[ "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}" == "true" && -n "${LINE_CHANNEL_ACCESS_TOKEN}" ]]; then
+    transport="broadcast"
   elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
     transport="notify"
   fi
 fi
 
 if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" && "${transport}" != "push" ]]; then
-  if [[ "${transport}" == "webhook" ]]; then
+  if [[ "${transport}" == "broadcast" ]]; then
+    echo "line-notify: LINE_TO is missing; using broadcast fallback."
+  elif [[ "${transport}" == "webhook" ]]; then
     echo "line-notify: push credentials are missing; using webhook fallback."
   elif [[ "${transport}" == "notify" ]]; then
     echo "line-notify: push and webhook are unavailable; using legacy notify fallback."
@@ -269,7 +281,7 @@ if (( ${#message} > 900 )); then
   message="${message:0:897}..."
 fi
 
-message_hash="$(hash_text "${transport}|${LINE_TO}|${LINE_WEBHOOK_URL}|${LINE_PUSH_API_URL}|${message}")"
+message_hash="$(hash_text "${transport}|${LINE_TO}|${LINE_WEBHOOK_URL}|${LINE_PUSH_API_URL}|${LINE_BROADCAST_API_URL}|${message}")"
 guard_action="disabled"
 epoch_now="$(date +%s)"
 repo_slug="${GITHUB_REPOSITORY:-}"
@@ -379,6 +391,18 @@ if [[ "${should_send}" == "true" ]]; then
     elif [[ "${transport}" == "push" ]]; then
       payload="$(jq -n --arg to "${LINE_TO}" --arg text "${message}" '{to:$to,messages:[{type:"text",text:$text}]}')"
       http_status="$(curl -sS -X POST "${LINE_PUSH_API_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+        -d "${payload}")"
+      curl_exit_code=$?
+    elif [[ "${transport}" == "broadcast" ]]; then
+      payload="$(jq -n --arg text "${message}" '{messages:[{type:"text",text:$text}]}')"
+      http_status="$(curl -sS -X POST "${LINE_BROADCAST_API_URL}" \
         --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
         --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
         -D "${headers_file}" \
