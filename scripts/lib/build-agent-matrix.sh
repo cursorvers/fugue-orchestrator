@@ -17,7 +17,7 @@ codex_multi_agent_model="gpt-5.3-codex-spark"
 claude_opus_model="claude-sonnet-4-6"
 claude_sonnet4_model="claude-sonnet-4-6"
 claude_sonnet6_model="claude-sonnet-4-6"
-glm_model="glm-4.5"
+glm_model="glm-5.0"
 gemini_model="gemini-3.1-pro"
 xai_model="grok-4"
 format="json"
@@ -79,7 +79,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --glm-model)
-      glm_model="${2:-glm-4.5}"
+      glm_model="${2:-glm-5.0}"
       shift 2
       ;;
     --gemini-model)
@@ -112,7 +112,7 @@ Options:
   --claude-opus-model VALUE         default: claude-sonnet-4-6
   --claude-sonnet4-model VALUE      default: claude-sonnet-4-6
   --claude-sonnet6-model VALUE      default: claude-sonnet-4-6
-  --glm-model VALUE                 default: glm-4.5
+  --glm-model VALUE                 default: glm-5.0
   --gemini-model VALUE              default: gemini-3.1-pro
   --xai-model VALUE                 default: grok-4
   --format VALUE                    json (default) | env
@@ -200,7 +200,7 @@ else
     claude_sonnet6_model="claude-sonnet-4-6"
   fi
   if [[ -z "${glm_model}" ]]; then
-    glm_model="glm-4.5"
+    glm_model="glm-5.0"
   fi
   if [[ -z "${gemini_model}" ]]; then
     gemini_model="gemini-3.1-pro"

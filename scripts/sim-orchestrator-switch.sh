@@ -60,7 +60,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --codex-main-model "${codex_main_model_default}" \
     --codex-multi-agent-model "${codex_multi_agent_model_default}" \
     --claude-model "${claude_opus_model_default}" \
-    --glm-model "${FUGUE_GLM_MODEL:-glm-4.5}" \
+    --glm-model "${FUGUE_GLM_MODEL:-glm-5.0}" \
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "gemini-3-flash" \
     --xai-model "grok-4" \

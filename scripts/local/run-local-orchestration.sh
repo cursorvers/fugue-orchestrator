@@ -367,7 +367,7 @@ eval "$("${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --claude-model "${claude_opus_model}" \
-  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-4.5}}" \
+  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" \
   --gemini-model "gemini-3.1-pro" \
   --gemini-fallback-model "gemini-3-flash" \
   --xai-model "grok-4" \

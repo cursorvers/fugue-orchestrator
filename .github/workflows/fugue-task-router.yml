@@ -743,7 +743,7 @@ jobs:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          ZAI_MODEL: glm-4.5
+          ZAI_MODEL: glm-5.0
           XAI_MODEL: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_PRIMARY_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}

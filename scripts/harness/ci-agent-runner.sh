@@ -42,7 +42,7 @@ model_policy_script="${script_dir}/../lib/model-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-4.5}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -x "${model_policy_script}" ]]; then
@@ -61,7 +61,7 @@ else
   claude_opus_model="claude-sonnet-4-6"
   codex_main_model="gpt-5-codex"
   codex_multi_agent_model="gpt-5.3-codex-spark"
-  glm_model="glm-4.5"
+  glm_model="glm-5.0"
   xai_latest_model="grok-4"
   gemini_fallback_model="gemini-3-flash"
 fi

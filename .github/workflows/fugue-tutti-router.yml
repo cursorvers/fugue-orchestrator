@@ -458,7 +458,7 @@ jobs:
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-4.5' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
           STRICT_MAIN_CODEX_MODEL: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
@@ -527,9 +527,9 @@ jobs:
           if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex)$ ]]; then
             CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
           fi
-          GLM_MODEL="$(echo "${GLM_MODEL:-glm-4.5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          GLM_MODEL="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${GLM_MODEL}" ]]; then
-            GLM_MODEL="glm-4.5"
+            GLM_MODEL="glm-5.0"
           fi
           if [[ "${CLAUDE_OPUS_MODEL}" != "claude-sonnet-4-6" ]]; then
             CLAUDE_OPUS_MODEL="claude-sonnet-4-6"
@@ -1657,7 +1657,7 @@ jobs:
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-4.5' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'standard' }}
           GLM_SUBAGENT_MODE: ${{ vars.FUGUE_GLM_SUBAGENT_MODE || 'paired' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -1964,9 +1964,9 @@ jobs:
           if [[ -z "${codex_multi_agent_model}" ]]; then
             codex_multi_agent_model="gpt-5.3-codex-spark"
           fi
-          glm_model="$(echo "${GLM_MODEL:-glm-4.5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${glm_model}" ]]; then
-            glm_model="glm-4.5"
+            glm_model="glm-5.0"
           fi
 
           matrix_args=(
