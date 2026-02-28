@@ -3,7 +3,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
-# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude]
+# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude] [--local-run|--gha-only]
 #
 # Options:
 #   --implement    Add implement intent labels to trigger post-vote implementation
@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   --orchestrator Per-request orchestrator override (codex|claude)
 #   --assist-orchestrator Per-request assist orchestrator override (claude|codex|none)
 #   --force-claude Force claude provider(s) for this issue even when repo fallback state is degraded/exhausted
+#   --local-run    Force local orchestration run after issue creation
+#   --gha-only     Disable local auto-fallback run
 #
 # Notes:
 #   Default mode is implement unless review-only intent is explicit.
@@ -32,11 +34,18 @@ ORCHESTRATOR_PROVIDER_EXPLICIT=false
 ASSIST_ORCHESTRATOR_PROVIDER="${GHA24_ASSIST_ORCHESTRATOR_PROVIDER:-}"
 ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=false
 FORCE_CLAUDE=false
+LOCAL_RUN_MODE="${GHA24_LOCAL_RUN_MODE:-force}" # auto|force|off
+LOCAL_POST_COMMENT="${GHA24_LOCAL_POST_COMMENT:-true}"
+LOCAL_MAX_PARALLEL="${GHA24_LOCAL_MAX_PARALLEL:-4}"
+LOCAL_RUN_MODE_EXPLICIT=false
 if [[ -n "${GHA24_ORCHESTRATOR_PROVIDER:-}" ]]; then
   ORCHESTRATOR_PROVIDER_EXPLICIT=true
 fi
 if [[ -n "${GHA24_ASSIST_ORCHESTRATOR_PROVIDER:-}" ]]; then
   ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=true
+fi
+if [[ -n "${GHA24_LOCAL_RUN_MODE:-}" ]]; then
+  LOCAL_RUN_MODE_EXPLICIT=true
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -69,8 +78,18 @@ while [[ $# -gt 0 ]]; do
       FORCE_CLAUDE=true
       shift
       ;;
+    --local-run)
+      LOCAL_RUN_MODE="force"
+      LOCAL_RUN_MODE_EXPLICIT=true
+      shift
+      ;;
+    --gha-only)
+      LOCAL_RUN_MODE="off"
+      LOCAL_RUN_MODE_EXPLICIT=true
+      shift
+      ;;
     -h|--help)
-      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude]"
+      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude] [--local-run|--gha-only]"
       echo ""
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
@@ -79,11 +98,17 @@ while [[ $# -gt 0 ]]; do
       echo "  --orchestrator Per-request orchestrator override (codex|claude)"
       echo "  --assist-orchestrator Per-request assist orchestrator override (claude|codex|none)"
       echo "  --force-claude Force claude provider(s) for this issue"
+      echo "  --local-run    Force local orchestration run after issue creation"
+      echo "  --gha-only     Disable local auto-fallback run"
+      echo "                 (フラグなしでも、タスク文の『ローカルで実行』『GHAのみ』等を自動解釈)"
       echo ""
       echo "Environment:"
       echo "  GHA24_ORCHESTRATOR_REPO  Orchestrator repo for issue creation (default: cursorvers/fugue-orchestrator)"
       echo "  GHA24_ORCHESTRATOR_PROVIDER  Per-request orchestrator override (codex|claude)"
       echo "  GHA24_ASSIST_ORCHESTRATOR_PROVIDER  Per-request assist override (claude|codex|none)"
+      echo "  GHA24_LOCAL_RUN_MODE  Local run mode (auto|force|off, default: force)"
+      echo "  GHA24_LOCAL_POST_COMMENT  Local run summary comment (true|false, default: true)"
+      echo "  GHA24_LOCAL_MAX_PARALLEL  Local lane parallelism (default: 4)"
       echo ""
       echo "Examples:"
       echo "  gha24 \"認証フローのセキュリティレビュー\""
@@ -94,6 +119,7 @@ while [[ $# -gt 0 ]]; do
       echo "  gha24 \"完遂: API障害対応\" --orchestrator claude"
       echo "  gha24 \"完遂: API障害対応\" --orchestrator codex --assist-orchestrator claude"
       echo "  gha24 \"完遂: API障害対応\" --orchestrator claude --force-claude"
+      echo "  gha24 \"完遂: API障害対応\" --local-run"
       exit 0
       ;;
     *)
@@ -114,6 +140,48 @@ fi
 if ! command -v gh &>/dev/null; then
   echo "Error: gh CLI not found" >&2
   exit 1
+fi
+
+LOCAL_RUN_MODE="$(echo "${LOCAL_RUN_MODE}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${LOCAL_RUN_MODE}" != "auto" && "${LOCAL_RUN_MODE}" != "force" && "${LOCAL_RUN_MODE}" != "off" ]]; then
+  echo "Error: local run mode must be auto|force|off" >&2
+  exit 1
+fi
+LOCAL_POST_COMMENT="$(echo "${LOCAL_POST_COMMENT}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${LOCAL_POST_COMMENT}" != "true" ]]; then
+  LOCAL_POST_COMMENT="false"
+fi
+if ! [[ "${LOCAL_MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( LOCAL_MAX_PARALLEL < 1 )); then
+  echo "Error: GHA24_LOCAL_MAX_PARALLEL must be a positive integer" >&2
+  exit 1
+fi
+
+# Natural language orchestrator hints (only when not explicitly set by flag/env).
+# Examples:
+# - "claudeをメインorchestratorに"
+# - "assistはcodex"
+# - "co-orchestratorはnone"
+if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" ]]; then
+  if echo "${TASK}" | grep -Eqi '((main|メイン)[[:space:]:：-]*(orchestrator|オーケストレータ|オーケストレーター)?[[:space:]:：-]*(claude|opus))|((claude|opus)[[:space:]:：-]*(main|メイン))'; then
+    ORCHESTRATOR_PROVIDER="claude"
+    ORCHESTRATOR_PROVIDER_EXPLICIT=true
+  elif echo "${TASK}" | grep -Eqi '((main|メイン)[[:space:]:：-]*(orchestrator|オーケストレータ|オーケストレーター)?[[:space:]:：-]*(codex|gpt-5(\.[0-9]+)?-codex))|((codex|gpt-5(\.[0-9]+)?-codex)[[:space:]:：-]*(main|メイン))'; then
+    ORCHESTRATOR_PROVIDER="codex"
+    ORCHESTRATOR_PROVIDER_EXPLICIT=true
+  fi
+fi
+
+if [[ "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" ]]; then
+  if echo "${TASK}" | grep -Eqi '((assist|sub|co-?orchestrator|アシスト|サブ|副)[[:space:]:：-]*(orchestrator|オーケストレータ|オーケストレーター)?[[:space:]:：-]*(claude|opus))|((claude|opus)[[:space:]:：-]*(assist|sub|co-?orchestrator|アシスト|サブ|副))'; then
+    ASSIST_ORCHESTRATOR_PROVIDER="claude"
+    ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=true
+  elif echo "${TASK}" | grep -Eqi '((assist|sub|co-?orchestrator|アシスト|サブ|副)[[:space:]:：-]*(orchestrator|オーケストレータ|オーケストレーター)?[[:space:]:：-]*(codex|gpt-5(\.[0-9]+)?-codex))|((codex|gpt-5(\.[0-9]+)?-codex)[[:space:]:：-]*(assist|sub|co-?orchestrator|アシスト|サブ|副))'; then
+    ASSIST_ORCHESTRATOR_PROVIDER="codex"
+    ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=true
+  elif echo "${TASK}" | grep -Eqi '((assist|sub|co-?orchestrator|アシスト|サブ|副)[[:space:]:：-]*(orchestrator|オーケストレータ|オーケストレーター)?[[:space:]:：-]*(none|off|なし|無効))|((none|off|なし|無効)[[:space:]:：-]*(assist|sub|co-?orchestrator|アシスト|サブ|副))'; then
+    ASSIST_ORCHESTRATOR_PROVIDER="none"
+    ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT=true
+  fi
 fi
 
 if [[ "${FORCE_CLAUDE}" == "true" && "${ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" && "${ASSIST_ORCHESTRATOR_PROVIDER_EXPLICIT}" != "true" ]]; then
@@ -139,6 +207,20 @@ fi
 if [[ "${MODE_EXPLICIT}" != "true" ]]; then
   if echo "${TASK}" | grep -Eqi '(レビューのみ|指摘のみ|実装しない|実装不要|review only|no implement|no-implement|#review)'; then
     IMPLEMENT=false
+  fi
+fi
+
+# Natural language local-run routing (only when not explicitly set by flag/env).
+# Priority:
+#   1) explicit GHA-only phrases      -> LOCAL_RUN_MODE=off
+#   2) explicit local force phrases   -> LOCAL_RUN_MODE=force
+if [[ "${LOCAL_RUN_MODE_EXPLICIT}" != "true" ]]; then
+  if echo "${TASK}" | grep -Eqi '(ghaのみ|github actionsのみ|ローカル実行しない|local( |-)?disable|gha( |-)?only)'; then
+    LOCAL_RUN_MODE="off"
+  elif echo "${TASK}" | grep -Eqi '(寝る|就寝|離席|不在|外出|夜間|pcを閉じ|pc落とす|シャットダウン).*(gha|github actions|actions|回して|任せ|まかせ)'; then
+    LOCAL_RUN_MODE="off"
+  elif echo "${TASK}" | grep -Eqi '(ローカル(メイン|優先|実行)|ローカルで(実行|進め)|gha(は|を)?使わない|github actions(は|を)?使わない|runner(なし|不要)|自分のpcで実行|local( |-)?first|local( |-)?only|run locally)'; then
+    LOCAL_RUN_MODE="force"
   fi
 fi
 
@@ -384,6 +466,103 @@ if [[ "${assist_fallback_applied}" == "true" ]]; then
 fi
 if [[ "${assist_pressure_guard_applied}" == "true" ]]; then
   gh issue comment "${ISSUE_NUM}" --repo "${ORCHESTRATOR_REPO}" --body "CLI pressure guard applied for assist orchestrator: requested \`${requested_assist_provider}\` but submitted \`${assist_provider}\` due to \`${assist_pressure_guard_reason}\`. Use \`--force-claude\` to bypass this guard for this issue."
+fi
+
+should_local_run=false
+local_run_reason="disabled"
+detected_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "subscription")"
+detected_engine="$(echo "${detected_engine}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${detected_engine}" != "subscription" && "${detected_engine}" != "api" && "${detected_engine}" != "harness" ]]; then
+  detected_engine="subscription"
+fi
+detected_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "continuity")"
+detected_offline_policy="$(echo "${detected_offline_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${detected_offline_policy}" != "hold" && "${detected_offline_policy}" != "continuity" ]]; then
+  detected_offline_policy="continuity"
+fi
+detected_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
+detected_runner_label="$(echo "${detected_runner_label}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${detected_runner_label}" ]]; then
+  detected_runner_label="fugue-subscription"
+fi
+
+if [[ "${LOCAL_RUN_MODE}" == "force" ]]; then
+  should_local_run=true
+  local_run_reason="forced"
+elif [[ "${LOCAL_RUN_MODE}" == "auto" ]]; then
+  if [[ "${detected_engine}" == "subscription" ]]; then
+    online_count_raw="$(gh api "repos/${ORCHESTRATOR_REPO}/actions/runners" --jq "[.runners[]? | select(.status==\"online\" and .busy != true and ([.labels[]?.name] | index(\"self-hosted\") != null) and ([.labels[]?.name] | index(\"${detected_runner_label}\") != null))] | length" 2>/dev/null || true)"
+    if [[ "${online_count_raw}" =~ ^[0-9]+$ ]] && (( online_count_raw == 0 )); then
+      should_local_run=true
+      local_run_reason="subscription-no-self-hosted-online(policy=${detected_offline_policy})"
+    fi
+  fi
+fi
+
+if [[ "${should_local_run}" == "true" ]]; then
+  local_runner="${SCRIPT_DIR}/local/run-local-orchestration.sh"
+  if [[ ! -x "${local_runner}" ]]; then
+    echo "Local fallback requested (${local_run_reason}) but runner is not executable: ${local_runner}" >&2
+    exit 1
+  fi
+
+  local_main_provider="${provider}"
+  if [[ -z "${local_main_provider}" ]]; then
+    local_main_provider="$(gh variable get FUGUE_MAIN_ORCHESTRATOR_PROVIDER --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || true)"
+    if [[ -z "${local_main_provider}" ]]; then
+      local_main_provider="$(gh variable get FUGUE_ORCHESTRATOR_PROVIDER --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "codex")"
+    fi
+  fi
+  local_main_provider="$(echo "${local_main_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${local_main_provider}" != "codex" && "${local_main_provider}" != "claude" ]]; then
+    local_main_provider="codex"
+  fi
+
+  local_assist_provider="${assist_provider}"
+  if [[ -z "${local_assist_provider}" ]]; then
+    local_assist_provider="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "claude")"
+  fi
+  local_assist_provider="$(echo "${local_assist_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${local_assist_provider}" != "claude" && "${local_assist_provider}" != "codex" && "${local_assist_provider}" != "none" ]]; then
+    local_assist_provider="claude"
+  fi
+
+  local_multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
+  local_multi_agent_mode="$(echo "${local_multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${local_multi_agent_mode}" != "standard" && "${local_multi_agent_mode}" != "enhanced" && "${local_multi_agent_mode}" != "max" ]]; then
+    local_multi_agent_mode="enhanced"
+  fi
+
+  local_glm_mode="$(gh variable get FUGUE_GLM_SUBAGENT_MODE --repo "${ORCHESTRATOR_REPO}" --json value -q '.value' 2>/dev/null || echo "paired")"
+  local_glm_mode="$(echo "${local_glm_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${local_glm_mode}" != "off" && "${local_glm_mode}" != "paired" && "${local_glm_mode}" != "symphony" ]]; then
+    local_glm_mode="paired"
+  fi
+
+  local_cmd=(
+    "${local_runner}"
+    --issue "${ISSUE_NUM}"
+    --repo "${ORCHESTRATOR_REPO}"
+    --main "${local_main_provider}"
+    --assist "${local_assist_provider}"
+    --mode "${local_multi_agent_mode}"
+    --glm-mode "${local_glm_mode}"
+    --max-parallel "${LOCAL_MAX_PARALLEL}"
+  )
+  if [[ "${LOCAL_POST_COMMENT}" == "true" ]]; then
+    local_cmd+=(--comment)
+  fi
+
+  echo "Local orchestration fallback activated: ${local_run_reason}"
+  echo "Local command: ${local_cmd[*]}"
+  set +e
+  "${local_cmd[@]}"
+  local_rc=$?
+  set -e
+  if (( local_rc != 0 )); then
+    echo "Local orchestration failed with exit code ${local_rc}" >&2
+    exit "${local_rc}"
+  fi
 fi
 
 echo "Created: ${URL}"

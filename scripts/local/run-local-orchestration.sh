@@ -74,6 +74,8 @@ Environment:
                          true|false (default: false; when true + state=ok, claude-opus-assist direct success is mandatory)
   FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX
                          true|false (default: true; when true + assist=claude, high-risk or ambiguity-signaled tasks require claude-opus-assist success)
+  FUGUE_LOCAL_REQUIRE_BASELINE_TRIO
+                         true|false (default: true; require codex+claude+glm successful participation)
   FUGUE_LOCAL_AMBIGUITY_SIGNAL
                          true|false (default: false; explicit local ambiguity signal used by complex-gate)
   FUGUE_DUAL_MAIN_SIGNAL
@@ -389,6 +391,10 @@ local_require_claude_assist_on_complex="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASS
 if [[ "${local_require_claude_assist_on_complex}" != "false" ]]; then
   local_require_claude_assist_on_complex="true"
 fi
+local_require_baseline_trio="$(echo "${FUGUE_LOCAL_REQUIRE_BASELINE_TRIO:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_require_baseline_trio}" != "false" ]]; then
+  local_require_baseline_trio="true"
+fi
 local_ambiguity_signal="$(echo "${FUGUE_LOCAL_AMBIGUITY_SIGNAL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${local_ambiguity_signal}" != "true" ]]; then
   local_ambiguity_signal="false"
@@ -695,6 +701,66 @@ fi
 if [[ "${required_claude_assist_gate}" == "fail" ]]; then
   weighted_vote_passed="false"
 fi
+
+baseline_trio_gate="not-required"
+baseline_trio_reason="policy-disabled"
+codex_baseline_success="$(jq '[
+  .[] | select(
+    .skipped != true
+    and ((.provider // "" | ascii_downcase) == "codex")
+    and (
+      ((.http_code // "" | tostring) == "200")
+      or
+      ((.http_code // "" | tostring | startswith("cli:0")))
+    )
+  )
+] | length' "${all_results}")"
+claude_baseline_success="$(jq '[
+  .[] | select(
+    .skipped != true
+    and ((.provider // "" | ascii_downcase) == "claude")
+    and (
+      ((.http_code // "" | tostring) == "200")
+      or
+      ((.http_code // "" | tostring | startswith("cli:0")))
+    )
+  )
+] | length' "${all_results}")"
+glm_baseline_success="$(jq '[
+  .[] | select(
+    .skipped != true
+    and ((.provider // "" | ascii_downcase) == "glm")
+    and ((.name // "") | test("^glm-.*-subagent$") | not)
+    and (
+      ((.http_code // "" | tostring) == "200")
+      or
+      ((.http_code // "" | tostring | startswith("cli:0")))
+    )
+  )
+] | length' "${all_results}")"
+if [[ "${local_require_baseline_trio}" == "true" ]]; then
+  baseline_trio_gate="pass"
+  baseline_missing=()
+  if [[ "${codex_baseline_success}" -eq 0 ]]; then
+    baseline_missing+=("codex")
+  fi
+  if [[ "${claude_baseline_success}" -eq 0 ]]; then
+    baseline_missing+=("claude")
+  fi
+  if [[ "${glm_baseline_success}" -eq 0 ]]; then
+    baseline_missing+=("glm")
+  fi
+  if (( ${#baseline_missing[@]} > 0 )); then
+    baseline_trio_gate="fail"
+    baseline_trio_reason="missing-$(IFS=,; echo "${baseline_missing[*]}")"
+    high_risk="true"
+    high_risk_count="$((high_risk_count + 1))"
+    weighted_vote_passed="false"
+  else
+    baseline_trio_reason="codex+claude+glm-ok"
+  fi
+fi
+
 if [[ "${weighted_vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
   ok_to_execute="true"
 fi
@@ -767,6 +833,11 @@ jq -n \
   --arg claude_sub_gate_requirement_kind "${gate_requirement_kind}" \
   --arg required_claude_assist_gate "${required_claude_assist_gate}" \
   --arg required_claude_assist_reason "${required_claude_assist_reason}" \
+  --arg baseline_trio_gate "${baseline_trio_gate}" \
+  --arg baseline_trio_reason "${baseline_trio_reason}" \
+  --argjson codex_baseline_success "${codex_baseline_success}" \
+  --argjson claude_baseline_success "${claude_baseline_success}" \
+  --argjson glm_baseline_success "${glm_baseline_success}" \
   --argjson claude_session_count "${claude_session_count}" \
   --arg claude_sessions_file "${claude_sessions_file}" \
   --arg claude_resume_hint "${claude_resume_hint}" \
@@ -805,6 +876,11 @@ jq -n \
     claude_sub_gate_requirement_kind:$claude_sub_gate_requirement_kind,
     required_claude_assist_gate:$required_claude_assist_gate,
     required_claude_assist_reason:$required_claude_assist_reason,
+    baseline_trio_gate:$baseline_trio_gate,
+    baseline_trio_reason:$baseline_trio_reason,
+    codex_baseline_success:$codex_baseline_success,
+    claude_baseline_success:$claude_baseline_success,
+    glm_baseline_success:$glm_baseline_success,
     claude_session_count:$claude_session_count,
     claude_sessions_file:$claude_sessions_file,
     claude_resume_hint:$claude_resume_hint
@@ -834,6 +910,7 @@ cat > "${summary_md}" <<EOF
 - linked systems status: ${linked_status} (${linked_note})
 - linked systems run dir: ${linked_run_dir}
 - required claude assist gate: ${required_claude_assist_gate} (${required_claude_assist_reason})
+- baseline trio gate (codex+claude+glm): ${baseline_trio_gate} (${baseline_trio_reason}; codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})
 - claude session handoff: ${claude_session_handoff} (sessions ${claude_session_count})
 - claude sessions file: ${claude_sessions_file}
 - claude resume hint: ${claude_resume_hint}

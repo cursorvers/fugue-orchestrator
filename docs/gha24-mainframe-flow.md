@@ -22,7 +22,7 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
 - **Risk-tier guard.** Implement workflow resolves `risk-tier (low|medium|high)` from issue text/labels to keep low-risk tasks lightweight while forcing deeper loops and review fan-out for high-risk tasks.
 - **Conditional lessons guard.** Lessons updates become strict when correction/postmortem signals are present (`user-corrected`, `postmortem`, `regression`, `incident` or equivalent text cues).
 - **Large-refactor guard.** `scripts/gha24` auto-adds `large-refactor` when task text indicates refactor/rewrite/migration, and implement workflow enforces `Candidate A/B + Failure Modes + Rollback Check` on every cycle.
-- **Watchdog.** `.github/workflows/fugue-watchdog.yml` runs hourly to keep the mainframe healthy: it checks OpenAI/Z.ai connectivity, verifies that both `fugue-task-router` and `fugue-tutti-caller` have had a successful run in the last 3 hours, posts a Discord alert if anything is stale, and works through open `fugue-task` issues that lack `processing`/`completed` labels by retriggering the router.
+- **Watchdog.** `.github/workflows/fugue-watchdog.yml` runs hourly to keep the mainframe healthy: it checks OpenAI/Z.ai connectivity, verifies that both `fugue-task-router` and `fugue-tutti-caller` have had a successful run in the last 3 hours, posts Discord/LINE alerts (when configured) if anything is stale, and works through open `fugue-task` issues that lack `processing`/`completed` labels by retriggering the router.
 - **Claude state auto-recovery.** `fugue-watchdog` now auto-restores `FUGUE_CLAUDE_RATE_LIMIT_STATE` to `ok` only after cooldown and stability checks (no pending work, no recent fallback signals, connectivity healthy).
 - **Switch canary.** `.github/workflows/fugue-orchestrator-canary.yml` runs daily and verifies two real-issue paths: regular `orchestrator:claude` request and forced `orchestrator-force:claude`.
 - **Weekly review.** `.github/workflows/fugue-orchestration-weekly-review.yml` posts 7-day metrics (assist none/claude mix, high-risk escalation coverage, canary latest result) into the `fugue-status` thread.
@@ -47,7 +47,7 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
 
 ## Observability
 - Tutti summaries, vote tallies, and Codex CLI output live directly on the originating GitHub issue so reviewers can trace decisions.
-- `fugue-watchdog` issues Discord alerts with the last-success timestamps and hours-since metrics whenever the router/mainframe runners stall, which keeps the codex team aware of automation outages.
+- `fugue-watchdog` issues Discord/LINE alerts with the last-success timestamps and hours-since metrics whenever the router/mainframe runners stall, which keeps the codex team aware of automation outages.
 - The `processing` label heartbeat and `needs-human` escalations form a feedback loop: humans can step in when trust, PATs, or agency votes raise concerns.
 
 ## Operations Record (2026-02-22)

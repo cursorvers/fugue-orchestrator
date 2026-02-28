@@ -125,6 +125,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body false   -R <owner/repo> # trueで claude-opus-assist=CLAUDE_OPUS_MODEL を厳格要求
 # gh variable set FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST --body false   -R <owner/repo> # trueで /vote 時に claude-opus-assist direct success を必須化
 # gh variable set FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX --body true   -R <owner/repo> # trueで assist=claude かつ high-risk/ambiguity タスク時に claude sub gate を必須化
+# gh variable set FUGUE_REQUIRE_BASELINE_TRIO       --body true    -R <owner/repo> # trueで codex+claude+glm の成功参加を必須化
 # gh variable set FUGUE_MIN_CONSENSUS_LANES          --body 6       -R <owner/repo> # integer >=6 (resolved lane count floor; underflow is fail-fast)
 # gh variable set FUGUE_API_STRICT_MODE              --body false   -R <owner/repo> # trueでharness/api時もstrict guardを維持
 # gh variable set FUGUE_MULTI_AGENT_MODE             --body enhanced -R <owner/repo> # standard|enhanced|max
@@ -192,6 +193,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `api-continuity` では strict guard は既定で無効化されます（`FUGUE_API_STRICT_MODE=true` で明示的に有効化可能）。
 # NOTE: `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST=true` のときのみ、/vote で `claude-opus-assist` の direct success を必須化します（既定は非必須）。
 # NOTE: `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true`（既定）では、assist=claude かつ `risk_tier=high` または ambiguity translation-gate=true のタスクで claude-opus-assist 成功を必須化します。未達時は `ok_to_execute=false` になります。
+# NOTE: `FUGUE_REQUIRE_BASELINE_TRIO=true`（既定）では、codex+claude+glm の成功参加が揃わない限り `ok_to_execute=false` になります。
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
@@ -200,7 +202,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
-# NOTE: 実装実行には `implement` に加えて `implement-confirmed` ラベルが必須です。
+# NOTE: 通常経路では実装実行に `implement` + `implement-confirmed` が必要です。`/vote` 経由は review-only 明示がない限り `implement-confirmed` を自動付与します。
+# NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
 # NOTE: `risk-tier (low|medium|high)` を算出し、preflight/dialogue最小値と review fan-out を調整します。
 # NOTE: local 実行でも `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX=true`（既定）により assist=claude かつ high-risk（または `FUGUE_LOCAL_AMBIGUITY_SIGNAL=true`）時に claude-opus-assist 成功が必須になります。
@@ -233,6 +236,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.7 Orchestrator切替シミュレーション（ローカル・非破壊）
 # ./scripts/sim-orchestrator-switch.sh | column -t -s $'\t'
+# NOTE: シミュレーションは `FUGUE_SIM_CODEX_SPARK_ONLY=true`（既定）で codex-main/codex multi-agent を `gpt-5.3-codex-spark` に統一し高速化します。
+# NOTE: `gpt-5-codex` との厳密差分検証が必要な場合のみ `FUGUE_SIM_CODEX_SPARK_ONLY=false` を指定してください。
 # NOTE: lane構成のSSOTは `scripts/lib/build-agent-matrix.sh` です。
 # NOTE: ドリフト検知は `./scripts/check-agent-matrix-parity.sh` で実行できます。
 
@@ -263,6 +268,9 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: line-notify は重複送信抑止と失敗クールダウンを標準有効化しています（`LINE_NOTIFY_GUARD_ENABLED=true`）。
 # NOTE: ガード状態は `LINE_NOTIFY_GUARD_FILE`（既定: `.fugue/state/line-notify-guard.json`）に永続化されます。
 # NOTE: 抑止窓は `LINE_NOTIFY_DEDUP_TTL_SECONDS` / `LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS` で調整できます。
+# NOTE: `LINE_NOTIFY_PREFER_PUSH=true` で、Push API資格情報がある場合は webhook より push を優先します。
+# NOTE: timeout/5xx の一時障害は `LINE_NOTIFY_RETRY_MAX_ATTEMPTS` / `LINE_NOTIFY_RETRY_BASE_SECONDS` / `LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS` で再試行できます。
+# NOTE: `LINE_NOTIFY_TRACE_ID` で通知相関IDを固定できます（未指定時は自動生成）。
 # NOTE: `--linked-mode execute` は本体の `ok_to_execute=true` のときのみ起動します。
 # NOTE: Obsidian音声AIのdry-run文字起こしは `OBSIDIAN_AUDIO_ENABLE_TRANSCRIBE=true` で有効化します。
 # NOTE: 連結定義の整合検証は `./scripts/check-linked-systems-integrity.sh`。

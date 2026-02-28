@@ -193,18 +193,18 @@ jobs:
           fi
           assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
           ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
-          subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "hold")"
+          subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "continuity")"
           subscription_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
           codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5-codex")"
           codex_multi_agent_model="$(gh variable get FUGUE_CODEX_MULTI_AGENT_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex-spark")"
-          multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "enhanced")"
+          multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "standard")"
           glm_subagent_mode="$(gh variable get FUGUE_GLM_SUBAGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "paired")"
           claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
           claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
           claude_assist_execution_policy="$(gh variable get FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "")"
           claude_plan_tier="$(gh variable get FUGUE_CLAUDE_PLAN_TIER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "max20")"
           implement_refinement_cycles="$(gh variable get FUGUE_IMPLEMENT_REFINEMENT_CYCLES --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
-          implement_preflight_cycles_full="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
+          implement_preflight_cycles_full="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "2")"
           implement_preflight_cycles_claude="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "1")"
           implement_dialogue_rounds="$(gh variable get FUGUE_IMPLEMENT_DIALOGUE_ROUNDS --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "2")"
           implement_dialogue_rounds_claude="$(gh variable get FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "1")"
@@ -252,7 +252,7 @@ jobs:
             ci_execution_engine="subscription"
           fi
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
-            subscription_offline_policy="hold"
+            subscription_offline_policy="continuity"
           fi
           if [[ -z "${subscription_runner_label}" ]]; then
             subscription_runner_label="fugue-subscription"
@@ -264,7 +264,7 @@ jobs:
             codex_multi_agent_model="gpt-5.3-codex-spark"
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
-            multi_agent_mode="enhanced"
+            multi_agent_mode="standard"
           fi
           if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
             glm_subagent_mode="paired"
@@ -289,7 +289,7 @@ jobs:
             implement_refinement_cycles="3"
           fi
           if [[ -z "${implement_preflight_cycles_full}" ]]; then
-            implement_preflight_cycles_full="3"
+            implement_preflight_cycles_full="2"
           fi
           if [[ -z "${implement_preflight_cycles_claude}" ]]; then
             implement_preflight_cycles_claude="1"
