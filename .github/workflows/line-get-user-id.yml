@@ -16,14 +16,28 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
-          echo "=== Bot Info (should be Cursorvers / @529ybhfo) ==="
+          echo "=== Bot Info ==="
           curl -sS https://api.line.me/v2/bot/info \
             -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" | jq .
+
+          echo ""
+          echo "=== Webhook endpoint config ==="
+          curl -sS https://api.line.me/v2/bot/channel/webhook/endpoint \
+            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" | jq .
+
+          echo ""
+          echo "=== Webhook test ==="
+          curl -sS -X POST https://api.line.me/v2/bot/channel/webhook/test \
+            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"endpoint":"https://haaxgwyimoqzzxzdaeep.supabase.co/functions/v1/line-userid-capture"}' | jq .
+
           echo ""
           echo "=== Followers ==="
           curl -sS https://api.line.me/v2/bot/followers/ids \
             -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" | jq . || true
+
           echo ""
-          echo "=== Recent delivery count ==="
+          echo "=== Message quota ==="
           curl -sS https://api.line.me/v2/bot/message/quota/consumption \
             -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" | jq . || true
