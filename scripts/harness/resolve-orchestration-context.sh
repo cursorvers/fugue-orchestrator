@@ -67,6 +67,18 @@ owner="${GITHUB_REPOSITORY%%/*}"
 
 has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
 has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+# Retry label fetch if labels not yet visible (GitHub API eventual consistency).
+if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
+  for _label_retry in 1 2 3; do
+    sleep "$((2 ** _label_retry))"
+    issue_json="$(gh_api_retry "${issue_endpoint}" 4 2>/dev/null || echo "${issue_json}")"
+    has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+    has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+    if [[ "${has_fugue}" == "true" && "${has_tutti}" == "true" ]]; then
+      break
+    fi
+  done
+fi
 has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
 has_implement_confirmed="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement-confirmed") != null)')"
 ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"

@@ -304,6 +304,7 @@ jobs:
 
             local cmd=(gh issue create --repo "${repo}" --title "${title}" --body "${body}" \
               --label "fugue-task" \
+              --label "tutti" \
               --label "orchestrator:${orch_provider}" \
               --label "orchestrator-assist:claude")
             if [[ -n "${force_label}" ]]; then
@@ -312,23 +313,6 @@ jobs:
             local url
             url="$("${cmd[@]}")"
             local issue_num="${url##*/}"
-            gh issue edit "${issue_num}" --repo "${repo}" --add-label "tutti" >/dev/null
-            local has_tutti="false"
-            local label_attempt=1
-            local issue_json
-            while [[ "${label_attempt}" -le "${canary_label_wait_attempts}" ]]; do
-              issue_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}" 4 || echo '{}')"
-              has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null' 2>/dev/null || echo "false")"
-              if [[ "${has_tutti}" == "true" ]]; then
-                break
-              fi
-              sleep "${canary_label_wait_sleep_sec}"
-              label_attempt="$((label_attempt + 1))"
-            done
-            if [[ "${has_tutti}" != "true" ]]; then
-              echo "Failed to confirm 'tutti' label before dispatch for issue #${issue_num}." >&2
-              return 1
-            fi
             local dispatch_offline_policy=""
             if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
               dispatch_offline_policy="${canary_offline_policy_override}"
