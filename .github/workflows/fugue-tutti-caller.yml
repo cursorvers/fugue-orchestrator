@@ -1162,10 +1162,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Post multi-agent / translator scorecard
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           PROFILE: ${{ needs.ctx.outputs.orchestration_profile }}
           RESOLVED_MULTI_AGENT_MODE: ${{ needs.tutti.outputs.resolved_multi_agent_mode }}
           EXPECTED_LANES: ${{ needs.tutti.outputs.expected_lanes }}
@@ -1223,7 +1229,7 @@ jobs:
           # MCP REST bridge: count actual CI-accessible MCP service calls.
           mcp_calls=0
           if [[ -x "scripts/lib/mcp-rest-bridge.sh" ]]; then
-            bridge_result="$(bash scripts/lib/mcp-rest-bridge.sh --smoke 2>/dev/null || echo '{}')"
+            bridge_result="$(STRIPE_API_KEY="${STRIPE_SECRET_KEY:-}" bash scripts/lib/mcp-rest-bridge.sh --smoke 2>/dev/null || echo '{}')"
             bridge_count="$(printf '%s' "${bridge_result}" | jq -r '.mcp_calls // 0' 2>/dev/null || echo "0")"
             if [[ "${bridge_count}" =~ ^[0-9]+$ ]]; then
               mcp_calls="${bridge_count}"
