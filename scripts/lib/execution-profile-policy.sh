@@ -242,6 +242,11 @@ if [[ "${requested_engine}" == "subscription" ]]; then
       continuity_active="false"
       strict_main_effective="${strict_main_requested}"
       strict_opus_effective="${strict_opus_requested}"
+      if should_demote_claude_assist; then
+        assist_provider_effective="$(resolve_unavailable_claude_fallback "${emergency_assist_policy}")"
+        assist_adjusted_by_profile="true"
+        assist_adjustment_reason="hold-assist-claude-unavailable->${assist_provider_effective}"
+      fi
     fi
   fi
 else

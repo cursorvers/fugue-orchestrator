@@ -55,6 +55,32 @@ assert_policy() {
   fi
 }
 
+assert_reason() {
+  local test_name="$1"
+  local field_name="$2"
+  local expected_value="$3"
+  shift 3
+
+  total=$((total + 1))
+  local output
+  output="$("${POLICY}" "$@" --format env)" || {
+    echo "FAIL [${test_name}]: script exited with error"
+    failed=$((failed + 1))
+    return
+  }
+
+  eval "${output}"
+  local actual="${!field_name}"
+
+  if [[ "${actual}" != "${expected_value}" ]]; then
+    echo "FAIL [${test_name}]: ${field_name}=${actual}(expected ${expected_value})"
+    failed=$((failed + 1))
+  else
+    echo "PASS [${test_name}]"
+    passed=$((passed + 1))
+  fi
+}
+
 echo "=== orchestrator-policy.sh unit tests ==="
 echo ""
 
@@ -160,7 +186,20 @@ assert_policy "custom defaults" \
   "claude" "codex" "false" "false" \
   --main "" --assist "" --default-main claude --default-assist codex --claude-state ok
 
-# --- Group 11: edge cases ---
+# --- Group 11: pressure_guard_reason audit trail ---
+assert_reason "reason: pressure only" \
+  "pressure_guard_reason" "main-claude-assist-claude->codex" \
+  --main claude --assist claude --claude-state ok --assist-policy codex
+
+assert_reason "reason: invariant only (assist=none)" \
+  "pressure_guard_reason" "main-claude-requires-assist-codex" \
+  --main claude --assist none --claude-state ok
+
+assert_reason "reason: pressure+invariant (policy=none)" \
+  "pressure_guard_reason" "main-claude-assist-claude->none;invariant-override->codex" \
+  --main claude --assist claude --claude-state ok --assist-policy none
+
+# --- Group 12: edge cases ---
 assert_policy "invalid main normalizes" \
   "codex" "claude" "false" "false" \
   --main "INVALID" --assist claude --claude-state ok

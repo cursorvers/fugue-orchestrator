@@ -203,6 +203,8 @@ if [[ "${resolved_main}" == "claude" && "${resolved_assist}" != "codex" && "${fo
   if [[ "${pressure_guard_applied}" != "true" ]]; then
     pressure_guard_applied="true"
     pressure_guard_reason="main-claude-requires-assist-codex"
+  else
+    pressure_guard_reason="${pressure_guard_reason};invariant-override->codex"
   fi
 fi
 
