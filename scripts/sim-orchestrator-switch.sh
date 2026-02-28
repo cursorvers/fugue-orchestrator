@@ -85,11 +85,20 @@ sim_codex_api_available="$(echo "${FUGUE_SIM_CODEX_API_AVAILABLE:-true}" | tr '[
 if [[ "${sim_codex_api_available}" != "true" ]]; then
   sim_codex_api_available="false"
 fi
-strict_main_requested="$(echo "${FUGUE_STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+# Hybrid Conductor Mode: execution provider differs from main orchestrator.
+execution_provider_default="$(echo "${FUGUE_EXECUTION_PROVIDER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${execution_provider_default}" != "codex" && "${execution_provider_default}" != "claude" ]]; then
+  execution_provider_default=""
+fi
+default_main_provider="$(echo "${FUGUE_MAIN_ORCHESTRATOR_PROVIDER:-claude}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${default_main_provider}" != "codex" && "${default_main_provider}" != "claude" ]]; then
+  default_main_provider="claude"
+fi
+strict_main_requested="$(echo "${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_main_requested}" != "true" ]]; then
   strict_main_requested="false"
 fi
-strict_opus_requested="$(echo "${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+strict_opus_requested="$(echo "${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_opus_requested}" != "true" ]]; then
   strict_opus_requested="false"
 fi
@@ -101,12 +110,16 @@ emergency_assist_policy="$(echo "${FUGUE_EMERGENCY_ASSIST_POLICY:-none}" | tr '[
 if [[ "${emergency_assist_policy}" != "none" && "${emergency_assist_policy}" != "codex" && "${emergency_assist_policy}" != "claude" ]]; then
   emergency_assist_policy="none"
 fi
-subscription_offline_policy_default="$(echo "${FUGUE_SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+subscription_offline_policy_default="$(echo "${FUGUE_SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${subscription_offline_policy_default}" != "hold" && "${subscription_offline_policy_default}" != "continuity" ]]; then
-  subscription_offline_policy_default="hold"
+  subscription_offline_policy_default="continuity"
+fi
+dual_main_signal_default="$(echo "${FUGUE_DUAL_MAIN_SIGNAL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${dual_main_signal_default}" != "true" ]]; then
+  dual_main_signal_default="false"
 fi
 
-printf "scenario\trequested_main\trequested_assist\tclaude_state\tforce_claude\trequested_engine\tself_hosted_online\temergency_mode\tsubscription_offline_policy\tresolved_main\tresolved_assist\teffective_assist\texecution_profile\teffective_engine\trunner\tcontinuity\tstrict_main\tstrict_opus\tmain_signal_lane\texpected_lanes\tweighted_vote\timpl_gate\trefinement_cycles\timplementation_dialogue_rounds\tpreflight_gate\tnote\n"
+printf "scenario\trequested_main\trequested_assist\tclaude_state\tforce_claude\trequested_engine\tself_hosted_online\temergency_mode\tsubscription_offline_policy\tresolved_main\tresolved_assist\teffective_assist\texecution_provider\thybrid_mode\texecution_profile\teffective_engine\trunner\tcontinuity\tstrict_main\tstrict_opus\tmain_signal_lane\texpected_lanes\tweighted_vote\timpl_gate\trefinement_cycles\timplementation_dialogue_rounds\tpreflight_gate\tnote\n"
 
 run_case() {
   local scenario="$1"
@@ -126,7 +139,7 @@ run_case() {
     scripts/lib/orchestrator-policy.sh \
       --main "${requested_main}" \
       --assist "${requested_assist}" \
-      --default-main "codex" \
+      --default-main "${default_main_provider}" \
       --default-assist "claude" \
       --claude-state "${claude_state}" \
       --force-claude "${force_claude}" \
@@ -184,6 +197,7 @@ run_case() {
     --glm-subagent-mode "${effective_glm_subagent_mode}" \
     --wants-gemini "false" \
     --wants-xai "false" \
+    --dual-main-signal "${dual_main_signal_default}" \
     --allow-glm-in-subscription "false" \
     --codex-main-model "${codex_main_model_default}" \
     --codex-multi-agent-model "${codex_multi_agent_model_default}" \
@@ -196,13 +210,34 @@ run_case() {
   local main_signal_lane
   main_signal_lane="$(echo "${matrix_payload}" | jq -r '.main_signal_lane')"
 
+  # Hybrid Conductor Mode resolution (mirrors tutti-caller.yml logic).
+  local sim_execution_provider="${execution_provider_default:-${resolved_main}}"
+  if [[ "${sim_execution_provider}" != "codex" && "${sim_execution_provider}" != "claude" ]]; then
+    sim_execution_provider="${resolved_main}"
+  fi
+  local sim_hybrid_mode="false"
+  if [[ "${resolved_main}" != "${sim_execution_provider}" ]]; then
+    sim_hybrid_mode="true"
+  fi
+  # Guard: only main=claude + execution=codex is valid Hybrid.
+  if [[ "${sim_hybrid_mode}" == "true" && "${resolved_main}" != "claude" ]]; then
+    sim_execution_provider="${resolved_main}"
+    sim_hybrid_mode="false"
+  fi
+  # Execution profile for implementation (codex-full or claude-light).
+  local sim_exec_profile="codex-full"
+  if [[ "${sim_execution_provider}" == "claude" ]]; then
+    sim_exec_profile="claude-light"
+  fi
+
   local impl_gate="no-implement"
   if [[ "${mode}" == "implement" && "${weighted_vote}" == "pass" && "${high_risk}" == "false" ]]; then
     impl_gate="codex-implement"
   fi
   local preflight_gate="n/a"
+  # Dialogue rounds follow execution_profile, not orchestration_profile.
   local implementation_dialogue_rounds="${dialogue_rounds_default}"
-  if [[ "${resolved_main}" == "claude" ]]; then
+  if [[ "${sim_exec_profile}" == "claude-light" ]]; then
     implementation_dialogue_rounds="${dialogue_rounds_claude}"
   fi
   if [[ "${impl_gate}" == "codex-implement" ]]; then
@@ -214,7 +249,7 @@ run_case() {
     note="$(IFS=';'; echo "${note_parts[*]}")"
   fi
 
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "${scenario}" \
     "${requested_main}" \
     "${requested_assist}" \
@@ -227,6 +262,8 @@ run_case() {
     "${resolved_main}" \
     "${resolved_assist}" \
     "${effective_assist}" \
+    "${sim_execution_provider}" \
+    "${sim_hybrid_mode}" \
     "${execution_profile}" \
     "${effective_engine}" \
     "${run_agents_runner}" \
@@ -253,3 +290,13 @@ run_case "S7"  "codex"  "claude" "ok"        "false" "implement" "pass"   "false
 run_case "S8"  "codex"  "codex"  "ok"        "false" "implement" "reject" "false" "api"          "false" "false" "hold"
 run_case "S9"  "claude" "none"   "ok"        "false" "implement" "pass"   "true"  "subscription" "true"  "false" "hold"
 run_case "S10" "claude" "claude" "exhausted" "true"  "review"    "pass"   "false" "subscription" "false" "false" "hold"
+
+# Hybrid Conductor Mode scenarios (main=claude, execution=codex via FUGUE_EXECUTION_PROVIDER).
+# These scenarios set execution_provider_default=codex to activate Hybrid.
+execution_provider_default="codex"
+run_case "S11" "claude" "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S12" "claude" "claude" "ok"        "false" "implement" "pass"   "false" "subscription" "false" "false" "continuity"
+run_case "S13" "claude" "claude" "degraded"  "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S14" "claude" "claude" "exhausted" "false" "implement" "pass"   "false" "subscription" "true"  "false" "hold"
+run_case "S15" "claude" "claude" "ok"        "false" "review"    "pass"   "true"  "subscription" "true"  "false" "hold"
+execution_provider_default=""

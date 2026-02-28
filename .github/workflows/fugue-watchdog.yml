@@ -470,6 +470,7 @@ jobs:
           LINE_NOTIFY_API_URL: ${{ vars.LINE_NOTIFY_API_URL || 'https://notify-api.line.me/api/notify' }}
           LINE_NOTIFY_MESSAGE: ${{ steps.decide.outputs.message }}
           LINE_NOTIFY_REQUIRED_ON_EXECUTE: "false"
+          LINE_NOTIFY_PREFER_PUSH: "true"
           LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK: ${{ vars.LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK || 'false' }}
         run: |
           set -euo pipefail
@@ -477,6 +478,7 @@ jobs:
           if [[ "${force_line_alert}" == "true" ]]; then
             export LINE_NOTIFY_GUARD_ENABLED="false"
           fi
+          export LINE_NOTIFY_TRACE_ID="watchdog-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-0}"
           run_dir="$(mktemp -d)"
           trap 'rm -rf "${run_dir}"' EXIT
           scripts/local/integrations/line-notify.sh --mode execute --run-dir "${run_dir}"

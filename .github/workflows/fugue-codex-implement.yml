@@ -54,7 +54,7 @@ on:
         default: "auto"
     secrets:
       OPENAI_API_KEY:
-        required: true
+        required: false
       TARGET_REPO_PAT:
         required: false
 
@@ -215,9 +215,51 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --add-label "processing"
 
-  implement:
+  credential-guard:
     if: ${{ needs.prepare.outputs.should_run == 'true' }}
     needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      can_run: ${{ steps.guard.outputs.can_run }}
+      skip_reason: ${{ steps.guard.outputs.skip_reason }}
+    steps:
+      - name: Guard implementation credentials
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+        run: |
+          set -euo pipefail
+
+          can_run="true"
+          skip_reason=""
+
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            can_run="false"
+            skip_reason="missing-openai-api-key"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Escalating to humans."
+          elif [[ "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
+            can_run="false"
+            skip_reason="missing-target-repo-pat"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret \`TARGET_REPO_PAT\`. Escalating to humans."
+          fi
+
+          if [[ "${can_run}" != "true" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
+          fi
+
+          {
+            echo "can_run=${can_run}"
+            echo "skip_reason=${skip_reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+  implement:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' }}
+    needs: [prepare, credential-guard]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -234,21 +276,6 @@ jobs:
       lessons_report_path: ${{ steps.codex.outputs.lessons_report_path }}
 
     steps:
-      - name: Guard PAT for cross-repo operations
-        if: ${{ needs.prepare.outputs.target_repo != github.repository }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
-          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
-          TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${TARGET_REPO_PAT}" ]]; then
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret TARGET_REPO_PAT. Escalating to humans."
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
-            exit 0
-          fi
-
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
@@ -861,8 +888,8 @@ jobs:
           if-no-files-found: ignore
 
   finalize:
-    if: always() && needs.prepare.outputs.should_run == 'true'
-    needs: [prepare, implement]
+    if: always() && needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true'
+    needs: [prepare, credential-guard, implement]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

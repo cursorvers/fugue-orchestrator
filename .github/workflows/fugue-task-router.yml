@@ -253,7 +253,7 @@ jobs:
 
       - name: GHA24 mainframe handoff (natural language)
         id: handoff
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.trusted == 'true' || steps.ctx.outputs.is_vote_command == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
@@ -442,7 +442,7 @@ jobs:
           fi
 
           # Default: fugue-task issues are handed off to the GHA24 mainframe.
-          # Explicit manual markers can opt out.
+          # Explicit manual markers can opt out, but /vote forces handoff.
           body_mainframe_handoff="$(extract_heading_value "${body}" "mainframe handoff")"
           wants_mainframe=true
           if [[ "${body_mainframe_handoff}" == "manual" ]]; then
@@ -450,6 +450,9 @@ jobs:
           fi
           if echo "${text}" | grep -Eqi '(mainframeしない|自動実行しない|manual only|#manual|#no-gha24)'; then
             wants_mainframe=false
+          fi
+          if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+            wants_mainframe=true
           fi
 
           if [[ "${wants_mainframe}" != "true" ]]; then
@@ -459,7 +462,8 @@ jobs:
 
           # Mode selection:
           # - Natural-language path defaults to review.
-          # - Explicit implement signal is required to enter implement intent.
+          # - Explicit implement signal enters implement intent.
+          # - /vote defaults to implement unless review-only is explicit.
           # - Explicit review-only always wins.
           body_mode="$(extract_heading_value "${body}" "execution mode")"
           if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
@@ -480,6 +484,8 @@ jobs:
           fi
           if [[ "${wants_review}" == "true" ]]; then
             wants_implement=false
+          elif [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+            wants_implement=true
           fi
 
           body_implement_confirm="$(extract_heading_value "${body}" "implementation confirmation")"
@@ -494,6 +500,11 @@ jobs:
           fi
           if echo "${text}" | grep -Eqi '(#confirm-implement|#impl-confirm|implement confirmed|実装確定)'; then
             confirm_implement="true"
+          fi
+          auto_confirmed_by_vote="false"
+          if [[ "${IS_VOTE_COMMAND}" == "true" && "${wants_implement}" == "true" && "${wants_review}" != "true" ]]; then
+            confirm_implement="true"
+            auto_confirmed_by_vote="true"
           fi
 
           # Safety guard: when review-only is explicitly requested, clear any
@@ -535,6 +546,10 @@ jobs:
             fi
           fi
 
+          gh label create "fugue-task" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --description "FUGUE task routing target" \
+            --color "5319E7" >/dev/null 2>&1 || true
           gh label create "${orchestrator_label}" \
             --repo "${GITHUB_REPOSITORY}" \
             --description "Requested orchestrator profile for Tutti routing" \
@@ -545,6 +560,7 @@ jobs:
             --color "0052CC" >/dev/null 2>&1 || true
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "fugue-task" >/dev/null
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${orchestrator_label}" >/dev/null
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${assist_orchestrator_label}" >/dev/null
 
@@ -558,7 +574,11 @@ jobs:
             extra=" + implement (+ ${compat_label} compatibility)"
             if [[ "${confirm_implement}" == "true" ]]; then
               extra="${extra} + implement-confirmed"
-              confirmation_line="- Implement confirmation: confirmed"
+              if [[ "${auto_confirmed_by_vote}" == "true" ]]; then
+                confirmation_line="- Implement confirmation: auto-confirmed by \`/vote\`"
+              else
+                confirmation_line="- Implement confirmation: confirmed"
+              fi
             else
               confirmation_line="- Implement confirmation: pending (\`implement-confirmed\` label required before execution)"
               confirm_note="Implementation intent is set, but execution is blocked until \`implement-confirmed\` is present."
@@ -600,11 +620,11 @@ jobs:
           ${nl_line}
           ${vote_instruction_line}
           ${confirmation_line}
-          - Action: added label \`tutti\`${extra}
+          - Action: added labels \`fugue-task\` + \`tutti\`${extra}
           ${fallback_block}
           ${confirm_note}
 
-          Next: Tutti runs and posts the vote/audit comment. Implementation execution requires both \`implement\` and \`implement-confirmed\`.
+          Next: Tutti runs and posts the vote/audit comment. Implementation execution requires \`implement\`; \`/vote\` auto-attaches \`implement-confirmed\` unless review-only is explicit.
           EOF
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file handoff-comment.md
 
@@ -649,7 +669,7 @@ jobs:
           gh issue edit "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --add-label "processing"
 
       - name: Untrusted mainframe request notice
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}

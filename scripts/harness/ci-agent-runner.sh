@@ -39,6 +39,7 @@ if [[ "${strict_opus_assist_direct}" != "true" ]]; then
 fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/../lib/model-policy.sh"
+recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -64,6 +65,28 @@ else
   glm_model="glm-5.0"
   xai_latest_model="grok-4"
   gemini_fallback_model="gemini-3-flash"
+fi
+
+recursive_enabled_raw="${FUGUE_CODEX_RECURSIVE_DELEGATION:-false}"
+recursive_depth_raw="${FUGUE_CODEX_RECURSIVE_MAX_DEPTH:-3}"
+recursive_targets_raw="${FUGUE_CODEX_RECURSIVE_TARGET_LANES:-codex-main-orchestrator,codex-orchestration-assist}"
+recursive_dry_run_raw="${FUGUE_CODEX_RECURSIVE_DRY_RUN:-false}"
+recursive_enabled="false"
+recursive_active="false"
+recursive_reason="policy-script-missing"
+recursive_lane_allowed="false"
+recursive_target_lanes="${recursive_targets_raw}"
+recursive_depth="3"
+recursive_dry_run="false"
+if [[ -x "${recursive_policy_script}" ]]; then
+  eval "$("${recursive_policy_script}" \
+    --enabled "${recursive_enabled_raw}" \
+    --provider "${PROVIDER:-}" \
+    --lane "${AGENT_NAME:-}" \
+    --depth "${recursive_depth_raw}" \
+    --target-lanes "${recursive_targets_raw}" \
+    --dry-run "${recursive_dry_run_raw}" \
+    --format env)"
 fi
 
 # Force requested model onto the latest-track policy for each provider.
@@ -99,6 +122,10 @@ case "${PROVIDER}" in
     fi
     ;;
 esac
+
+if [[ "${PROVIDER}" == "codex" && "${recursive_active}" == "true" ]]; then
+  sys_prompt="${sys_prompt} Recursive Delegation Mode enabled: execute parent -> child -> grandchild delegation depth ${recursive_depth} before finalizing. Use codex multi-agent reasoning and include marker in rationale: delegation_mode=recursive depth=${recursive_depth} lane=${AGENT_NAME}."
+fi
 
 if [[ "${PROVIDER}" == "gemini" && -z "${GEMINI_API_KEY:-}" ]]; then
   result="$(jq -n \
@@ -228,6 +255,43 @@ if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "${result}" > "agent-${AGENT_NAME}.json"
     exit 0
   fi
+fi
+
+if [[ "${PROVIDER}" == "codex" && "${recursive_active}" == "true" && "${recursive_dry_run}" == "true" ]]; then
+  result="$(jq -n \
+    --arg name "${AGENT_NAME}" \
+    --arg provider "codex" \
+    --arg api_url "${API_URL}" \
+    --arg model "${MODEL}" \
+    --arg agent_role "${AGENT_ROLE}" \
+    --arg requested_provider "${ORIGINAL_PROVIDER}" \
+    --arg requested_model "${ORIGINAL_MODEL}" \
+    --arg delegation_mode "recursive" \
+    --arg delegation_depth "${recursive_depth}" \
+    --arg delegation_reason "${recursive_reason}" \
+    '{
+      name:$name,
+      provider:$provider,
+      api_url:$api_url,
+      model:$model,
+      agent_role:$agent_role,
+      requested_provider:$requested_provider,
+      requested_model:$requested_model,
+      http_code:"dry-run",
+      skipped:false,
+      delegation_mode:$delegation_mode,
+      delegation_depth:($delegation_depth|tonumber),
+      delegation_reason:$delegation_reason,
+      risk:"MEDIUM",
+      approve:false,
+      findings:["Recursive delegation dry-run active for codex lane"],
+      recommendation:"Disable FUGUE_CODEX_RECURSIVE_DRY_RUN to execute real recursive codex delegation",
+      rationale:("delegation_mode=recursive depth=" + $delegation_depth + " dry_run=true"),
+      execution_engine:"harness",
+      execution_route:"codex-api-recursive-dry-run"
+    }')"
+  echo "${result}" > "agent-${AGENT_NAME}.json"
+  exit 0
 fi
 
 req=""
@@ -532,6 +596,13 @@ fi
 if [[ "${CLAUDE_PROXY_MODE}" == "true" ]]; then
   execution_route="claude-via-codex-proxy"
 fi
+if [[ "${ORIGINAL_PROVIDER}" == "codex" && "${recursive_active}" == "true" ]]; then
+  if [[ "${effective_provider}" == "codex" ]]; then
+    execution_route="codex-api-recursive"
+  else
+    execution_route="codex-api-recursive-fallback"
+  fi
+fi
 
 result="$(jq -n \
   --arg name "${AGENT_NAME}" \
@@ -546,6 +617,9 @@ result="$(jq -n \
   --arg skipped "${skipped_flag}" \
   --arg execution_route "${execution_route}" \
   --arg model_attempts "${attempt_trace}" \
+  --arg delegation_mode "$( [[ "${recursive_active}" == "true" ]] && echo "recursive" || echo "flat" )" \
+  --arg delegation_depth "$( [[ "${recursive_active}" == "true" ]] && echo "${recursive_depth}" || echo "1" )" \
+  --arg delegation_reason "${recursive_reason}" \
   '{
     name:$name,
     provider:$provider,
@@ -557,6 +631,9 @@ result="$(jq -n \
     http_code:$http_code,
     skipped:($skipped == "true"),
     model_attempts:$model_attempts,
+    delegation_mode:$delegation_mode,
+    delegation_depth:($delegation_depth|tonumber),
+    delegation_reason:$delegation_reason,
     risk:(($payload.risk // "MEDIUM")|ascii_upcase),
     approve:($payload.approve // false),
     findings:(if ($payload.findings|type)=="array" then $payload.findings else [($payload.findings|tostring)] end),

@@ -11,14 +11,14 @@ assist_provider="claude"
 force_claude="false"
 self_hosted_online="false"
 claude_state="ok"
-strict_main_requested="true"
-strict_opus_requested="true"
+strict_main_requested="false"
+strict_opus_requested="false"
 claude_direct_available="true"
 codex_api_available="true"
 api_strict_mode="false"
 emergency_continuity_mode="false"
 emergency_assist_policy="none"
-subscription_offline_policy="hold"
+subscription_offline_policy="continuity"
 format="env"
 
 while [[ $# -gt 0 ]]; do
@@ -48,11 +48,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --strict-main-requested)
-      strict_main_requested="${2:-true}"
+      strict_main_requested="${2:-false}"
       shift 2
       ;;
     --strict-opus-requested)
-      strict_opus_requested="${2:-true}"
+      strict_opus_requested="${2:-false}"
       shift 2
       ;;
     --claude-direct-available)
@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --subscription-offline-policy)
-      subscription_offline_policy="${2:-hold}"
+      subscription_offline_policy="${2:-continuity}"
       shift 2
       ;;
     --format)
@@ -101,7 +101,7 @@ Options:
   --api-strict-mode VALUE             true to keep strict guards active even on api/harness engines
   --emergency-continuity-mode VALUE   true to run inflight-only continuity mode
   --emergency-assist-policy VALUE     Assist policy under continuity fallback (none|codex|claude)
-  --subscription-offline-policy VALUE Subscription mode fallback policy when self-hosted is offline (hold|continuity)
+  --subscription-offline-policy VALUE Subscription mode fallback policy when self-hosted is offline (hold|continuity; default continuity)
   --format VALUE                      env (default) or json
 EOF
       exit 0
@@ -149,7 +149,7 @@ normalize_offline_policy() {
   local v
   v="$(lower_trim "$1")"
   if [[ "${v}" != "hold" && "${v}" != "continuity" ]]; then
-    v="hold"
+    v="continuity"
   fi
   printf '%s' "${v}"
 }

@@ -37,6 +37,9 @@ jobs:
       API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
       HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+      DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || 'claude' }}
+      EXECUTION_PROVIDER_DEFAULT: ${{ vars.FUGUE_EXECUTION_PROVIDER || '' }}
+      CANARY_ALTERNATE_PROVIDER: ${{ vars.FUGUE_CANARY_ALTERNATE_PROVIDER || '' }}
       CANARY_LABEL_WAIT_ATTEMPTS: ${{ vars.FUGUE_CANARY_LABEL_WAIT_ATTEMPTS || '10' }}
       CANARY_LABEL_WAIT_SLEEP_SEC: ${{ vars.FUGUE_CANARY_LABEL_WAIT_SLEEP_SEC || '2' }}
       CANARY_WAIT_FAST_ATTEMPTS: ${{ vars.FUGUE_CANARY_WAIT_FAST_ATTEMPTS || '12' }}
@@ -121,9 +124,9 @@ jobs:
           if [[ "${ci_execution_engine}" != "subscription" && "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
             ci_execution_engine="subscription"
           fi
-          subscription_offline_policy="$(normalize "${SUBSCRIPTION_OFFLINE_POLICY:-hold}")"
+          subscription_offline_policy="$(normalize "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}")"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
-            subscription_offline_policy="hold"
+            subscription_offline_policy="continuity"
           fi
           canary_offline_policy_override="$(normalize "${CANARY_OFFLINE_POLICY_OVERRIDE:-continuity}")"
           if [[ "${canary_offline_policy_override}" != "inherit" && "${canary_offline_policy_override}" != "hold" && "${canary_offline_policy_override}" != "continuity" ]]; then
@@ -168,6 +171,27 @@ jobs:
           fi
           canary_wait_slow_sleep_sec="$(clamp_num "${canary_wait_slow_sleep_sec}" 1 120)"
 
+          default_main_provider="$(normalize "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-claude}")"
+          if [[ "${default_main_provider}" != "codex" && "${default_main_provider}" != "claude" ]]; then
+            default_main_provider="claude"
+          fi
+          execution_provider_default="$(normalize "${EXECUTION_PROVIDER_DEFAULT:-}")"
+          if [[ "${execution_provider_default}" != "codex" && "${execution_provider_default}" != "claude" ]]; then
+            execution_provider_default=""
+          fi
+          canary_alternate_main="$(normalize "${CANARY_ALTERNATE_PROVIDER:-}")"
+          if [[ "${canary_alternate_main}" != "codex" && "${canary_alternate_main}" != "claude" ]]; then
+            if [[ "${default_main_provider}" == "claude" ]]; then
+              canary_alternate_main="codex"
+            else
+              canary_alternate_main="claude"
+            fi
+          fi
+          canary_alternate_force="false"
+          if [[ "${canary_alternate_main}" == "claude" && "${default_main_provider}" != "claude" ]]; then
+            canary_alternate_force="true"
+          fi
+
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
             runners_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 5 || echo '{}')"
             online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
@@ -193,9 +217,9 @@ jobs:
 
           eval "$(
             ./scripts/lib/orchestrator-policy.sh \
-              --main "claude" \
+              --main "${default_main_provider}" \
               --assist "claude" \
-              --default-main "codex" \
+              --default-main "${default_main_provider}" \
               --default-assist "claude" \
               --claude-state "${claude_state}" \
               --force-claude "false" \
@@ -228,12 +252,12 @@ jobs:
 
           eval "$(
             ./scripts/lib/orchestrator-policy.sh \
-              --main "claude" \
+              --main "${canary_alternate_main}" \
               --assist "claude" \
-              --default-main "codex" \
+              --default-main "${default_main_provider}" \
               --default-assist "claude" \
               --claude-state "${claude_state}" \
-              --force-claude "true" \
+              --force-claude "${canary_alternate_force}" \
               --assist-policy "${main_assist_policy}" \
               --claude-role-policy "${role_policy}" \
               --degraded-assist-policy "${degraded_assist_policy}"
@@ -262,6 +286,7 @@ jobs:
           expected_force_runner="${run_agents_runner}"
 
           gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
+          gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
           gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
           gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
           gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
@@ -270,14 +295,16 @@ jobs:
           create_issue() {
             local title="$1"
             local force_label="$2"
+            local orch_provider="${3:-claude}"
             local body
-            body="$(printf '## Canary\nAutomated orchestration canary.\n\n- profile: codex main + claude assist default\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
+            body="$(printf '## Canary\nAutomated orchestration canary.\n\n- orchestrator: %s main\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
+              "${orch_provider}" \
               "${title}" \
               "$(date -u +"%Y-%m-%dT%H:%M:%SZ")")"
 
             local cmd=(gh issue create --repo "${repo}" --title "${title}" --body "${body}" \
               --label "fugue-task" \
-              --label "orchestrator:claude" \
+              --label "orchestrator:${orch_provider}" \
               --label "orchestrator-assist:claude")
             if [[ -n "${force_label}" ]]; then
               cmd+=(--label "${force_label}")
@@ -419,10 +446,14 @@ jobs:
           if [[ "${canary_mode}" == "lite" ]]; then
             issue_prefix="[canary-lite]"
           fi
-          regular_issue="$(create_issue "${issue_prefix} regular claude request ${ts}" "")"
+          regular_issue="$(create_issue "${issue_prefix} regular ${default_main_provider}-main request ${ts}" "" "${default_main_provider}")"
           force_issue=""
           if [[ "${run_force_case}" == "true" ]]; then
-            force_issue="$(create_issue "${issue_prefix} forced claude request ${ts}" "orchestrator-force:claude")"
+            if [[ "${canary_alternate_force}" == "true" ]]; then
+              force_issue="$(create_issue "${issue_prefix} alternate ${canary_alternate_main}-main request ${ts}" "orchestrator-force:claude" "${canary_alternate_main}")"
+            else
+              force_issue="$(create_issue "${issue_prefix} alternate ${canary_alternate_main}-main request ${ts}" "" "${canary_alternate_main}")"
+            fi
           fi
 
           regular_pair_file="$(mktemp)"
@@ -544,7 +575,7 @@ jobs:
           fi
 
           if [[ "${run_force_case}" == "true" ]]; then
-            echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), force(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner}), strict_expected=${strict_expected}"
+            echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), alternate(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner}), default_main=${default_main_provider}, alternate_main=${canary_alternate_main}, strict_expected=${strict_expected}"
           else
-            echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), force=skipped, strict_expected=${strict_expected}"
+            echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), alternate=skipped, default_main=${default_main_provider}, strict_expected=${strict_expected}"
           fi

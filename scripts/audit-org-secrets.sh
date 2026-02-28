@@ -112,6 +112,33 @@ get_selected_repos_for_secret() {
     --jq '.repositories[].full_name' 2>/dev/null | tee "${cache_file}" || true
 }
 
+secret_is_covered_for_repo() {
+  # Usage: secret_is_covered_for_repo <repo> <secret> <repo_secrets_multiline>
+  local repo="$1"
+  local secret="$2"
+  local repo_secrets="$3"
+
+  if printf '%s\n' "${repo_secrets}" | has_line_exact "${secret}"; then
+    return 0
+  fi
+
+  local org_vis org_covers
+  org_vis="$(org_secret_visibility "${secret}")"
+  org_covers=false
+  if [[ "${org_vis}" == "all" ]]; then
+    org_covers=true
+  elif [[ "${org_vis}" == "selected" ]]; then
+    if get_selected_repos_for_secret "${secret}" | has_line_exact "${repo}"; then
+      org_covers=true
+    fi
+  fi
+
+  if [[ "${org_covers}" == "true" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 repo_count=0
 failures=0
 warnings=0
@@ -148,7 +175,8 @@ while IFS= read -r repo; do
   echo "Repo: ${repo}"
 
   required="$(jq -r --arg r "${repo}" '.repos[$r].required[]? // empty' "${CONFIG}")"
-  if [[ -z "${required}" ]]; then
+  required_any_count="$(jq -r --arg r "${repo}" '(.repos[$r].required_any // []) | length' "${CONFIG}")"
+  if [[ -z "${required}" && "${required_any_count}" == "0" ]]; then
     echo "  (no required secrets configured)"
     continue
   fi
@@ -208,6 +236,57 @@ while IFS= read -r repo; do
       failures=$((failures+1))
     fi
   done <<<"${required}"
+
+  if [[ "${required_any_count}" != "0" ]]; then
+    group_idx=0
+    while IFS= read -r group_json; do
+      [[ -z "${group_json}" ]] && continue
+      group_idx=$((group_idx + 1))
+      group_ok="false"
+      satisfied_by=""
+
+      while IFS= read -r candidate_json; do
+        [[ -z "${candidate_json}" ]] && continue
+        candidate_type="$(printf '%s' "${candidate_json}" | jq -r 'type')"
+        candidate_ok="true"
+        candidate_label=""
+
+        if [[ "${candidate_type}" == "string" ]]; then
+          secret_name="$(printf '%s' "${candidate_json}" | jq -r '.')"
+          candidate_label="${secret_name}"
+          if ! secret_is_covered_for_repo "${repo}" "${secret_name}" "${repo_secrets}"; then
+            candidate_ok="false"
+          fi
+        elif [[ "${candidate_type}" == "object" ]] && printf '%s' "${candidate_json}" | jq -e 'has("all_of") and (.all_of | type == "array")' >/dev/null 2>&1; then
+          candidate_label="$(printf '%s' "${candidate_json}" | jq -r '.all_of | join(" + ")')"
+          while IFS= read -r secret_name; do
+            [[ -z "${secret_name}" ]] && continue
+            if ! secret_is_covered_for_repo "${repo}" "${secret_name}" "${repo_secrets}"; then
+              candidate_ok="false"
+              break
+            fi
+          done < <(printf '%s' "${candidate_json}" | jq -r '.all_of[]? // empty')
+        else
+          candidate_ok="false"
+          candidate_label="invalid-candidate"
+        fi
+
+        if [[ "${candidate_ok}" == "true" ]]; then
+          group_ok="true"
+          satisfied_by="${candidate_label}"
+          break
+        fi
+      done < <(printf '%s' "${group_json}" | jq -c '.[]?')
+
+      if [[ "${group_ok}" == "true" ]]; then
+        printf '  OK    required_any[%s] (%s)\n' "${group_idx}" "${satisfied_by}"
+      else
+        group_desc="$(printf '%s' "${group_json}" | jq -r 'map(if type=="string" then . elif (type=="object" and has("all_of")) then (.all_of|join(" + ")) else "invalid" end) | join(" OR ")')"
+        printf '  FAIL  required_any[%s] (%s)\n' "${group_idx}" "${group_desc}"
+        failures=$((failures+1))
+      fi
+    done < <(jq -c --arg r "${repo}" '.repos[$r].required_any[]? // empty' "${CONFIG}")
+  fi
 done <<<"${repos}"
 
 echo ""

@@ -167,6 +167,7 @@ jobs:
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
+      vote_command: ${{ steps.ctx.outputs.vote_command }}
 
     steps:
       - name: Resolve issue context
@@ -310,6 +311,7 @@ jobs:
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          VOTE_COMMAND: ${{ steps.ctx.outputs.vote_command }}
         run: |
           set -euo pipefail
           gh_api_retry() {
@@ -348,6 +350,12 @@ jobs:
           TRUSTED="false"
           if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
             TRUSTED="true"
+          fi
+          if [[ "${VOTE_COMMAND}" == "true" ]]; then
+            TRUSTED="true"
+            if [[ "${PERM}" == "none" ]]; then
+              PERM="vote-bypass"
+            fi
           fi
 
           {
@@ -440,6 +448,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout orchestrator scripts
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          ref: v7
+          path: .fugue-orchestrator
+
       - name: Call agent engine
         id: call
         env:
@@ -479,6 +494,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          harness_dir="scripts/harness"
+          if [[ ! -d "${harness_dir}" && -d ".fugue-orchestrator/scripts/harness" ]]; then
+            harness_dir=".fugue-orchestrator/scripts/harness"
+          fi
+
           issue_body_effective="${ISSUE_BODY}"
           extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -n "${extra_issue_instruction}" ]]; then
@@ -491,19 +511,19 @@ jobs:
             ci_execution_engine="subscription"
           fi
           if [[ "${ci_execution_engine}" == "harness" ]]; then
-            if [[ ! -x "scripts/harness/ci-agent-runner.sh" ]]; then
+            if [[ ! -x "${harness_dir}/ci-agent-runner.sh" ]]; then
               echo "harness execution engine is enabled, but scripts/harness/ci-agent-runner.sh is missing or not executable." >&2
               exit 1
             fi
-            bash scripts/harness/ci-agent-runner.sh
+            bash "${harness_dir}/ci-agent-runner.sh"
             exit 0
           fi
           if [[ "${ci_execution_engine}" == "subscription" ]]; then
-            if [[ ! -x "scripts/harness/subscription-agent-runner.sh" ]]; then
+            if [[ ! -x "${harness_dir}/subscription-agent-runner.sh" ]]; then
               echo "subscription execution engine is enabled, but scripts/harness/subscription-agent-runner.sh is missing or not executable." >&2
               exit 1
             fi
-            bash scripts/harness/subscription-agent-runner.sh
+            bash "${harness_dir}/subscription-agent-runner.sh"
             exit 0
           fi
 

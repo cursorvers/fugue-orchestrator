@@ -139,7 +139,7 @@ case "${risk_tier}" in
     ;;
 esac
 
-preflight_cycles_floor=3
+preflight_cycles_floor=2
 implementation_dialogue_rounds_floor=2
 if [[ "${orchestration_profile}" == "claude-light" ]]; then
   case "${risk_tier}" in
@@ -159,7 +159,7 @@ if [[ "${orchestration_profile}" == "claude-light" ]]; then
 else
   case "${risk_tier}" in
     low)
-      preflight_cycles_floor=3
+      preflight_cycles_floor=2
       implementation_dialogue_rounds_floor=1
       ;;
     medium)

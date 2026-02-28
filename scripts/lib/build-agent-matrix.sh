@@ -7,11 +7,12 @@ set -euo pipefail
 engine="subscription"
 main_provider="codex"
 assist_provider="claude"
-multi_agent_mode="enhanced"
+multi_agent_mode="standard"
 glm_subagent_mode="paired"
 wants_gemini="false"
 wants_xai="false"
 allow_glm_in_subscription="false"
+dual_main_signal="false"
 codex_main_model="gpt-5-codex"
 codex_multi_agent_model="gpt-5.3-codex-spark"
 claude_opus_model="claude-sonnet-4-6"
@@ -39,7 +40,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --multi-agent-mode)
-      multi_agent_mode="${2:-enhanced}"
+      multi_agent_mode="${2:-standard}"
       shift 2
       ;;
     --glm-subagent-mode)
@@ -56,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-glm-in-subscription)
       allow_glm_in_subscription="${2:-false}"
+      shift 2
+      ;;
+    --dual-main-signal)
+      dual_main_signal="${2:-false}"
       shift 2
       ;;
     --codex-main-model)
@@ -107,6 +112,7 @@ Options:
   --wants-gemini VALUE              true|false
   --wants-xai VALUE                 true|false
   --allow-glm-in-subscription VALUE true|false (local hybrid mode switch)
+  --dual-main-signal VALUE          true|false (include both codex/claude main signal lanes)
   --codex-main-model VALUE          default: gpt-5-codex
   --codex-multi-agent-model VALUE   default: gpt-5.3-codex-spark
   --claude-opus-model VALUE         default: claude-sonnet-4-6
@@ -162,7 +168,7 @@ if [[ "${assist_provider}" != "claude" && "${assist_provider}" != "codex" && "${
 fi
 multi_agent_mode="$(lower_trim "${multi_agent_mode}")"
 if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
-  multi_agent_mode="enhanced"
+  multi_agent_mode="standard"
 fi
 glm_subagent_mode="$(lower_trim "${glm_subagent_mode}")"
 if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
@@ -171,6 +177,7 @@ fi
 wants_gemini="$(normalize_bool "${wants_gemini}")"
 wants_xai="$(normalize_bool "${wants_xai}")"
 allow_glm_in_subscription="$(normalize_bool "${allow_glm_in_subscription}")"
+dual_main_signal="$(normalize_bool "${dual_main_signal}")"
 if [[ -x "${model_policy_script}" ]]; then
   eval "$("${model_policy_script}" \
     --codex-main-model "${codex_main_model}" \
@@ -221,8 +228,10 @@ if [[ "${engine}" == "subscription" && "${allow_glm_in_subscription}" != "true" 
 fi
 
 main_signal_lane="codex-main-orchestrator"
+secondary_main_signal_lane="claude-main-orchestrator"
 if [[ "${main_provider}" == "claude" ]]; then
   main_signal_lane="claude-main-orchestrator"
+  secondary_main_signal_lane="codex-main-orchestrator"
 fi
 
 matrix="$(jq -cn \
@@ -242,6 +251,7 @@ matrix="$(jq -cn \
   --argjson wants_gemini "$( [[ "${wants_gemini}" == "true" ]] && echo true || echo false )" \
   --argjson wants_xai "$( [[ "${wants_xai}" == "true" ]] && echo true || echo false )" \
   --argjson use_glm_baseline "$( [[ "${use_glm_baseline}" == "true" ]] && echo true || echo false )" \
+  --argjson dual_main_signal "$( [[ "${dual_main_signal}" == "true" ]] && echo true || echo false )" \
   '
   def codex_api($engine):
     if $engine == "subscription" then "subscription-cli" else "https://api.openai.com/v1/chat/completions" end;
@@ -297,6 +307,25 @@ matrix="$(jq -cn \
         agent_role:"main-orchestrator"
       }]
     end
+  | if $dual_main_signal then
+      if $main_provider == "claude" then
+        .include += [{
+          name:"codex-main-orchestrator",
+          provider:"codex",
+          api_url:codex_api($engine),
+          model:$codex_main_model,
+          agent_role:"main-orchestrator"
+        }]
+      else
+        .include += [{
+          name:"claude-main-orchestrator",
+          provider:"claude",
+          api_url:claude_api($engine),
+          model:$claude_opus_model,
+          agent_role:"main-orchestrator"
+        }]
+      end
+    else . end
   | if $assist_provider == "claude" then
       .include += [{
         name:"claude-opus-assist",
@@ -422,6 +451,7 @@ if [[ "${format}" == "env" ]]; then
   printf 'matrix=%q\n' "${matrix}"
   printf 'lanes=%q\n' "${lanes}"
   printf 'main_signal_lane=%q\n' "${main_signal_lane}"
+  printf 'main_signal_lanes=%q\n' "$(jq -cn --arg primary "${main_signal_lane}" --arg secondary "${secondary_main_signal_lane}" --argjson dual "$( [[ "${dual_main_signal}" == "true" ]] && echo true || echo false )" '[$primary] + (if $dual and ($secondary|length)>0 then [$secondary] else [] end)')"
   printf 'use_glm_baseline=%q\n' "${use_glm_baseline}"
   exit 0
 fi
@@ -430,10 +460,13 @@ jq -cn \
   --argjson matrix "${matrix}" \
   --argjson lanes "${lanes}" \
   --arg main_signal_lane "${main_signal_lane}" \
+  --arg secondary_main_signal_lane "${secondary_main_signal_lane}" \
+  --argjson dual_main_signal "$( [[ "${dual_main_signal}" == "true" ]] && echo true || echo false )" \
   --argjson use_glm_baseline "$( [[ "${use_glm_baseline}" == "true" ]] && echo true || echo false )" \
   '{
     matrix:$matrix,
     lanes:$lanes,
     main_signal_lane:$main_signal_lane,
+    main_signal_lanes:([$main_signal_lane] + (if $dual_main_signal and ($secondary_main_signal_lane|length)>0 then [$secondary_main_signal_lane] else [] end)),
     use_glm_baseline:$use_glm_baseline
   }'

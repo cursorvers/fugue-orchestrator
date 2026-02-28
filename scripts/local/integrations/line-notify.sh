@@ -18,11 +18,17 @@ LINE_NOTIFY_SMOKE_SEND="${LINE_NOTIFY_SMOKE_SEND:-false}"
 LINE_NOTIFY_MESSAGE="${LINE_NOTIFY_MESSAGE:-}"
 LINE_NOTIFY_GUARD_ENABLED="${LINE_NOTIFY_GUARD_ENABLED:-true}"
 LINE_NOTIFY_GUARD_FILE="${LINE_NOTIFY_GUARD_FILE:-${ROOT_DIR}/.fugue/state/line-notify-guard.json}"
+LINE_NOTIFY_PREFER_PUSH="${LINE_NOTIFY_PREFER_PUSH:-false}"
 LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK:-false}"
 LINE_NOTIFY_DEDUP_TTL_SECONDS="${LINE_NOTIFY_DEDUP_TTL_SECONDS:-21600}"
 LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS:-3600}"
 LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS="${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS:-5}"
 LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS="${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS:-20}"
+LINE_NOTIFY_RETRY_MAX_ATTEMPTS="${LINE_NOTIFY_RETRY_MAX_ATTEMPTS:-3}"
+LINE_NOTIFY_RETRY_BASE_SECONDS="${LINE_NOTIFY_RETRY_BASE_SECONDS:-1}"
+LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="${LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS:-8}"
+LINE_NOTIFY_TRACE_ID="${LINE_NOTIFY_TRACE_ID:-}"
+LINE_NOTIFY_TRACE_PREFIX="${LINE_NOTIFY_TRACE_PREFIX:-fugue-line}"
 
 usage() {
   cat <<'EOF'
@@ -49,6 +55,8 @@ Environment:
   LINE_NOTIFY_GUARD_ENABLED=true|false
                                   Suppress duplicate payloads and recent repeated failures (default: true).
   LINE_NOTIFY_GUARD_FILE          Guard state file path (default: <repo>/.fugue/state/line-notify-guard.json).
+  LINE_NOTIFY_PREFER_PUSH=true|false
+                                  If true, prefer LINE push API over webhook when both are configured.
   LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true|false
                                   If false (default), reject inbound webhook URLs such as /webhook/line-bot.
   LINE_NOTIFY_DEDUP_TTL_SECONDS   Duplicate suppression window in seconds (default: 21600).
@@ -58,6 +66,12 @@ Environment:
                                   curl connect timeout seconds (default: 5).
   LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS
                                   curl max-time seconds (default: 20).
+  LINE_NOTIFY_RETRY_MAX_ATTEMPTS    Max send attempts for transient failures (default: 3).
+  LINE_NOTIFY_RETRY_BASE_SECONDS    Initial retry wait seconds (default: 1).
+  LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS
+                                  Max retry backoff seconds (default: 8).
+  LINE_NOTIFY_TRACE_ID             Optional fixed trace id for webhook correlation.
+  LINE_NOTIFY_TRACE_PREFIX         Trace id prefix when auto-generated (default: fugue-line).
 EOF
 }
 
@@ -160,29 +174,62 @@ save_guard_json() {
 LINE_NOTIFY_REQUIRED_ON_EXECUTE="$(to_bool "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}")"
 LINE_NOTIFY_SMOKE_SEND="$(to_bool "${LINE_NOTIFY_SMOKE_SEND}")"
 LINE_NOTIFY_GUARD_ENABLED="$(to_bool "${LINE_NOTIFY_GUARD_ENABLED}")"
+LINE_NOTIFY_PREFER_PUSH="$(to_bool "${LINE_NOTIFY_PREFER_PUSH}")"
 LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="$(to_bool "${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK}")"
 LINE_NOTIFY_DEDUP_TTL_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_DEDUP_TTL_SECONDS}" "21600")"
 LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS}" "3600")"
 LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" "5")"
 LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" "20")"
+LINE_NOTIFY_RETRY_MAX_ATTEMPTS="$(normalize_non_negative_int "${LINE_NOTIFY_RETRY_MAX_ATTEMPTS}" "3")"
+LINE_NOTIFY_RETRY_BASE_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_RETRY_BASE_SECONDS}" "1")"
+LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS}" "8")"
+if (( LINE_NOTIFY_RETRY_MAX_ATTEMPTS < 1 )); then
+  LINE_NOTIFY_RETRY_MAX_ATTEMPTS=1
+fi
+if (( LINE_NOTIFY_RETRY_BASE_SECONDS < 1 )); then
+  LINE_NOTIFY_RETRY_BASE_SECONDS=1
+fi
+if (( LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS < LINE_NOTIFY_RETRY_BASE_SECONDS )); then
+  LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="${LINE_NOTIFY_RETRY_BASE_SECONDS}"
+fi
 
 transport="none"
-if [[ -n "${LINE_WEBHOOK_URL}" ]]; then
-  transport="webhook"
-elif [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
-  transport="push"
-elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
-  transport="notify"
+transport_selection="webhook-first"
+if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" ]]; then
+  transport_selection="push-first"
+  if [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
+    transport="push"
+  elif [[ -n "${LINE_WEBHOOK_URL}" ]]; then
+    transport="webhook"
+  elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
+    transport="notify"
+  fi
+else
+  if [[ -n "${LINE_WEBHOOK_URL}" ]]; then
+    transport="webhook"
+  elif [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
+    transport="push"
+  elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
+    transport="notify"
+  fi
+fi
+
+if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" && "${transport}" != "push" ]]; then
+  if [[ "${transport}" == "webhook" ]]; then
+    echo "line-notify: push credentials are missing; using webhook fallback."
+  elif [[ "${transport}" == "notify" ]]; then
+    echo "line-notify: push and webhook are unavailable; using legacy notify fallback."
+  fi
 fi
 
 if [[ "${transport}" == "none" ]]; then
   if [[ "${MODE}" == "execute" && "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}" == "true" ]]; then
     echo "line-notify: missing config. Set LINE_WEBHOOK_URL or (LINE_CHANNEL_ACCESS_TOKEN + LINE_TO) or LINE_NOTIFY_TOKEN." >&2
-    write_meta "error-missing-config" "sent=false"
+    write_meta "error-missing-config" "sent=false" "transport_selection=${transport_selection}" "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
     exit 1
   fi
   echo "line-notify: configuration is missing; skipping (${MODE})."
-  write_meta "skipped-missing-config" "sent=false"
+  write_meta "skipped-missing-config" "sent=false" "transport_selection=${transport_selection}" "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
   exit 0
 fi
 
@@ -194,7 +241,9 @@ if [[ "${transport}" == "webhook" ]]; then
     write_meta "error-inbound-webhook-url" \
       "transport=webhook" \
       "sent=false" \
-      "line_webhook_url=${LINE_WEBHOOK_URL}"
+      "line_webhook_url=${LINE_WEBHOOK_URL}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
     exit 1
   fi
 fi
@@ -223,6 +272,18 @@ fi
 message_hash="$(hash_text "${transport}|${LINE_TO}|${LINE_WEBHOOK_URL}|${LINE_PUSH_API_URL}|${message}")"
 guard_action="disabled"
 epoch_now="$(date +%s)"
+repo_slug="${GITHUB_REPOSITORY:-}"
+run_id="${GITHUB_RUN_ID:-}"
+run_attempt="${GITHUB_RUN_ATTEMPT:-}"
+workflow_name="${GITHUB_WORKFLOW:-}"
+run_url=""
+if [[ -n "${repo_slug}" && -n "${run_id}" ]]; then
+  run_url="https://github.com/${repo_slug}/actions/runs/${run_id}"
+fi
+if [[ -z "${LINE_NOTIFY_TRACE_ID}" ]]; then
+  trace_seed="${LINE_NOTIFY_TRACE_PREFIX}|${MODE}|${issue_number}|${message_hash}|${repo_slug}|${run_id}|${epoch_now}"
+  LINE_NOTIFY_TRACE_ID="$(hash_text "${trace_seed}" | cut -c1-20)"
+fi
 
 if [[ "${should_send}" == "true" && "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]]; then
   guard_action="checked"
@@ -237,6 +298,10 @@ if [[ "${should_send}" == "true" && "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]];
       "transport=${transport}" \
       "sent=false" \
       "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
       "guard=duplicate-ttl"
     exit 0
   fi
@@ -247,6 +312,10 @@ if [[ "${should_send}" == "true" && "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]];
       "transport=${transport}" \
       "sent=false" \
       "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
       "failure_count=${failure_count}" \
       "guard=failure-cooldown"
     exit 0
@@ -258,60 +327,118 @@ if [[ "${should_send}" == "true" ]]; then
   curl_exit_code=0
   response_body=""
   line_request_id=""
+  max_attempts="${LINE_NOTIFY_RETRY_MAX_ATTEMPTS}"
+  attempt=1
+  retry_count=0
+  last_retry_reason=""
 
   headers_file="$(mktemp)"
   body_file="$(mktemp)"
   trap 'rm -f "${headers_file}" "${body_file}"' EXIT
 
-  set +e
-  if [[ "${transport}" == "webhook" ]]; then
-    payload="$(jq -n \
-      --arg text "${message}" \
-      --arg mode "${MODE}" \
-      --arg issue_number "${issue_number}" \
-      '{
-        text:$text,
-        message:$text,
-        source:"fugue-line-notify",
-        mode:$mode,
-        issue_number:$issue_number
-      }')"
-    http_status="$(curl -sS -X POST "${LINE_WEBHOOK_URL}" \
-      --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
-      --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
-      -D "${headers_file}" \
-      -o "${body_file}" \
-      --write-out '%{http_code}' \
-      -H "Content-Type: application/json" \
-      -d "${payload}")"
-    curl_exit_code=$?
-  elif [[ "${transport}" == "push" ]]; then
-    payload="$(jq -n --arg to "${LINE_TO}" --arg text "${message}" '{to:$to,messages:[{type:"text",text:$text}]}')"
-    http_status="$(curl -sS -X POST "${LINE_PUSH_API_URL}" \
-      --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
-      --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
-      -D "${headers_file}" \
-      -o "${body_file}" \
-      --write-out '%{http_code}' \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
-      -d "${payload}")"
-    curl_exit_code=$?
-  else
-    http_status="$(curl -sS -X POST "${LINE_NOTIFY_API_URL}" \
-      --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
-      --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
-      -D "${headers_file}" \
-      -o "${body_file}" \
-      --write-out '%{http_code}' \
-      -H "Authorization: Bearer ${LINE_NOTIFY_TOKEN}" \
-      --data-urlencode "message=${message}")"
-    curl_exit_code=$?
-  fi
-  set -e
+  while :; do
+    : > "${headers_file}"
+    : > "${body_file}"
 
-  response_body="$(cat "${body_file}" 2>/dev/null || true)"
-  line_request_id="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${headers_file}")"
+    set +e
+    if [[ "${transport}" == "webhook" ]]; then
+      payload="$(jq -n \
+        --arg text "${message}" \
+        --arg mode "${MODE}" \
+        --arg issue_number "${issue_number}" \
+        --arg trace_id "${LINE_NOTIFY_TRACE_ID}" \
+        --arg message_hash "${message_hash}" \
+        --arg repo "${repo_slug}" \
+        --arg workflow "${workflow_name}" \
+        --arg run_id "${run_id}" \
+        --arg run_attempt "${run_attempt}" \
+        --arg run_url "${run_url}" \
+        '{
+          text:$text,
+          message:$text,
+          source:"fugue-line-notify",
+          mode:$mode,
+          issue_number:$issue_number,
+          trace_id:$trace_id,
+          message_hash:$message_hash,
+          repo:$repo,
+          workflow:$workflow,
+          run_id:$run_id,
+          run_attempt:$run_attempt,
+          run_url:$run_url
+        }')"
+      http_status="$(curl -sS -X POST "${LINE_WEBHOOK_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -d "${payload}")"
+      curl_exit_code=$?
+    elif [[ "${transport}" == "push" ]]; then
+      payload="$(jq -n --arg to "${LINE_TO}" --arg text "${message}" '{to:$to,messages:[{type:"text",text:$text}]}')"
+      http_status="$(curl -sS -X POST "${LINE_PUSH_API_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+        -d "${payload}")"
+      curl_exit_code=$?
+    else
+      http_status="$(curl -sS -X POST "${LINE_NOTIFY_API_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Authorization: Bearer ${LINE_NOTIFY_TOKEN}" \
+        --data-urlencode "message=${message}")"
+      curl_exit_code=$?
+    fi
+    set -e
+
+    response_body="$(cat "${body_file}" 2>/dev/null || true)"
+    line_request_id="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${headers_file}")"
+    if (( curl_exit_code == 0 )) && [[ "${http_status}" =~ ^2[0-9]{2}$ ]]; then
+      break
+    fi
+
+    retry_reason=""
+    if (( attempt < max_attempts )); then
+      case "${curl_exit_code}" in
+        6|7|28|52|56)
+          retry_reason="curl-exit-${curl_exit_code}"
+          ;;
+      esac
+      if [[ -z "${retry_reason}" ]]; then
+        case "${http_status:-}" in
+          408|429|500|502|503|504)
+            retry_reason="http-${http_status}"
+            ;;
+        esac
+      fi
+    fi
+
+    if [[ -n "${retry_reason}" ]]; then
+      retry_count=$((retry_count + 1))
+      last_retry_reason="${retry_reason}"
+      sleep_seconds=$((LINE_NOTIFY_RETRY_BASE_SECONDS << (attempt - 1)))
+      if (( sleep_seconds > LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS )); then
+        sleep_seconds="${LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS}"
+      fi
+      echo "line-notify: transient failure (${retry_reason}); retry ${attempt}/${max_attempts} after ${sleep_seconds}s."
+      attempt=$((attempt + 1))
+      sleep "${sleep_seconds}"
+      continue
+    fi
+
+    break
+  done
+
   code_display="N/A"
   if [[ "${http_status}" =~ ^[0-9]{3}$ ]] && [[ "${http_status}" != "000" ]]; then
     code_display="${http_status}"
@@ -323,9 +450,9 @@ if [[ "${should_send}" == "true" ]]; then
     if [[ "${transport}" == "webhook" && -z "${line_request_id}" ]]; then
       delivery_state="accepted-upstream"
       if [[ -n "${response_message}" ]]; then
-        echo "line-notify: upstream webhook accepted request (${response_message}); downstream LINE delivery must be confirmed by webhook system logs."
+        echo "line-notify: upstream webhook accepted request (${response_message}); downstream LINE delivery must be confirmed by webhook system logs (trace_id=${LINE_NOTIFY_TRACE_ID})."
       else
-        echo "line-notify: upstream webhook accepted request; downstream LINE delivery must be confirmed by webhook system logs."
+        echo "line-notify: upstream webhook accepted request; downstream LINE delivery must be confirmed by webhook system logs (trace_id=${LINE_NOTIFY_TRACE_ID})."
       fi
     fi
     if [[ "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]]; then
@@ -336,6 +463,9 @@ if [[ "${should_send}" == "true" ]]; then
       save_guard_json "${updated_guard}"
       guard_action="recorded-success"
     fi
+    if (( retry_count > 0 )); then
+      echo "line-notify: recovered after retry count=${retry_count} (last=${last_retry_reason})."
+    fi
     echo "line-notify: delivered (${MODE}) via ${transport} (code=${code_display})."
     write_meta "ok" \
       "transport=${transport}" \
@@ -345,6 +475,12 @@ if [[ "${should_send}" == "true" ]]; then
       "delivery_state=${delivery_state}" \
       "response_message=${response_message}" \
       "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+      "retry_count=${retry_count}" \
+      "retry_last_reason=${last_retry_reason}" \
       "guard=${guard_action}"
   else
     error_message="$(printf '%s' "${response_body}" | jq -r 'if type=="object" then (.message // .error // .error_description // .detail // .title // empty) else empty end' 2>/dev/null || true)"
@@ -377,6 +513,12 @@ if [[ "${should_send}" == "true" ]]; then
       "curl_exit_code=${curl_exit_code}" \
       "line_request_id=${line_request_id}" \
       "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+      "retry_count=${retry_count}" \
+      "retry_last_reason=${last_retry_reason}" \
       "failure_count=${failure_count}" \
       "error_message=${error_message}" \
       "guard=${guard_action}"
@@ -389,5 +531,9 @@ else
     "transport=${transport}" \
     "sent=false" \
     "message_hash=${message_hash}" \
+    "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+    "run_url=${run_url}" \
+    "transport_selection=${transport_selection}" \
+    "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
     "guard=${guard_action}"
 fi

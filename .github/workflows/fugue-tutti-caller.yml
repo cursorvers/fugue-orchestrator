@@ -89,6 +89,9 @@ jobs:
       context_budget_guard_reasons: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
       assist_auto_selected: ${{ steps.ctx.outputs.assist_auto_selected }}
       force_claude: ${{ steps.ctx.outputs.force_claude }}
+      execution_provider: ${{ steps.ctx.outputs.execution_provider }}
+      execution_profile: ${{ steps.ctx.outputs.execution_profile }}
+      hybrid_conductor_mode: ${{ steps.ctx.outputs.hybrid_conductor_mode }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
       subscription_offline_policy: ${{ steps.ctx.outputs.subscription_offline_policy }}
@@ -111,7 +114,8 @@ jobs:
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'claude' }}
+          EXECUTION_PROVIDER_DEFAULT: ${{ vars.FUGUE_EXECUTION_PROVIDER || '' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
@@ -133,7 +137,7 @@ jobs:
           DEFAULT_MULTI_AGENT_MODE_LOCK: ${{ vars.FUGUE_MULTI_AGENT_MODE_LOCK || 'false' }}
           CLAUDE_LIGHT_MULTI_AGENT_MODE: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE || 'standard' }}
           CLAUDE_LIGHT_MULTI_AGENT_LOCK: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_LOCK || 'true' }}
-          IMPLEMENT_PREFLIGHT_CYCLES_FULL: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL || '3' }}
+          IMPLEMENT_PREFLIGHT_CYCLES_FULL: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL || '2' }}
           IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE || '1' }}
           IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
           IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
@@ -141,7 +145,7 @@ jobs:
           FUGUE_CONTEXT_BUDGET_MIN_MAX: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_MAX || '12' }}
           FUGUE_CONTEXT_BUDGET_MIN_SPAN: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_SPAN || '6' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
-          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
           SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: |
@@ -205,9 +209,9 @@ jobs:
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
           fi
-          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-hold}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_offline_policy="$(echo "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
-            subscription_offline_policy="hold"
+            subscription_offline_policy="continuity"
           fi
           subscription_offline_policy_override="$(echo "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
@@ -402,7 +406,9 @@ jobs:
           if [[ "${multi_agent_mode_lock}" != "true" ]]; then
             multi_agent_mode_lock="false"
           fi
-          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+          # Apply claude-light multi-agent restrictions only when NOT in Hybrid Conductor Mode.
+          # In Hybrid, Claude is main but execution is Codex — full multi-agent depth is desired.
+          if [[ "${orchestration_profile}" == "claude-light" && "${hybrid_conductor_mode}" != "true" ]]; then
             if [[ -z "${multi_agent_mode_override}" ]]; then
               multi_agent_mode_override="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
               if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
@@ -719,8 +725,29 @@ jobs:
             orchestration_profile="claude-light"
           fi
 
+          # Hybrid Conductor Mode: execution provider can differ from main orchestrator.
+          execution_provider="$(echo "${EXECUTION_PROVIDER_DEFAULT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${execution_provider}" != "codex" && "${execution_provider}" != "claude" ]]; then
+            execution_provider="${requested_main_provider}"
+          fi
+          hybrid_conductor_mode="false"
+          if [[ "${requested_main_provider}" != "${execution_provider}" ]]; then
+            hybrid_conductor_mode="true"
+          fi
+          # Guard: only main=claude + execution=codex is a valid Hybrid combination.
+          if [[ "${hybrid_conductor_mode}" == "true" && "${requested_main_provider}" != "claude" ]]; then
+            echo "Warning: reverse Hybrid (main=${requested_main_provider}, execution=${execution_provider}) is unsupported; falling back to non-Hybrid." >&2
+            execution_provider="${requested_main_provider}"
+            hybrid_conductor_mode="false"
+          fi
+          # Execution profile determines implementation parameters (codex-full or claude-light).
+          execution_profile="codex-full"
+          if [[ "${execution_provider}" == "claude" ]]; then
+            execution_profile="claude-light"
+          fi
+
           implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT:-2}"
-          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+          if [[ "${execution_profile}" == "claude-light" ]]; then
             implementation_dialogue_rounds_raw="${IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE:-1}"
           fi
           implementation_dialogue_rounds="$(echo "${implementation_dialogue_rounds_raw}" | tr -cd '0-9')"
@@ -733,23 +760,23 @@ jobs:
             implementation_dialogue_rounds=5
           fi
 
-          preflight_cycles_raw="${IMPLEMENT_PREFLIGHT_CYCLES_FULL:-3}"
-          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+          preflight_cycles_raw="${IMPLEMENT_PREFLIGHT_CYCLES_FULL:-2}"
+          if [[ "${execution_profile}" == "claude-light" ]]; then
             preflight_cycles_raw="${IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE:-1}"
           fi
           preflight_cycles="$(echo "${preflight_cycles_raw}" | tr -cd '0-9')"
           if [[ -z "${preflight_cycles}" ]]; then
-            preflight_cycles="3"
+            preflight_cycles="2"
           fi
-          if [[ "${orchestration_profile}" == "claude-light" ]]; then
+          if [[ "${execution_profile}" == "claude-light" ]]; then
             if (( preflight_cycles < 1 )); then
               preflight_cycles=1
             elif (( preflight_cycles > 3 )); then
               preflight_cycles=3
             fi
           else
-            if (( preflight_cycles < 3 )); then
-              preflight_cycles=3
+            if (( preflight_cycles < 2 )); then
+              preflight_cycles=2
             elif (( preflight_cycles > 5 )); then
               preflight_cycles=5
             fi
@@ -961,6 +988,11 @@ jobs:
             echo "context_budget_guard_reasons=${context_budget_guard_reasons}"
             echo "assist_auto_selected=${assist_auto_selected}"
             echo "force_claude=${force_claude}"
+            echo "execution_provider=${execution_provider}"
+            echo "execution_profile=${execution_profile}"
+            echo "hybrid_conductor_mode=${hybrid_conductor_mode}"
+            echo "subscription_offline_policy=${subscription_offline_policy}"
+            echo "trust_subject=${trust_subject}"
             echo "allow_processing_rerun=${allow_processing_rerun}"
             echo "vote_instruction<<EOF"
             echo "${vote_instruction}"
@@ -1093,6 +1125,10 @@ jobs:
       force_claude: "${{ needs.ctx.outputs.force_claude }}"
       multi_agent_mode_override: "${{ needs.ctx.outputs.multi_agent_mode_override }}"
       multi_agent_mode_lock: "${{ needs.ctx.outputs.multi_agent_mode_lock }}"
+      risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
+      ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
+      ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"
+      claude_sub_trigger: "${{ needs.ctx.outputs.assist_auto_selected }}"
       subscription_offline_policy_override: "${{ needs.ctx.outputs.subscription_offline_policy }}"
       trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
       allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
@@ -1178,9 +1214,9 @@ jobs:
             fail_current=60
           fi
 
-          mode="$(echo "${RESOLVED_MULTI_AGENT_MODE:-enhanced}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          mode="$(echo "${RESOLVED_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${mode}" != "standard" && "${mode}" != "enhanced" && "${mode}" != "max" ]]; then
-            mode="enhanced"
+            mode="standard"
           fi
           if [[ "${mode}" == "standard" ]]; then
             ma_on_quality="$(clamp_int $((quality_current + 8)) 0 100)"
@@ -1261,7 +1297,7 @@ jobs:
       target_repo: "${{ needs.ctx.outputs.target_repo }}"
       refinement_cycles: "${{ needs.ctx.outputs.preflight_cycles }}"
       implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"
-      orchestration_profile: "${{ needs.ctx.outputs.orchestration_profile }}"
+      orchestration_profile: "${{ needs.ctx.outputs.execution_profile }}"
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       lessons_required: "${{ needs.ctx.outputs.lessons_required }}"
       correction_signal: "${{ needs.ctx.outputs.correction_signal }}"
