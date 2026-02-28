@@ -1415,6 +1415,68 @@ jobs:
             echo "ok_to_execute=${ok_to_execute}"
           } >> "${GITHUB_OUTPUT}"
 
+          # Save intermediate variables for the comment generation step
+          _esc() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
+          {
+            echo "approve_count='$(_esc "${approve_count}")'"
+            echo "total_count='$(_esc "${total_count}")'"
+            echo "high_risk_count='$(_esc "${high_risk_count}")'"
+            echo "high_risk='$(_esc "${high_risk}")'"
+            echo "weighted_approve_score='$(_esc "${weighted_approve_score}")'"
+            echo "weighted_total_score='$(_esc "${weighted_total_score}")'"
+            echo "weighted_threshold='$(_esc "${weighted_threshold}")'"
+            echo "weighted_vote_passed='$(_esc "${weighted_vote_passed}")'"
+            echo "required_claude_assist_gate='$(_esc "${required_claude_assist_gate}")'"
+            echo "required_claude_assist_reason='$(_esc "${required_claude_assist_reason}")'"
+            echo "baseline_trio_gate='$(_esc "${baseline_trio_gate}")'"
+            echo "baseline_trio_reason='$(_esc "${baseline_trio_reason}")'"
+            echo "codex_baseline_success='$(_esc "${codex_baseline_success}")'"
+            echo "claude_baseline_success='$(_esc "${claude_baseline_success}")'"
+            echo "glm_baseline_success='$(_esc "${glm_baseline_success}")'"
+            echo "complex_claude_sub_required='$(_esc "${complex_claude_sub_required}")'"
+            echo "complex_claude_sub_reason='$(_esc "${complex_claude_sub_reason}")'"
+          } > integration-vars.sh
+
+      - name: Generate integrated comment
+        env:
+          MAIN_CLAUDE_FALLBACK_APPLIED: ${{ needs.resolve-orchestrator.outputs.main_claude_fallback_applied }}
+          MAIN_CLAUDE_FALLBACK_REASON: ${{ needs.resolve-orchestrator.outputs.main_claude_fallback_reason }}
+          ASSIST_CLAUDE_FALLBACK_APPLIED: ${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_applied }}
+          ASSIST_CLAUDE_FALLBACK_REASON: ${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_reason }}
+          CLAUDE_PRESSURE_GUARD_APPLIED: ${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_applied }}
+          CLAUDE_PRESSURE_GUARD_REASON: ${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_reason }}
+          MAIN_PROVIDER_REQUESTED: ${{ needs.resolve-orchestrator.outputs.main_provider_requested }}
+          MAIN_PROVIDER: ${{ needs.resolve-orchestrator.outputs.main_provider }}
+          MAIN_SIGNAL_LANE: ${{ needs.resolve-orchestrator.outputs.main_signal_lane }}
+          MAIN_SIGNAL_LANES: ${{ needs.resolve-orchestrator.outputs.main_signal_lanes }}
+          ASSIST_PROVIDER_REQUESTED: ${{ needs.resolve-orchestrator.outputs.assist_provider_requested }}
+          ASSIST_PROVIDER: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
+          MULTI_AGENT_MODE: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
+          MULTI_AGENT_MODE_SOURCE: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
+          GLM_SUBAGENT_MODE: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}
+          GLM_SUBAGENT_MODE_SOURCE: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode_source }}
+          CI_EXECUTION_ENGINE: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ needs.resolve-orchestrator.outputs.subscription_offline_policy }}
+          RUN_AGENTS_RUNNER: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
+          RUN_AGENTS_RUNNER_JSON: ${{ needs.resolve-orchestrator.outputs.run_agents_runner_json }}
+          EXECUTION_PROFILE: ${{ needs.resolve-orchestrator.outputs.execution_profile }}
+          EXECUTION_PROFILE_REASON: ${{ needs.resolve-orchestrator.outputs.execution_profile_reason }}
+          CONTINUITY_ACTIVE: ${{ needs.resolve-orchestrator.outputs.continuity_active }}
+          SELF_HOSTED_ONLINE_COUNT: ${{ needs.resolve-orchestrator.outputs.self_hosted_online_count }}
+          SUBSCRIPTION_RUNNER_LABEL: ${{ needs.resolve-orchestrator.outputs.subscription_runner_label }}
+          STRICT_MAIN_CODEX_MODEL_EFFECTIVE: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
+          STRICT_OPUS_ASSIST_DIRECT_EFFECTIVE: ${{ needs.resolve-orchestrator.outputs.strict_opus_assist_direct_effective }}
+          ASSIST_ADJUSTED_BY_EXECUTION_PROFILE: ${{ needs.resolve-orchestrator.outputs.assist_adjusted_by_execution_profile }}
+          ASSIST_ADJUSTMENT_REASON: ${{ needs.resolve-orchestrator.outputs.assist_adjustment_reason }}
+          EXPECTED_LANES: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+
+          # Load intermediate variables from step 1
+          # shellcheck source=/dev/null
+          source integration-vars.sh
+
           approve_agents="$(jq -r '[.[] | select(.skipped != true and .approve == true) | .name] | join(", ")' all-results.json)"
           reject_agents="$(jq -r '[.[] | select(.skipped != true and .approve != true) | .name] | join(", ")' all-results.json)"
           security_block="$(jq -r '
@@ -1437,12 +1499,12 @@ jobs:
             ] | if length==0 then "- none" else join("\n") end
           ' all-results.json)"
           main_fallback_section="- main fallback: none"
-          if [[ "${{ needs.resolve-orchestrator.outputs.main_claude_fallback_applied }}" == "true" ]]; then
-            main_fallback_section="- main fallback: claude -> codex (\`${{ needs.resolve-orchestrator.outputs.main_claude_fallback_reason }}\`)"
+          if [[ "${MAIN_CLAUDE_FALLBACK_APPLIED}" == "true" ]]; then
+            main_fallback_section="- main fallback: claude -> codex (\`${MAIN_CLAUDE_FALLBACK_REASON}\`)"
           fi
           assist_fallback_section="- assist fallback: none"
-          if [[ "${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_applied }}" == "true" ]]; then
-            assist_fallback_reason="${{ needs.resolve-orchestrator.outputs.assist_claude_fallback_reason }}"
+          if [[ "${ASSIST_CLAUDE_FALLBACK_APPLIED}" == "true" ]]; then
+            assist_fallback_reason="${ASSIST_CLAUDE_FALLBACK_REASON}"
             assist_fallback_target="none"
             if [[ "${assist_fallback_reason}" == *"->"* ]]; then
               assist_fallback_target="${assist_fallback_reason##*->}"
@@ -1454,8 +1516,8 @@ jobs:
             assist_fallback_section="- assist fallback: claude -> ${assist_fallback_target} (\`${assist_fallback_reason}\`)"
           fi
           claude_pressure_section="- claude pressure guard: none"
-          if [[ "${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_applied }}" == "true" ]]; then
-            claude_pressure_section="- claude pressure guard: applied (\`${{ needs.resolve-orchestrator.outputs.claude_pressure_guard_reason }}\`)"
+          if [[ "${CLAUDE_PRESSURE_GUARD_APPLIED}" == "true" ]]; then
+            claude_pressure_section="- claude pressure guard: applied (\`${CLAUDE_PRESSURE_GUARD_REASON}\`)"
           fi
           required_assist_section="- required claude assist gate: not-required"
           if [[ "${required_claude_assist_gate}" == "pass" ]]; then
@@ -1473,15 +1535,15 @@ jobs:
           integrated_meta="$(jq -cn \
             --arg schema "fugue-integrated-meta/v1" \
             --arg run_id "${GITHUB_RUN_ID}" \
-            --arg issue_number "${{ needs.prepare.outputs.issue_number }}" \
-            --arg main "${{ needs.resolve-orchestrator.outputs.main_provider }}" \
-            --arg assist "${{ needs.resolve-orchestrator.outputs.assist_provider }}" \
-            --arg multi_agent_mode "${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}" \
-            --arg glm_subagent_mode "${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}" \
-            --arg profile "${{ needs.resolve-orchestrator.outputs.execution_profile }}" \
-            --arg runner "${{ needs.resolve-orchestrator.outputs.run_agents_runner }}" \
-            --arg runner_labels "${{ needs.resolve-orchestrator.outputs.run_agents_runner_json }}" \
-            --arg lanes "${{ needs.resolve-orchestrator.outputs.expected_lanes }}" \
+            --arg issue_number "${ISSUE_NUMBER}" \
+            --arg main "${MAIN_PROVIDER}" \
+            --arg assist "${ASSIST_PROVIDER}" \
+            --arg multi_agent_mode "${MULTI_AGENT_MODE}" \
+            --arg glm_subagent_mode "${GLM_SUBAGENT_MODE}" \
+            --arg profile "${EXECUTION_PROFILE}" \
+            --arg runner "${RUN_AGENTS_RUNNER}" \
+            --arg runner_labels "${RUN_AGENTS_RUNNER_JSON}" \
+            --arg lanes "${EXPECTED_LANES}" \
             --arg weighted_vote "${weighted_vote_passed}" \
             --arg high_risk "${high_risk}" \
             --arg required_claude_assist_gate "${required_claude_assist_gate}" \
@@ -1522,34 +1584,34 @@ jobs:
           cat > integrated-comment.md <<COMMENT_EOF
           ## Tutti Integrated Review
 
-          - main orchestrator requested: ${{ needs.resolve-orchestrator.outputs.main_provider_requested }}
-          - main orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.main_provider }}
-          - main orchestrator signal lane: ${{ needs.resolve-orchestrator.outputs.main_signal_lane }}
-          - main orchestrator signal lanes: ${{ needs.resolve-orchestrator.outputs.main_signal_lanes }}
-          - assist orchestrator requested: ${{ needs.resolve-orchestrator.outputs.assist_provider_requested }}
-          - assist orchestrator resolved: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
-          - multi-agent mode: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
-          - multi-agent mode source: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
-          - glm subagent mode: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}
-          - glm subagent mode source: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode_source }}
-          - ci execution engine: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
-          - subscription offline policy: ${{ needs.resolve-orchestrator.outputs.subscription_offline_policy }}
-          - run-agents runner: ${{ needs.resolve-orchestrator.outputs.run_agents_runner }}
-          - run-agents runner labels: ${{ needs.resolve-orchestrator.outputs.run_agents_runner_json }}
-          - execution profile: ${{ needs.resolve-orchestrator.outputs.execution_profile }} (\`${{ needs.resolve-orchestrator.outputs.execution_profile_reason }}\`)
-          - continuity active: ${{ needs.resolve-orchestrator.outputs.continuity_active }}
-          - self-hosted online count: ${{ needs.resolve-orchestrator.outputs.self_hosted_online_count }}
-          - required subscription runner label: ${{ needs.resolve-orchestrator.outputs.subscription_runner_label }}
-          - strict main codex model effective: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
-          - strict opus assist direct effective: ${{ needs.resolve-orchestrator.outputs.strict_opus_assist_direct_effective }}
-          - assist adjusted by execution profile: ${{ needs.resolve-orchestrator.outputs.assist_adjusted_by_execution_profile }} (\`${{ needs.resolve-orchestrator.outputs.assist_adjustment_reason }}\`)
+          - main orchestrator requested: ${MAIN_PROVIDER_REQUESTED}
+          - main orchestrator resolved: ${MAIN_PROVIDER}
+          - main orchestrator signal lane: ${MAIN_SIGNAL_LANE}
+          - main orchestrator signal lanes: ${MAIN_SIGNAL_LANES}
+          - assist orchestrator requested: ${ASSIST_PROVIDER_REQUESTED}
+          - assist orchestrator resolved: ${ASSIST_PROVIDER}
+          - multi-agent mode: ${MULTI_AGENT_MODE}
+          - multi-agent mode source: ${MULTI_AGENT_MODE_SOURCE}
+          - glm subagent mode: ${GLM_SUBAGENT_MODE}
+          - glm subagent mode source: ${GLM_SUBAGENT_MODE_SOURCE}
+          - ci execution engine: ${CI_EXECUTION_ENGINE}
+          - subscription offline policy: ${SUBSCRIPTION_OFFLINE_POLICY}
+          - run-agents runner: ${RUN_AGENTS_RUNNER}
+          - run-agents runner labels: ${RUN_AGENTS_RUNNER_JSON}
+          - execution profile: ${EXECUTION_PROFILE} (\`${EXECUTION_PROFILE_REASON}\`)
+          - continuity active: ${CONTINUITY_ACTIVE}
+          - self-hosted online count: ${SELF_HOSTED_ONLINE_COUNT}
+          - required subscription runner label: ${SUBSCRIPTION_RUNNER_LABEL}
+          - strict main codex model effective: ${STRICT_MAIN_CODEX_MODEL_EFFECTIVE}
+          - strict opus assist direct effective: ${STRICT_OPUS_ASSIST_DIRECT_EFFECTIVE}
+          - assist adjusted by execution profile: ${ASSIST_ADJUSTED_BY_EXECUTION_PROFILE} (\`${ASSIST_ADJUSTMENT_REASON}\`)
           ${main_fallback_section}
           ${assist_fallback_section}
           ${claude_pressure_section}
           ${complex_assist_section}
           ${required_assist_section}
           ${baseline_trio_section}
-          - lanes configured: ${{ needs.resolve-orchestrator.outputs.expected_lanes }}
+          - lanes configured: ${EXPECTED_LANES}
 
           **Rule a: Security criticism (unconditionally adopted)**
           ${security_block}
