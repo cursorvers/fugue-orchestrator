@@ -23,6 +23,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "=== Step 0: Warm up the capture function ==="
+          curl -sS "${CAPTURE_URL}" | jq . || true
+          sleep 2
+          curl -sS "${CAPTURE_URL}" | jq . || true
+          sleep 2
+
+          echo ""
+          echo "=== Step 0.5: LINE webhook test to capture function ==="
+          curl -sS -X POST https://api.line.me/v2/bot/channel/webhook/test \
+            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"endpoint\": \"${CAPTURE_URL}\"}" | jq .
+
+          echo ""
           echo "=== Step 1: Get current webhook URL ==="
           CURRENT=$(curl -sS https://api.line.me/v2/bot/channel/webhook/endpoint \
             -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}")
