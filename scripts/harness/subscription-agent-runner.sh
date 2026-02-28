@@ -39,7 +39,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --codex-main-model "${raw_codex_main_model}" \
     --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
     --claude-model "${raw_claude_model}" \
-    --glm-model "glm-5.0" \
+    --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-4.5}}" \
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "gemini-3-flash" \
     --xai-model "grok-4" \

@@ -77,7 +77,7 @@ lower_trim() {
 LATEST_CODEX_MAIN="gpt-5-codex"
 LATEST_CODEX_MULTI_DEFAULT="gpt-5.3-codex-spark"
 LATEST_CLAUDE_DEFAULT="claude-sonnet-4-6"
-LATEST_GLM_DEFAULT="glm-5.0"
+LATEST_GLM_DEFAULT="glm-4.5"
 LATEST_GEMINI_PRIMARY="gemini-3.1-pro"
 LATEST_GEMINI_FALLBACK="gemini-3-flash"
 LATEST_XAI_DEFAULT="grok-4"
@@ -126,7 +126,7 @@ if [[ -n "${claude_raw}" ]]; then
 fi
 
 if [[ -n "${glm_raw}" ]]; then
-  if [[ "${glm_raw}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
+  if [[ "${glm_raw}" == "glm-4.5" || "${glm_raw}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
     normalized_glm="${glm_raw}"
   else
     adjusted="true"

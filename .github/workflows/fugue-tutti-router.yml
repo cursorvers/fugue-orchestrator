@@ -458,6 +458,7 @@ jobs:
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-4.5' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
           STRICT_MAIN_CODEX_MODEL: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
@@ -523,8 +524,12 @@ jobs:
             claude_max_plan="false"
           fi
           CODEX_MAIN_MODEL="gpt-5-codex"
-          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex)$ ]]; then
             CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+          fi
+          GLM_MODEL="$(echo "${GLM_MODEL:-glm-4.5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${GLM_MODEL}" ]]; then
+            GLM_MODEL="glm-4.5"
           fi
           if [[ "${CLAUDE_OPUS_MODEL}" != "claude-sonnet-4-6" ]]; then
             CLAUDE_OPUS_MODEL="claude-sonnet-4-6"
@@ -551,7 +556,7 @@ jobs:
               MODEL="${CLAUDE_OPUS_MODEL}"
               ;;
             glm)
-              MODEL="glm-5.0"
+              MODEL="${GLM_MODEL}"
               ;;
             gemini)
               if [[ "${requested_model}" == "gemini-3.1-pro" || "${requested_model}" == "gemini-3-flash" ]]; then
@@ -696,23 +701,24 @@ jobs:
                 --arg model "${chosen_model}" \
                 --arg s "${sys_prompt}" \
                 --arg u "${user_prompt}" \
-                '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+                '{model:$model,input:("SYSTEM:\n"+$s+"\n\nUSER:\n"+$u+"\n\nReturn ONLY JSON."),temperature:0.1,max_output_tokens:1200}')"
 
-              http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
+              http_code="$(curl -sS -o response.json -w "%{http_code}" "https://api.openai.com/v1/responses" \
                 --connect-timeout 10 --max-time 60 --retry 2 \
                 -H "${auth_header}" \
                 -H "Content-Type: application/json" \
                 -d "${req}" || true)"
+              effective_api_url="https://api.openai.com/v1/responses"
               if [[ "${http_code}" == "200" ]]; then
                 break
               fi
             done
 
-            # If Codex lane is unavailable, fail over to GLM-5.0 so consensus can continue.
+            # If Codex lane is unavailable, fail over to GLM so consensus can continue.
             if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
               effective_provider="glm"
               effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
-              chosen_model="glm-5.0"
+              chosen_model="${GLM_MODEL}"
               fallback_req="$(jq -n \
                 --arg model "${chosen_model}" \
                 --arg s "${sys_prompt}" \
@@ -765,7 +771,7 @@ jobs:
             done
           else
             if [[ "${PROVIDER}" == "glm" ]]; then
-              candidates=("${MODEL}" "glm-5.0")
+              candidates=("${MODEL}" "${GLM_MODEL}" "glm-4.5")
               for m in "${candidates[@]}"; do
                 chosen_model="${m}"
                 req="$(jq -n \
@@ -787,13 +793,13 @@ jobs:
               # Keep 6-lane quorum robust when GLM endpoint/model is temporarily unavailable.
               if [[ "${http_code}" != "200" && -n "${OPENAI_API_KEY:-}" ]]; then
                 effective_provider="codex"
-                effective_api_url="https://api.openai.com/v1/chat/completions"
-                chosen_model="${CODEX_MULTI_AGENT_MODEL}"
+                effective_api_url="https://api.openai.com/v1/responses"
+                chosen_model="${CODEX_MAIN_MODEL}"
                 fallback_req="$(jq -n \
                   --arg model "${chosen_model}" \
                   --arg s "${sys_prompt}" \
                   --arg u "${user_prompt}" \
-                  '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+                  '{model:$model,input:("SYSTEM:\n"+$s+"\n\nUSER:\n"+$u+"\n\nReturn ONLY JSON."),temperature:0.1,max_output_tokens:1200}')"
                 http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
                   --connect-timeout 10 --max-time 60 --retry 2 \
                   -H "Authorization: Bearer ${OPENAI_API_KEY}" \
@@ -820,10 +826,12 @@ jobs:
             fi
           fi
 
-          if [[ "${PROVIDER}" == "gemini" ]]; then
+          if [[ "${effective_provider}" == "gemini" ]]; then
             content="$(jq -r '.candidates[0].content.parts[0].text // ""' response.json 2>/dev/null || echo "")"
-          elif [[ "${PROVIDER}" == "claude" ]]; then
+          elif [[ "${effective_provider}" == "claude" ]]; then
             content="$(jq -r '[.content[]? | select(.type=="text") | .text] | join("\n") // ""' response.json 2>/dev/null || echo "")"
+          elif [[ "${effective_provider}" == "codex" && "${effective_api_url}" == "https://api.openai.com/v1/responses" ]]; then
+            content="$(jq -r '.output_text // ([.output[]? | select(.type=="message") | .content[]? | select(.type=="output_text") | .text] | join("\n")) // ""' response.json 2>/dev/null || echo "")"
           else
             content="$(jq -r '.choices[0].message.content // ""' response.json 2>/dev/null || echo "")"
           fi
@@ -1649,6 +1657,7 @@ jobs:
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-4.5' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'standard' }}
           GLM_SUBAGENT_MODE: ${{ vars.FUGUE_GLM_SUBAGENT_MODE || 'paired' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -1955,6 +1964,10 @@ jobs:
           if [[ -z "${codex_multi_agent_model}" ]]; then
             codex_multi_agent_model="gpt-5.3-codex-spark"
           fi
+          glm_model="$(echo "${GLM_MODEL:-glm-4.5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${glm_model}" ]]; then
+            glm_model="glm-4.5"
+          fi
 
           matrix_args=(
             --engine "${ci_execution_engine}"
@@ -1967,6 +1980,7 @@ jobs:
             --allow-glm-in-subscription "${allow_glm_in_subscription}"
             --codex-main-model "${codex_main_model}"
             --codex-multi-agent-model "${codex_multi_agent_model}"
+            --glm-model "${glm_model}"
             --claude-opus-model "${CLAUDE_OPUS_MODEL}"
             --claude-sonnet4-model "${CLAUDE_SONNET4_MODEL}"
             --claude-sonnet6-model "${CLAUDE_SONNET6_MODEL}"
