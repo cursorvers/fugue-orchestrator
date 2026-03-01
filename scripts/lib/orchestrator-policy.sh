@@ -96,9 +96,7 @@ EOF
   esac
 done
 
-lower_trim() {
-  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
-}
+source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
 normalize_main() {
   local v

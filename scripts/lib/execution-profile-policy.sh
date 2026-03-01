@@ -113,19 +113,7 @@ EOF
   esac
 done
 
-lower_trim() {
-  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
-}
-
-normalize_bool() {
-  local v
-  v="$(lower_trim "$1")"
-  if [[ "${v}" == "true" || "${v}" == "1" || "${v}" == "yes" || "${v}" == "on" ]]; then
-    printf '%s' "true"
-  else
-    printf '%s' "false"
-  fi
-}
+source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
 normalize_engine() {
   local v

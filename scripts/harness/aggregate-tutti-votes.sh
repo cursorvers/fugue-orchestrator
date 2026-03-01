@@ -16,13 +16,7 @@ set -euo pipefail
 # Usage: bash scripts/harness/aggregate-tutti-votes.sh
 
 # --- Input normalization ---
-lower_trim() {
-  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
-}
-normalize_bool() {
-  local v; v="$(lower_trim "$1")"
-  [[ "${v}" == "true" ]] && printf 'true' || printf 'false'
-}
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common-utils.sh"
 
 # Guard: ensure agent result files exist before aggregation.
 if ! compgen -G "agent-results/*.json" > /dev/null 2>&1; then

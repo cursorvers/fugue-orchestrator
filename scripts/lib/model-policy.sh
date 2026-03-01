@@ -70,9 +70,7 @@ EOF
   esac
 done
 
-lower_trim() {
-  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
-}
+source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
 LATEST_CODEX_MAIN="gpt-5-codex"
 LATEST_CODEX_MULTI_DEFAULT="gpt-5.3-codex-spark"

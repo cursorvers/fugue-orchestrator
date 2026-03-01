@@ -27,14 +27,10 @@ Options:
 EOF
 }
 
-lower_trim() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
-}
+source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
 is_truthy() {
-  local v
-  v="$(lower_trim "$1")"
-  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "on" ]]
+  [[ "$(normalize_bool "$1")" == "true" ]]
 }
 
 while [[ $# -gt 0 ]]; do
