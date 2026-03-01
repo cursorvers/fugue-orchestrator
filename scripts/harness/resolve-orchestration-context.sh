@@ -35,6 +35,21 @@ gh_api_retry() {
   return 1
 }
 
+# Extract the first non-empty line under a markdown heading from issue body.
+# Usage: extract_body_section "$body" "heading regex" "##|###"
+extract_body_section() {
+  local b="$1" hre="$2" lvl="${3:-##}"
+  printf '%s\n' "${b}" | awk -v hre="${hre}" -v lvl="${lvl}" '
+    BEGIN { in_sec=0 }
+    tolower($0) ~ ("^" lvl "[[:space:]]*" hre "[[:space:]]*$") { in_sec=1; next }
+    in_sec && $0 ~ ("^" lvl "[[:space:]]") { exit }
+    in_sec {
+      line=$0; gsub(/`/, "", line); gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line != "") { print tolower(line); exit }
+    }
+  '
+}
+
 ISSUE_NUMBER=""
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
   ISSUE_NUMBER="${ISSUE_NUMBER_FROM_DISPATCH}"
@@ -114,35 +129,9 @@ if [[ "${ci_execution_engine}" == "subscription" ]]; then
   fi
 fi
 labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
-body_mode="$(printf '%s\n' "${body}" | awk '
-  BEGIN { in_sec=0 }
-  tolower($0) ~ /^##[[:space:]]*mode[[:space:]]*$/ { in_sec=1; next }
-  in_sec && $0 ~ /^##[[:space:]]/ { exit }
-  in_sec {
-    line=$0
-    gsub(/`/, "", line)
-    gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-    if (line != "") {
-      print tolower(line)
-      exit
-    }
-  }
-')"
+body_mode="$(extract_body_section "${body}" "mode" "##")"
 if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
-  body_mode="$(printf '%s\n' "${body}" | awk '
-    BEGIN { in_sec=0 }
-    tolower($0) ~ /^###[[:space:]]*execution[[:space:]]+mode[[:space:]]*$/ { in_sec=1; next }
-    in_sec && $0 ~ /^###[[:space:]]/ { exit }
-    in_sec {
-      line=$0
-      gsub(/`/, "", line)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-      if (line != "") {
-        print tolower(line)
-        exit
-      }
-    }
-  ')"
+  body_mode="$(extract_body_section "${body}" "execution[[:space:]]+mode" "###")"
 fi
 if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
   body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
@@ -170,35 +159,9 @@ label_assist_provider="$(echo "${issue_json}" | jq -r '
 force_claude="$(echo "${issue_json}" | jq -r '
   [ .labels[]? | .name ] | index("orchestrator-force:claude") != null
 ')"
-body_main_provider="$(printf '%s\n' "${body}" | awk '
-  BEGIN { in_sec=0 }
-  tolower($0) ~ /^##[[:space:]]*orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
-  in_sec && $0 ~ /^##[[:space:]]/ { exit }
-  in_sec {
-    line=$0
-    gsub(/`/, "", line)
-    gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-    if (line != "") {
-      print tolower(line)
-      exit
-    }
-  }
-')"
+body_main_provider="$(extract_body_section "${body}" "orchestrator[[:space:]]+provider" "##")"
 if [[ -z "${body_main_provider}" ]]; then
-  body_main_provider="$(printf '%s\n' "${body}" | awk '
-    BEGIN { in_sec=0 }
-    tolower($0) ~ /^###[[:space:]]*main[[:space:]]+orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
-    in_sec && $0 ~ /^###[[:space:]]/ { exit }
-    in_sec {
-      line=$0
-      gsub(/`/, "", line)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-      if (line != "") {
-        print tolower(line)
-        exit
-      }
-    }
-  ')"
+  body_main_provider="$(extract_body_section "${body}" "main[[:space:]]+orchestrator[[:space:]]+provider" "###")"
 fi
 if [[ "${body_main_provider}" != "claude" && "${body_main_provider}" != "codex" ]]; then
   body_main_provider=""
@@ -207,35 +170,9 @@ if [[ -z "${body_main_provider}" ]]; then
   body_main_provider="$(echo "${body}" | sed -nE 's/^[[:space:]]*orchestrator[[:space:]_-]*provider[[:space:]]*:[[:space:]]*(claude|codex)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
 fi
 
-body_assist_provider="$(printf '%s\n' "${body}" | awk '
-  BEGIN { in_sec=0 }
-  tolower($0) ~ /^##[[:space:]]*assist[[:space:]]+orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
-  in_sec && $0 ~ /^##[[:space:]]/ { exit }
-  in_sec {
-    line=$0
-    gsub(/`/, "", line)
-    gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-    if (line != "") {
-      print tolower(line)
-      exit
-    }
-  }
-')"
+body_assist_provider="$(extract_body_section "${body}" "assist[[:space:]]+orchestrator[[:space:]]+provider" "##")"
 if [[ -z "${body_assist_provider}" ]]; then
-  body_assist_provider="$(printf '%s\n' "${body}" | awk '
-    BEGIN { in_sec=0 }
-    tolower($0) ~ /^###[[:space:]]*assist[[:space:]]+orchestrator[[:space:]]+provider[[:space:]]*$/ { in_sec=1; next }
-    in_sec && $0 ~ /^###[[:space:]]/ { exit }
-    in_sec {
-      line=$0
-      gsub(/`/, "", line)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-      if (line != "") {
-        print tolower(line)
-        exit
-      }
-    }
-  ')"
+  body_assist_provider="$(extract_body_section "${body}" "assist[[:space:]]+orchestrator[[:space:]]+provider" "###")"
 fi
 if [[ "${body_assist_provider}" != "claude" && "${body_assist_provider}" != "codex" && "${body_assist_provider}" != "none" ]]; then
   body_assist_provider=""
