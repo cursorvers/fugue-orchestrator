@@ -24,6 +24,11 @@ normalize_bool() {
   [[ "${v}" == "true" ]] && printf 'true' || printf 'false'
 }
 
+# Guard: ensure agent result files exist before aggregation.
+if ! compgen -G "agent-results/*.json" > /dev/null 2>&1; then
+  echo "::error::No agent result files found in agent-results/" >&2
+  exit 1
+fi
 jq -s '.' agent-results/*.json > all-results.json
 
 total_count="$(jq '[.[] | select(.skipped != true)] | length' all-results.json)"

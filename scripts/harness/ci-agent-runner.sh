@@ -53,6 +53,7 @@ source "${script_dir}/../lib/safe-eval-policy.sh"
 FUGUE_CURL_CONNECT_TIMEOUT="${FUGUE_CURL_CONNECT_TIMEOUT:-10}"
 FUGUE_CURL_MAX_TIME="${FUGUE_CURL_MAX_TIME:-60}"
 FUGUE_CURL_RETRY="${FUGUE_CURL_RETRY:-2}"
+FUGUE_CURL_RETRY_ALL="${FUGUE_CURL_RETRY_ALL:---retry-all-errors}"
 if [[ -x "${model_policy_script}" ]]; then
   safe_eval_policy "${model_policy_script}" \
     --codex-main-model "${raw_codex_main_model}" \
@@ -356,7 +357,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
       '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
 
     http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
-      --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+      --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
       -H "${auth_header}" \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
@@ -378,7 +379,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
         --arg u "${user_prompt}" \
         '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
       http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
-        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
         -H "Authorization: Bearer ${ZAI_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "${fallback_req}" || true)"
@@ -399,7 +400,7 @@ elif [[ "${PROVIDER}" == "xai" ]]; then
       '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
 
     http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
-      --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+      --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
       -H "${auth_header}" \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
@@ -419,7 +420,7 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
       '{model:$model,system:$s,messages:[{role:"user",content:$u}],max_tokens:1200,temperature:0.1}')"
 
     http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
-      --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+      --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
       -H "x-api-key: ${ANTHROPIC_API_KEY}" \
       -H "anthropic-version: 2023-06-01" \
       -H "Content-Type: application/json" \
@@ -441,7 +442,7 @@ else
         '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
 
       http_code="$(curl -sS -o response.json -w "%{http_code}" "${API_URL}" \
-        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
         -H "${auth_header}" \
         -H "Content-Type: application/json" \
         -d "${req}" || true)"
@@ -461,7 +462,7 @@ else
         --arg u "${user_prompt}" \
         '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
       http_code="$(curl -sS -o response.json -w "%{http_code}" "${effective_api_url}" \
-        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
         -H "Authorization: Bearer ${OPENAI_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "${fallback_req}" || true)"
@@ -476,7 +477,7 @@ else
       chosen_model="${gm}"
       gemini_url="${API_URL}/${gm}:generateContent?key=${GEMINI_API_KEY}"
       http_code="$(curl -sS -o response.json -w "%{http_code}" "${gemini_url}" \
-        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" \
+        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
         -H "Content-Type: application/json" \
         -d "${req}" || true)"
       append_attempt "gemini" "${gm}" "${http_code}"
