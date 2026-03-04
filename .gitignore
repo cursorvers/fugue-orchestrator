@@ -8,3 +8,5 @@ node_modules/
 .claude/projects/
 .claude/.credentials.json
 .fugue/local-run/
+#...but encrypted secrets are safe to commit
+!.env.enc
