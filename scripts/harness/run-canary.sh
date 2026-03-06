@@ -54,7 +54,7 @@ gh_api_retry() {
   local sleep_sec=2
   local i out
   for ((i=1; i<=attempts; i++)); do
-    if out="$(gh_timeout_cmd 20s gh api "${endpoint}" 2>/dev/null)"; then
+    if out="$(GH_TOKEN="${gh_readonly_token:-${GH_TOKEN:-}}" gh_timeout_cmd 20s gh api "${endpoint}" 2>/dev/null)"; then
       printf '%s\n' "${out}"
       return 0
     fi
@@ -81,7 +81,7 @@ gh_var_default() {
     return 0
   fi
   if [[ -n "${repo_name}" ]]; then
-    resolved="$(gh_timeout_cmd 20s gh variable get "${gh_var_name}" --repo "${repo_name}" --json value -q '.value' 2>/dev/null || true)"
+    resolved="$(GH_TOKEN="${gh_readonly_token:-${GH_TOKEN:-}}" gh_timeout_cmd 20s gh variable get "${gh_var_name}" --repo "${repo_name}" --json value -q '.value' 2>/dev/null || true)"
     if [[ -n "${resolved}" ]]; then
       printf '%s\n' "${resolved}"
       return 0
@@ -99,7 +99,7 @@ gh_secret_present_default() {
     printf '%s\n' "${env_value}"
     return 0
   fi
-  if [[ -n "${repo_name}" ]] && gh_timeout_cmd 20s gh secret list --repo "${repo_name}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${secret_name}"; then
+  if [[ -n "${repo_name}" ]] && GH_TOKEN="${gh_readonly_token:-${GH_TOKEN:-}}" gh_timeout_cmd 20s gh secret list --repo "${repo_name}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${secret_name}"; then
     printf 'true\n'
     return 0
   fi
@@ -121,6 +121,7 @@ clamp_num() {
 # --- Input normalization ---
 
 repo="${GITHUB_REPOSITORY}"
+gh_readonly_token="${GH_TOKEN:-}"
 ts="$(date -u +%Y%m%d%H%M%S)"
 failures=0
 online_count=0
@@ -231,10 +232,7 @@ HAS_OPENAI_API_KEY="$(gh_secret_present_default "${repo}" "${HAS_OPENAI_API_KEY:
 # --- Token resolution ---
 
 if [[ "${plan_only}" != "true" ]]; then
-  if [[ -n "${OPS_TOKEN:-}" ]]; then
-    GH_TOKEN="${OPS_TOKEN}"
-    export GH_TOKEN
-  else
+  if [[ -z "${OPS_TOKEN:-}" ]]; then
     echo "Skip canary: neither FUGUE_OPS_PAT nor TARGET_REPO_PAT is configured; real-issue trust gate cannot pass with github-actions author."
     exit 0
   fi
@@ -461,14 +459,14 @@ fi
 # --- Ensure labels exist ---
 
 echo "Canary: ensuring label set on ${repo}"
-gh_timeout_cmd 20s gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "orchestrator-assist:codex" --repo "${repo}" --description "Requested codex assist orchestrator profile for Tutti routing" --color "0E8A16" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "orchestrator-assist:none" --repo "${repo}" --description "No assist orchestrator requested" --color "BFDADC" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
-gh_timeout_cmd 20s gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-assist:codex" --repo "${repo}" --description "Requested codex assist orchestrator profile for Tutti routing" --color "0E8A16" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-assist:none" --repo "${repo}" --description "No assist orchestrator requested" --color "BFDADC" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
+GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
 
 # --- Issue creation ---
 
@@ -495,7 +493,7 @@ create_issue() {
   fi
   local url
   echo "Canary: creating issue '${title}'" >&2
-  url="$(gh_timeout_cmd 30s "${cmd[@]}")"
+  url="$(GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 30s "${cmd[@]}")"
   local issue_num="${url##*/}"
   local dispatch_offline_policy=""
   if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
@@ -509,7 +507,7 @@ create_issue() {
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
   fi
   echo "Canary: dispatching tutti caller for issue #${issue_num} handoff=${handoff_target}" >&2
-  gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
+  GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
   echo "${issue_num}"
 }
 
