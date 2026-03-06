@@ -1774,6 +1774,7 @@ jobs:
             echo "provider_requested=${main_provider_requested}"
             echo "multi_agent_mode=${multi_agent_mode}"
             echo "multi_agent_mode_source=${multi_agent_mode_source}"
+            echo "task_size_tier=${task_size_tier}"
             echo "glm_subagent_mode=${glm_subagent_mode}"
             echo "glm_subagent_mode_source=${glm_subagent_mode_source}"
             echo "allow_glm_in_subscription=${allow_glm_in_subscription}"

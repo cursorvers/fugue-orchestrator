@@ -46,6 +46,10 @@ grep -q "HANDOFF_TARGET: .*inputs.handoff_target" "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow missing handoff target wiring into comment generation" >&2
   exit 1
 }
+grep -q 'echo "task_size_tier=${task_size_tier}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow must emit task_size_tier as a job output" >&2
+  exit 1
+}
 grep -q "canary-dispatch-owned" "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should skip canary issues owned by run-canary dispatch" >&2
   exit 1
