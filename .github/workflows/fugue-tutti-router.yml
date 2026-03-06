@@ -273,6 +273,9 @@ jobs:
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+          if [[ "${canary_dispatch_owned}" == "true" ]]; then
+            HAS_TUTTI="true"
+          fi
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
           HAS_IMPLEMENT_REQUEST="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
           ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -310,10 +313,6 @@ jobs:
 
           SHOULD_RUN="true"
           SKIP_REASON=""
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" && "${canary_dispatch_owned}" == "true" ]]; then
-            HAS_TUTTI="true"
-          fi
-
           if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-required-labels"

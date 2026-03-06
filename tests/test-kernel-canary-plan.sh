@@ -63,8 +63,8 @@ grep -q 'canary_dispatch_owned: "\${{ needs.ctx.outputs.canary_dispatch_owned }}
   echo "FAIL: caller workflow should pass canary dispatch ownership into router" >&2
   exit 1
 }
-grep -q 'GITHUB_EVENT_NAME}" == "workflow_call" && "${canary_dispatch_owned}" == "true"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router workflow should allow caller-owned canary workflow_call issues without tutti label" >&2
+grep -q 'if \[\[ "\${canary_dispatch_owned}" == "true" \]\]; then' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow should trust explicit caller-owned canary dispatch input" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"
