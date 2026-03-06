@@ -6,7 +6,7 @@
 - Cloudflare production worker deploy: passed
 - Cloudflare production health check: passed
 - Cloudflare production Cockpit auth route probe: passed
-- Cursorvers LINE production endpoint reachability: passed
+- Cursorvers LINE production deploy and authenticated health-check: passed
 - Cloudflare production D1 Kernel runtime schema patch: applied
 - Kernel -> FUGUE rollback simulation: passed
 - GitHub live canary: passed
@@ -69,12 +69,16 @@
 - Live results:
   - without auth headers: `401 Missing authorization header`
   - with placeholder anon key from local `.env.test`: `401 Invalid JWT`
+  - after latest deploy with live anon key: `200 OK`
+  - authenticated response body:
+    - `{"ok":true,"totalEvents":0,"riskSummary":{},"phiCount":0}`
 - Interpretation:
   - deployed Edge Function endpoint is reachable in production
   - Supabase JWT enforcement is active
-  - this terminal did not contain a valid production anon/service key, so a positive `200 OK` probe was not completed here
+  - authenticated production health-check is confirmed
 - Supporting production evidence:
-  - latest `Deploy Supabase Edge Functions` run: success
+  - latest `CI Tests` run `22774580380`: success
+  - latest `Deploy Supabase Edge Functions` run `22774755463`: success
   - latest `Discord Forum Sync` run: success
   - recent `Economic Circuit Breaker` runs: success
 
@@ -137,7 +141,7 @@
 
 - GitHub live canary is no longer blocked.
 - Old failed canary runs/issues from pre-fix commits remain as historical artifacts and can be cleaned up separately.
-- Cursorvers LINE positive `200 OK` health probe still requires a valid production anon or service-role key on this terminal.
+- Cursorvers LINE production path is now green in both remote deploy workflow and authenticated live probe.
 
 ## Current Decision
 

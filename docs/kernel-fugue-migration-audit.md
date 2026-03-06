@@ -8,7 +8,7 @@ This is a design and validation audit. Runtime control-path evidence is now incl
 
 ## Verdict
 
-`Kernel` is runtime-capable as the successor to FUGUE, but migration is not yet perfect.
+`Kernel` is runtime-capable as the successor to FUGUE, and the validated core plus protected peripherals are now production-ready.
 
 Current state:
 
@@ -18,8 +18,8 @@ Current state:
 
 So the honest assessment is:
 
-- `Kernel` is not yet a perfect drop-in replacement across every peripheral
-- the remaining gaps are concentrated in runtime control-plane wiring rather than discovery
+- `Kernel` is functionally complete across the validated core and protected peripheral set
+- the remaining gaps are concentrated in optional adapter hardening rather than migration-critical behavior
 
 ## FUGUE Layers And Kernel Status
 
@@ -67,6 +67,13 @@ Validated surfaces:
 - Cursorvers LINE as a protected cross-repo contract
 - Supabase and Vercel boundary contracts
 - slide and Manus specialist workflows
+
+Production-backed evidence now includes:
+
+- Cloudflare production health and Cockpit auth probes
+- GitHub live canary success for Kernel and `fugue-bridge` rollback
+- Cursorvers LINE authenticated production `health-check` returning `200 OK`
+- latest Cursorvers LINE `CI Tests` and `Deploy Supabase Edge Functions` runs succeeding on the fixed head
 
 Repeated validation evidence:
 
@@ -135,6 +142,8 @@ The remaining gaps are concrete:
 3. heavy peripherals such as `auto-video` still rely on budgeted verification instead of routine smoke
 4. Claude-session-only MCP surfaces still need first-class non-Claude adapters for full Kernel ownership
 
+These are not feature-drop blockers for the currently validated Kernel replacement set. They are expansion and hardening tasks.
+
 ## Conclusion
 
 Kernel migration is substantially complete at the doctrine and interface level.
@@ -146,4 +155,4 @@ However, the hard part is now done:
 - preserved doctrines are explicit
 - peripheral compatibility is repeatedly validated
 - rollback has a named adapter path
-- remaining work is concentrated in runtime control-plane implementation
+- remaining work is concentrated in optional adapter hardening and terminology cleanup
