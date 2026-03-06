@@ -126,15 +126,26 @@ elif (( risk_score >= 2 )); then
   risk_tier="medium"
 fi
 
+task_size_tier="small"
+if echo "${text}" | grep -Eqi '(mass[[:space:]-]*delete|delete[[:space:]]+all|drop[[:space:]]+table|truncate|irreversible|production|本番|大量削除|全削除|認証|auth|billing|payment|secrets?|credential|token rotation|trust boundary)'; then
+  task_size_tier="critical"
+elif has_label "large-refactor" || echo "${text}" | grep -Eqi '(migration|rewrite|全面刷新|アーキテクチャ刷新|schema[[:space:]]+change|breaking[[:space:]]+change|incident|障害|root cause|rollback|refactor)'; then
+  task_size_tier="large"
+elif [[ "${risk_tier}" == "medium" ]]; then
+  task_size_tier="medium"
+elif [[ "${risk_tier}" == "high" ]]; then
+  task_size_tier="large"
+fi
+
 multi_agent_mode_hint="enhanced"
-case "${risk_tier}" in
-  low)
+case "${task_size_tier}" in
+  small)
     multi_agent_mode_hint="standard"
     ;;
   medium)
     multi_agent_mode_hint="enhanced"
     ;;
-  high)
+  large|critical)
     multi_agent_mode_hint="max"
     ;;
 esac
@@ -265,6 +276,7 @@ emit() {
 emit risk_tier "${risk_tier}"
 emit risk_score "${risk_score}"
 emit risk_reasons "${risk_reason_string}"
+emit task_size_tier "${task_size_tier}"
 emit multi_agent_mode_hint "${multi_agent_mode_hint}"
 emit preflight_cycles_floor "${preflight_cycles_floor}"
 emit implementation_dialogue_rounds_floor "${implementation_dialogue_rounds_floor}"

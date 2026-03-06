@@ -1,0 +1,97 @@
+{
+  "adapters": [
+    {
+      "id": "codex-sovereign",
+      "provider": "codex",
+      "default": true,
+      "class": "sovereign",
+      "availability": "active",
+      "protocol_version": "kernel.v1",
+      "packet_schema": "kernel.protocol.v1.packets",
+      "required_packets": [
+        "intake",
+        "classification",
+        "topology_request",
+        "council_packet",
+        "decision_packet",
+        "artifact_packet",
+        "fallback_packet"
+      ],
+      "governance_invariants": {
+        "weighted_two_thirds_consensus": true,
+        "high_risk_veto": true,
+        "baseline_council_required_for_non_trivial_writes": true,
+        "human_approval_gate_for_destructive_or_irreversible_actions": true,
+        "run_trace_schema_stable": true,
+        "linked_system_dispatch_contract_stable": true
+      },
+      "adapter_boundary": {
+        "encapsulates_provider_limits": true,
+        "encapsulates_agent_teams_policy": true,
+        "core_provider_branching_forbidden": true
+      }
+    },
+    {
+      "id": "claude-sovereign-compat",
+      "provider": "claude",
+      "default": false,
+      "class": "sovereign-compat",
+      "availability": "compat-ready",
+      "protocol_version": "kernel.v1",
+      "packet_schema": "kernel.protocol.v1.packets",
+      "required_packets": [
+        "intake",
+        "classification",
+        "topology_request",
+        "council_packet",
+        "decision_packet",
+        "artifact_packet",
+        "fallback_packet"
+      ],
+      "governance_invariants": {
+        "weighted_two_thirds_consensus": true,
+        "high_risk_veto": true,
+        "baseline_council_required_for_non_trivial_writes": true,
+        "human_approval_gate_for_destructive_or_irreversible_actions": true,
+        "run_trace_schema_stable": true,
+        "linked_system_dispatch_contract_stable": true
+      },
+      "adapter_boundary": {
+        "encapsulates_provider_limits": true,
+        "encapsulates_agent_teams_policy": true,
+        "core_provider_branching_forbidden": true
+      }
+    },
+    {
+      "id": "fugue-bridge",
+      "provider": "legacy-fugue",
+      "default": false,
+      "class": "legacy-bridge",
+      "availability": "rollback-ready",
+      "protocol_version": "kernel.v1",
+      "packet_schema": "kernel.protocol.v1.packets",
+      "required_packets": [
+        "intake",
+        "classification",
+        "topology_request",
+        "council_packet",
+        "decision_packet",
+        "artifact_packet",
+        "fallback_packet"
+      ],
+      "governance_invariants": {
+        "weighted_two_thirds_consensus": true,
+        "high_risk_veto": true,
+        "baseline_council_required_for_non_trivial_writes": true,
+        "human_approval_gate_for_destructive_or_irreversible_actions": true,
+        "run_trace_schema_stable": true,
+        "linked_system_dispatch_contract_stable": true
+      },
+      "adapter_boundary": {
+        "encapsulates_provider_limits": true,
+        "encapsulates_agent_teams_policy": true,
+        "core_provider_branching_forbidden": true
+      }
+    }
+  ]
+}

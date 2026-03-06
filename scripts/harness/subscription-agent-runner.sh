@@ -33,7 +33,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/../lib/model-policy.sh"
 recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-3.1-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -53,7 +53,7 @@ if [[ -x "${model_policy_script}" ]]; then
   claude_opus_model="${claude_model}"
 else
   claude_opus_model="claude-sonnet-4-6"
-  codex_main_model="gpt-5-codex"
+  codex_main_model="gpt-5.4"
   codex_multi_agent_model="gpt-5.3-codex-spark"
   glm_model="glm-5.0"
   gemini_model="gemini-3.1-pro"
@@ -323,13 +323,22 @@ execute_claude_model() {
   local out_file="${tmp_dir}/claude-${model}-out.json"
   local err_file="${tmp_dir}/claude-${model}-stderr.log"
   local configured_session_id
+  local teams_mode="false"
   local -a claude_cmd
   local prompt
+  if [[ "${AGENT_NAME:-}" == "claude-teams-executor" || "${AGENT_ROLE:-}" == "teams-executor" ]]; then
+    teams_mode="true"
+  fi
   prompt="${sys_prompt}
 
 ${user_prompt}
 
 Return ONLY valid JSON."
+  if [[ "${teams_mode}" == "true" ]]; then
+    prompt="${prompt}
+
+Claude Teams bounded mode is active. Work as a narrow collaboration executor and return handoff-ready JSON only."
+  fi
   configured_session_id="$(echo "${CLAUDE_SESSION_ID:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
   claude_cmd=(
     claude
@@ -376,7 +385,11 @@ Return ONLY valid JSON."
 
   chosen_model="${model}"
   effective_provider="claude"
-  execution_route="claude-cli"
+  if [[ "${teams_mode}" == "true" ]]; then
+    execution_route="claude-cli-teams-bounded"
+  else
+    execution_route="claude-cli"
+  fi
   http_code="cli:0"
   append_attempt "claude" "${model}" "ok"
   return 0

@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: ""
+      handoff_target:
+        description: "Sovereign handoff target (kernel|fugue-bridge)"
+        required: false
+        type: string
+        default: "kernel"
 
 permissions:
   issues: write
@@ -80,6 +85,11 @@ jobs:
       multi_agent_mode_override: ${{ steps.ctx.outputs.multi_agent_mode_override }}
       multi_agent_mode_lock: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
       implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
+      task_size_tier: ${{ steps.ctx.outputs.task_size_tier }}
+      claude_teams_allowed: ${{ steps.ctx.outputs.claude_teams_allowed }}
+      claude_teams_reason: ${{ steps.ctx.outputs.claude_teams_reason }}
+      claude_teams_member_cap: ${{ steps.ctx.outputs.claude_teams_member_cap }}
+      claude_teams_max_invocations: ${{ steps.ctx.outputs.claude_teams_max_invocations }}
       risk_tier: ${{ steps.ctx.outputs.risk_tier }}
       risk_score: ${{ steps.ctx.outputs.risk_score }}
       risk_reasons: ${{ steps.ctx.outputs.risk_reasons }}
@@ -102,6 +112,7 @@ jobs:
       subscription_offline_policy: ${{ steps.ctx.outputs.subscription_offline_policy }}
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
+      handoff_target: ${{ steps.ctx.outputs.handoff_target }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
@@ -116,10 +127,11 @@ jobs:
           ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
+          HANDOFF_TARGET_INPUT: ${{ github.event.inputs.handoff_target || 'kernel' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'claude' }}
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           EXECUTION_PROVIDER_DEFAULT: ${{ vars.FUGUE_EXECUTION_PROVIDER || '' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
@@ -136,7 +148,7 @@ jobs:
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
           CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-sonnet-4-6' }}
-          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
           DEFAULT_MULTI_AGENT_MODE_LOCK: ${{ vars.FUGUE_MULTI_AGENT_MODE_LOCK || 'false' }}
@@ -194,6 +206,9 @@ jobs:
           PROFILE: ${{ steps.ctx.outputs.orchestration_profile }}
           PREFLIGHT_CYCLES: ${{ steps.ctx.outputs.preflight_cycles }}
           IMPLEMENT_ROUNDS: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
+          TASK_SIZE_TIER: ${{ steps.ctx.outputs.task_size_tier }}
+          CLAUDE_TEAMS_ALLOWED: ${{ steps.ctx.outputs.claude_teams_allowed }}
+          CLAUDE_TEAMS_REASON: ${{ steps.ctx.outputs.claude_teams_reason }}
           MODE_OVERRIDE: ${{ steps.ctx.outputs.multi_agent_mode_override }}
           MODE_LOCK: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
           RISK_TIER: ${{ steps.ctx.outputs.risk_tier }}
@@ -214,6 +229,7 @@ jobs:
           NL_MAIN_HINT: ${{ steps.ctx.outputs.nl_main_hint }}
           NL_ASSIST_HINT: ${{ steps.ctx.outputs.nl_assist_hint }}
           NL_SKIP_REASON: ${{ steps.ctx.outputs.nl_inference_skipped_reason }}
+          HANDOFF_TARGET: ${{ steps.ctx.outputs.handoff_target }}
         run: |
           set -euo pipefail
           override_display="${MODE_OVERRIDE:-none}"
@@ -227,7 +243,11 @@ jobs:
           if [[ "${BUDGET_GUARD_APPLIED}" == "true" ]]; then
             budget_guard_note=" context_guard=applied(\`${BUDGET_GUARD_REASONS:-none}\`) floors=\`${BUDGET_FLOOR_INITIAL}/${BUDGET_FLOOR_MAX}/span${BUDGET_FLOOR_SPAN}\`."
           fi
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${budget_guard_note}${nl_note}"
+          claude_teams_note=""
+          if [[ "${CLAUDE_TEAMS_ALLOWED}" == "true" ]]; then
+            claude_teams_note=" claude_teams=enabled(\`${CLAUDE_TEAMS_REASON}\`)."
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${claude_teams_note}${budget_guard_note}${nl_note}"
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
@@ -273,12 +293,17 @@ jobs:
     uses: ./.github/workflows/fugue-tutti-router.yml
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
-      orchestrator_provider: "${{ needs.ctx.outputs.orchestrator_provider }}"
-      main_orchestrator_provider: "${{ needs.ctx.outputs.main_orchestrator_provider }}"
-      assist_orchestrator_provider: "${{ needs.ctx.outputs.assist_orchestrator_provider }}"
-      force_claude: "${{ needs.ctx.outputs.force_claude }}"
-      multi_agent_mode_override: "${{ needs.ctx.outputs.multi_agent_mode_override }}"
-      multi_agent_mode_lock: "${{ needs.ctx.outputs.multi_agent_mode_lock }}"
+      orchestrator_provider: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER || 'claude') || needs.ctx.outputs.orchestrator_provider }}"
+      main_orchestrator_provider: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER || 'claude') || needs.ctx.outputs.main_orchestrator_provider }}"
+      assist_orchestrator_provider: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_ASSIST_ORCHESTRATOR_PROVIDER || 'claude') || needs.ctx.outputs.assist_orchestrator_provider }}"
+      force_claude: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_FORCE_CLAUDE || 'true') || needs.ctx.outputs.force_claude }}"
+      multi_agent_mode_override: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_MULTI_AGENT_MODE || '') || needs.ctx.outputs.multi_agent_mode_override }}"
+      multi_agent_mode_lock: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_MULTI_AGENT_MODE_LOCK || 'false') || needs.ctx.outputs.multi_agent_mode_lock }}"
+      task_size_tier: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '' || needs.ctx.outputs.task_size_tier }}"
+      claude_teams_allowed: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'false' || needs.ctx.outputs.claude_teams_allowed }}"
+      claude_teams_member_cap: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '3' || needs.ctx.outputs.claude_teams_member_cap }}"
+      claude_teams_max_invocations: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '1' || needs.ctx.outputs.claude_teams_max_invocations }}"
+      handoff_target: "${{ needs.ctx.outputs.handoff_target }}"
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
       ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"

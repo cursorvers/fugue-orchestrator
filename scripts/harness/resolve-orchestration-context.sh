@@ -50,6 +50,25 @@ extract_body_section() {
   '
 }
 
+normalize_multi_agent_mode() {
+  local raw
+  raw="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  case "${raw}" in
+    small|standard)
+      echo "standard"
+      ;;
+    medium|enhanced)
+      echo "enhanced"
+      ;;
+    large|critical|max)
+      echo "max"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
 ISSUE_NUMBER=""
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
   ISSUE_NUMBER="${ISSUE_NUMBER_FROM_DISPATCH}"
@@ -71,6 +90,10 @@ fi
 allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${allow_processing_rerun}" != "true" ]]; then
   allow_processing_rerun="false"
+fi
+handoff_target="$(echo "${HANDOFF_TARGET_INPUT:-kernel}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${handoff_target}" != "kernel" && "${handoff_target}" != "fugue-bridge" ]]; then
+  handoff_target="kernel"
 fi
 vote_instruction=""
 vote_instruction_b64="$(echo "${VOTE_INSTRUCTION_B64_INPUT:-}" | tr -d '\n\r[:space:]')"
@@ -211,10 +234,7 @@ orchestration_profile="codex-full"
 if [[ "${requested_main_provider_initial}" == "claude" && "${force_claude}" != "true" ]]; then
   orchestration_profile="claude-light"
 fi
-multi_agent_mode_override="$(echo "${DEFAULT_MULTI_AGENT_MODE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
-  multi_agent_mode_override=""
-fi
+multi_agent_mode_override="$(normalize_multi_agent_mode "${DEFAULT_MULTI_AGENT_MODE:-}")"
 multi_agent_mode_lock="$(echo "${DEFAULT_MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${multi_agent_mode_lock}" != "true" ]]; then
   multi_agent_mode_lock="false"
@@ -232,8 +252,8 @@ fi
 # In Hybrid, Claude is main but execution is Codex — full multi-agent depth is desired.
 if [[ "${orchestration_profile}" == "claude-light" && "${hybrid_conductor_mode}" != "true" ]]; then
   if [[ -z "${multi_agent_mode_override}" ]]; then
-    multi_agent_mode_override="$(echo "${CLAUDE_LIGHT_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-    if [[ "${multi_agent_mode_override}" != "standard" && "${multi_agent_mode_override}" != "enhanced" && "${multi_agent_mode_override}" != "max" ]]; then
+    multi_agent_mode_override="$(normalize_multi_agent_mode "${CLAUDE_LIGHT_MULTI_AGENT_MODE:-standard}")"
+    if [[ -z "${multi_agent_mode_override}" ]]; then
       multi_agent_mode_override="standard"
     fi
   fi
@@ -326,8 +346,23 @@ translation_skip_reason=""
 translation_event="false"
 translation_payload=""
 normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
-CODEX_MAIN_MODEL="gpt-5-codex"
-if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+CODEX_MAIN_MODEL="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -x "scripts/lib/model-policy.sh" ]]; then
+  eval "$(
+    scripts/lib/model-policy.sh \
+      --codex-main-model "${CODEX_MAIN_MODEL}" \
+      --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
+      --claude-model "claude-sonnet-4-6" \
+      --glm-model "glm-5.0" \
+      --gemini-model "gemini-3.1-pro" \
+      --gemini-fallback-model "gemini-3-flash" \
+      --xai-model "grok-4" \
+      --format env
+  )"
+  CODEX_MAIN_MODEL="${codex_main_model}"
+  CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
+elif ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
   CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
 fi
 if [[ "${CLAUDE_TRANSLATOR_MODEL}" != "claude-sonnet-4-6" ]]; then
@@ -612,6 +647,21 @@ eval "$(
     --has-implement "${has_implement}" \
     --orchestration-profile "${orchestration_profile}"
 )"
+claude_teams_allowed="false"
+claude_teams_reason="policy-script-missing"
+claude_teams_collaboration_signal="false"
+claude_teams_member_cap="3"
+claude_teams_max_invocations="1"
+if [[ -x "scripts/lib/claude-teams-policy.sh" ]]; then
+  eval "$(
+    scripts/lib/claude-teams-policy.sh \
+      --task-size-tier "${task_size_tier}" \
+      --risk-tier "${risk_tier}" \
+      --claude-state "${claude_state}" \
+      --title "${title}" \
+      --body "${body}"
+  )"
+fi
 
 if (( preflight_cycles < preflight_cycles_floor )); then
   preflight_cycles="${preflight_cycles_floor}"
@@ -707,14 +757,10 @@ if [[ "${assist_claude_fallback_applied}" == "true" && -n "${assist_claude_fallb
 elif [[ "${claude_pressure_guard_applied}" == "true" && -n "${claude_pressure_guard_reason}" ]]; then
   assist_provider_source="${assist_provider_source}+policy(${claude_pressure_guard_reason})"
 fi
-# Keep low-risk tasks lightweight and high-risk tasks exhaustive when
-# no explicit multi-agent override was provided.
+# Promote adaptive topology decisions from the centralized workflow risk policy
+# unless a repo-level lock or explicit override already chose the lane shape.
 if [[ -z "${multi_agent_mode_override}" && "${multi_agent_mode_lock}" != "true" ]]; then
-  if [[ "${risk_tier}" == "low" ]]; then
-    multi_agent_mode_override="standard"
-  elif [[ "${risk_tier}" == "high" ]]; then
-    multi_agent_mode_override="max"
-  fi
+  multi_agent_mode_override="$(normalize_multi_agent_mode "${multi_agent_mode_hint:-}")"
 fi
 
 # 1) Prefer fully-qualified owner/repo found inside backticks.
@@ -791,10 +837,18 @@ fi
   echo "translation_reason=$(echo "${translation_reason}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
   echo "translation_skip_reason=${translation_skip_reason}"
   echo "translation_event=${translation_event}"
+  echo "handoff_target=${handoff_target}"
   echo "orchestration_profile=${orchestration_profile}"
   echo "preflight_cycles=${preflight_cycles}"
   echo "multi_agent_mode_override=${multi_agent_mode_override}"
   echo "multi_agent_mode_lock=${multi_agent_mode_lock}"
+  echo "task_size_tier=${task_size_tier}"
+  echo "claude_teams_allowed=${claude_teams_allowed}"
+  echo "claude_teams_reason=${claude_teams_reason}"
+  echo "claude_teams_collaboration_signal=${claude_teams_collaboration_signal}"
+  echo "claude_teams_member_cap=${claude_teams_member_cap}"
+  echo "claude_teams_max_invocations=${claude_teams_max_invocations}"
+  echo "multi_agent_mode_hint=${multi_agent_mode_hint}"
   echo "implementation_dialogue_rounds=${implementation_dialogue_rounds}"
   echo "risk_tier=${risk_tier}"
   echo "risk_score=${risk_score}"

@@ -15,7 +15,9 @@ set -euo pipefail
 #   SUBSCRIPTION_RUNNER_LABEL, EMERGENCY_ASSIST_POLICY,
 #   API_STRICT_MODE, HAS_ANTHROPIC_API_KEY, HAS_OPENAI_API_KEY,
 #   DEFAULT_MAIN_ORCHESTRATOR_PROVIDER, EXECUTION_PROVIDER_DEFAULT,
-#   CANARY_ALTERNATE_PROVIDER,
+#   CANARY_ALTERNATE_PROVIDER, CANARY_PRIMARY_HANDOFF_TARGET,
+#   CANARY_VERIFY_ROLLBACK, LEGACY_MAIN_ORCHESTRATOR_PROVIDER,
+#   LEGACY_ASSIST_ORCHESTRATOR_PROVIDER, LEGACY_FORCE_CLAUDE,
 #   CANARY_LABEL_WAIT_ATTEMPTS, CANARY_LABEL_WAIT_SLEEP_SEC,
 #   CANARY_WAIT_FAST_ATTEMPTS, CANARY_WAIT_FAST_SLEEP_SEC,
 #   CANARY_WAIT_SLOW_ATTEMPTS, CANARY_WAIT_SLOW_SLEEP_SEC
@@ -23,6 +25,7 @@ set -euo pipefail
 # Optional env vars:
 #   OPS_TOKEN            — preferred over GH_TOKEN for issue operations
 #   CANARY_MODE_INPUT    — full (default) or lite
+#   CANARY_PLAN_ONLY     — true to print resolved cases without touching GitHub
 #
 # Usage: bash scripts/harness/run-canary.sh
 
@@ -64,16 +67,6 @@ clamp_num() {
   echo "${value}"
 }
 
-# --- Token resolution ---
-
-if [[ -n "${OPS_TOKEN:-}" ]]; then
-  GH_TOKEN="${OPS_TOKEN}"
-  export GH_TOKEN
-else
-  echo "Skip canary: neither FUGUE_OPS_PAT nor TARGET_REPO_PAT is configured; real-issue trust gate cannot pass with github-actions author."
-  exit 0
-fi
-
 # --- Input normalization ---
 
 repo="${GITHUB_REPOSITORY}"
@@ -83,6 +76,10 @@ online_count=0
 self_hosted_online="false"
 canary_mode="full"
 run_force_case="true"
+verify_rollback_case="false"
+plan_only="$(normalize_bool "${CANARY_PLAN_ONLY:-false}")"
+primary_handoff_target="kernel"
+rollback_handoff_target="fugue-bridge"
 
 claude_state="$(lower_trim "${CLAUDE_RATE_LIMIT_STATE:-ok}")"
 canary_mode="$(lower_trim "${CANARY_MODE_INPUT:-full}")"
@@ -91,6 +88,11 @@ if [[ "${canary_mode}" != "full" && "${canary_mode}" != "lite" ]]; then
 fi
 if [[ "${canary_mode}" == "lite" ]]; then
   run_force_case="false"
+fi
+verify_rollback_case="$(normalize_bool "${CANARY_VERIFY_ROLLBACK:-$([[ "${canary_mode}" == "full" ]] && echo "true" || echo "false")}")"
+primary_handoff_target="$(lower_trim "${CANARY_PRIMARY_HANDOFF_TARGET:-kernel}")"
+if [[ "${primary_handoff_target}" != "kernel" && "${primary_handoff_target}" != "fugue-bridge" ]]; then
+  primary_handoff_target="kernel"
 fi
 role_policy="$(lower_trim "${CLAUDE_ROLE_POLICY:-flex}")"
 degraded_assist_policy="$(lower_trim "${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}")"
@@ -163,10 +165,38 @@ canary_alternate_force="false"
 if [[ "${canary_alternate_main}" == "claude" && "${default_main_provider}" != "claude" ]]; then
   canary_alternate_force="true"
 fi
+legacy_main_provider="$(lower_trim "${LEGACY_MAIN_ORCHESTRATOR_PROVIDER:-claude}")"
+if [[ "${legacy_main_provider}" != "codex" && "${legacy_main_provider}" != "claude" ]]; then
+  legacy_main_provider="claude"
+fi
+legacy_assist_provider="$(lower_trim "${LEGACY_ASSIST_ORCHESTRATOR_PROVIDER:-claude}")"
+if [[ "${legacy_assist_provider}" != "claude" && "${legacy_assist_provider}" != "codex" && "${legacy_assist_provider}" != "none" ]]; then
+  legacy_assist_provider="claude"
+fi
+legacy_force_claude="$(normalize_bool "${LEGACY_FORCE_CLAUDE:-true}")"
+
+# --- Token resolution ---
+
+if [[ "${plan_only}" != "true" ]]; then
+  if [[ -n "${OPS_TOKEN:-}" ]]; then
+    GH_TOKEN="${OPS_TOKEN}"
+    export GH_TOKEN
+  else
+    echo "Skip canary: neither FUGUE_OPS_PAT nor TARGET_REPO_PAT is configured; real-issue trust gate cannot pass with github-actions author."
+    exit 0
+  fi
+fi
 
 # --- Runner availability check ---
 
-if [[ "${ci_execution_engine}" == "subscription" ]]; then
+if [[ "${plan_only}" == "true" ]]; then
+  online_count="$(printf '%s' "${CANARY_PLAN_ONLINE_COUNT:-1}" | tr -cd '0-9')"
+  if [[ -z "${online_count}" ]]; then
+    online_count="1"
+  else
+    online_count="$((10#${online_count}))"
+  fi
+elif [[ "${ci_execution_engine}" == "subscription" ]]; then
   runners_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 5 || echo '{}')"
   online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
   online_count="$(echo "${online_count}" | tr -cd '0-9')"
@@ -225,6 +255,9 @@ eval "$(
 expected_regular_assist_effective="${assist_provider_effective}"
 expected_regular_profile="${execution_profile}"
 expected_regular_runner="${run_agents_runner}"
+expected_regular_handoff_target="${primary_handoff_target}"
+expected_regular_mode_source=""
+expected_regular_task_size_tier=""
 
 # --- Policy resolution (alternate/force case) ---
 
@@ -262,12 +295,123 @@ eval "$(
 expected_force_assist_effective="${assist_provider_effective}"
 expected_force_profile="${execution_profile}"
 expected_force_runner="${run_agents_runner}"
+expected_force_handoff_target="${primary_handoff_target}"
+expected_force_mode_source=""
+expected_force_task_size_tier=""
+
+# --- Policy resolution (rollback / fugue-bridge case) ---
+
+expected_rollback_main=""
+expected_rollback_assist=""
+expected_rollback_assist_effective=""
+expected_rollback_profile=""
+expected_rollback_runner=""
+expected_rollback_handoff_target="${rollback_handoff_target}"
+expected_rollback_mode_source="legacy-bridge"
+expected_rollback_task_size_tier="small"
+if [[ "${verify_rollback_case}" == "true" ]]; then
+  eval "$(
+    ./scripts/lib/orchestrator-policy.sh \
+      --main "${legacy_main_provider}" \
+      --assist "${legacy_assist_provider}" \
+      --default-main "${legacy_main_provider}" \
+      --default-assist "${legacy_assist_provider}" \
+      --claude-state "${claude_state}" \
+      --force-claude "${legacy_force_claude}" \
+      --assist-policy "${main_assist_policy}" \
+      --claude-role-policy "${role_policy}" \
+      --degraded-assist-policy "${degraded_assist_policy}"
+  )"
+  expected_rollback_main="${resolved_main}"
+  expected_rollback_assist="${resolved_assist}"
+  eval "$(
+    ./scripts/lib/execution-profile-policy.sh \
+      --requested-engine "${ci_execution_engine}" \
+      --main-provider "${expected_rollback_main}" \
+      --assist-provider "${expected_rollback_assist}" \
+      --force-claude "${legacy_force_claude}" \
+      --self-hosted-online "${self_hosted_online}" \
+      --claude-state "${claude_state}" \
+      --strict-main-requested "true" \
+      --strict-opus-requested "true" \
+      --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+      --codex-api-available "${HAS_OPENAI_API_KEY}" \
+      --subscription-offline-policy "${subscription_offline_policy}" \
+      --api-strict-mode "${API_STRICT_MODE:-false}" \
+      --emergency-continuity-mode "${emergency_continuity_mode}" \
+      --emergency-assist-policy "${EMERGENCY_ASSIST_POLICY:-none}"
+  )"
+  expected_rollback_assist_effective="${assist_provider_effective}"
+  expected_rollback_profile="${execution_profile}"
+  expected_rollback_runner="${run_agents_runner}"
+fi
+
+if [[ "${primary_handoff_target}" == "fugue-bridge" && "${verify_rollback_case}" == "true" ]]; then
+  expected_regular_main="${expected_rollback_main}"
+  expected_regular_assist_effective="${expected_rollback_assist_effective}"
+  expected_regular_profile="${expected_rollback_profile}"
+  expected_regular_runner="${expected_rollback_runner}"
+  expected_regular_mode_source="${expected_rollback_mode_source}"
+  expected_regular_task_size_tier="${expected_rollback_task_size_tier}"
+  expected_force_main="${expected_rollback_main}"
+  expected_force_assist_effective="${expected_rollback_assist_effective}"
+  expected_force_profile="${expected_rollback_profile}"
+  expected_force_runner="${expected_rollback_runner}"
+  expected_force_mode_source="${expected_rollback_mode_source}"
+  expected_force_task_size_tier="${expected_rollback_task_size_tier}"
+fi
+
+print_plan_case() {
+  local case_name="$1"
+  local requested_main="$2"
+  local resolved_main="$3"
+  local resolved_assist="$4"
+  local resolved_profile="$5"
+  local resolved_runner="$6"
+  local handoff_target="$7"
+  local mode_source="$8"
+  local task_size_tier="$9"
+  jq -cn \
+    --arg case_name "${case_name}" \
+    --arg requested_main "${requested_main}" \
+    --arg resolved_main "${resolved_main}" \
+    --arg resolved_assist "${resolved_assist}" \
+    --arg resolved_profile "${resolved_profile}" \
+    --arg resolved_runner "${resolved_runner}" \
+    --arg handoff_target "${handoff_target}" \
+    --arg mode_source "${mode_source}" \
+    --arg task_size_tier "${task_size_tier}" \
+    '{
+      case:$case_name,
+      requested_main:$requested_main,
+      resolved_main:$resolved_main,
+      resolved_assist:$resolved_assist,
+      resolved_profile:$resolved_profile,
+      resolved_runner:$resolved_runner,
+      handoff_target:$handoff_target,
+      multi_agent_mode_source:$mode_source,
+      task_size_tier:$task_size_tier
+    }'
+}
+
+if [[ "${plan_only}" == "true" ]]; then
+  print_plan_case "regular" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}"
+  if [[ "${run_force_case}" == "true" ]]; then
+    print_plan_case "alternate" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}"
+  fi
+  if [[ "${verify_rollback_case}" == "true" ]]; then
+    print_plan_case "rollback" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}"
+  fi
+  exit 0
+fi
 
 # --- Ensure labels exist ---
 
 gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
 gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
 gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
+gh label create "orchestrator-assist:codex" --repo "${repo}" --description "Requested codex assist orchestrator profile for Tutti routing" --color "0E8A16" >/dev/null 2>&1 || true
+gh label create "orchestrator-assist:none" --repo "${repo}" --description "No assist orchestrator requested" --color "BFDADC" >/dev/null 2>&1 || true
 gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
 gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
 gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
@@ -278,9 +422,13 @@ create_issue() {
   local title="$1"
   local force_label="$2"
   local orch_provider="${3:-claude}"
+  local handoff_target="${4:-kernel}"
+  local assist_provider="${5:-claude}"
   local body
-  body="$(printf '## Canary\nAutomated orchestration canary.\n\n- orchestrator: %s main\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
+  body="$(printf '## Canary\nAutomated orchestration canary.\n\n- orchestrator: %s main\n- assist orchestrator provider: %s\n- handoff target: %s\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
     "${orch_provider}" \
+    "${assist_provider}" \
+    "${handoff_target}" \
     "${title}" \
     "$(date -u +"%Y-%m-%dT%H:%M:%SZ")")"
 
@@ -288,7 +436,7 @@ create_issue() {
     --label "fugue-task" \
     --label "tutti" \
     --label "orchestrator:${orch_provider}" \
-    --label "orchestrator-assist:claude")
+    --label "orchestrator-assist:${assist_provider}")
   if [[ -n "${force_label}" ]]; then
     cmd+=(--label "${force_label}")
   fi
@@ -301,7 +449,8 @@ create_issue() {
   fi
   local run_cmd=(gh workflow run fugue-tutti-caller.yml \
     --repo "${repo}" \
-    -f issue_number="${issue_num}")
+    -f issue_number="${issue_num}" \
+    -f handoff_target="${handoff_target}")
   if [[ -n "${dispatch_offline_policy}" ]]; then
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
   fi
@@ -317,7 +466,9 @@ wait_for_resolved_orchestrators() {
   local max_attempts="${canary_wait_fast_attempts}"
   local sleep_sec="${canary_wait_fast_sleep_sec}"
   local attempt=1
-  local comments_json meta_json comment
+  local comments_json meta_json comment resolved_main resolved_assist resolved_profile
+  local resolved_runner resolved_runner_labels resolved_lanes resolved_handoff_target
+  local resolved_mode_source resolved_task_size_tier
   while true; do
     comments_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}/comments?per_page=100" 4 || echo '[]')"
     meta_json="$(echo "${comments_json}" | jq -r '
@@ -333,8 +484,11 @@ wait_for_resolved_orchestrators() {
       resolved_runner="$(echo "${meta_json}" | jq -r '.run_agents_runner // ""' | tr '[:upper:]' '[:lower:]')"
       resolved_runner_labels="$(echo "${meta_json}" | jq -c '.run_agents_runner_labels // []')"
       resolved_lanes="$(echo "${meta_json}" | jq -r '.lanes_configured // ""' | tr -cd '0-9')"
+      resolved_handoff_target="$(echo "${meta_json}" | jq -r '.handoff_target // "kernel"' | tr '[:upper:]' '[:lower:]')"
+      resolved_mode_source="$(echo "${meta_json}" | jq -r '.multi_agent_mode_source // ""' | tr '[:upper:]' '[:lower:]')"
+      resolved_task_size_tier="$(echo "${meta_json}" | jq -r '.task_size_tier // ""' | tr '[:upper:]' '[:lower:]')"
       if [[ -n "${resolved_main}" && -n "${resolved_assist}" && -n "${resolved_profile}" ]]; then
-        echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}"
+        echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}|${resolved_handoff_target}|${resolved_mode_source}|${resolved_task_size_tier}"
         return 0
       fi
     fi
@@ -346,8 +500,11 @@ wait_for_resolved_orchestrators() {
       resolved_runner="$(printf '%s\n' "${comment}" | sed -n 's/^- run-agents runner: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
       resolved_runner_labels="$(printf '%s\n' "${comment}" | sed -n 's/^- run-agents runner labels: //p' | head -n1 | tr -d '\r')"
       resolved_lanes="$(printf '%s\n' "${comment}" | sed -n 's/^- lanes configured: //p' | head -n1 | tr -cd '0-9')"
+      resolved_handoff_target="$(printf '%s\n' "${comment}" | sed -n 's/^- handoff target: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+      resolved_mode_source="$(printf '%s\n' "${comment}" | sed -n 's/^- multi-agent mode source: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+      resolved_task_size_tier="$(printf '%s\n' "${comment}" | sed -n 's/^- task size tier: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
       if [[ -n "${resolved_main}" && -n "${resolved_assist}" && -n "${resolved_profile}" ]]; then
-        echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}"
+        echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}|${resolved_handoff_target}|${resolved_mode_source}|${resolved_task_size_tier}"
         return 0
       fi
     fi
@@ -375,18 +532,24 @@ conclude_issue() {
   local expected_assist="$3"
   local expected_profile="$4"
   local expected_runner="$5"
-  local actual_main="$6"
-  local actual_assist="$7"
-  local actual_profile="$8"
-  local actual_runner="$9"
-  local actual_lanes="${10}"
-  local pass="${11}"
-  local case_name="${12}"
-  local reason="${13}"
+  local expected_handoff_target="$6"
+  local expected_mode_source="$7"
+  local expected_task_size_tier="$8"
+  local actual_main="$9"
+  local actual_assist="${10}"
+  local actual_profile="${11}"
+  local actual_runner="${12}"
+  local actual_lanes="${13}"
+  local actual_handoff_target="${14}"
+  local actual_mode_source="${15}"
+  local actual_task_size_tier="${16}"
+  local pass="${17}"
+  local case_name="${18}"
+  local reason="${19}"
   local issue_state=""
   local issue_state_after=""
   if [[ "${pass}" == "true" ]]; then
-    gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\` profile=\`${actual_profile}\` runner=\`${actual_runner}\`, lanes=\`${actual_lanes}\`."
+    gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\` handoff=\`${expected_handoff_target:-n/a}\` mode_source=\`${expected_mode_source:-n/a}\` task_size=\`${expected_task_size_tier:-n/a}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\` profile=\`${actual_profile}\` runner=\`${actual_runner}\` handoff=\`${actual_handoff_target:-n/a}\` mode_source=\`${actual_mode_source:-n/a}\` task_size=\`${actual_task_size_tier:-n/a}\`, lanes=\`${actual_lanes}\`."
     if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null 2>&1; then
       echo "Warning: failed to add completed label to issue #${issue_num}" >&2
     fi
@@ -400,7 +563,7 @@ conclude_issue() {
       fi
     fi
   else
-    gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\` profile=\`${actual_profile:-timeout}\` runner=\`${actual_runner:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
+    gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\` handoff=\`${expected_handoff_target:-n/a}\` mode_source=\`${expected_mode_source:-n/a}\` task_size=\`${expected_task_size_tier:-n/a}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\` profile=\`${actual_profile:-timeout}\` runner=\`${actual_runner:-timeout}\` handoff=\`${actual_handoff_target:-timeout}\` mode_source=\`${actual_mode_source:-timeout}\` task_size=\`${actual_task_size_tier:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
     if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null 2>&1; then
       echo "Warning: failed to add needs-human label to issue #${issue_num}" >&2
     fi
@@ -418,20 +581,29 @@ issue_prefix="[canary]"
 if [[ "${canary_mode}" == "lite" ]]; then
   issue_prefix="[canary-lite]"
 fi
-regular_issue="$(create_issue "${issue_prefix} regular ${default_main_provider}-main request ${ts}" "" "${default_main_provider}")"
+regular_issue="$(create_issue "${issue_prefix} regular ${default_main_provider}-main request ${ts}" "" "${default_main_provider}" "${primary_handoff_target}" "claude")"
 force_issue=""
+rollback_issue=""
 if [[ "${run_force_case}" == "true" ]]; then
   if [[ "${canary_alternate_force}" == "true" ]]; then
-    force_issue="$(create_issue "${issue_prefix} alternate ${canary_alternate_main}-main request ${ts}" "orchestrator-force:claude" "${canary_alternate_main}")"
+    force_issue="$(create_issue "${issue_prefix} alternate ${canary_alternate_main}-main request ${ts}" "orchestrator-force:claude" "${canary_alternate_main}" "${primary_handoff_target}" "claude")"
   else
-    force_issue="$(create_issue "${issue_prefix} alternate ${canary_alternate_main}-main request ${ts}" "" "${canary_alternate_main}")"
+    force_issue="$(create_issue "${issue_prefix} alternate ${canary_alternate_main}-main request ${ts}" "" "${canary_alternate_main}" "${primary_handoff_target}" "claude")"
   fi
+fi
+if [[ "${verify_rollback_case}" == "true" ]]; then
+  rollback_force_label=""
+  if [[ "${legacy_force_claude}" == "true" ]]; then
+    rollback_force_label="orchestrator-force:claude"
+  fi
+  rollback_issue="$(create_issue "${issue_prefix} rollback legacy ${legacy_main_provider}-main request ${ts}" "${rollback_force_label}" "${legacy_main_provider}" "${rollback_handoff_target}" "${legacy_assist_provider}")"
 fi
 
 regular_pair_file="$(mktemp)"
 force_pair_file="$(mktemp)"
+rollback_pair_file="$(mktemp)"
 cleanup_wait_files() {
-  rm -f "${regular_pair_file}" "${force_pair_file}"
+  rm -f "${regular_pair_file}" "${force_pair_file}" "${rollback_pair_file}"
 }
 trap cleanup_wait_files EXIT
 
@@ -441,6 +613,11 @@ force_wait_pid=""
 if [[ "${run_force_case}" == "true" ]]; then
   wait_for_resolved_orchestrators "${force_issue}" >"${force_pair_file}" &
   force_wait_pid="$!"
+fi
+rollback_wait_pid=""
+if [[ "${verify_rollback_case}" == "true" ]]; then
+  wait_for_resolved_orchestrators "${rollback_issue}" >"${rollback_pair_file}" &
+  rollback_wait_pid="$!"
 fi
 
 regular_pair=""
@@ -459,6 +636,15 @@ elif wait "${force_wait_pid}"; then
   force_wait_ok="true"
 fi
 
+rollback_pair=""
+rollback_wait_ok="false"
+if [[ "${verify_rollback_case}" != "true" ]]; then
+  rollback_wait_ok="false"
+elif wait "${rollback_wait_pid}"; then
+  rollback_pair="$(tail -n1 "${rollback_pair_file}" | tr -d '\r')"
+  rollback_wait_ok="true"
+fi
+
 # --- Verify regular case ---
 
 if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
@@ -471,7 +657,13 @@ if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
   regular_runner="${regular_rest%%|*}"
   regular_rest="${regular_rest#*|}"
   regular_runner_labels="${regular_rest%%|*}"
-  regular_lanes="${regular_rest#*|}"
+  regular_rest="${regular_rest#*|}"
+  regular_lanes="${regular_rest%%|*}"
+  regular_rest="${regular_rest#*|}"
+  regular_handoff_target="${regular_rest%%|*}"
+  regular_rest="${regular_rest#*|}"
+  regular_mode_source="${regular_rest%%|*}"
+  regular_task_size_tier="${regular_rest#*|}"
   regular_ok="true"
   regular_reason="ok"
   if [[ "${regular_main}" != "${expected_regular_main}" || "${regular_assist}" != "${expected_regular_assist_effective}" ]]; then
@@ -486,18 +678,21 @@ if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
   elif [[ "${expected_regular_runner}" == "self-hosted" && "${regular_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
     regular_ok="false"
     regular_reason="required-runner-label-missing"
+  elif [[ "${regular_handoff_target}" != "${expected_regular_handoff_target}" ]]; then
+    regular_ok="false"
+    regular_reason="handoff-target-mismatch"
   elif [[ -z "${regular_lanes}" || "${regular_lanes}" == "0" ]]; then
     regular_ok="false"
     regular_reason="lanes-not-materialized"
   fi
   if [[ "${regular_ok}" == "true" ]]; then
-    conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "true" "regular" "ok"
+    conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "true" "regular" "ok"
   else
-    conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "false" "regular" "${regular_reason}"
+    conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "false" "regular" "${regular_reason}"
     failures="$((failures + 1))"
   fi
 else
-  conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
+  conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
   failures="$((failures + 1))"
 fi
 
@@ -515,7 +710,13 @@ elif [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
   force_runner="${force_rest%%|*}"
   force_rest="${force_rest#*|}"
   force_runner_labels="${force_rest%%|*}"
-  force_lanes="${force_rest#*|}"
+  force_rest="${force_rest#*|}"
+  force_lanes="${force_rest%%|*}"
+  force_rest="${force_rest#*|}"
+  force_handoff_target="${force_rest%%|*}"
+  force_rest="${force_rest#*|}"
+  force_mode_source="${force_rest%%|*}"
+  force_task_size_tier="${force_rest#*|}"
   force_ok="true"
   force_reason="ok"
   if [[ "${force_main}" != "${expected_force_main}" || "${force_assist}" != "${expected_force_assist_effective}" ]]; then
@@ -530,18 +731,80 @@ elif [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
   elif [[ "${expected_force_runner}" == "self-hosted" && "${force_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
     force_ok="false"
     force_reason="required-runner-label-missing"
+  elif [[ "${force_handoff_target}" != "${expected_force_handoff_target}" ]]; then
+    force_ok="false"
+    force_reason="handoff-target-mismatch"
   elif [[ -z "${force_lanes}" || "${force_lanes}" == "0" ]]; then
     force_ok="false"
     force_reason="lanes-not-materialized"
   fi
   if [[ "${force_ok}" == "true" ]]; then
-    conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "true" "force" "ok"
+    conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "true" "force" "ok"
   else
-    conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "false" "force" "${force_reason}"
+    conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "false" "force" "${force_reason}"
     failures="$((failures + 1))"
   fi
 else
-  conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
+  conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
+  failures="$((failures + 1))"
+fi
+
+# --- Verify rollback / fugue-bridge case ---
+
+if [[ "${verify_rollback_case}" != "true" ]]; then
+  echo "Canary rollback verification: skipped."
+elif [[ "${rollback_wait_ok}" == "true" && -n "${rollback_pair}" ]]; then
+  rollback_main="${rollback_pair%%|*}"
+  rollback_rest="${rollback_pair#*|}"
+  rollback_assist="${rollback_rest%%|*}"
+  rollback_rest="${rollback_rest#*|}"
+  rollback_profile="${rollback_rest%%|*}"
+  rollback_rest="${rollback_rest#*|}"
+  rollback_runner="${rollback_rest%%|*}"
+  rollback_rest="${rollback_rest#*|}"
+  rollback_runner_labels="${rollback_rest%%|*}"
+  rollback_rest="${rollback_rest#*|}"
+  rollback_lanes="${rollback_rest%%|*}"
+  rollback_rest="${rollback_rest#*|}"
+  rollback_handoff_target_actual="${rollback_rest%%|*}"
+  rollback_rest="${rollback_rest#*|}"
+  rollback_mode_source_actual="${rollback_rest%%|*}"
+  rollback_task_size_tier_actual="${rollback_rest#*|}"
+  rollback_ok="true"
+  rollback_reason="ok"
+  if [[ "${rollback_main}" != "${expected_rollback_main}" || "${rollback_assist}" != "${expected_rollback_assist_effective}" ]]; then
+    rollback_ok="false"
+    rollback_reason="resolved-provider-mismatch"
+  elif [[ "${rollback_profile}" != "${expected_rollback_profile}" ]]; then
+    rollback_ok="false"
+    rollback_reason="execution-profile-mismatch"
+  elif [[ "${rollback_runner}" != "${expected_rollback_runner}" ]]; then
+    rollback_ok="false"
+    rollback_reason="runner-mismatch"
+  elif [[ "${expected_rollback_runner}" == "self-hosted" && "${rollback_runner_labels}" != *"\"${subscription_runner_label}\""* ]]; then
+    rollback_ok="false"
+    rollback_reason="required-runner-label-missing"
+  elif [[ "${rollback_handoff_target_actual}" != "${expected_rollback_handoff_target}" ]]; then
+    rollback_ok="false"
+    rollback_reason="handoff-target-mismatch"
+  elif [[ "${rollback_mode_source_actual}" != "${expected_rollback_mode_source}" ]]; then
+    rollback_ok="false"
+    rollback_reason="mode-source-mismatch"
+  elif [[ "${rollback_task_size_tier_actual}" != "${expected_rollback_task_size_tier}" ]]; then
+    rollback_ok="false"
+    rollback_reason="task-size-tier-mismatch"
+  elif [[ -z "${rollback_lanes}" || "${rollback_lanes}" == "0" ]]; then
+    rollback_ok="false"
+    rollback_reason="lanes-not-materialized"
+  fi
+  if [[ "${rollback_ok}" == "true" ]]; then
+    conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "true" "rollback" "ok"
+  else
+    conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "false" "rollback" "${rollback_reason}"
+    failures="$((failures + 1))"
+  fi
+else
+  conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" "false" "rollback" "timeout-no-integrated-review"
   failures="$((failures + 1))"
 fi
 
@@ -552,8 +815,13 @@ if [[ "${failures}" -gt 0 ]]; then
   exit 1
 fi
 
+rollback_summary="rollback=skipped"
+if [[ "${verify_rollback_case}" == "true" ]]; then
+  rollback_summary="rollback(main=${expected_rollback_main},assist_effective=${expected_rollback_assist_effective},profile=${expected_rollback_profile},runner=${expected_rollback_runner},handoff=${expected_rollback_handoff_target},mode_source=${expected_rollback_mode_source},task_size=${expected_rollback_task_size_tier})"
+fi
+
 if [[ "${run_force_case}" == "true" ]]; then
-  echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), alternate(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner}), default_main=${default_main_provider}, alternate_main=${canary_alternate_main}, strict_expected=${strict_expected}"
+  echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner},handoff=${expected_regular_handoff_target}), alternate(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner},handoff=${expected_force_handoff_target}), ${rollback_summary}, default_main=${default_main_provider}, alternate_main=${canary_alternate_main}, strict_expected=${strict_expected}"
 else
-  echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner}), alternate=skipped, default_main=${default_main_provider}, strict_expected=${strict_expected}"
+  echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner},handoff=${expected_regular_handoff_target}), alternate=skipped, ${rollback_summary}, default_main=${default_main_provider}, strict_expected=${strict_expected}"
 fi

@@ -1,46 +1,64 @@
-# CODEX.md - Thin Adapter
+# CODEX.md - Kernel Adapter
 
-Role: Codex is an orchestrator adapter for this repository.
-Primary policy source is `AGENTS.md`.
+Role: Codex is the sovereign orchestrator for `Kernel`.
 
-## 1. Read Order
+Primary policy source:
+
+1. `AGENTS.md`
+2. `docs/requirements-gpt54-codex-kernel.md`
+3. `docs/kernel-preimplementation-readiness.md`
+4. `docs/kernel-codex-import-strategy.md`
+5. `docs/kernel-fugue-migration-audit.md`
+
+If a file conflicts with `AGENTS.md`, `AGENTS.md` wins.
+
+## Read Order
 
 1. Read `AGENTS.md` first.
-2. Read only the specific workflow/docs sections needed for the current task.
-3. Do not load large reference files unless blocked.
+2. Read this file for Codex-specific orchestration role.
+3. Read only the Kernel document sections needed for the active task.
+4. Load deeper workflow docs only when blocked.
 
-## 2. Codex-Specific Deltas
+## Kernel Role
 
-- Codex is the safe default main orchestrator when Claude is throttled.
-- Main/assist provider selection and fallback must stay audit-visible on each issue.
-- Keep implementation ownership in workflow gates (`vote` + risk), not in ad-hoc bypasses.
+- Codex owns control-plane state.
+- Codex performs task-shape classification.
+- Codex selects adaptive lane topology.
+- Codex integrates council outputs.
+- Codex decides `ok_to_execute`.
+- Claude may participate only as executor, adapter, or council lane.
 
-## 3. Operational Anchors
+## Precision Rule
 
-- Intake and handoff:
-  - `.github/workflows/fugue-task-router.yml`
-- Provider resolution and fallback:
-  - `.github/workflows/fugue-tutti-caller.yml`
-  - `.github/workflows/fugue-tutti-router.yml`
-- CLI entry:
-  - `scripts/gha24`
-- Shared workflow playbook:
-  - `rules/shared-orchestration-playbook.md`
+Use imported Claude-era assets as `knowledge`, not as `authority`.
 
-## 4. Commands
+- Thin adapters and skill triggers may be reused.
+- Legacy Claude sovereignty assumptions must not be reused.
 
-- Submit a request:
-  - `./scripts/gha24 "task" --review`
-  - `./scripts/gha24 "task" --implement`
-- Provider override:
-  - `./scripts/gha24 "task" --orchestrator codex`
-  - `./scripts/gha24 "task" --assist-orchestrator codex`
-  - `./scripts/gha24 "task" --orchestrator claude --force-claude`
-- Deterministic simulation:
-  - `scripts/sim-orchestrator-switch.sh`
-- Shared skills baseline sync:
-  - `scripts/skills/sync-openclaw-skills.sh --target both`
+## Verification Rule
 
-## 5. Rule
+Before claiming peripheral readiness or migration readiness, use:
 
-If this file conflicts with `AGENTS.md`, `AGENTS.md` wins.
+- `scripts/sim-kernel-peripherals.sh`
+- `scripts/check-sovereign-adapters.sh`
+
+Use this as the default PDCA preflight for Kernel work that touches:
+
+- linked systems
+- Discord / LINE
+- Cloudflare
+- Supabase / Vercel contracts
+- Cursorvers business interfaces
+
+## Current Intent
+
+This repository currently contains:
+
+- legacy FUGUE control-plane implementation
+- Kernel doctrine and pre-implementation validation
+
+Until Kernel runtime implementation is complete:
+
+- preserve legacy FUGUE behavior unless explicitly migrating a path
+- treat Kernel docs and validation harnesses as the source of truth for new control-plane work
+- treat `fugue-bridge` as the only acceptable rollback shape for returning control to legacy FUGUE

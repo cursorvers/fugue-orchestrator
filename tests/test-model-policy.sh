@@ -75,7 +75,7 @@ echo ""
 
 # --- Group 1: Default values (no args) ---
 assert_model "default-codex-main" \
-  "codex_main_model" "gpt-5-codex"
+  "codex_main_model" "gpt-5.4"
 
 assert_model "default-codex-multi" \
   "codex_multi_agent_model" "gpt-5.3-codex-spark"
@@ -99,6 +99,14 @@ assert_model "default-not-adjusted" \
 assert_model "codex-spark-valid" \
   "codex_multi_agent_model" "gpt-5.3-codex-spark" \
   --codex-multi-agent-model "gpt-5.3-codex-spark"
+
+assert_model "codex-main-latest-valid" \
+  "codex_main_model" "gpt-5.4" \
+  --codex-main-model "gpt-5.4"
+
+assert_model "codex-main-fallback-valid" \
+  "codex_main_model" "gpt-5-codex" \
+  --codex-main-model "gpt-5-codex"
 
 assert_model "codex-spark-5.1" \
   "codex_multi_agent_model" "gpt-5.1-codex-spark" \
@@ -126,7 +134,7 @@ assert_model "xai-grok4-variant" \
 
 # --- Group 3: Invalid models get normalized ---
 assert_model "invalid-codex-main" \
-  "codex_main_model" "gpt-5-codex" \
+  "codex_main_model" "gpt-5.4" \
   --codex-main-model "gpt-4-turbo"
 
 assert_model "invalid-claude" \
@@ -156,7 +164,7 @@ assert_model "adjusted-false-all-valid" \
 
 # --- Group 5: JSON format ---
 assert_json "json-codex-main" \
-  ".codex_main_model" "gpt-5-codex"
+  ".codex_main_model" "gpt-5.4"
 
 assert_json "json-adjusted-false" \
   ".adjusted" "false"
@@ -171,7 +179,7 @@ assert_json "json-adjustments" \
 
 # --- Group 6: Edge cases ---
 assert_model "empty-codex-main" \
-  "codex_main_model" "gpt-5-codex" \
+  "codex_main_model" "gpt-5.4" \
   --codex-main-model ""
 
 assert_model "whitespace-model" \

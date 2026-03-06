@@ -11,6 +11,7 @@ FUGUEのローカル実行に、以下の外部システムを連結するため
 ## Source of truth
 
 - `config/integrations/local-systems.json`
+- `config/integrations/peripheral-adapters.json`
 
 ## Runner
 
@@ -21,8 +22,16 @@ FUGUEのローカル実行に、以下の外部システムを連結するため
 ## Integrity Check
 
 - `scripts/check-linked-systems-integrity.sh`
+- `scripts/check-peripheral-adapters.sh`
 
 マニフェストの重複ID・形式・有効アダプタ存在/実行権限/bash構文を検証します。
+`peripheral-adapters.json` 側では authority, validation mode, contract owner も検証します。
+
+## Kernel Verification
+
+- `scripts/sim-kernel-peripherals.sh`
+
+Kernel の PDCA ループ用 cross-repo harness。linked systems に加えて Cloudflare Discord 回帰、Cursorvers LINE 関数スイート、Supabase/Vercel 契約の静的プローブをまとめて検証します。
 
 ## Adapters
 

@@ -94,6 +94,15 @@ assert_risk "high-security-keywords" \
   "high" "max" \
   --title "security audit" --body "auth payment vulnerability incident" --labels "" --has-implement "true"
 
+assert_field "task-size-small" "task_size_tier" "small" \
+  --title "fix typo" --body "small fix" --labels "" --has-implement "false"
+
+assert_field "task-size-large" "task_size_tier" "large" \
+  --title "rewrite migration" --body "full schema change with rollback plan" --labels "large-refactor" --has-implement "true"
+
+assert_field "task-size-critical" "task_size_tier" "critical" \
+  --title "production auth incident" --body "mass delete and billing credential rotation in production" --labels "" --has-implement "true"
+
 # --- Group 2: Label-based risk ---
 assert_risk "large-refactor-label" \
   "high" "max" \

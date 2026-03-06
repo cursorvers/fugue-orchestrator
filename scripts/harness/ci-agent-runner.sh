@@ -6,6 +6,9 @@ user_prompt="Issue Title: ${ISSUE_TITLE}
 
 Issue Body:
 ${ISSUE_BODY}"
+if [[ "${AGENT_NAME:-}" == "claude-teams-executor" || "${AGENT_ROLE:-}" == "teams-executor" ]]; then
+  sys_prompt="${sys_prompt} Claude Teams bounded mode is active; behave as a narrow collaboration executor and return handoff-ready JSON only."
+fi
 
 ORIGINAL_PROVIDER="${PROVIDER}"
 ORIGINAL_MODEL="${MODEL}"
@@ -41,7 +44,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/../lib/model-policy.sh"
 recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -68,7 +71,7 @@ if [[ -x "${model_policy_script}" ]]; then
   xai_latest_model="${xai_model}"
 else
   claude_opus_model="claude-sonnet-4-6"
-  codex_main_model="gpt-5-codex"
+  codex_main_model="gpt-5.4"
   codex_multi_agent_model="gpt-5.3-codex-spark"
   glm_model="glm-5.0"
   xai_latest_model="grok-4"
@@ -347,7 +350,7 @@ append_attempt() {
 }
 
 if [[ "${PROVIDER}" == "codex" ]]; then
-  candidates=("${MODEL}" "${codex_main_model}" "${codex_multi_agent_model}" "gpt-5-codex" "gpt-5" "gpt-4.1")
+  candidates=("${MODEL}" "${codex_main_model}" "${codex_multi_agent_model}" "gpt-5.4" "gpt-5-codex" "gpt-5" "gpt-4.1")
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \

@@ -185,6 +185,27 @@ elif [[ "${pressure_guard_applied}" == "true" ]]; then
   assist_fallback_note="Assist orchestrator pressure guard: requested \`${requested_assist_provider}\` but switched to \`${assist_provider}\` due to \`${pressure_guard_reason}\`."
 fi
 
+handoff_target_default="$(echo "${FUGUE_HANDOFF_TARGET_DEFAULT:-kernel}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${handoff_target_default}" != "kernel" && "${handoff_target_default}" != "fugue-bridge" ]]; then
+  handoff_target_default="kernel"
+fi
+body_handoff_target="$(extract_heading_value "${body}" "handoff target")"
+if [[ -z "${body_handoff_target}" ]]; then
+  body_handoff_target="$(extract_heading_value "${body}" "sovereign adapter")"
+fi
+if [[ "${body_handoff_target}" != "kernel" && "${body_handoff_target}" != "fugue-bridge" ]]; then
+  body_handoff_target="$(echo "${body}" | sed -nE 's/^[[:space:]]*(handoff[[:space:]_-]*target|sovereign[[:space:]_-]*adapter)[[:space:]]*:[[:space:]]*(kernel|fugue-bridge)[[:space:]]*$/\2/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+fi
+handoff_target="${handoff_target_default}"
+if [[ "${body_handoff_target}" == "kernel" || "${body_handoff_target}" == "fugue-bridge" ]]; then
+  handoff_target="${body_handoff_target}"
+fi
+if echo "${text}" | grep -Eqi '#fugue-bridge|rollback to fugue|legacy fugue'; then
+  handoff_target="fugue-bridge"
+elif echo "${text}" | grep -Eqi '#kernel'; then
+  handoff_target="kernel"
+fi
+
 # Default: fugue-task issues are handed off to the GHA24 mainframe.
 # Explicit manual markers can opt out, but /vote forces handoff.
 body_mainframe_handoff="$(extract_heading_value "${body}" "mainframe handoff")"
@@ -346,6 +367,7 @@ assist_provider_line="- Assist orchestrator: ${assist_provider}"
 if [[ -n "${assist_fallback_note}" ]]; then
   assist_provider_line="- Assist orchestrator: ${assist_provider} (requested: ${requested_assist_provider})"
 fi
+handoff_target_line="- Handoff target: ${handoff_target}"
 source_line="- Provider source: main=${main_provider_source}, assist=${assist_provider_source}"
 nl_line=""
 if [[ "${nl_hint_applied}" == "true" ]]; then
@@ -360,6 +382,7 @@ GHA24 mainframe handoff (natural language)
 - Mode: ${mode}
 ${provider_line}
 ${assist_provider_line}
+${handoff_target_line}
 ${source_line}
 ${nl_line}
 ${vote_instruction_line}
@@ -380,6 +403,7 @@ dispatch_args=(
 )
 dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
 dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
+dispatch_args+=(-f handoff_target="kernel")
 trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -n "${trust_subject}" ]]; then
   dispatch_args+=(-f trust_subject="${trust_subject}")
@@ -390,7 +414,36 @@ fi
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
   dispatch_args+=(-f allow_processing_rerun="true")
 fi
-gh workflow run fugue-tutti-caller.yml "${dispatch_args[@]}" >/dev/null
+
+bridge_handoff_script="scripts/harness/fugue-bridge-handoff.sh"
+if [[ ! -x "${bridge_handoff_script}" && -x ".fugue-orchestrator/scripts/harness/fugue-bridge-handoff.sh" ]]; then
+  bridge_handoff_script=".fugue-orchestrator/scripts/harness/fugue-bridge-handoff.sh"
+fi
+
+if [[ "${handoff_target}" == "fugue-bridge" ]]; then
+  if [[ ! -x "${bridge_handoff_script}" ]]; then
+    echo "fugue-bridge handoff requested, but adapter script is missing: ${bridge_handoff_script}" >&2
+    exit 1
+  fi
+  bridge_args=(
+    --repo "${GITHUB_REPOSITORY}"
+    --issue-number "${ISSUE_NUMBER}"
+    --dispatch-nonce "${dispatch_nonce}"
+  )
+  if [[ -n "${trust_subject}" ]]; then
+    bridge_args+=(--trust-subject "${trust_subject}")
+  fi
+  if [[ -n "${vote_instruction_b64}" ]]; then
+    bridge_args+=(--vote-instruction-b64 "${vote_instruction_b64}")
+  fi
+  if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+    bridge_args+=(--allow-processing-rerun)
+  fi
+  bash "${bridge_handoff_script}" "${bridge_args[@]}" >/dev/null
+else
+  gh workflow run fugue-tutti-caller.yml "${dispatch_args[@]}" >/dev/null
+fi
 
 echo "handoff=true" >> "${GITHUB_OUTPUT}"
+echo "handoff_target=${handoff_target}" >> "${GITHUB_OUTPUT}"
 echo "mode=${mode}" >> "${GITHUB_OUTPUT}"

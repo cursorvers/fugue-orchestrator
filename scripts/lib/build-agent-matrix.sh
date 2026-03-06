@@ -13,7 +13,7 @@ wants_gemini="false"
 wants_xai="false"
 allow_glm_in_subscription="false"
 dual_main_signal="false"
-codex_main_model="gpt-5-codex"
+codex_main_model="gpt-5.4"
 codex_multi_agent_model="gpt-5.3-codex-spark"
 claude_opus_model="claude-sonnet-4-6"
 claude_sonnet4_model="claude-sonnet-4-6"
@@ -21,6 +21,9 @@ claude_sonnet6_model="claude-sonnet-4-6"
 glm_model="glm-5.0"
 gemini_model="gemini-3.1-pro"
 xai_model="grok-4"
+enable_claude_teams="false"
+claude_teams_member_cap="3"
+claude_teams_max_invocations="1"
 format="json"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/model-policy.sh"
@@ -64,7 +67,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --codex-main-model)
-      codex_main_model="${2:-gpt-5-codex}"
+      codex_main_model="${2:-gpt-5.4}"
       shift 2
       ;;
     --codex-multi-agent-model)
@@ -95,6 +98,18 @@ while [[ $# -gt 0 ]]; do
       xai_model="${2:-grok-4}"
       shift 2
       ;;
+    --enable-claude-teams)
+      enable_claude_teams="${2:-false}"
+      shift 2
+      ;;
+    --claude-teams-member-cap)
+      claude_teams_member_cap="${2:-3}"
+      shift 2
+      ;;
+    --claude-teams-max-invocations)
+      claude_teams_max_invocations="${2:-1}"
+      shift 2
+      ;;
     --format)
       format="${2:-json}"
       shift 2
@@ -107,13 +122,13 @@ Options:
   --engine VALUE                    subscription|harness|api
   --main-provider VALUE             codex|claude
   --assist-provider VALUE           claude|codex|none
-  --multi-agent-mode VALUE          standard|enhanced|max
+  --multi-agent-mode VALUE          standard|enhanced|max|small|medium|large|critical
   --glm-subagent-mode VALUE         off|paired|symphony
   --wants-gemini VALUE              true|false
   --wants-xai VALUE                 true|false
   --allow-glm-in-subscription VALUE true|false (local hybrid mode switch)
   --dual-main-signal VALUE          true|false (include both codex/claude main signal lanes)
-  --codex-main-model VALUE          default: gpt-5-codex
+  --codex-main-model VALUE          default: gpt-5.4
   --codex-multi-agent-model VALUE   default: gpt-5.3-codex-spark
   --claude-opus-model VALUE         default: claude-sonnet-4-6
   --claude-sonnet4-model VALUE      default: claude-sonnet-4-6
@@ -121,6 +136,10 @@ Options:
   --glm-model VALUE                 default: glm-5.0
   --gemini-model VALUE              default: gemini-3.1-pro
   --xai-model VALUE                 default: grok-4
+  --enable-claude-teams VALUE       true|false
+  --claude-teams-member-cap VALUE   default: 3
+  --claude-teams-max-invocations VALUE
+                                    default: 1
   --format VALUE                    json (default) | env
 
 Output (json):
@@ -155,9 +174,20 @@ if [[ "${assist_provider}" != "claude" && "${assist_provider}" != "codex" && "${
   assist_provider="none"
 fi
 multi_agent_mode="$(lower_trim "${multi_agent_mode}")"
-if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
-  multi_agent_mode="standard"
-fi
+case "${multi_agent_mode}" in
+  small|standard)
+    multi_agent_mode="standard"
+    ;;
+  medium|enhanced)
+    multi_agent_mode="enhanced"
+    ;;
+  large|critical|max)
+    multi_agent_mode="max"
+    ;;
+  *)
+    multi_agent_mode="standard"
+    ;;
+esac
 glm_subagent_mode="$(lower_trim "${glm_subagent_mode}")"
 if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
   glm_subagent_mode="paired"
@@ -166,6 +196,20 @@ wants_gemini="$(normalize_bool "${wants_gemini}")"
 wants_xai="$(normalize_bool "${wants_xai}")"
 allow_glm_in_subscription="$(normalize_bool "${allow_glm_in_subscription}")"
 dual_main_signal="$(normalize_bool "${dual_main_signal}")"
+enable_claude_teams="$(normalize_bool "${enable_claude_teams}")"
+claude_teams_member_cap="$(printf '%s' "${claude_teams_member_cap}" | tr -cd '0-9')"
+if [[ -z "${claude_teams_member_cap}" ]]; then
+  claude_teams_member_cap="3"
+fi
+if (( 10#${claude_teams_member_cap} < 2 )); then
+  claude_teams_member_cap="2"
+elif (( 10#${claude_teams_member_cap} > 4 )); then
+  claude_teams_member_cap="4"
+fi
+claude_teams_max_invocations="$(printf '%s' "${claude_teams_max_invocations}" | tr -cd '0-9')"
+if [[ -z "${claude_teams_max_invocations}" || 10#${claude_teams_max_invocations} != 1 ]]; then
+  claude_teams_max_invocations="1"
+fi
 # shellcheck source=safe-eval-policy.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
@@ -182,7 +226,7 @@ if [[ -x "${model_policy_script}" ]]; then
   claude_sonnet6_model="${claude_model}"
 else
   if [[ -z "${codex_main_model}" ]]; then
-    codex_main_model="gpt-5-codex"
+    codex_main_model="gpt-5.4"
   fi
   if [[ -z "${codex_multi_agent_model}" ]]; then
     codex_multi_agent_model="gpt-5.3-codex-spark"
@@ -238,6 +282,9 @@ matrix="$(jq -cn \
   --arg glm_model "${glm_model}" \
   --arg gemini_model "${gemini_model}" \
   --arg xai_model "${xai_model}" \
+  --argjson enable_claude_teams "$( [[ "${enable_claude_teams}" == "true" ]] && echo true || echo false )" \
+  --argjson claude_teams_member_cap "${claude_teams_member_cap}" \
+  --argjson claude_teams_max_invocations "${claude_teams_max_invocations}" \
   --argjson wants_gemini "$( [[ "${wants_gemini}" == "true" ]] && echo true || echo false )" \
   --argjson wants_xai "$( [[ "${wants_xai}" == "true" ]] && echo true || echo false )" \
   --argjson use_glm_baseline "$( [[ "${use_glm_baseline}" == "true" ]] && echo true || echo false )" \
@@ -300,6 +347,10 @@ matrix="$(jq -cn \
   # Assist lanes
   | if $assist_provider == "claude" then
       .include += [L("claude-opus-assist";"claude";claude_api;$claude_opus_model;"orchestration-assistant")]
+    else . end
+  | if $enable_claude_teams then
+      .include += [Ld("claude-teams-executor";"claude";claude_api;$claude_opus_model;"teams-executor";
+        ("Claude Teams bounded release. member_cap=" + ($claude_teams_member_cap|tostring) + " max_invocations=" + ($claude_teams_max_invocations|tostring) + ". Return council handoff-ready JSON only."))]
     else . end
   | if $assist_provider == "claude" and $engine != "subscription" then
       .include += [

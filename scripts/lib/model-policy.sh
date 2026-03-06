@@ -72,7 +72,8 @@ done
 
 source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
-LATEST_CODEX_MAIN="gpt-5-codex"
+LATEST_CODEX_MAIN="gpt-5.4"
+FALLBACK_CODEX_MAIN="gpt-5-codex"
 LATEST_CODEX_MULTI_DEFAULT="gpt-5.3-codex-spark"
 LATEST_CLAUDE_DEFAULT="claude-sonnet-4-6"
 LATEST_GLM_DEFAULT="glm-5.0"
@@ -99,9 +100,13 @@ normalized_xai="${LATEST_XAI_DEFAULT}"
 adjusted="false"
 adjustments=()
 
-if [[ -n "${codex_main_raw}" && "${codex_main_raw}" != "${LATEST_CODEX_MAIN}" ]]; then
-  adjusted="true"
-  adjustments+=("codex_main:${codex_main_raw}->${LATEST_CODEX_MAIN}")
+if [[ -n "${codex_main_raw}" ]]; then
+  if [[ "${codex_main_raw}" == "${LATEST_CODEX_MAIN}" || "${codex_main_raw}" == "${FALLBACK_CODEX_MAIN}" ]]; then
+    normalized_codex_main="${codex_main_raw}"
+  else
+    adjusted="true"
+    adjustments+=("codex_main:${codex_main_raw}->${LATEST_CODEX_MAIN}")
+  fi
 fi
 
 if [[ -n "${codex_multi_raw}" ]]; then

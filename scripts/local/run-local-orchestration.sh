@@ -11,12 +11,12 @@ ISSUE_NUMBER="${ISSUE_NUMBER:-}"
 OUT_DIR="${OUT_DIR:-.fugue/local-run}"
 MAIN_PROVIDER="${MAIN_PROVIDER:-codex}"
 ASSIST_PROVIDER="${ASSIST_PROVIDER:-claude}"
-MULTI_AGENT_MODE="${MULTI_AGENT_MODE:-standard}"
+MULTI_AGENT_MODE="${MULTI_AGENT_MODE:-auto}"
 GLM_SUBAGENT_MODE="${GLM_SUBAGENT_MODE:-paired}"
 MAX_PARALLEL="${MAX_PARALLEL:-6}"
 MIN_CONSENSUS_LANES="${MIN_CONSENSUS_LANES:-${FUGUE_MIN_CONSENSUS_LANES:-6}}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
-CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5-codex}"
+CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5.4}"
 CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
 WITH_LINKED_SYSTEMS="${WITH_LINKED_SYSTEMS:-false}"
 LINKED_MODE="${LINKED_MODE:-smoke}"
@@ -42,8 +42,8 @@ Options:
   --main <codex|claude>  Main orchestrator (default: codex)
   --assist <claude|codex|none>
                          Assist orchestrator (default: claude)
-  --mode <standard|enhanced|max>
-                         Multi-agent mode (default: standard)
+  --mode <auto|small|medium|large|critical|standard|enhanced|max>
+                         Multi-agent mode (default: auto; routed from workflow risk policy)
   --glm-mode <off|paired|symphony>
                          GLM subagent fan-out (default: paired)
   --max-parallel <n>     Max parallel lanes (default: 6)
@@ -93,6 +93,28 @@ Environment:
   FUGUE_CLAUDE_SESSION_HANDOFF
                          true|false (default: true; persist claude lane session IDs for resume/handoff)
 EOF
+}
+
+normalize_multi_agent_mode() {
+  local raw
+  raw="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  case "${raw}" in
+    auto|"")
+      echo "auto"
+      ;;
+    small|standard)
+      echo "standard"
+      ;;
+    medium|enhanced)
+      echo "enhanced"
+      ;;
+    large|critical|max)
+      echo "max"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -215,8 +237,9 @@ if [[ "${ASSIST_PROVIDER}" != "claude" && "${ASSIST_PROVIDER}" != "codex" && "${
   echo "Error: --assist must be claude|codex|none." >&2
   exit 2
 fi
-if [[ "${MULTI_AGENT_MODE}" != "standard" && "${MULTI_AGENT_MODE}" != "enhanced" && "${MULTI_AGENT_MODE}" != "max" ]]; then
-  echo "Error: --mode must be standard|enhanced|max." >&2
+MULTI_AGENT_MODE="$(normalize_multi_agent_mode "${MULTI_AGENT_MODE}")"
+if [[ -z "${MULTI_AGENT_MODE}" ]]; then
+  echo "Error: --mode must be auto|small|medium|large|critical|standard|enhanced|max." >&2
   exit 2
 fi
 if [[ "${GLM_SUBAGENT_MODE}" != "off" && "${GLM_SUBAGENT_MODE}" != "paired" && "${GLM_SUBAGENT_MODE}" != "symphony" ]]; then
@@ -254,6 +277,7 @@ HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
 MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
 MODEL_POLICY="${ROOT_DIR}/scripts/lib/model-policy.sh"
 WORKFLOW_RISK_POLICY="${ROOT_DIR}/scripts/lib/workflow-risk-policy.sh"
+CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
@@ -265,6 +289,10 @@ if [[ ! -x "${MODEL_POLICY}" ]]; then
 fi
 if [[ ! -x "${WORKFLOW_RISK_POLICY}" ]]; then
   echo "Error: required workflow risk policy script is missing or not executable: ${WORKFLOW_RISK_POLICY}" >&2
+  exit 2
+fi
+if [[ ! -x "${CLAUDE_TEAMS_POLICY}" ]]; then
+  echo "Error: required Claude Teams policy script is missing or not executable: ${CLAUDE_TEAMS_POLICY}" >&2
   exit 2
 fi
 if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
@@ -411,6 +439,14 @@ safe_eval_policy "${WORKFLOW_RISK_POLICY}" \
 issue_risk_tier="${risk_tier}"
 issue_risk_score="${risk_score}"
 issue_risk_reasons="${risk_reasons}"
+issue_task_size_tier="${task_size_tier}"
+issue_multi_agent_mode_hint="$(normalize_multi_agent_mode "${multi_agent_mode_hint:-}")"
+eval "$("${CLAUDE_TEAMS_POLICY}" \
+  --task-size-tier "${issue_task_size_tier}" \
+  --risk-tier "${issue_risk_tier}" \
+  --claude-state "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" \
+  --title "${ISSUE_TITLE}" \
+  --body "${ISSUE_BODY}")"
 claude_session_handoff="$(echo "${FUGUE_CLAUDE_SESSION_HANDOFF:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${claude_session_handoff}" != "true" ]]; then
   claude_session_handoff="false"
@@ -421,12 +457,19 @@ if [[ "${claude_session_handoff}" == "true" ]]; then
 fi
 
 matrix_file="${RUN_DIR}/matrix.json"
+resolved_multi_agent_mode="${MULTI_AGENT_MODE}"
+if [[ "${resolved_multi_agent_mode}" == "auto" ]]; then
+  resolved_multi_agent_mode="${issue_multi_agent_mode_hint}"
+fi
+if [[ -z "${resolved_multi_agent_mode}" || "${resolved_multi_agent_mode}" == "auto" ]]; then
+  resolved_multi_agent_mode="standard"
+fi
 dual_main_signal_raw="$(echo "${FUGUE_DUAL_MAIN_SIGNAL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${dual_main_signal_raw}" == "true" ]]; then
   dual_main_signal="true"
 elif [[ "${dual_main_signal_raw}" == "false" ]]; then
   dual_main_signal="false"
-elif [[ "${MULTI_AGENT_MODE}" == "max" ]]; then
+elif [[ "${resolved_multi_agent_mode}" == "max" ]]; then
   dual_main_signal="true"
 else
   dual_main_signal="false"
@@ -435,9 +478,12 @@ matrix_payload="$("${MATRIX_BUILDER}" \
   --engine "subscription" \
   --main-provider "${MAIN_PROVIDER}" \
   --assist-provider "${ASSIST_PROVIDER}" \
-  --multi-agent-mode "${MULTI_AGENT_MODE}" \
+  --multi-agent-mode "${resolved_multi_agent_mode}" \
   --glm-subagent-mode "${GLM_SUBAGENT_MODE}" \
   --dual-main-signal "${dual_main_signal}" \
+  --enable-claude-teams "${claude_teams_allowed:-false}" \
+  --claude-teams-member-cap "${claude_teams_member_cap:-3}" \
+  --claude-teams-max-invocations "${claude_teams_max_invocations:-1}" \
   --allow-glm-in-subscription "true" \
   --wants-gemini "false" \
   --wants-xai "false" \
@@ -456,7 +502,7 @@ if (( lanes_total < MIN_CONSENSUS_LANES )); then
   echo "Error: resolved lane count (${lanes_total}) is below minimum consensus floor (${MIN_CONSENSUS_LANES})." >&2
   exit 2
 fi
-echo "Running local orchestration: issue=${ISSUE_NUMBER} lanes=${lanes_total} mode=${MULTI_AGENT_MODE} glm_mode=${GLM_SUBAGENT_MODE} dual_main=${dual_main_signal}" >&2
+echo "Running local orchestration: issue=${ISSUE_NUMBER} lanes=${lanes_total} mode=${resolved_multi_agent_mode} task_size=${issue_task_size_tier} glm_mode=${GLM_SUBAGENT_MODE} dual_main=${dual_main_signal} claude_teams=${claude_teams_allowed:-false}" >&2
 
 lane_jobs_file="${RUN_DIR}/lane-jobs.jsonl"
 jq -c '.include[]' "${matrix_file}" > "${lane_jobs_file}"
@@ -810,7 +856,7 @@ jq -n \
   --arg run_dir "${RUN_DIR}" \
   --arg main "${MAIN_PROVIDER}" \
   --arg assist "${ASSIST_PROVIDER}" \
-  --arg mode "${MULTI_AGENT_MODE}" \
+  --arg mode "${resolved_multi_agent_mode}" \
   --arg glm_mode "${GLM_SUBAGENT_MODE}" \
   --argjson lanes "${lanes_total}" \
   --argjson min_consensus_lanes "${MIN_CONSENSUS_LANES}" \
@@ -832,6 +878,7 @@ jq -n \
   --arg issue_risk_tier "${issue_risk_tier}" \
   --arg issue_risk_score "${issue_risk_score}" \
   --arg issue_risk_reasons "${issue_risk_reasons}" \
+  --arg issue_task_size_tier "${issue_task_size_tier}" \
   --arg local_ambiguity_signal "${local_ambiguity_signal}" \
   --arg complex_claude_sub_required "${complex_claude_sub_required}" \
   --arg complex_claude_sub_reason "${complex_claude_sub_reason}" \
@@ -875,6 +922,7 @@ jq -n \
     issue_risk_tier:$issue_risk_tier,
     issue_risk_score:($issue_risk_score|tonumber? // 0),
     issue_risk_reasons:$issue_risk_reasons,
+    issue_task_size_tier:$issue_task_size_tier,
     local_ambiguity_signal:($local_ambiguity_signal=="true"),
     complex_claude_sub_required:($complex_claude_sub_required=="true"),
     complex_claude_sub_reason:$complex_claude_sub_reason,
@@ -900,7 +948,9 @@ cat > "${summary_md}" <<EOF
 - issue context source: ${issue_context_source}
 - main orchestrator: ${MAIN_PROVIDER}
 - assist orchestrator: ${ASSIST_PROVIDER}
-- multi-agent mode: ${MULTI_AGENT_MODE}
+- multi-agent mode: ${resolved_multi_agent_mode}
+- task size tier: ${issue_task_size_tier}
+- claude teams: ${claude_teams_allowed:-false} (${claude_teams_reason:-none}, member_cap=${claude_teams_member_cap:-3}, max_invocations=${claude_teams_max_invocations:-1})
 - glm subagent mode: ${GLM_SUBAGENT_MODE}
 - lanes configured: ${lanes_total}
 - minimum consensus lanes: ${MIN_CONSENSUS_LANES}

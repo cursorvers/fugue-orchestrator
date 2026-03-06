@@ -162,11 +162,22 @@ stripe_smoke() {
 # --- Smoke Test ---
 
 run_smoke() {
-  local results=()
   local supabase_result stripe_result
 
-  supabase_result="$(supabase_smoke 2>/dev/null || echo '{"service":"supabase","status":"error"}')"
-  stripe_result="$(stripe_smoke 2>/dev/null || echo '{"service":"stripe","status":"error"}')"
+  if supabase_result="$(supabase_smoke 2>/dev/null)"; then
+    :
+  else
+    if [[ -z "${supabase_result:-}" ]]; then
+      supabase_result='{"service":"supabase","status":"error"}'
+    fi
+  fi
+  if stripe_result="$(stripe_smoke 2>/dev/null)"; then
+    :
+  else
+    if [[ -z "${stripe_result:-}" ]]; then
+      stripe_result='{"service":"stripe","status":"error"}'
+    fi
+  fi
 
   # Count successful calls from results (subshells don't propagate MCP_CALL_COUNT).
   local smoke_count=0

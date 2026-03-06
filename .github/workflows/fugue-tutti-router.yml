@@ -28,7 +28,7 @@ on:
         type: string
         default: "false"
       multi_agent_mode_override:
-        description: "Override multi-agent mode (standard|enhanced|max)"
+        description: "Override multi-agent mode (small|medium|large|critical|standard|enhanced|max)"
         required: false
         type: string
         default: ""
@@ -42,6 +42,31 @@ on:
         required: false
         type: string
         default: ""
+      task_size_tier:
+        description: "Task size tier inferred by caller (small|medium|large|critical)"
+        required: false
+        type: string
+        default: ""
+      claude_teams_allowed:
+        description: "Enable bounded Claude Teams executor lane"
+        required: false
+        type: string
+        default: "false"
+      claude_teams_member_cap:
+        description: "Bounded Claude Teams member cap"
+        required: false
+        type: string
+        default: "3"
+      claude_teams_max_invocations:
+        description: "Max Claude Teams invocations per task"
+        required: false
+        type: string
+        default: "1"
+      handoff_target:
+        description: "Sovereign handoff target (kernel|fugue-bridge)"
+        required: false
+        type: string
+        default: "kernel"
       ambiguity_translation_gate:
         description: "true when caller ambiguity/translation gate requested Claude sub attention"
         required: false
@@ -119,6 +144,9 @@ on:
       resolved_multi_agent_mode:
         description: "resolved multi-agent mode after policy/override resolution"
         value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode }}
+      resolved_task_size_tier:
+        description: "resolved task size tier for this run"
+        value: ${{ jobs.resolve-orchestrator.outputs.task_size_tier }}
       resolved_multi_agent_mode_source:
         description: "where the resolved multi-agent mode came from"
         value: ${{ jobs.resolve-orchestrator.outputs.multi_agent_mode_source }}
@@ -476,7 +504,7 @@ jobs:
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
-          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
@@ -548,7 +576,7 @@ jobs:
           if [[ "${claude_max_plan}" != "true" ]]; then
             claude_max_plan="false"
           fi
-          CODEX_MAIN_MODEL="gpt-5-codex"
+          CODEX_MAIN_MODEL="gpt-5.4"
           if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex)$ ]]; then
             CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
           fi
@@ -719,7 +747,7 @@ jobs:
 
           if [[ "${PROVIDER}" == "codex" ]]; then
             # Prefer latest Codex family + configured repository defaults.
-            candidates=("${MODEL}" "${CODEX_MAIN_MODEL}" "${CODEX_MULTI_AGENT_MODEL}" "gpt-5-codex" "gpt-5" "gpt-4.1")
+            candidates=("${MODEL}" "${CODEX_MAIN_MODEL}" "${CODEX_MULTI_AGENT_MODEL}" "gpt-5.4" "gpt-5-codex" "gpt-5" "gpt-4.1")
             for m in "${candidates[@]}"; do
               chosen_model="${m}"
               req="$(jq -n \
@@ -1155,6 +1183,8 @@ jobs:
           MAIN_SIGNAL_LANES: ${{ needs.resolve-orchestrator.outputs.main_signal_lanes }}
           ASSIST_PROVIDER_REQUESTED: ${{ needs.resolve-orchestrator.outputs.assist_provider_requested }}
           ASSIST_PROVIDER: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
+          HANDOFF_TARGET: ${{ inputs.handoff_target || 'kernel' }}
+          TASK_SIZE_TIER: ${{ needs.resolve-orchestrator.outputs.task_size_tier }}
           MULTI_AGENT_MODE: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
           MULTI_AGENT_MODE_SOURCE: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
           GLM_SUBAGENT_MODE: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}
@@ -1269,6 +1299,7 @@ jobs:
       assist_adjustment_reason: ${{ steps.resolve.outputs.assist_adjustment_reason }}
       main_signal_lane: ${{ steps.resolve.outputs.main_signal_lane }}
       main_signal_lanes: ${{ steps.resolve.outputs.main_signal_lanes }}
+      task_size_tier: ${{ steps.resolve.outputs.task_size_tier }}
       expected_lanes: ${{ steps.resolve.outputs.expected_lanes }}
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
     steps:
@@ -1304,7 +1335,7 @@ jobs:
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
-          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'standard' }}
@@ -1333,8 +1364,32 @@ jobs:
           HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          TASK_SIZE_TIER_INPUT: ${{ inputs.task_size_tier }}
+          CLAUDE_TEAMS_ALLOWED: ${{ inputs.claude_teams_allowed || 'false' }}
+          CLAUDE_TEAMS_MEMBER_CAP: ${{ inputs.claude_teams_member_cap || '3' }}
+          CLAUDE_TEAMS_MAX_INVOCATIONS: ${{ inputs.claude_teams_max_invocations || '1' }}
+          HANDOFF_TARGET: ${{ inputs.handoff_target || 'kernel' }}
         run: |
           set -euo pipefail
+
+          normalize_multi_agent_mode() {
+            local raw
+            raw="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            case "${raw}" in
+              small|standard)
+                echo "standard"
+                ;;
+              medium|enhanced)
+                echo "enhanced"
+                ;;
+              large|critical|max)
+                echo "max"
+                ;;
+              *)
+                echo ""
+                ;;
+            esac
+          }
 
           gh_api_retry() {
             local endpoint="$1"
@@ -1477,8 +1532,51 @@ jobs:
               assist_claude_fallback_reason="${assist_adjustment_reason}"
             fi
           fi
+          handoff_target="$(echo "${HANDOFF_TARGET:-kernel}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${handoff_target}" != "fugue-bridge" ]]; then
+            handoff_target="kernel"
+          fi
+          legacy_bridge_active="false"
+          if [[ "${handoff_target}" == "fugue-bridge" ]]; then
+            legacy_bridge_active="true"
+          fi
+          task_size_tier_input="$(echo "${TASK_SIZE_TIER_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_teams_allowed="$(echo "${CLAUDE_TEAMS_ALLOWED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_teams_allowed}" != "true" ]]; then
+            claude_teams_allowed="false"
+          fi
+          claude_teams_member_cap="$(printf '%s' "${CLAUDE_TEAMS_MEMBER_CAP:-3}" | tr -cd '0-9')"
+          if [[ -z "${claude_teams_member_cap}" ]]; then
+            claude_teams_member_cap="3"
+          fi
+          claude_teams_max_invocations="$(printf '%s' "${CLAUDE_TEAMS_MAX_INVOCATIONS:-1}" | tr -cd '0-9')"
+          if [[ -z "${claude_teams_max_invocations}" ]]; then
+            claude_teams_max_invocations="1"
+          fi
+          risk_policy_task_size_tier=""
+          risk_policy_mode_hint=""
+          if [[ "${legacy_bridge_active}" != "true" && -x "${orchestrator_lib_dir}/workflow-risk-policy.sh" ]]; then
+            eval "$(
+              bash "${orchestrator_lib_dir}/workflow-risk-policy.sh" \
+                --title "${ISSUE_TITLE}" \
+                --body "${ISSUE_BODY}" \
+                --labels "" \
+                --has-implement "false" \
+                --orchestration-profile "${execution_profile}"
+            )"
+            risk_policy_task_size_tier="${task_size_tier}"
+            risk_policy_mode_hint="$(normalize_multi_agent_mode "${multi_agent_mode_hint:-}")"
+          fi
+          task_size_tier="${task_size_tier_input}"
+          if [[ "${task_size_tier}" != "small" && "${task_size_tier}" != "medium" && "${task_size_tier}" != "large" && "${task_size_tier}" != "critical" ]]; then
+            if [[ "${legacy_bridge_active}" == "true" ]]; then
+              task_size_tier="small"
+            else
+              task_size_tier="${risk_policy_task_size_tier:-small}"
+            fi
+          fi
           multi_agent_mode="$(echo "${MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          mode_override="$(echo "${MULTI_AGENT_MODE_OVERRIDE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          mode_override="$(normalize_multi_agent_mode "${MULTI_AGENT_MODE_OVERRIDE:-}")"
           mode_lock="$(echo "${MULTI_AGENT_MODE_LOCK:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           multi_agent_mode_source="repo-default"
           if [[ "${mode_lock}" != "true" ]]; then
@@ -1504,35 +1602,23 @@ jobs:
               }
             ')"
             if [[ -z "${body_multi_agent_mode}" ]]; then
-              body_multi_agent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*multi[[:space:]_-]*agent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(standard|enhanced|max|auto)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+              body_multi_agent_mode="$(echo "${ISSUE_BODY}" | sed -nE 's/^[[:space:]]*multi[[:space:]_-]*agent[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(small|medium|large|critical|standard|enhanced|max|auto)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
             fi
             if [[ "${body_multi_agent_mode}" == "auto" ]]; then
               body_multi_agent_mode=""
             fi
             if [[ -n "${body_multi_agent_mode}" ]]; then
-              multi_agent_mode="${body_multi_agent_mode}"
+              multi_agent_mode="$(normalize_multi_agent_mode "${body_multi_agent_mode}")"
               multi_agent_mode_source="issue-body"
             fi
           fi
-          if [[ "${multi_agent_mode_source}" == "repo-default" ]]; then
-            heuristic_mode=""
-            if echo "${text}" | grep -Eqi '(大規模|全面|全体|refactor|rewrite|migration|アーキテクチャ|全面刷新|リライト)'; then
-              heuristic_mode="max"
-            elif echo "${text}" | grep -Eqi '(architecture|security|performance|concurrency|database|schema|workflow|ci|gha|infra|統合|設計|移行)'; then
-              heuristic_mode="enhanced"
+          if [[ "${multi_agent_mode_source}" == "repo-default" && "${legacy_bridge_active}" != "true" ]]; then
+            if [[ -n "${risk_policy_mode_hint}" ]]; then
+              multi_agent_mode="${risk_policy_mode_hint}"
+              multi_agent_mode_source="task-size-tier(${task_size_tier})"
             fi
-            text_len="$(printf '%s' "${text}" | wc -c | tr -d ' ')"
-            if [[ -z "${heuristic_mode}" ]]; then
-              if (( text_len > 1400 )); then
-                heuristic_mode="enhanced"
-              elif (( text_len > 0 && text_len < 280 )); then
-                heuristic_mode="standard"
-              fi
-            fi
-            if [[ -n "${heuristic_mode}" ]]; then
-              multi_agent_mode="${heuristic_mode}"
-              multi_agent_mode_source="complexity-heuristic"
-            fi
+          elif [[ "${legacy_bridge_active}" == "true" && "${multi_agent_mode_source}" == "repo-default" ]]; then
+            multi_agent_mode_source="legacy-bridge"
           fi
           if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
             multi_agent_mode="standard"
@@ -1605,14 +1691,17 @@ jobs:
               wants_xai="true"
             fi
           fi
-          codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ -z "${codex_main_model}" ]]; then
-            codex_main_model="gpt-5-codex"
-          fi
-          codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ -z "${codex_multi_agent_model}" ]]; then
-            codex_multi_agent_model="gpt-5.3-codex-spark"
-          fi
+          eval "$(
+            bash "${orchestrator_lib_dir}/model-policy.sh" \
+              --codex-main-model "${CODEX_MAIN_MODEL:-gpt-5.4}" \
+              --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" \
+              --claude-model "${CLAUDE_OPUS_MODEL}" \
+              --glm-model "${GLM_MODEL:-glm-5.0}" \
+              --gemini-model "${GEMINI_MODEL}" \
+              --gemini-fallback-model "gemini-3-flash" \
+              --xai-model "${XAI_MODEL}" \
+              --format env
+          )"
           glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${glm_model}" ]]; then
             glm_model="glm-5.0"
@@ -1626,6 +1715,9 @@ jobs:
             --glm-subagent-mode "${glm_subagent_mode}"
             --wants-gemini "${wants_gemini}"
             --wants-xai "${wants_xai}"
+            --enable-claude-teams "${claude_teams_allowed}"
+            --claude-teams-member-cap "${claude_teams_member_cap}"
+            --claude-teams-max-invocations "${claude_teams_max_invocations}"
             --allow-glm-in-subscription "${allow_glm_in_subscription}"
             --codex-main-model "${codex_main_model}"
             --codex-multi-agent-model "${codex_multi_agent_model}"

@@ -9,6 +9,7 @@ SYSTEMS="${SYSTEMS:-all}" # all|id1,id2
 OUT_DIR="${OUT_DIR:-.fugue/local-run}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-true}"
 MANIFEST_PATH="${MANIFEST_PATH:-config/integrations/local-systems.json}"
+INCLUDE_BUDGETED="${INCLUDE_BUDGETED:-false}"
 
 usage() {
   cat <<'EOF'
@@ -23,6 +24,7 @@ Options:
   --max-parallel <n>       Parallel adapter limit (default: 3)
   --out-dir <path>         Output directory (default: .fugue/local-run)
   --comment                Post summary comment to issue
+  --include-budgeted       Include budgeted systems during smoke runs
   -h, --help               Show help
 EOF
 }
@@ -57,6 +59,10 @@ while [[ $# -gt 0 ]]; do
       POST_ISSUE_COMMENT="true"
       shift 1
       ;;
+    --include-budgeted)
+      INCLUDE_BUDGETED="true"
+      shift 1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -80,6 +86,10 @@ fi
 if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
   echo "Error: --max-parallel must be a positive integer." >&2
   exit 2
+fi
+include_budgeted="$(echo "${INCLUDE_BUDGETED}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${include_budgeted}" != "true" ]]; then
+  include_budgeted="false"
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -110,6 +120,7 @@ SYSTEM_DIR="${RUN_DIR}/systems"
 mkdir -p "${SYSTEM_DIR}"
 
 selector='[ .systems[] | select(.enabled == true) ]'
+budgeted_skipped=0
 if [[ "${SYSTEMS}" != "all" ]]; then
   IFS=',' read -r -a requested <<< "${SYSTEMS}"
   requested_json="$(printf '%s\n' "${requested[@]}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | sed '/^$/d' | jq -R . | jq -s .)"
@@ -119,6 +130,11 @@ if [[ "${SYSTEMS}" != "all" ]]; then
     exit 2
   fi
   selector='[ .systems[] | select(.enabled == true and (.id as $id | $requested | index($id))) ]'
+fi
+
+if [[ "${SYSTEMS}" == "all" && "${MODE}" == "smoke" && "${include_budgeted}" != "true" ]]; then
+  selector='[ .systems[] | select(.enabled == true and .validation_mode != "budgeted") ]'
+  budgeted_skipped="$(jq '[ .systems[] | select(.enabled == true and .validation_mode == "budgeted") ] | length' "${manifest_file}")"
 fi
 
 selected_json="$(jq -c --argjson requested "${requested_json:-[]}" "${selector}" "${manifest_file}")"
@@ -243,6 +259,7 @@ cat > "${summary_md}" <<EOF
 - success: ${ok_count}
 - error: ${error_count}
 - status: ${overall_status}
+- budgeted skipped: ${budgeted_skipped}
 - run dir: ${RUN_DIR}
 EOF
 
@@ -256,6 +273,7 @@ jq -n \
   --argjson selected "${selected_count}" \
   --argjson success "${ok_count}" \
   --argjson error "${error_count}" \
+  --argjson budgeted_skipped "${budgeted_skipped}" \
   '{
     issue_number:($issue_number|tonumber),
     issue_url:$issue_url,
@@ -264,7 +282,8 @@ jq -n \
     status:$status,
     selected:$selected,
     success:$success,
-    error:$error
+    error:$error,
+    budgeted_skipped:$budgeted_skipped
   }' > "${integrated_json}"
 
 if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then

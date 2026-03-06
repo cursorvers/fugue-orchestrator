@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MANIFEST="${ROOT_DIR}/config/integrations/mcp-adapters.json"
+POLICY="${ROOT_DIR}/scripts/lib/mcp-adapter-policy.sh"
+
+fail() {
+  echo "[FAIL] $*" >&2
+  exit 1
+}
+
+pass() {
+  echo "[PASS] $*"
+}
+
+command -v jq >/dev/null 2>&1 || fail "missing command: jq"
+[[ -f "${MANIFEST}" ]] || fail "manifest not found: ${MANIFEST}"
+[[ -x "${POLICY}" ]] || fail "policy script not executable: ${POLICY}"
+
+jq -e '.adapters | type == "array" and length >= 2' "${MANIFEST}" >/dev/null || fail "manifest must contain adapter array with entries"
+pass "adapter count valid"
+
+dups="$(jq -r '.adapters | group_by(.id)[] | select(length > 1) | .[0].id' "${MANIFEST}")"
+[[ -z "${dups}" ]] || fail "duplicate adapter IDs: ${dups}"
+pass "adapter IDs unique"
+
+invalid="$(jq -r '
+  .adapters[]
+  | select(
+      (.access_mode | IN("rest-bridge","kernel-adapter","claude-session") | not)
+      or (.runtime_availability | IN("hybrid","adapter-backed","session-only") | not)
+      or (.control_plane | IN("kernel","claude") | not)
+      or (.kernel_compatible | type != "boolean")
+      or (.fallback_route | IN("none","manual","claude-session") | not)
+    )
+  | .id
+' "${MANIFEST}")"
+[[ -z "${invalid}" ]] || fail "invalid MCP adapter enum values: ${invalid}"
+pass "adapter enums valid"
+
+while IFS= read -r row; do
+  id="$(echo "${row}" | jq -r '.id')"
+  path_value="$(echo "${row}" | jq -r '.path')"
+  if [[ "${path_value}" == /* ]]; then
+    resolved_path="${path_value}"
+  else
+    resolved_path="${ROOT_DIR}/${path_value}"
+  fi
+  [[ -e "${resolved_path}" ]] || fail "adapter=${id} path missing: ${path_value}"
+done < <(jq -c '.adapters[]' "${MANIFEST}")
+pass "adapter paths exist"
+
+supabase_route="$("${POLICY}" --adapter supabase-rest-mcp --execution-engine subscription --session-provider none --format json)"
+[[ "$(echo "${supabase_route}" | jq -r '.route')" == "rest-bridge" ]] || fail "supabase-rest-mcp should resolve to rest-bridge"
+[[ "$(echo "${supabase_route}" | jq -r '.available')" == "true" ]] || fail "supabase-rest-mcp should be available"
+pass "rest bridge route valid"
+
+pencil_route="$("${POLICY}" --adapter pencil-session-mcp --execution-engine subscription --session-provider none --format json)"
+[[ "$(echo "${pencil_route}" | jq -r '.route')" == "kernel-adapter" ]] || fail "pencil-session-mcp should resolve to kernel-adapter"
+[[ "$(echo "${pencil_route}" | jq -r '.available')" == "true" ]] || fail "pencil-session-mcp should be available via kernel adapter"
+pass "pencil kernel adapter opens without claude session"
+
+excalidraw_route="$("${POLICY}" --adapter excalidraw-session-mcp --execution-engine local --session-provider none --format json)"
+[[ "$(echo "${excalidraw_route}" | jq -r '.route')" == "kernel-adapter" ]] || fail "excalidraw-session-mcp should resolve to kernel-adapter"
+[[ "$(echo "${excalidraw_route}" | jq -r '.available')" == "true" ]] || fail "excalidraw-session-mcp should be available via kernel adapter"
+pass "excalidraw kernel adapter opens without claude session"
+
+slack_route="$("${POLICY}" --adapter slack-session-mcp --execution-engine local --session-provider claude --format json)"
+[[ "$(echo "${slack_route}" | jq -r '.route')" == "claude-session" ]] || fail "slack-session-mcp should fall back to claude-session when session is active"
+[[ "$(echo "${slack_route}" | jq -r '.available')" == "true" ]] || fail "slack-session-mcp should be available with Claude session"
+pass "slack session fallback preserved"
+
+vercel_route="$(KERNEL_VERCEL_ADAPTER_ENABLED=true "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none --format json)"
+[[ "$(echo "${vercel_route}" | jq -r '.route')" == "kernel-adapter" ]] || fail "vercel-session-mcp should resolve to kernel-adapter when enabled"
+[[ "$(echo "${vercel_route}" | jq -r '.available')" == "true" ]] || fail "vercel-session-mcp kernel adapter should be available when enabled"
+pass "vercel kernel adapter opt-in works"
+
+echo "mcp adapter contract check passed"

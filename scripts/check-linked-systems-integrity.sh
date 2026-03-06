@@ -42,6 +42,24 @@ if [[ -n "${invalid_ids}" ]]; then
 fi
 pass "system IDs format valid"
 
+metadata_failures="$(jq -r '
+  .systems[]
+  | select(
+      (.kind | IN("content","knowledge","notify") | not)
+      or (.adapter_class | IN("shell") | not)
+      or (.authority | IN("artifact-only","service-adapter") | not)
+      or (.validation_mode | IN("smoke","budgeted") | not)
+      or (.contract_owner | IN("kernel-local") | not)
+      or (.preferred_lane | IN("codex","claude") | not)
+      or (.protected_interface | type != "boolean")
+    )
+  | .id
+' "${MANIFEST}")"
+if [[ -n "${metadata_failures}" ]]; then
+  fail "systems with invalid adapter metadata: ${metadata_failures}"
+fi
+pass "adapter metadata valid"
+
 while IFS= read -r row; do
   id="$(echo "${row}" | jq -r '.id')"
   adapter_rel="$(echo "${row}" | jq -r '.adapter')"
@@ -63,4 +81,3 @@ done < <(jq -c '.systems[]' "${MANIFEST}")
 
 pass "enabled adapters exist, are executable, and pass bash -n"
 echo "linked systems integrity check passed"
-

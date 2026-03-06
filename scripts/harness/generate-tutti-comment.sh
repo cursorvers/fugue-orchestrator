@@ -8,13 +8,14 @@ set -euo pipefail
 #
 # Required env vars: MAIN_PROVIDER, ASSIST_PROVIDER, MAIN_PROVIDER_REQUESTED,
 #   ASSIST_PROVIDER_REQUESTED, MAIN_SIGNAL_LANE, MAIN_SIGNAL_LANES,
-#   MULTI_AGENT_MODE, MULTI_AGENT_MODE_SOURCE, GLM_SUBAGENT_MODE,
-#   GLM_SUBAGENT_MODE_SOURCE, CI_EXECUTION_ENGINE, SUBSCRIPTION_OFFLINE_POLICY,
-#   RUN_AGENTS_RUNNER, RUN_AGENTS_RUNNER_JSON, EXECUTION_PROFILE,
-#   EXECUTION_PROFILE_REASON, CONTINUITY_ACTIVE, SELF_HOSTED_ONLINE_COUNT,
-#   SUBSCRIPTION_RUNNER_LABEL, STRICT_MAIN_CODEX_MODEL_EFFECTIVE,
-#   STRICT_OPUS_ASSIST_DIRECT_EFFECTIVE, ASSIST_ADJUSTED_BY_EXECUTION_PROFILE,
-#   ASSIST_ADJUSTMENT_REASON, EXPECTED_LANES, ISSUE_NUMBER,
+#   HANDOFF_TARGET, TASK_SIZE_TIER, MULTI_AGENT_MODE, MULTI_AGENT_MODE_SOURCE,
+#   GLM_SUBAGENT_MODE, GLM_SUBAGENT_MODE_SOURCE, CI_EXECUTION_ENGINE,
+#   SUBSCRIPTION_OFFLINE_POLICY, RUN_AGENTS_RUNNER, RUN_AGENTS_RUNNER_JSON,
+#   EXECUTION_PROFILE, EXECUTION_PROFILE_REASON, CONTINUITY_ACTIVE,
+#   SELF_HOSTED_ONLINE_COUNT, SUBSCRIPTION_RUNNER_LABEL,
+#   STRICT_MAIN_CODEX_MODEL_EFFECTIVE, STRICT_OPUS_ASSIST_DIRECT_EFFECTIVE,
+#   ASSIST_ADJUSTED_BY_EXECUTION_PROFILE, ASSIST_ADJUSTMENT_REASON,
+#   EXPECTED_LANES, ISSUE_NUMBER,
 #   MAIN_CLAUDE_FALLBACK_APPLIED, MAIN_CLAUDE_FALLBACK_REASON,
 #   ASSIST_CLAUDE_FALLBACK_APPLIED, ASSIST_CLAUDE_FALLBACK_REASON,
 #   CLAUDE_PRESSURE_GUARD_APPLIED, CLAUDE_PRESSURE_GUARD_REASON
@@ -100,7 +101,10 @@ integrated_meta="$(jq -cn \
   --arg issue_number "${ISSUE_NUMBER}" \
   --arg main "${MAIN_PROVIDER}" \
   --arg assist "${ASSIST_PROVIDER}" \
+  --arg handoff_target "${HANDOFF_TARGET}" \
+  --arg task_size_tier "${TASK_SIZE_TIER}" \
   --arg multi_agent_mode "${MULTI_AGENT_MODE}" \
+  --arg multi_agent_mode_source "${MULTI_AGENT_MODE_SOURCE}" \
   --arg glm_subagent_mode "${GLM_SUBAGENT_MODE}" \
   --arg profile "${EXECUTION_PROFILE}" \
   --arg runner "${RUN_AGENTS_RUNNER}" \
@@ -123,7 +127,10 @@ integrated_meta="$(jq -cn \
     issue_number:$issue_number,
     main_orchestrator_resolved:$main,
     assist_orchestrator_resolved:$assist,
+    handoff_target:$handoff_target,
+    task_size_tier:$task_size_tier,
     multi_agent_mode:$multi_agent_mode,
+    multi_agent_mode_source:$multi_agent_mode_source,
     glm_subagent_mode:$glm_subagent_mode,
     execution_profile:$profile,
     run_agents_runner:$runner,
@@ -153,6 +160,8 @@ cat > integrated-comment.md <<COMMENT_EOF
 - main orchestrator signal lanes: ${MAIN_SIGNAL_LANES}
 - assist orchestrator requested: ${ASSIST_PROVIDER_REQUESTED}
 - assist orchestrator resolved: ${ASSIST_PROVIDER}
+- handoff target: ${HANDOFF_TARGET}
+- task size tier: ${TASK_SIZE_TIER}
 - multi-agent mode: ${MULTI_AGENT_MODE}
 - multi-agent mode source: ${MULTI_AGENT_MODE_SOURCE}
 - glm subagent mode: ${GLM_SUBAGENT_MODE}

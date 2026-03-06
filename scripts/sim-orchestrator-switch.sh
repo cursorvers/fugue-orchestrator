@@ -4,6 +4,9 @@ set -euo pipefail
 # Deterministic orchestration simulation.
 # This does not call external APIs or mutate GitHub.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 refinement_cycles="${FUGUE_IMPLEMENT_REFINEMENT_CYCLES:-3}"
 refinement_cycles="$(echo "${refinement_cycles}" | tr -cd '0-9')"
 if [[ -z "${refinement_cycles}" ]]; then
@@ -43,7 +46,7 @@ glm_subagent_mode_default="$(echo "${FUGUE_GLM_SUBAGENT_MODE:-paired}" | tr '[:u
 if [[ "${glm_subagent_mode_default}" != "off" && "${glm_subagent_mode_default}" != "paired" && "${glm_subagent_mode_default}" != "symphony" ]]; then
   glm_subagent_mode_default="paired"
 fi
-codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 sim_codex_spark_only="$(echo "${FUGUE_SIM_CODEX_SPARK_ONLY:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -54,9 +57,9 @@ sim_codex_spark_model="$(echo "${FUGUE_SIM_CODEX_SPARK_MODEL:-gpt-5.3-codex-spar
 if ! [[ "${sim_codex_spark_model}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
   sim_codex_spark_model="gpt-5.3-codex-spark"
 fi
-model_policy_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)/model-policy.sh"
+model_policy_script="${ROOT_DIR}/scripts/lib/model-policy.sh"
 # shellcheck source=lib/safe-eval-policy.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)/safe-eval-policy.sh"
+source "${ROOT_DIR}/scripts/lib/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
   safe_eval_policy "${model_policy_script}" \
     --codex-main-model "${codex_main_model_default}" \
@@ -92,9 +95,9 @@ execution_provider_default="$(echo "${FUGUE_EXECUTION_PROVIDER:-}" | tr '[:upper
 if [[ "${execution_provider_default}" != "codex" && "${execution_provider_default}" != "claude" ]]; then
   execution_provider_default=""
 fi
-default_main_provider="$(echo "${FUGUE_MAIN_ORCHESTRATOR_PROVIDER:-claude}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+default_main_provider="$(echo "${FUGUE_MAIN_ORCHESTRATOR_PROVIDER:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${default_main_provider}" != "codex" && "${default_main_provider}" != "claude" ]]; then
-  default_main_provider="claude"
+  default_main_provider="codex"
 fi
 strict_main_requested="$(echo "${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_main_requested}" != "true" ]]; then
@@ -137,7 +140,7 @@ run_case() {
   local emergency_mode="${11:-false}"
   local subscription_offline_policy="${12:-${subscription_offline_policy_default}}"
 
-  safe_eval_policy scripts/lib/orchestrator-policy.sh \
+  safe_eval_policy "${ROOT_DIR}/scripts/lib/orchestrator-policy.sh" \
       --main "${requested_main}" \
       --assist "${requested_assist}" \
       --default-main "${default_main_provider}" \
@@ -160,7 +163,7 @@ run_case() {
     note_parts+=("pressure:${pressure_guard_reason}")
   fi
 
-  safe_eval_policy scripts/lib/execution-profile-policy.sh \
+  safe_eval_policy "${ROOT_DIR}/scripts/lib/execution-profile-policy.sh" \
       --requested-engine "${requested_engine}" \
       --main-provider "${resolved_main}" \
       --assist-provider "${resolved_assist}" \
@@ -187,7 +190,7 @@ run_case() {
   fi
 
   local matrix_payload
-  matrix_payload="$(scripts/lib/build-agent-matrix.sh \
+  matrix_payload="$("${ROOT_DIR}/scripts/lib/build-agent-matrix.sh" \
     --engine "${effective_engine}" \
     --main-provider "${resolved_main}" \
     --assist-provider "${effective_assist}" \
