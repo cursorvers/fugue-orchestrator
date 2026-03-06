@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CANARY_SCRIPT="${ROOT_DIR}/scripts/harness/run-canary.sh"
 CANARY_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-orchestrator-canary.yml"
 ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml"
+TASK_ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-task-router.yml"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
 
 if [[ ! -x "${CANARY_SCRIPT}" ]]; then
@@ -42,6 +43,10 @@ grep -q "TASK_SIZE_TIER" "${COMMENT_SCRIPT}" || {
 }
 grep -q "HANDOFF_TARGET: .*inputs.handoff_target" "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow missing handoff target wiring into comment generation" >&2
+  exit 1
+}
+grep -q "canary-dispatch-owned" "${TASK_ROUTER_WORKFLOW}" || {
+  echo "FAIL: task router should skip canary issues owned by run-canary dispatch" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"

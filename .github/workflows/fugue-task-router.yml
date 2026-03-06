@@ -83,6 +83,10 @@ jobs:
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           AUTHOR_ASSOC="$(echo "${issue_json}" | jq -r '.author_association // "NONE"')"
+          IS_CANARY="false"
+          if printf '%s\n%s\n' "${TITLE}" "${BODY}" | grep -Eiq '^\[canary|^##[[:space:]]*Canary'; then
+            IS_CANARY="true"
+          fi
 
           # Trust gate (write/maintain/admin). For issue comments, evaluate the
           # comment actor (triggering user), not the issue author.
@@ -106,7 +110,10 @@ jobs:
 
           SHOULD_RUN="true"
           SKIP_REASON=""
-          if [[ "${HAS_FUGUE}" != "true" ]]; then
+          if [[ "${IS_CANARY}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="canary-dispatch-owned"
+          elif [[ "${HAS_FUGUE}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-fugue-task-label"
           elif [[ "${HAS_GHA24}" == "true" ]]; then
@@ -139,6 +146,7 @@ jobs:
             echo "author=${AUTHOR}"
             echo "trust_subject=${TRUST_SUBJECT}"
             echo "author_association=${AUTHOR_ASSOC}"
+            echo "is_canary=${IS_CANARY}"
             echo "trusted=${TRUSTED}"
             echo "permission=${PERM}"
             echo "has_fugue=${HAS_FUGUE}"
