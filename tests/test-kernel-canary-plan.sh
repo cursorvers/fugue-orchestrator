@@ -6,6 +6,7 @@ CANARY_SCRIPT="${ROOT_DIR}/scripts/harness/run-canary.sh"
 CANARY_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-orchestrator-canary.yml"
 ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml"
 TASK_ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-task-router.yml"
+RESOLVE_CONTEXT_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
 
 if [[ ! -x "${CANARY_SCRIPT}" ]]; then
@@ -47,6 +48,11 @@ grep -q "HANDOFF_TARGET: .*inputs.handoff_target" "${ROUTER_WORKFLOW}" || {
 }
 grep -q "canary-dispatch-owned" "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should skip canary issues owned by run-canary dispatch" >&2
+  exit 1
+}
+
+grep -q 'canary_dispatch_owned="true"' "${RESOLVE_CONTEXT_SCRIPT}" || {
+  echo "FAIL: resolve context should allow workflow_dispatch canary issues without tutti label" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"

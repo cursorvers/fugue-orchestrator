@@ -83,6 +83,10 @@ if ! issue_json="$(gh_api_retry "${issue_endpoint}" 5)"; then
 fi
 title="$(echo "${issue_json}" | jq -r '.title // ""')"
 body="$(echo "${issue_json}" | jq -r '.body // ""')"
+is_canary_issue="false"
+if printf '%s\n%s\n' "${title}" "${body}" | grep -Eiq '^\[canary|^\[canary-lite|^##[[:space:]]*Canary'; then
+  is_canary_issue="true"
+fi
 trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -n "${trust_subject}" ]]; then
   trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
@@ -791,7 +795,11 @@ fi
 
 should_run="true"
 skip_reason=""
-if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
+canary_dispatch_owned="false"
+if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${is_canary_issue}" == "true" ]]; then
+  canary_dispatch_owned="true"
+fi
+if [[ "${has_fugue}" != "true" || ( "${has_tutti}" != "true" && "${canary_dispatch_owned}" != "true" ) ]]; then
   should_run="false"
   skip_reason="missing-required-labels"
 elif [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" && "${emergency_continuity_mode}" != "true" && "${self_hosted_online_count}" == "0" ]]; then
