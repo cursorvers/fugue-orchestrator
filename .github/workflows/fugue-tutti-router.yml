@@ -67,6 +67,11 @@ on:
         required: false
         type: string
         default: "kernel"
+      canary_dispatch_owned:
+        description: "True when the caller resolved this workflow_call as a canary-owned dispatch"
+        required: false
+        type: string
+        default: "false"
       ambiguity_translation_gate:
         description: "true when caller ambiguity/translation gate requested Claude sub attention"
         required: false
@@ -252,6 +257,10 @@ jobs:
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+          canary_dispatch_owned="$(echo "${{ inputs.canary_dispatch_owned || 'false' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${canary_dispatch_owned}" != "true" ]]; then
+            canary_dispatch_owned="false"
+          fi
           trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -n "${trust_subject}" ]]; then
             trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
@@ -301,6 +310,10 @@ jobs:
 
           SHOULD_RUN="true"
           SKIP_REASON=""
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" && "${canary_dispatch_owned}" == "true" ]]; then
+            HAS_TUTTI="true"
+          fi
+
           if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-required-labels"

@@ -61,6 +61,7 @@ jobs:
       should_run: ${{ steps.ctx.outputs.should_run }}
       skip_reason: ${{ steps.ctx.outputs.skip_reason }}
       issue_number: ${{ steps.ctx.outputs.issue_number }}
+      canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       has_implement_confirmed: ${{ steps.ctx.outputs.has_implement_confirmed }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
@@ -304,6 +305,7 @@ jobs:
       claude_teams_member_cap: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '3' || needs.ctx.outputs.claude_teams_member_cap }}"
       claude_teams_max_invocations: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '1' || needs.ctx.outputs.claude_teams_max_invocations }}"
       handoff_target: "${{ needs.ctx.outputs.handoff_target }}"
+      canary_dispatch_owned: "${{ needs.ctx.outputs.canary_dispatch_owned }}"
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
       ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"

@@ -55,6 +55,18 @@ grep -q 'canary_dispatch_owned="true"' "${RESOLVE_CONTEXT_SCRIPT}" || {
   echo "FAIL: resolve context should allow workflow_dispatch canary issues without tutti label" >&2
   exit 1
 }
+grep -q 'canary_dispatch_owned:' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing canary dispatch ownership input" >&2
+  exit 1
+}
+grep -q 'canary_dispatch_owned: "\${{ needs.ctx.outputs.canary_dispatch_owned }}"' "${CANARY_WORKFLOW%orchestrator-canary.yml}tutti-caller.yml" || {
+  echo "FAIL: caller workflow should pass canary dispatch ownership into router" >&2
+  exit 1
+}
+grep -q 'GITHUB_EVENT_NAME}" == "workflow_call" && "${canary_dispatch_owned}" == "true"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow should allow caller-owned canary workflow_call issues without tutti label" >&2
+  exit 1
+}
 echo "PASS [workflow-wiring]"
 
 plan_output="$(

@@ -809,6 +809,7 @@ fi
 
 {
   echo "issue_number=${ISSUE_NUMBER}"
+  echo "canary_dispatch_owned=${canary_dispatch_owned}"
   echo "has_implement_request=${has_implement}"
   echo "has_implement_confirmed=${has_implement_confirmed}"
   echo "self_hosted_online_count=${self_hosted_online_count}"
