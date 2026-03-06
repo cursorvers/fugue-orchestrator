@@ -74,6 +74,7 @@ Production-backed evidence now includes:
 - GitHub live canary success for Kernel and `fugue-bridge` rollback
 - Cursorvers LINE authenticated production `health-check` returning `200 OK`
 - latest Cursorvers LINE `CI Tests` and `Deploy Supabase Edge Functions` runs succeeding on the fixed head
+- manual Cursorvers LINE `Manus Audit (Unified)` daily run succeeding after execution/finding separation
 
 Repeated validation evidence:
 

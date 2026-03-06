@@ -79,6 +79,7 @@
 - Supporting production evidence:
   - latest `CI Tests` run `22774580380`: success
   - latest `Deploy Supabase Edge Functions` run `22774755463`: success
+  - manual `Manus Audit (Unified)` daily run `22783873896`: success
   - latest `Discord Forum Sync` run: success
   - recent `Economic Circuit Breaker` runs: success
 
