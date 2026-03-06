@@ -464,15 +464,7 @@ fi
 
 # --- Ensure labels exist ---
 
-echo "Canary: ensuring label set on ${repo}"
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-assist:codex" --repo "${repo}" --description "Requested codex assist orchestrator profile for Tutti routing" --color "0E8A16" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-assist:none" --repo "${repo}" --description "No assist orchestrator requested" --color "BFDADC" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
-GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 20s gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
+echo "Canary: reusing existing orchestration labels on ${repo}"
 
 # --- Issue creation ---
 
