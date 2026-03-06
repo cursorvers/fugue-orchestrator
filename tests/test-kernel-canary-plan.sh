@@ -24,6 +24,14 @@ grep -q "LEGACY_MAIN_ORCHESTRATOR_PROVIDER" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing legacy main provider env" >&2
   exit 1
 }
+grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing GitHub variable hydration helper" >&2
+  exit 1
+}
+if sed -n '/local cmd=(gh issue create/,/local url/p' "${CANARY_SCRIPT}" | grep -q -- '--label "tutti"'; then
+  echo "FAIL: canary issue creation should not auto-apply tutti label before workflow_dispatch" >&2
+  exit 1
+fi
 grep -q "HANDOFF_TARGET" "${COMMENT_SCRIPT}" || {
   echo "FAIL: integrated comment generator missing handoff target support" >&2
   exit 1

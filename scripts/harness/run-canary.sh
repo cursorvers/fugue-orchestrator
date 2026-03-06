@@ -55,6 +55,43 @@ gh_api_retry() {
   return 1
 }
 
+gh_var_default() {
+  local repo_name="$1"
+  local env_value="${2:-}"
+  local gh_var_name="$3"
+  local fallback="$4"
+  local resolved="${env_value}"
+
+  if [[ -n "${resolved}" ]]; then
+    printf '%s\n' "${resolved}"
+    return 0
+  fi
+  if [[ -n "${repo_name}" ]]; then
+    resolved="$(gh variable get "${gh_var_name}" --repo "${repo_name}" --json value -q '.value' 2>/dev/null || true)"
+    if [[ -n "${resolved}" ]]; then
+      printf '%s\n' "${resolved}"
+      return 0
+    fi
+  fi
+  printf '%s\n' "${fallback}"
+}
+
+gh_secret_present_default() {
+  local repo_name="$1"
+  local env_value="${2:-}"
+  local secret_name="$3"
+
+  if [[ -n "${env_value}" ]]; then
+    printf '%s\n' "${env_value}"
+    return 0
+  fi
+  if [[ -n "${repo_name}" ]] && gh secret list --repo "${repo_name}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${secret_name}"; then
+    printf 'true\n'
+    return 0
+  fi
+  printf 'false\n'
+}
+
 clamp_num() {
   local value="$1"
   local min="$2"
@@ -81,7 +118,7 @@ plan_only="$(normalize_bool "${CANARY_PLAN_ONLY:-false}")"
 primary_handoff_target="kernel"
 rollback_handoff_target="fugue-bridge"
 
-claude_state="$(lower_trim "${CLAUDE_RATE_LIMIT_STATE:-ok}")"
+claude_state="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_RATE_LIMIT_STATE:-}" "FUGUE_CLAUDE_RATE_LIMIT_STATE" "ok")")"
 canary_mode="$(lower_trim "${CANARY_MODE_INPUT:-full}")"
 if [[ "${canary_mode}" != "full" && "${canary_mode}" != "lite" ]]; then
   canary_mode="full"
@@ -94,23 +131,23 @@ primary_handoff_target="$(lower_trim "${CANARY_PRIMARY_HANDOFF_TARGET:-kernel}")
 if [[ "${primary_handoff_target}" != "kernel" && "${primary_handoff_target}" != "fugue-bridge" ]]; then
   primary_handoff_target="kernel"
 fi
-role_policy="$(lower_trim "${CLAUDE_ROLE_POLICY:-flex}")"
-degraded_assist_policy="$(lower_trim "${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}")"
-main_assist_policy="$(lower_trim "${CLAUDE_MAIN_ASSIST_POLICY:-codex}")"
-ci_execution_engine="$(lower_trim "${CI_EXECUTION_ENGINE:-subscription}")"
+role_policy="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_ROLE_POLICY:-}" "FUGUE_CLAUDE_ROLE_POLICY" "flex")")"
+degraded_assist_policy="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_DEGRADED_ASSIST_POLICY:-}" "FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY" "claude")")"
+main_assist_policy="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_MAIN_ASSIST_POLICY:-}" "FUGUE_CLAUDE_MAIN_ASSIST_POLICY" "codex")")"
+ci_execution_engine="$(lower_trim "$(gh_var_default "${repo}" "${CI_EXECUTION_ENGINE:-}" "FUGUE_CI_EXECUTION_ENGINE" "subscription")")"
 if [[ "${ci_execution_engine}" != "subscription" && "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" ]]; then
   ci_execution_engine="subscription"
 fi
-subscription_offline_policy="$(lower_trim "${SUBSCRIPTION_OFFLINE_POLICY:-continuity}")"
+subscription_offline_policy="$(lower_trim "$(gh_var_default "${repo}" "${SUBSCRIPTION_OFFLINE_POLICY:-}" "FUGUE_SUBSCRIPTION_OFFLINE_POLICY" "continuity")")"
 if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
   subscription_offline_policy="continuity"
 fi
-canary_offline_policy_override="$(lower_trim "${CANARY_OFFLINE_POLICY_OVERRIDE:-continuity}")"
+canary_offline_policy_override="$(lower_trim "$(gh_var_default "${repo}" "${CANARY_OFFLINE_POLICY_OVERRIDE:-}" "FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE" "continuity")")"
 if [[ "${canary_offline_policy_override}" != "inherit" && "${canary_offline_policy_override}" != "hold" && "${canary_offline_policy_override}" != "continuity" ]]; then
   canary_offline_policy_override="continuity"
 fi
-emergency_continuity_mode="$(normalize_bool "${EMERGENCY_CONTINUITY_MODE:-false}")"
-subscription_runner_label="$(echo "${SUBSCRIPTION_RUNNER_LABEL:-fugue-subscription}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+emergency_continuity_mode="$(normalize_bool "$(gh_var_default "${repo}" "${EMERGENCY_CONTINUITY_MODE:-}" "FUGUE_EMERGENCY_CONTINUITY_MODE" "false")")"
+subscription_runner_label="$(echo "$(gh_var_default "${repo}" "${SUBSCRIPTION_RUNNER_LABEL:-}" "FUGUE_SUBSCRIPTION_RUNNER_LABEL" "fugue-subscription")" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -z "${subscription_runner_label}" ]]; then
   subscription_runner_label="fugue-subscription"
 fi
@@ -145,11 +182,11 @@ if [[ -z "${canary_wait_slow_sleep_sec}" ]]; then
 fi
 canary_wait_slow_sleep_sec="$(clamp_num "${canary_wait_slow_sleep_sec}" 1 120)"
 
-default_main_provider="$(lower_trim "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-claude}")"
+default_main_provider="$(lower_trim "$(gh_var_default "${repo}" "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-}" "FUGUE_MAIN_ORCHESTRATOR_PROVIDER" "codex")")"
 if [[ "${default_main_provider}" != "codex" && "${default_main_provider}" != "claude" ]]; then
-  default_main_provider="claude"
+  default_main_provider="codex"
 fi
-execution_provider_default="$(lower_trim "${EXECUTION_PROVIDER_DEFAULT:-}")"
+execution_provider_default="$(lower_trim "$(gh_var_default "${repo}" "${EXECUTION_PROVIDER_DEFAULT:-}" "FUGUE_EXECUTION_PROVIDER" "")")"
 if [[ "${execution_provider_default}" != "codex" && "${execution_provider_default}" != "claude" ]]; then
   execution_provider_default=""
 fi
@@ -165,15 +202,17 @@ canary_alternate_force="false"
 if [[ "${canary_alternate_main}" == "claude" && "${default_main_provider}" != "claude" ]]; then
   canary_alternate_force="true"
 fi
-legacy_main_provider="$(lower_trim "${LEGACY_MAIN_ORCHESTRATOR_PROVIDER:-claude}")"
+legacy_main_provider="$(lower_trim "$(gh_var_default "${repo}" "${LEGACY_MAIN_ORCHESTRATOR_PROVIDER:-}" "FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER" "claude")")"
 if [[ "${legacy_main_provider}" != "codex" && "${legacy_main_provider}" != "claude" ]]; then
   legacy_main_provider="claude"
 fi
-legacy_assist_provider="$(lower_trim "${LEGACY_ASSIST_ORCHESTRATOR_PROVIDER:-claude}")"
+legacy_assist_provider="$(lower_trim "$(gh_var_default "${repo}" "${LEGACY_ASSIST_ORCHESTRATOR_PROVIDER:-}" "FUGUE_LEGACY_ASSIST_ORCHESTRATOR_PROVIDER" "claude")")"
 if [[ "${legacy_assist_provider}" != "claude" && "${legacy_assist_provider}" != "codex" && "${legacy_assist_provider}" != "none" ]]; then
   legacy_assist_provider="claude"
 fi
-legacy_force_claude="$(normalize_bool "${LEGACY_FORCE_CLAUDE:-true}")"
+legacy_force_claude="$(normalize_bool "$(gh_var_default "${repo}" "${LEGACY_FORCE_CLAUDE:-}" "FUGUE_LEGACY_FORCE_CLAUDE" "true")")"
+HAS_ANTHROPIC_API_KEY="$(gh_secret_present_default "${repo}" "${HAS_ANTHROPIC_API_KEY:-}" "ANTHROPIC_API_KEY")"
+HAS_OPENAI_API_KEY="$(gh_secret_present_default "${repo}" "${HAS_OPENAI_API_KEY:-}" "OPENAI_API_KEY")"
 
 # --- Token resolution ---
 
@@ -434,7 +473,6 @@ create_issue() {
 
   local cmd=(gh issue create --repo "${repo}" --title "${title}" --body "${body}" \
     --label "fugue-task" \
-    --label "tutti" \
     --label "orchestrator:${orch_provider}" \
     --label "orchestrator-assist:${assist_provider}")
   if [[ -n "${force_label}" ]]; then
