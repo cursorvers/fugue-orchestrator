@@ -10,6 +10,8 @@
 - Cloudflare production D1 Kernel runtime schema patch: applied
 - Kernel -> FUGUE rollback simulation: passed
 - GitHub live canary: passed
+- Cursorvers LINE manual CI rerun on current head: passed
+- Cursorvers LINE manual production audit rerun: passed
 
 ## Verified Today
 
@@ -21,6 +23,7 @@
     - `linked_integrity`
     - `peripheral_adapter_contract`
     - `mcp_adapter_contract`
+    - `mcp_adapter_exec`
     - `claude_teams_policy`
     - `sovereign_adapter_contract`
     - `sovereign_adapter_switch_sim`
@@ -77,11 +80,15 @@
   - Supabase JWT enforcement is active
   - authenticated production health-check is confirmed
 - Supporting production evidence:
-  - latest `CI Tests` run `22774580380`: success
-  - latest `Deploy Supabase Edge Functions` run `22774755463`: success
-  - manual `Manus Audit (Unified)` daily run `22783873896`: success
+  - latest push-triggered `Deploy Supabase Edge Functions` run `22784483627`: success
+  - manual current-head `CI Tests` run `22784566391`: success
+  - manual current-head `Manus Audit (Unified)` daily run `22784566401`: success
   - latest `Discord Forum Sync` run: success
   - recent `Economic Circuit Breaker` runs: success
+  - interpretation:
+    - production audit flow returns `200` on the current head
+    - GitHub-backed repair actions no longer collapse the audit route into `500`
+    - missing GitHub automation now degrades to manual-required behavior instead of aborting the audit API
 
 ### 5. Cloudflare production D1
 
@@ -143,6 +150,7 @@
 - GitHub live canary is no longer blocked.
 - Old failed canary runs/issues from pre-fix commits remain as historical artifacts and can be cleaned up separately.
 - Cursorvers LINE production path is now green in both remote deploy workflow and authenticated live probe.
+- Kernel MCP adapter execution path is now verified as part of the standard peripheral harness, not only by contract resolution.
 
 ## Current Decision
 

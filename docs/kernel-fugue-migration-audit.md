@@ -73,8 +73,10 @@ Production-backed evidence now includes:
 - Cloudflare production health and Cockpit auth probes
 - GitHub live canary success for Kernel and `fugue-bridge` rollback
 - Cursorvers LINE authenticated production `health-check` returning `200 OK`
-- latest Cursorvers LINE `CI Tests` and `Deploy Supabase Edge Functions` runs succeeding on the fixed head
-- manual Cursorvers LINE `Manus Audit (Unified)` daily run succeeding after execution/finding separation
+- latest Cursorvers LINE `Deploy Supabase Edge Functions` run succeeding on the fixed head
+- manual Cursorvers LINE `CI Tests` rerun succeeding on the current head
+- manual Cursorvers LINE `Manus Audit (Unified)` daily run succeeding after execution/finding separation and GitHub-token soft-fail handling
+- Kernel MCP adapter execution harness succeeding for Pencil, Excalidraw, Slack fallback, Vercel, and REST bridge routes
 
 Repeated validation evidence:
 
@@ -119,11 +121,12 @@ Current verification fabric covers:
 2. sovereign adapter contract integrity
 3. sovereign adapter switch simulation
 4. peripheral adapter contract integrity
-5. orchestration matrix simulation
-6. linked-system smoke with mocked issue provider
-7. Cloudflare Discord regression subset
-8. Cursorvers LINE function suite
-9. static contract probes for protected interfaces
+5. MCP adapter execution paths
+6. orchestration matrix simulation
+7. linked-system smoke with mocked issue provider
+8. Cloudflare Discord regression subset
+9. Cursorvers LINE function suite
+10. static contract probes for protected interfaces
 
 Primary entry points:
 
@@ -131,6 +134,7 @@ Primary entry points:
 - `scripts/check-sovereign-adapters.sh`
 - `scripts/sim-sovereign-adapter-switch.sh`
 - `scripts/check-peripheral-adapters.sh`
+- `tests/test-mcp-adapter-exec.sh`
 - `scripts/sim-orchestrator-switch.sh`
 - `scripts/sim-kernel-peripherals.sh`
 
@@ -141,7 +145,7 @@ The remaining gaps are concrete:
 1. `claude-sovereign-compat` is contract-level, not runtime-level
 2. Cloudflare/Cockpit naming and runtime ownership still need Kernel terminology
 3. heavy peripherals such as `auto-video` still rely on budgeted verification instead of routine smoke
-4. Claude-session-only MCP surfaces still need first-class non-Claude adapters for full Kernel ownership
+4. Claude-session-only MCP surfaces are now runtime-routable through Kernel, but some providers still rely on explicit fallback rather than full native ownership
 
 These are not feature-drop blockers for the currently validated Kernel replacement set. They are expansion and hardening tasks.
 
