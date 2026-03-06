@@ -122,6 +122,7 @@ clamp_num() {
 
 repo="${GITHUB_REPOSITORY}"
 gh_readonly_token="${GH_TOKEN:-}"
+gh_ops_token="${gh_readonly_token:-${OPS_TOKEN:-}}"
 ts="$(date -u +%Y%m%d%H%M%S)"
 failures=0
 online_count=0
@@ -232,8 +233,8 @@ HAS_OPENAI_API_KEY="$(gh_secret_present_default "${repo}" "${HAS_OPENAI_API_KEY:
 # --- Token resolution ---
 
 if [[ "${plan_only}" != "true" ]]; then
-  if [[ -z "${OPS_TOKEN:-}" ]]; then
-    echo "Skip canary: neither FUGUE_OPS_PAT nor TARGET_REPO_PAT is configured; real-issue trust gate cannot pass with github-actions author."
+  if [[ -z "${gh_ops_token}" ]]; then
+    echo "Skip canary: no GitHub token available for same-repo issue and workflow operations."
     exit 0
   fi
 fi
@@ -491,7 +492,7 @@ create_issue() {
   fi
   local url
   echo "Canary: creating issue '${title}'" >&2
-  url="$(GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 30s "${cmd[@]}")"
+  url="$(GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${cmd[@]}")"
   local issue_num="${url##*/}"
   local dispatch_offline_policy=""
   if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
@@ -501,11 +502,14 @@ create_issue() {
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
+  if [[ -n "${GITHUB_ACTOR:-}" ]]; then
+    run_cmd+=(-f trust_subject="${GITHUB_ACTOR}")
+  fi
   if [[ -n "${dispatch_offline_policy}" ]]; then
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
   fi
   echo "Canary: dispatching tutti caller for issue #${issue_num} handoff=${handoff_target}" >&2
-  GH_TOKEN="${OPS_TOKEN}" gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
+  GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
   echo "${issue_num}"
 }
 
