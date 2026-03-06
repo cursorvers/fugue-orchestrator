@@ -248,21 +248,27 @@ if [[ "${plan_only}" == "true" ]]; then
     online_count="$((10#${online_count}))"
   fi
 elif [[ "${ci_execution_engine}" == "subscription" ]]; then
-  runners_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 5 || echo '{}')"
-  online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
-  online_count="$(echo "${online_count}" | tr -cd '0-9')"
-  if [[ -z "${online_count}" ]]; then
+  if [[ "${canary_offline_policy_override}" == "continuity" ]]; then
     online_count="0"
+    echo "Canary override: continuity verification skips self-hosted runner probe for label ${subscription_runner_label}."
+    subscription_offline_policy="continuity"
   else
-    online_count="$((10#${online_count}))"
-  fi
-  if [[ "${subscription_offline_policy}" == "hold" ]] && (( online_count == 0 )); then
-    if [[ "${canary_offline_policy_override}" == "continuity" ]]; then
-      echo "Canary override: no online self-hosted runner for label ${subscription_runner_label}; forcing continuity mode for verification."
-      subscription_offline_policy="continuity"
-    elif [[ "${canary_offline_policy_override}" == "inherit" || "${canary_offline_policy_override}" == "hold" ]]; then
-      echo "Canary skipped: subscription strict hold policy active and no online self-hosted runner for label ${subscription_runner_label}."
-      exit 0
+    runners_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 5 || echo '{}')"
+    online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
+    online_count="$(echo "${online_count}" | tr -cd '0-9')"
+    if [[ -z "${online_count}" ]]; then
+      online_count="0"
+    else
+      online_count="$((10#${online_count}))"
+    fi
+    if [[ "${subscription_offline_policy}" == "hold" ]] && (( online_count == 0 )); then
+      if [[ "${canary_offline_policy_override}" == "continuity" ]]; then
+        echo "Canary override: no online self-hosted runner for label ${subscription_runner_label}; forcing continuity mode for verification."
+        subscription_offline_policy="continuity"
+      elif [[ "${canary_offline_policy_override}" == "inherit" || "${canary_offline_policy_override}" == "hold" ]]; then
+        echo "Canary skipped: subscription strict hold policy active and no online self-hosted runner for label ${subscription_runner_label}."
+        exit 0
+      fi
     fi
   fi
 fi
