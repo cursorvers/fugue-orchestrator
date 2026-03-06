@@ -8,6 +8,24 @@ passed=0
 failed=0
 total=0
 
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+fake_pencil="${tmp_dir}/pencil-wrapper.sh"
+cat > "${fake_pencil}" <<'EOF'
+#!/usr/bin/env bash
+echo "fake pencil wrapper"
+EOF
+chmod +x "${fake_pencil}"
+
+fake_excalidraw_dir="${tmp_dir}/excalidraw"
+mkdir -p "${fake_excalidraw_dir}"
+cat > "${fake_excalidraw_dir}/healthcheck.cjs" <<'EOF'
+#!/usr/bin/env node
+console.log('{"status":"ok"}');
+EOF
+chmod +x "${fake_excalidraw_dir}/healthcheck.cjs"
+
 assert_field() {
   local test_name="$1"
   local field_name="$2"
@@ -16,7 +34,7 @@ assert_field() {
 
   total=$((total + 1))
   local output
-  output="$("${POLICY}" "$@")" || {
+  output="$("$@")" || {
     echo "FAIL [${test_name}]: script exited with error"
     failed=$((failed + 1))
     return
@@ -37,16 +55,18 @@ echo "=== mcp-adapter-policy.sh unit tests ==="
 echo ""
 
 assert_field "rest-bridge-route" "route" "rest-bridge" \
-  --adapter supabase-rest-mcp --execution-engine subscription --session-provider none
+  "${POLICY}" --adapter supabase-rest-mcp --execution-engine subscription --session-provider none
 assert_field "rest-bridge-available" "available" "true" \
-  --adapter stripe-rest-mcp --execution-engine api --session-provider none
+  "${POLICY}" --adapter stripe-rest-mcp --execution-engine api --session-provider none
 assert_field "pencil-kernel-route" "route" "kernel-adapter" \
+  env KERNEL_PENCIL_WRAPPER="${fake_pencil}" "${POLICY}" \
   --adapter pencil-session-mcp --execution-engine subscription --session-provider none
 assert_field "vercel-kernel-disabled" "route" "unavailable" \
-  --adapter vercel-session-mcp --execution-engine local --session-provider none
+  "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none
 assert_field "slack-session-fallback" "route" "claude-session" \
-  --adapter slack-session-mcp --execution-engine local --session-provider claude
+  "${POLICY}" --adapter slack-session-mcp --execution-engine local --session-provider claude
 assert_field "session-only-available-flag" "available" "true" \
+  env KERNEL_EXCALIDRAW_HEALTHCHECK_SCRIPT="${fake_excalidraw_dir}/healthcheck.cjs" "${POLICY}" \
   --adapter excalidraw-session-mcp --execution-engine local --session-provider claude
 
 total=$((total + 1))

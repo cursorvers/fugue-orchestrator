@@ -325,6 +325,11 @@ run_step \
   bash "${ROOT_DIR}/scripts/check-mcp-adapters.sh" || failures=$((failures + 1))
 
 run_step \
+  "mcp_adapter_exec" \
+  "${ROOT_DIR}" \
+  bash "${ROOT_DIR}/tests/test-mcp-adapter-exec.sh" || failures=$((failures + 1))
+
+run_step \
   "claude_teams_policy" \
   "${ROOT_DIR}" \
   bash "${ROOT_DIR}/tests/test-claude-teams-policy.sh" || failures=$((failures + 1))

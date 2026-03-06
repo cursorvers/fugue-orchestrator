@@ -18,6 +18,24 @@ command -v jq >/dev/null 2>&1 || fail "missing command: jq"
 [[ -f "${MANIFEST}" ]] || fail "manifest not found: ${MANIFEST}"
 [[ -x "${POLICY}" ]] || fail "policy script not executable: ${POLICY}"
 
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+fake_pencil="${tmp_dir}/pencil-wrapper.sh"
+cat > "${fake_pencil}" <<'EOF'
+#!/usr/bin/env bash
+echo "fake pencil wrapper"
+EOF
+chmod +x "${fake_pencil}"
+
+fake_excalidraw_dir="${tmp_dir}/excalidraw"
+mkdir -p "${fake_excalidraw_dir}"
+cat > "${fake_excalidraw_dir}/healthcheck.cjs" <<'EOF'
+#!/usr/bin/env node
+console.log('{"status":"ok"}');
+EOF
+chmod +x "${fake_excalidraw_dir}/healthcheck.cjs"
+
 jq -e '.adapters | type == "array" and length >= 2' "${MANIFEST}" >/dev/null || fail "manifest must contain adapter array with entries"
 pass "adapter count valid"
 
@@ -56,12 +74,12 @@ supabase_route="$("${POLICY}" --adapter supabase-rest-mcp --execution-engine sub
 [[ "$(echo "${supabase_route}" | jq -r '.available')" == "true" ]] || fail "supabase-rest-mcp should be available"
 pass "rest bridge route valid"
 
-pencil_route="$("${POLICY}" --adapter pencil-session-mcp --execution-engine subscription --session-provider none --format json)"
+pencil_route="$(KERNEL_PENCIL_WRAPPER="${fake_pencil}" "${POLICY}" --adapter pencil-session-mcp --execution-engine subscription --session-provider none --format json)"
 [[ "$(echo "${pencil_route}" | jq -r '.route')" == "kernel-adapter" ]] || fail "pencil-session-mcp should resolve to kernel-adapter"
 [[ "$(echo "${pencil_route}" | jq -r '.available')" == "true" ]] || fail "pencil-session-mcp should be available via kernel adapter"
 pass "pencil kernel adapter opens without claude session"
 
-excalidraw_route="$("${POLICY}" --adapter excalidraw-session-mcp --execution-engine local --session-provider none --format json)"
+excalidraw_route="$(KERNEL_EXCALIDRAW_HEALTHCHECK_SCRIPT="${fake_excalidraw_dir}/healthcheck.cjs" "${POLICY}" --adapter excalidraw-session-mcp --execution-engine local --session-provider none --format json)"
 [[ "$(echo "${excalidraw_route}" | jq -r '.route')" == "kernel-adapter" ]] || fail "excalidraw-session-mcp should resolve to kernel-adapter"
 [[ "$(echo "${excalidraw_route}" | jq -r '.available')" == "true" ]] || fail "excalidraw-session-mcp should be available via kernel adapter"
 pass "excalidraw kernel adapter opens without claude session"
