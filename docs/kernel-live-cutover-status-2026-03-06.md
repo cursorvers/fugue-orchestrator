@@ -6,6 +6,7 @@
 - Cloudflare production worker deploy: passed
 - Cloudflare production health check: passed
 - Cloudflare production Cockpit auth route probe: passed
+- Cursorvers LINE production endpoint reachability: passed
 - Cloudflare production D1 Kernel runtime schema patch: applied
 - Kernel -> FUGUE rollback simulation: passed
 - GitHub live canary: passed
@@ -53,11 +54,31 @@
     - `services.cache=available`
 - Cockpit auth route probe:
   - `POST /api/cockpit/auth/login`
-  - Origin: `https://fugue-system-ui.vercel.app`
-  - Dummy credentials result: `{"error":"Invalid credentials"}`
-  - Interpretation: route stack, CSRF allowlist, DB lookup path, and password auth path are live
+  - Origin: `https://cockpit-pwa.vercel.app`
+  - Dummy credentials result:
+    - `{"error":"Validation failed","details":[...password format regex...]}` with malformed password
+  - Interpretation:
+    - route stack is live
+    - CSRF allowlist is live
+    - request validation path is live
 
-### 4. Cloudflare production D1
+### 4. Cursorvers LINE production probes
+
+- Public endpoint:
+  - `GET https://haaxgwyimoqzzxzdaeep.supabase.co/functions/v1/health-check`
+- Live results:
+  - without auth headers: `401 Missing authorization header`
+  - with placeholder anon key from local `.env.test`: `401 Invalid JWT`
+- Interpretation:
+  - deployed Edge Function endpoint is reachable in production
+  - Supabase JWT enforcement is active
+  - this terminal did not contain a valid production anon/service key, so a positive `200 OK` probe was not completed here
+- Supporting production evidence:
+  - latest `Deploy Supabase Edge Functions` run: success
+  - latest `Discord Forum Sync` run: success
+  - recent `Economic Circuit Breaker` runs: success
+
+### 5. Cloudflare production D1
 
 - Problem found:
   - production DB already had historical migrations beyond local repo state
@@ -78,25 +99,29 @@
   - re-running the script reports columns already present
   - production D1 queries used by Kernel now execute successfully
 
-### 5. GitHub live canary
+### 6. GitHub live canary
 
 - Live workflow:
   - `fugue-orchestrator-canary`
-  - run: `22773542912`
-  - head: `fdbefb5`
+  - prior verified run: `22773542912`
+  - latest verified run: `22773951215`
+  - head: `b4588a6`
   - result: `success`
-  - URL: `https://github.com/cursorvers/fugue-orchestrator/actions/runs/22773542912`
+  - URL: `https://github.com/cursorvers/fugue-orchestrator/actions/runs/22773951215`
 - Verified issue paths:
   - regular Kernel path:
-    - issue `310`
+    - prior issue `310`
+    - latest issue `315`
     - `handoff_target=kernel`
     - result: `Canary pass (regular)`
   - alternate Codex path:
-    - issue `311`
+    - prior issue `311`
+    - latest issue `316`
     - `handoff_target=kernel`
     - result: `Canary pass (force)`
   - rollback legacy FUGUE path:
-    - issue `312`
+    - prior issue `312`
+    - latest issue `317`
     - `handoff_target=fugue-bridge`
     - result: `Canary pass (rollback)`
 - Important metadata confirmed on live rollback:
@@ -104,12 +129,15 @@
   - `task_size_tier=small`
   - `execution_profile=api-continuity`
   - `run_agents_runner=ubuntu-latest`
+- Canary cleanup hardening:
+  - transient `needs-human` / `needs-review` / `processing` labels are now removed on pass
+  - latest closed canary issues `315`, `316`, `317` keep only stable labels plus `completed`
 
 ## Remaining Hardening Notes
 
 - GitHub live canary is no longer blocked.
-- `regular` Claude-main canary currently closes successfully but still leaves `needs-human` on the issue because Tutti marks a HIGH-risk escalation before canary cleanup closes it. Routing is correct and canary passes, but this label behavior is noisier than ideal.
 - Old failed canary runs/issues from pre-fix commits remain as historical artifacts and can be cleaned up separately.
+- Cursorvers LINE positive `200 OK` health probe still requires a valid production anon or service-role key on this terminal.
 
 ## Current Decision
 
