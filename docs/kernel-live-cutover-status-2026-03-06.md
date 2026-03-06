@@ -8,7 +8,7 @@
 - Cloudflare production Cockpit auth route probe: passed
 - Cloudflare production D1 Kernel runtime schema patch: applied
 - Kernel -> FUGUE rollback simulation: passed
-- GitHub live canary: blocked by missing valid GitHub token/PAT
+- GitHub live canary: passed
 
 ## Verified Today
 
@@ -78,24 +78,42 @@
   - re-running the script reports columns already present
   - production D1 queries used by Kernel now execute successfully
 
-## Remaining Live Blocker
+### 5. GitHub live canary
 
-### GitHub live canary
+- Live workflow:
+  - `fugue-orchestrator-canary`
+  - run: `22773542912`
+  - head: `fdbefb5`
+  - result: `success`
+  - URL: `https://github.com/cursorvers/fugue-orchestrator/actions/runs/22773542912`
+- Verified issue paths:
+  - regular Kernel path:
+    - issue `310`
+    - `handoff_target=kernel`
+    - result: `Canary pass (regular)`
+  - alternate Codex path:
+    - issue `311`
+    - `handoff_target=kernel`
+    - result: `Canary pass (force)`
+  - rollback legacy FUGUE path:
+    - issue `312`
+    - `handoff_target=fugue-bridge`
+    - result: `Canary pass (rollback)`
+- Important metadata confirmed on live rollback:
+  - `multi_agent_mode_source=legacy-bridge`
+  - `task_size_tier=small`
+  - `execution_profile=api-continuity`
+  - `run_agents_runner=ubuntu-latest`
 
-- `scripts/harness/run-canary.sh` can perform real issue/workflow verification only if a valid token is available via:
-  - `FUGUE_OPS_PAT`
-  - `TARGET_REPO_PAT`
-  - or a valid `gh` login session
-- Current state:
-  - `gh auth status` reports invalid token
-  - shell environment does not expose the required PAT variables
-- Impact:
-  - Kernel local + Cloudflare production are verified
-  - GitHub Actions live issue/canary is not yet verified in production
+## Remaining Hardening Notes
+
+- GitHub live canary is no longer blocked.
+- `regular` Claude-main canary currently closes successfully but still leaves `needs-human` on the issue because Tutti marks a HIGH-risk escalation before canary cleanup closes it. Routing is correct and canary passes, but this label behavior is noisier than ideal.
+- Old failed canary runs/issues from pre-fix commits remain as historical artifacts and can be cleaned up separately.
 
 ## Current Decision
 
 - Kernel implementation is ready to continue as the primary control plane.
 - Cloudflare production runtime is in a usable state.
-- FUGUE rollback remains available through `fugue-bridge` in simulation/runtime contract terms.
-- Do not claim full end-to-end production cutover until GitHub live canary is verified with valid credentials.
+- FUGUE rollback is verified live through `fugue-bridge`, not only in simulation/runtime contract terms.
+- End-to-end production cutover prerequisites are satisfied for Kernel orchestration and rollback validation.
