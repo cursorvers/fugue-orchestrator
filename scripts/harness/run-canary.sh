@@ -604,10 +604,33 @@ conclude_issue() {
   local reason="${19}"
   local issue_state=""
   local issue_state_after=""
+  local label_json=""
+  local cleanup_labels=()
+  local cleanup_cmd=()
   if [[ "${pass}" == "true" ]]; then
     gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\` handoff=\`${expected_handoff_target:-n/a}\` mode_source=\`${expected_mode_source:-n/a}\` task_size=\`${expected_task_size_tier:-n/a}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\` profile=\`${actual_profile}\` runner=\`${actual_runner}\` handoff=\`${actual_handoff_target:-n/a}\` mode_source=\`${actual_mode_source:-n/a}\` task_size=\`${actual_task_size_tier:-n/a}\`, lanes=\`${actual_lanes}\`."
     if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null 2>&1; then
       echo "Warning: failed to add completed label to issue #${issue_num}" >&2
+    fi
+    label_json="$(gh issue view "${issue_num}" --repo "${repo}" --json labels -q '.labels[].name' 2>/dev/null || true)"
+    if [[ -n "${label_json}" ]]; then
+      while IFS= read -r label_name; do
+        case "${label_name}" in
+          needs-human|needs-review|processing)
+            cleanup_labels+=("${label_name}")
+            ;;
+        esac
+      done <<< "${label_json}"
+    fi
+    if [[ "${#cleanup_labels[@]}" -gt 0 ]]; then
+      cleanup_cmd=(gh issue edit "${issue_num}" --repo "${repo}")
+      local cleanup_label=""
+      for cleanup_label in "${cleanup_labels[@]}"; do
+        cleanup_cmd+=(--remove-label "${cleanup_label}")
+      done
+      if ! "${cleanup_cmd[@]}" >/dev/null 2>&1; then
+        echo "Warning: failed to remove transient canary labels from issue #${issue_num}" >&2
+      fi
     fi
     issue_state="$(gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
     if [[ "${issue_state}" == "OPEN" ]]; then

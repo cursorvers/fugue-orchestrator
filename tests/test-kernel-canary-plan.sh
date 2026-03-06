@@ -30,6 +30,10 @@ grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script missing GitHub variable hydration helper" >&2
   exit 1
 }
+grep -q "needs-human|needs-review|processing" "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should clean transient review labels on pass" >&2
+  exit 1
+}
 if sed -n '/local cmd=(gh issue create/,/local url/p' "${CANARY_SCRIPT}" | grep -q -- '--label "tutti"'; then
   echo "FAIL: canary issue creation should not auto-apply tutti label before workflow_dispatch" >&2
   exit 1
