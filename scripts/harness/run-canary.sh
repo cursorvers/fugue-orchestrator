@@ -34,13 +34,27 @@ source "${SCRIPT_DIR}/../lib/common-utils.sh"
 
 # --- Helper functions ---
 
+gh_timeout_cmd() {
+  local duration="${1:-30s}"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --preserve-status "${duration}" "$@"
+    return $?
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout --preserve-status "${duration}" "$@"
+    return $?
+  fi
+  "$@"
+}
+
 gh_api_retry() {
   local endpoint="$1"
   local attempts="${2:-5}"
   local sleep_sec=2
   local i out
   for ((i=1; i<=attempts; i++)); do
-    if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+    if out="$(gh_timeout_cmd 20s gh api "${endpoint}" 2>/dev/null)"; then
       printf '%s\n' "${out}"
       return 0
     fi
@@ -67,7 +81,7 @@ gh_var_default() {
     return 0
   fi
   if [[ -n "${repo_name}" ]]; then
-    resolved="$(gh variable get "${gh_var_name}" --repo "${repo_name}" --json value -q '.value' 2>/dev/null || true)"
+    resolved="$(gh_timeout_cmd 20s gh variable get "${gh_var_name}" --repo "${repo_name}" --json value -q '.value' 2>/dev/null || true)"
     if [[ -n "${resolved}" ]]; then
       printf '%s\n' "${resolved}"
       return 0
@@ -85,7 +99,7 @@ gh_secret_present_default() {
     printf '%s\n' "${env_value}"
     return 0
   fi
-  if [[ -n "${repo_name}" ]] && gh secret list --repo "${repo_name}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${secret_name}"; then
+  if [[ -n "${repo_name}" ]] && gh_timeout_cmd 20s gh secret list --repo "${repo_name}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${secret_name}"; then
     printf 'true\n'
     return 0
   fi
@@ -446,14 +460,15 @@ fi
 
 # --- Ensure labels exist ---
 
-gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
-gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
-gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
-gh label create "orchestrator-assist:codex" --repo "${repo}" --description "Requested codex assist orchestrator profile for Tutti routing" --color "0E8A16" >/dev/null 2>&1 || true
-gh label create "orchestrator-assist:none" --repo "${repo}" --description "No assist orchestrator requested" --color "BFDADC" >/dev/null 2>&1 || true
-gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
-gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
-gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
+echo "Canary: ensuring label set on ${repo}"
+gh_timeout_cmd 20s gh label create "orchestrator:claude" --repo "${repo}" --description "Requested orchestrator profile for Tutti routing" --color "5319E7" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "orchestrator:codex" --repo "${repo}" --description "Requested codex orchestrator profile for Tutti routing" --color "1D76DB" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "orchestrator-assist:claude" --repo "${repo}" --description "Requested assist orchestrator profile for Tutti routing" --color "0052CC" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "orchestrator-assist:codex" --repo "${repo}" --description "Requested codex assist orchestrator profile for Tutti routing" --color "0E8A16" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "orchestrator-assist:none" --repo "${repo}" --description "No assist orchestrator requested" --color "BFDADC" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "orchestrator-force:claude" --repo "${repo}" --description "Force claude orchestrator for this issue (override rate-limit fallback)" --color "B60205" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "completed" --repo "${repo}" --description "Processing completed" --color "0E8A16" >/dev/null 2>&1 || true
+gh_timeout_cmd 20s gh label create "needs-human" --repo "${repo}" --description "Human intervention required" --color "D93F0B" >/dev/null 2>&1 || true
 
 # --- Issue creation ---
 
@@ -479,7 +494,8 @@ create_issue() {
     cmd+=(--label "${force_label}")
   fi
   local url
-  url="$("${cmd[@]}")"
+  echo "Canary: creating issue '${title}'" >&2
+  url="$(gh_timeout_cmd 30s "${cmd[@]}")"
   local issue_num="${url##*/}"
   local dispatch_offline_policy=""
   if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
@@ -492,7 +508,8 @@ create_issue() {
   if [[ -n "${dispatch_offline_policy}" ]]; then
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
   fi
-  "${run_cmd[@]}" >/dev/null
+  echo "Canary: dispatching tutti caller for issue #${issue_num} handoff=${handoff_target}" >&2
+  gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
   echo "${issue_num}"
 }
 
@@ -507,6 +524,7 @@ wait_for_resolved_orchestrators() {
   local comments_json meta_json comment resolved_main resolved_assist resolved_profile
   local resolved_runner resolved_runner_labels resolved_lanes resolved_handoff_target
   local resolved_mode_source resolved_task_size_tier
+  echo "Canary: waiting for integrated review on issue #${issue_num}" >&2
   while true; do
     comments_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}/comments?per_page=100" 4 || echo '[]')"
     meta_json="$(echo "${comments_json}" | jq -r '
@@ -663,6 +681,7 @@ regular_wait_ok="false"
 if wait "${regular_wait_pid}"; then
   regular_pair="$(tail -n1 "${regular_pair_file}" | tr -d '\r')"
   regular_wait_ok="true"
+  echo "Canary: regular issue #${regular_issue} resolved -> ${regular_pair}"
 fi
 
 force_pair=""
@@ -672,6 +691,7 @@ if [[ "${run_force_case}" != "true" ]]; then
 elif wait "${force_wait_pid}"; then
   force_pair="$(tail -n1 "${force_pair_file}" | tr -d '\r')"
   force_wait_ok="true"
+  echo "Canary: alternate issue #${force_issue} resolved -> ${force_pair}"
 fi
 
 rollback_pair=""
@@ -681,6 +701,7 @@ if [[ "${verify_rollback_case}" != "true" ]]; then
 elif wait "${rollback_wait_pid}"; then
   rollback_pair="$(tail -n1 "${rollback_pair_file}" | tr -d '\r')"
   rollback_wait_ok="true"
+  echo "Canary: rollback issue #${rollback_issue} resolved -> ${rollback_pair}"
 fi
 
 # --- Verify regular case ---
