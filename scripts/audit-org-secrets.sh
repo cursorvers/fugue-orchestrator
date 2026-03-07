@@ -79,6 +79,8 @@ echo "Config: ${CONFIG}"
 echo ""
 
 preferred_org_secrets="$(json_get '.preferred_org_secrets[]?' | sed '/^null$/d' || true)"
+optional_org_secrets="$(json_get '.optional_org_secrets[]?' | sed '/^null$/d' || true)"
+preferred_org_variables="$(json_get '.preferred_org_variables[]?' | sed '/^null$/d' || true)"
 allow_repo_secrets="$(json_get '.allow_repo_secrets[]?' | sed '/^null$/d' || true)"
 
 tmpdir="$(mktemp -d)"
@@ -88,6 +90,7 @@ trap 'rm -rf "${tmpdir}"' EXIT
 org_secrets_tsv="${tmpdir}/org-secrets.tsv"
 org_access=true
 org_api_err="${tmpdir}/org-secrets.err"
+org_variables_tsv="${tmpdir}/org-variables.tsv"
 
 # Prefer the stable gh subcommand output first; fall back to repo-only mode if unavailable.
 if ! gh secret list --org "${ORG}" >"${org_secrets_tsv}" 2>"${org_api_err}"; then
@@ -98,6 +101,14 @@ else
   tmp_org_secrets="${tmpdir}/org-secrets-normalized.tsv"
   awk 'NF >= 3 { print $1 "\t" tolower($3) "\t" $2 }' "${org_secrets_tsv}" > "${tmp_org_secrets}"
   mv "${tmp_org_secrets}" "${org_secrets_tsv}"
+fi
+
+if ! gh variable list --org "${ORG}" >"${org_variables_tsv}" 2>/dev/null; then
+  : > "${org_variables_tsv}"
+else
+  tmp_org_variables="${tmpdir}/org-variables-normalized.tsv"
+  awk 'NF >= 4 { print $1 "\t" tolower($4) "\t" $3 }' "${org_variables_tsv}" > "${tmp_org_variables}"
+  mv "${tmp_org_variables}" "${org_variables_tsv}"
 fi
 
 org_secret_visibility() {
@@ -116,6 +127,16 @@ org_secret_updated_at() {
     return 0
   fi
   awk -F'\t' -v s="${secret}" '$1==s{print $3; found=1} END{if(!found) print ""}' "${org_secrets_tsv}"
+}
+
+org_variable_visibility() {
+  local variable="$1"
+  awk -F'\t' -v s="${variable}" '$1==s{print $2; found=1} END{if(!found) print "missing"}' "${org_variables_tsv}"
+}
+
+org_variable_updated_at() {
+  local variable="$1"
+  awk -F'\t' -v s="${variable}" '$1==s{print $3; found=1} END{if(!found) print ""}' "${org_variables_tsv}"
 }
 
 get_selected_repos_for_secret() {
@@ -191,6 +212,44 @@ if [[ -n "${preferred_org_secrets}" ]]; then
       printf 'OK       %s (visibility=%s updated=%s)\n' "${s}" "${vis}" "${updated}"
     fi
   done <<<"${preferred_org_secrets}"
+else
+  echo "(none configured)"
+fi
+echo ""
+
+echo "=== Org Secrets (optional) ==="
+if [[ -n "${optional_org_secrets}" ]]; then
+  while IFS= read -r s; do
+    [[ -z "${s}" ]] && continue
+    vis="$(org_secret_visibility "${s}")"
+    updated="$(org_secret_updated_at "${s}")"
+    if [[ "${vis}" == "unknown" ]]; then
+      printf 'SKIP     %s (org access unavailable)\n' "${s}"
+      warnings=$((warnings+1))
+    elif [[ "${vis}" == "missing" ]]; then
+      printf 'OPTIONAL %s\n' "${s}"
+    else
+      printf 'OK       %s (visibility=%s updated=%s)\n' "${s}" "${vis}" "${updated}"
+    fi
+  done <<<"${optional_org_secrets}"
+else
+  echo "(none configured)"
+fi
+echo ""
+
+echo "=== Org Variables (preferred) ==="
+if [[ -n "${preferred_org_variables}" ]]; then
+  while IFS= read -r v; do
+    [[ -z "${v}" ]] && continue
+    vis="$(org_variable_visibility "${v}")"
+    updated="$(org_variable_updated_at "${v}")"
+    if [[ "${vis}" == "missing" ]]; then
+      printf 'MISSING  %s\n' "${v}"
+      failures=$((failures+1))
+    else
+      printf 'OK       %s (visibility=%s updated=%s)\n' "${v}" "${vis}" "${updated}"
+    fi
+  done <<<"${preferred_org_variables}"
 else
   echo "(none configured)"
 fi

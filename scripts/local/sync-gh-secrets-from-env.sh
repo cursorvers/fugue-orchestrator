@@ -103,6 +103,12 @@ current_org_secret_repo_csv() {
     | awk 'NF && !seen[$0]++ { out = out ? out "," $0 : $0 } END { print out }'
 }
 
+current_org_variable_repo_csv() {
+  local variable_name="$1"
+  gh api "orgs/${ORG}/actions/variables/${variable_name}/repositories" --paginate --jq '.repositories[].full_name' 2>/dev/null \
+    | awk 'NF && !seen[$0]++ { out = out ? out "," $0 : $0 } END { print out }'
+}
+
 merge_repo_csv() {
   local left="$1"
   local right="$2"
@@ -181,6 +187,52 @@ apply_secret() {
   fi
 }
 
+apply_variable() {
+  local scope="$1"
+  local variable_name="$2"
+  local required="$3"
+  shift 3
+  local candidates=("$@")
+
+  if ! resolve_first_nonempty "${candidates[@]}"; then
+    if [[ "${required}" == "required" ]]; then
+      echo "MISSING(required): ${variable_name} (candidates: ${candidates[*]})"
+      required_missing=$((required_missing + 1))
+    else
+      echo "SKIP(optional): ${variable_name} (no value in: ${candidates[*]})"
+      set_skip=$((set_skip + 1))
+    fi
+    return 0
+  fi
+
+  if [[ "${APPLY}" != "true" ]]; then
+    echo "DRY-RUN: set ${scope} variable ${variable_name} from ${RESOLVED_SOURCE}"
+    set_ok=$((set_ok + 1))
+    return 0
+  fi
+
+  if [[ "${scope}" == "org" ]]; then
+    local existing_repo_csv merged_repo_csv
+    existing_repo_csv="$(current_org_variable_repo_csv "${variable_name}")"
+    merged_repo_csv="$(merge_repo_csv "${existing_repo_csv}" "${REPO}")"
+    if printf '%s' "${RESOLVED_VALUE}" | gh variable set "${variable_name}" --org "${ORG}" --visibility selected --repos "${merged_repo_csv}" >/dev/null; then
+      echo "OK: set org variable ${variable_name} from ${RESOLVED_SOURCE} (repos=${merged_repo_csv})"
+      set_ok=$((set_ok + 1))
+    else
+      echo "FAIL: org variable ${variable_name}" >&2
+      set_fail=$((set_fail + 1))
+    fi
+  else
+    if printf '%s' "${RESOLVED_VALUE}" | gh variable set "${variable_name}" --repo "${REPO}" >/dev/null; then
+      echo "OK: set repo variable ${variable_name} from ${RESOLVED_SOURCE}"
+      set_ok=$((set_ok + 1))
+    else
+      echo "FAIL: repo variable ${variable_name}" >&2
+      set_fail=$((set_fail + 1))
+    fi
+  fi
+}
+
 env_source="process-env"
 if [[ -n "${ENV_FILE}" ]]; then
   env_source="${ENV_FILE}"
@@ -203,12 +255,11 @@ apply_secret org DISCORD_ADMIN_WEBHOOK_URL optional DISCORD_ADMIN_WEBHOOK_URL
 apply_secret org DISCORD_WEBHOOK_URL optional DISCORD_WEBHOOK_URL
 apply_secret org DISCORD_SYSTEM_WEBHOOK optional DISCORD_SYSTEM_WEBHOOK
 apply_secret org N8N_API_KEY optional N8N_API_KEY
-apply_secret org N8N_INSTANCE_URL optional N8N_INSTANCE_URL
+apply_variable org N8N_INSTANCE_URL optional N8N_INSTANCE_URL
 apply_secret org SUPABASE_ACCESS_TOKEN optional SUPABASE_ACCESS_TOKEN
-apply_secret org SUPABASE_PROJECT_ID optional SUPABASE_PROJECT_ID
+apply_variable org SUPABASE_PROJECT_ID optional SUPABASE_PROJECT_ID
 apply_secret org SUPABASE_URL optional SUPABASE_URL
 apply_secret org MANUS_AUDIT_API_KEY optional MANUS_AUDIT_API_KEY
-apply_secret org MANUS_FIXER_API_KEY optional MANUS_FIXER_API_KEY
 apply_secret org GOOGLE_SERVICE_ACCOUNT_JSON optional GOOGLE_SERVICE_ACCOUNT_JSON
 apply_secret org PROGRESS_WEBHOOK_URL optional PROGRESS_WEBHOOK_URL
 

@@ -17,19 +17,24 @@ Goal: move GitHub Actions secrets to an org-first model while keeping `Kernel` a
 
 - `OPENAI_API_KEY`
 - `ZAI_API_KEY`
-- `ANTHROPIC_API_KEY`
 - `DISCORD_ADMIN_WEBHOOK_URL`
 - `DISCORD_WEBHOOK_URL`
 - `DISCORD_SYSTEM_WEBHOOK`
 - `N8N_API_KEY`
-- `N8N_INSTANCE_URL`
 - `SUPABASE_ACCESS_TOKEN`
-- `SUPABASE_PROJECT_ID`
 - `SUPABASE_URL`
 - `MANUS_AUDIT_API_KEY`
-- `MANUS_FIXER_API_KEY`
 - `GOOGLE_SERVICE_ACCOUNT_JSON`
 - `PROGRESS_WEBHOOK_URL`
+
+### Optional GitHub Organization Secrets
+
+- `ANTHROPIC_API_KEY`
+
+### Move to GitHub Organization Variables
+
+- `SUPABASE_PROJECT_ID`
+- `N8N_INSTANCE_URL`
 
 ### Keep as Repo / Environment Secret
 
@@ -43,6 +48,7 @@ Goal: move GitHub Actions secrets to an org-first model while keeping `Kernel` a
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LINE_CHANNEL_SECRET`
 - `MANUS_API_KEY`
+- `MANUS_FIXER_API_KEY`
 - Cloudflare runtime auth/webhook secrets
 
 ## Controlled Duplication
