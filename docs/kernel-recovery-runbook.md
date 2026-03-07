@@ -117,6 +117,13 @@ Additional hardening:
 
 - `run-recovery-console.sh` now retries `gh api`, `gh issue list`, `gh variable get`, and `gh workflow run`
 - this reduces flakiness during transient GitHub API connectivity failures
+- post-hardening validation:
+  - `status` run `22793030500`
+  - success
+  - `reroute-issue` run `22793030490`
+  - success
+  - dispatched `fugue-tutti-caller` run `22793032641`
+  - downstream workflow success
 
 Validated behaviors:
 
