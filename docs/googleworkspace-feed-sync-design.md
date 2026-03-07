@@ -95,6 +95,7 @@ Environment split:
   - environment-scoped
   - no per-run approval requirement
   - personal readonly mailbox feeds only
+  - stores only `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON`
 
 ## Reflection Into Kernel/FUGUE
 

@@ -6,7 +6,6 @@ EVENT_NAME="${EVENT_NAME:-workflow_dispatch}"
 SCHEDULE_EXPR="${SCHEDULE_EXPR:-}"
 INPUT_PROFILE="${INPUT_PROFILE:-}"
 INPUT_WORKFLOW_TARGET="${INPUT_WORKFLOW_TARGET:-}"
-INPUT_ENVIRONMENT_OVERRIDE="${INPUT_ENVIRONMENT_OVERRIDE:-}"
 INPUT_FORCE_REFRESH="${INPUT_FORCE_REFRESH:-false}"
 
 fail() {
@@ -38,8 +37,7 @@ if [[ "${EVENT_NAME}" == "schedule" ]]; then
   [[ -n "${SCHEDULE_EXPR}" ]] || fail "SCHEDULE_EXPR is required for scheduled resolution"
   matrix="$(jq -c \
     --arg schedule "${SCHEDULE_EXPR}" \
-    --arg workflow_target "${INPUT_WORKFLOW_TARGET}" \
-    --arg environment_override "${INPUT_ENVIRONMENT_OVERRIDE}" '
+    --arg workflow_target "${INPUT_WORKFLOW_TARGET}" '
     [
       .profiles
       | to_entries[]
@@ -49,13 +47,7 @@ if [[ "${EVENT_NAME}" == "schedule" ]]; then
       | select(.value.recommended_cron_utc == $schedule)
       | {
           profile: .key,
-          environment: (
-            if ($environment_override | length) > 0 then
-              $environment_override
-            else
-              (.value.github_environment // "")
-            end
-          )
+          environment: (.value.github_environment // "")
         }
       | select(.environment | length > 0)
     ]' "${POLICY_FILE}")"
@@ -64,8 +56,7 @@ else
   case "${profile}" in
     ""|"all"|"all-${INPUT_WORKFLOW_TARGET}")
       matrix="$(jq -c \
-        --arg workflow_target "${INPUT_WORKFLOW_TARGET}" \
-        --arg environment_override "${INPUT_ENVIRONMENT_OVERRIDE}" '
+        --arg workflow_target "${INPUT_WORKFLOW_TARGET}" '
         [
           .profiles
           | to_entries[]
@@ -73,13 +64,7 @@ else
           | select(.value.workflow_target == $workflow_target)
           | {
               profile: .key,
-              environment: (
-                if ($environment_override | length) > 0 then
-                  $environment_override
-                else
-                  (.value.github_environment // "")
-                end
-              )
+              environment: (.value.github_environment // "")
             }
           | select(.environment | length > 0)
         ]' "${POLICY_FILE}")"
@@ -94,18 +79,11 @@ else
         fail "profile ${profile} does not belong to workflow target ${INPUT_WORKFLOW_TARGET}"
       fi
       matrix="$(jq -c \
-        --arg profile "${profile}" \
-        --arg environment_override "${INPUT_ENVIRONMENT_OVERRIDE}" '
+        --arg profile "${profile}" '
         [
           {
             profile: $profile,
-            environment: (
-              if ($environment_override | length) > 0 then
-                $environment_override
-              else
-                (.profiles[$profile].github_environment // "")
-              end
-            )
+            environment: (.profiles[$profile].github_environment // "")
           }
           | select(.environment | length > 0)
         ]' "${POLICY_FILE}")"

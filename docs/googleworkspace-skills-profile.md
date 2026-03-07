@@ -217,7 +217,6 @@ Recommended environment:
 - `workspace-personal-readonly`
   - environment-scoped, no per-run reviewer gate
   - expose `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` for personal mailbox feeds
-  - optional: also expose `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` for fallback
 
 Secret:
 
@@ -243,6 +242,8 @@ Protection model:
   read the secret
 - scheduled personal mailbox feeds use a separate environment-scoped secret and
   do not share the protected approval path used by issue preflight
+- shared scheduled feeds receive only the service-account secret
+- personal scheduled feeds receive only the user OAuth export secret
 - mailbox helpers prefer `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` when present
   and otherwise degrade gracefully under service-account mode
 

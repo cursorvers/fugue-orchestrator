@@ -11,11 +11,6 @@ on:
         required: false
         type: string
         default: "all-personal"
-      environment_override:
-        description: "Optional environment override for all selected personal profiles"
-        required: false
-        type: string
-        default: ""
       force_refresh:
         description: "Bypass TTL cache and refresh the selected feeds"
         required: false
@@ -45,7 +40,6 @@ jobs:
           SCHEDULE_EXPR: ${{ github.event.schedule }}
           INPUT_PROFILE: ${{ inputs.profile }}
           INPUT_WORKFLOW_TARGET: personal
-          INPUT_ENVIRONMENT_OVERRIDE: ${{ inputs.environment_override }}
           INPUT_FORCE_REFRESH: ${{ inputs.force_refresh }}
         run: bash scripts/harness/resolve-googleworkspace-feed-matrix.sh
 
@@ -80,7 +74,6 @@ jobs:
           OUT_ROOT: .fugue/feeds/googleworkspace
           PREFLIGHT_SCRIPT: scripts/harness/googleworkspace-preflight-enrich.sh
           ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
-          GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
           GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON }}
         run: bash scripts/harness/googleworkspace-scheduled-extract.sh
 
