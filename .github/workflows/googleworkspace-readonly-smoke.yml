@@ -86,6 +86,7 @@ jobs:
           REPORT_PATH: .fugue/pre-implement/issue-${{ needs.resolve-context.outputs.issue_number }}-googleworkspace.md
           ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
           GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
+          GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON }}
         run: bash scripts/harness/googleworkspace-preflight-enrich.sh
 
       - name: Upload Workspace smoke artifact

@@ -210,6 +210,7 @@ Recommended environment:
 - `workspace-readonly`
   - configure required reviewers or approval rules
   - expose `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` only in this environment
+  - optionally expose `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` for mailbox helpers
 
 Secret:
 
@@ -218,12 +219,23 @@ Secret:
   - intended only for readonly preflight actions
   - consumed by `scripts/harness/googleworkspace-preflight-enrich.sh`
   - not passed through the caller workflow as a reusable-workflow secret
+- `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON`
+  - optional `authorized_user` JSON payload for mailbox helpers such as
+    `gmail-triage` and `weekly-digest`
+  - generate it with:
+    ```bash
+    gws auth export --unmasked > credentials.json
+    ```
+  - note: masked `gws auth export` output is not valid for CI use
+  - consumed only inside the protected readonly preflight job
 
 Protection model:
 
 - first guard: readonly service-account scope only
 - second guard: protected `Environment` approval before the preflight job can
   read the secret
+- mailbox helpers prefer `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` when present
+  and otherwise degrade gracefully under service-account mode
 
 If the environment secret is absent, the CI workflow does not fail. It emits a
 `skipped` Workspace artifact instead and continues with the normal Codex path.
