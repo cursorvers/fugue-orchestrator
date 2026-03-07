@@ -3,7 +3,7 @@ set -euo pipefail
 
 ORG="cursorvers"
 REPO="cursorvers/fugue-orchestrator"
-ENV_FILE=".env"
+ENV_FILE=""
 APPLY="false"
 SKIP_AUDIT="false"
 
@@ -12,7 +12,7 @@ usage() {
 Usage: scripts/local/bootstrap-prod-secrets.sh [options]
 
 Options:
-  --env-file <path>   Env file path (default: .env)
+  --env-file <path>   Load secrets from an external env file
   --org <name>        GitHub organization (default: cursorvers)
   --repo <owner/repo> Target repository (default: cursorvers/fugue-orchestrator)
   --apply             Apply secret updates
@@ -22,7 +22,7 @@ Options:
 
 Flow:
   1) Ensure gh auth is valid
-  2) Sync secrets from env -> GitHub (org/repo)
+  2) Sync secrets from process env or explicit env file -> GitHub (org/repo)
   3) Audit org secret coverage (unless --skip-audit)
 EOF
 }
@@ -83,11 +83,17 @@ if [[ "${APPLY}" == "true" ]]; then
 fi
 
 echo "[1/2] Sync secrets (${mode_flag})"
-bash scripts/local/sync-gh-secrets-from-env.sh \
-  --org "${ORG}" \
-  --repo "${REPO}" \
-  --env-file "${ENV_FILE}" \
+sync_args=(
+  --org "${ORG}"
+  --repo "${REPO}"
   "${mode_flag}"
+)
+
+if [[ -n "${ENV_FILE}" ]]; then
+  sync_args+=(--env-file "${ENV_FILE}")
+fi
+
+bash scripts/local/sync-gh-secrets-from-env.sh "${sync_args[@]}"
 
 if [[ "${SKIP_AUDIT}" == "true" ]]; then
   echo "[2/2] Audit skipped by --skip-audit"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ORG="cursorvers"
 REPO="cursorvers/fugue-orchestrator"
-ENV_FILE=".env"
+ENV_FILE=""
 APPLY="false"
 ENV_FILE_EXPLICIT="false"
 
@@ -17,7 +17,7 @@ usage() {
 Usage: scripts/local/sync-gh-secrets-from-env.sh [options]
 
 Options:
-  --env-file <path>   Load env vars from file (default: .env)
+  --env-file <path>   Load env vars from an explicit external env file
   --org <name>        GitHub organization (default: cursorvers)
   --repo <owner/repo> Target repository (default: cursorvers/fugue-orchestrator)
   --apply             Apply changes (default: dry-run)
@@ -70,16 +70,26 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -f "${ENV_FILE}" ]]; then
+if [[ "${ENV_FILE_EXPLICIT}" == "true" ]]; then
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    echo "Error: env file not found: ${ENV_FILE}" >&2
+    exit 1
+  fi
   # shellcheck source=/dev/null
   set -a
   source "${ENV_FILE}"
   set +a
-elif [[ "${ENV_FILE_EXPLICIT}" == "true" ]]; then
-  echo "Error: env file not found: ${ENV_FILE}" >&2
-  exit 1
+elif [[ -n "${ENV_FILE}" ]]; then
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    echo "Error: env file not found: ${ENV_FILE}" >&2
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  set -a
+  source "${ENV_FILE}"
+  set +a
 else
-  echo "Info: ${ENV_FILE} not found; using current process environment only."
+  echo "Info: no env file specified; using current process environment only."
 fi
 
 if [[ "${APPLY}" == "true" ]]; then
@@ -150,7 +160,11 @@ apply_secret() {
   fi
 }
 
-echo "mode=$([[ "${APPLY}" == "true" ]] && echo apply || echo dry-run) org=${ORG} repo=${REPO} env=${ENV_FILE}"
+env_source="process-env"
+if [[ -n "${ENV_FILE}" ]]; then
+  env_source="${ENV_FILE}"
+fi
+echo "mode=$([[ "${APPLY}" == "true" ]] && echo apply || echo dry-run) org=${ORG} repo=${REPO} env=${env_source}"
 
 # Required
 apply_secret org OPENAI_API_KEY required OPENAI_API_KEY

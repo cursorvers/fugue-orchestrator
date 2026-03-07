@@ -7,17 +7,25 @@
 ## Hierarchy
 
 ```
-Organization Secrets (your GitHub org)     <- priority
-+-- AI_API_KEY_GLM                         <- GLM-4.7
-+-- AI_API_KEY_GEMINI                      <- Gemini
-+-- AI_API_KEY_OPENAI                      <- Codex (if needed)
-+-- (other shared API keys)
+GitHub Organization Secrets (shared CI)    <- first choice for shared automation
++-- OPENAI_API_KEY
++-- ZAI_API_KEY
++-- ANTHROPIC_API_KEY
++-- GEMINI_API_KEY / XAI_API_KEY
++-- shared webhook / ops credentials
 
-Repository Secrets                          <- project-specific only
-+-- VERCEL_TOKEN                           <- deploy-specific
-+-- SUPABASE_SERVICE_ROLE_KEY              <- DB-specific
-+-- DISCORD_WEBHOOK_URL                    <- notification-specific
-+-- (other project-specific keys)
+GitHub Repository / Environment Secrets    <- repo- or env-specific CI only
++-- TARGET_REPO_PAT
++-- production-only deploy tokens
++-- repo-scoped notification overrides
+
+Platform Runtime Secrets                   <- runtime systems of record
++-- Supabase Edge Function secrets
++-- Cloudflare Workers secrets
++-- Vercel / Fly / Railway runtime secrets
+
+Local Process Environment                  <- bootstrap only, never source of truth
++-- one-shot import into GitHub/platform secret stores
 ```
 
 ## Decision Criteria
@@ -25,10 +33,11 @@ Repository Secrets                          <- project-specific only
 | Secret Type | Location | Reason |
 |------------|---------|--------|
 | AI API Keys (GLM, Gemini, OpenAI) | Organization | Shared across multiple repos |
-| Deploy (Vercel, Netlify) | Repository | Project-specific |
-| DB (Supabase, Firebase) | Repository | Project-specific |
-| Notifications (Discord, Slack) | Repository | Project-specific |
+| Deploy (Vercel, Netlify) | Repository or Environment | Project- / env-specific |
+| DB (Supabase, Firebase) | Platform Runtime Secret | Runtime system of record |
+| Notifications (Discord, Slack) | Org or Repo/Environment | Shared lifeline vs repo override |
 | Auth (Clerk, Auth0) | Repository | Project-specific |
+| Local bootstrap copy | Process env or explicit external env file | Temporary import only |
 
 ## When Adding a New Secret
 
@@ -39,15 +48,24 @@ Repository Secrets                          <- project-specific only
 ## Local Development
 
 ```bash
-# .env file (never committed)
-GLM_API_KEY=your-key-here
-GEMINI_API_KEY=your-key-here
-OPENAI_API_KEY=your-key-here
+# preferred: export into current shell, or source an env file outside the repo
+export OPENAI_API_KEY=...
+export ZAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
 ```
+
+Do not treat `.env` inside the workspace as a trusted storage layer. Any agent or tool with file-read access may inspect repository files. If you must use an env file locally, keep it outside the repo and use it only to bootstrap GitHub/platform secret stores.
+
+## Kernel / FUGUE Compatibility
+
+- Secret **names** are the contract. Orchestrator choice must not require renaming secrets.
+- `Kernel` and `FUGUE` should both resolve the same canonical names (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `TARGET_REPO_PAT`, `FUGUE_OPS_PAT`, etc.).
+- Provider-specific adapters may be optional, but secret naming stays stable so rollback from `Kernel` to `FUGUE` does not require secret migration.
 
 ## Prohibitions
 
 - Never duplicate the same secret across multiple Repository Secrets
 - Never hardcode secrets in source code
 - Never commit `.env` files (ensure `.gitignore` covers them)
+- Never keep live secrets in the repo workspace as the primary source of truth
 - Never store secrets in plaintext in documentation
