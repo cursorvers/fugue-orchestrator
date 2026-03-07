@@ -23,6 +23,10 @@ Current implementation seed:
 
 - `/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web`
 
+Context-governance source of truth:
+
+- [kernel-context-governor.md](./kernel-context-governor.md)
+
 The current implementation seed already includes:
 
 - a `happy-app-intake` adapter
@@ -156,6 +160,15 @@ That means:
 - one output model
 - one mobile web surface
 - optional shells around the same surface
+
+The context model should also remain singular.
+
+That means:
+
+- one canonical packet model
+- one budget band model
+- one compression policy across `Kernel`, `Happy`, `GHA`, and `FUGUE`
+- no screen should depend on raw long-thread replay
 
 ## 3. Top-Level Model
 
