@@ -40,6 +40,7 @@ assert_case() {
   local expected_request="$5"
   local expected_confirm="$6"
   local expect_implement_label="$7"
+  local execution_mode_override="${8:-auto}"
   local out_file="${TMP_DIR}/${name}.out"
   local actual_mode=""
   local workflow_line=""
@@ -72,6 +73,7 @@ assert_case() {
       CLAUDE_MAIN_ASSIST_POLICY="codex" \
       CLAUDE_ROLE_POLICY="flex" \
       CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
+      EXECUTION_MODE_OVERRIDE_INPUT="${execution_mode_override}" \
       bash "${SCRIPT}" >/dev/null 2>"${TMP_DIR}/${name}.stderr"
   ); then
     echo "FAIL [${name}]: script exited with error"
@@ -100,6 +102,18 @@ assert_case() {
       return
     fi
   done
+
+  if [[ "${execution_mode_override}" != "auto" && "${workflow_line}" != *"-f execution_mode_override=${execution_mode_override}"* ]]; then
+    echo "FAIL [${name}]: workflow dispatch missing execution_mode_override=${execution_mode_override}"
+    failed=$((failed + 1))
+    return
+  fi
+
+  if ! grep -Fq 'Mainframe dispatches and evaluates execution policy.' "${ROOT_DIR}/handoff-comment.md"; then
+    echo "FAIL [${name}]: handoff comment missing execution-policy note"
+    failed=$((failed + 1))
+    return
+  fi
 
   if [[ "${expect_implement_label}" == "true" ]]; then
     if ! grep -Eq -- '--add-label implement([[:space:]]|$)' "${FAKE_GH_LOG}"; then
@@ -135,6 +149,7 @@ echo ""
 assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true"
 assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false"
 assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false"
+assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

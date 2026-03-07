@@ -22,6 +22,11 @@ title="${ISSUE_TITLE}"
 body="${ISSUE_BODY}"
 comment="${COMMENT_BODY}"
 vote_instruction="$(printf '%s' "${VOTE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+execution_mode_override="$(printf '%s' "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${execution_mode_override}" in
+  auto|primary|backup-safe|backup-heavy) ;;
+  *) execution_mode_override="auto" ;;
+esac
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
   # Keep structured parsing immune to comment-injected headings.
   text="$(printf '%s\n%s\n' "${title}" "${body}")"
@@ -460,7 +465,7 @@ ${confirmation_line}
 ${fallback_block}
 ${confirm_note}
 
-Next: Tutti runs and posts the vote/audit comment. Implementation execution requires \`implement\`; \`/vote\` auto-attaches \`implement-confirmed\` unless review-only is explicit.
+Next: Mainframe dispatches and evaluates execution policy. Tutti posts the vote/audit comment only when GitHub execution remains active; otherwise this issue stays as a handoff/audit record until the primary executor proceeds.
 EOF
 gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file handoff-comment.md
 
@@ -487,6 +492,9 @@ fi
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
   dispatch_args+=(-f allow_processing_rerun="true")
 fi
+if [[ "${execution_mode_override}" != "auto" ]]; then
+  dispatch_args+=(-f execution_mode_override="${execution_mode_override}")
+fi
 
 bridge_handoff_script="scripts/harness/fugue-bridge-handoff.sh"
 if [[ ! -x "${bridge_handoff_script}" && -x ".fugue-orchestrator/scripts/harness/fugue-bridge-handoff.sh" ]]; then
@@ -506,6 +514,7 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --implement-request "${wants_implement}"
     --implement-confirmed "${confirm_implement}"
     --vote-command "${IS_VOTE_COMMAND}"
+    --execution-mode-override "${execution_mode_override}"
   )
   if [[ -n "${trust_subject}" ]]; then
     bridge_args+=(--trust-subject "${trust_subject}")
