@@ -118,6 +118,42 @@ Remain by design:
 - repo-specific CI credentials such as `TARGET_REPO_PAT`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 - platform/runtime secrets such as `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `MANUS_API_KEY`
 
+## Remaining Tasks
+
+No production blocker remains in the currently verified Cursorvers surfaces.
+
+### Non-blocking follow-ups
+
+- `Pencil` / `Excalidraw` / `Slack` / `Vercel`
+  - MCP adapters are verified through contract and dry-run tests
+  - live session-backed verification is still pending
+- `slide` / `Manus artifact`
+  - CLI entrypoint contracts are verified
+  - real Google Slides issuance / Manus generation is still pending
+- `MANUS_GITHUB_TOKEN`
+  - bounded mode is safe today
+  - rotation or GitHub App migration remains desirable for long-term hardening
+- `cloudflare-workers-hub` repo-specific credentials
+  - values such as `CODEX_AUTH_JSON`, `BACKFILL_API_KEY`, `SENTRY_AUTH_TOKEN`
+  - remain intentional for now, but still deserve future consolidation review
+
+### Current confidence split
+
+- production-verified:
+  - Cursorvers LINE platform
+  - Cloudflare Workers / Cockpit boundary
+  - FUGUE / Kernel canary
+  - org-first GitHub Actions secret resolution
+- smoke / contract-verified:
+  - local linked systems
+  - MCP adapter layer
+  - slide / Manus specialist entrypoints
+
+### Recommendation
+
+Treat the current state as production-ready for Cursorvers-operated critical surfaces.
+Run future work as incremental hardening rather than as prerequisite migration work.
+
 ## Conclusion
 
 Cursorvers-operated peripheral systems are aligned with the org-first CI secret model and continue to function in production after cleanup.
