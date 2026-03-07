@@ -35,6 +35,42 @@ Therefore:
 - `Happy.app` may embed or wrap that web experience
 - native wrappers may be added later, but must not fork the product logic
 
+## 1.b Design Toolchain
+
+The design workflow should be:
+
+- `Pencil.dev` for screen composition and design source-of-truth
+- `gemini-cli` for critique and mobile UX second-opinion
+- `Kernel` docs as the product logic source-of-truth
+
+Recommended visual direction for the first production pass:
+
+- `mobile`
+- `webapp`
+- `command-center`
+- `developer`
+- `data-focused`
+- `crisp`
+- `calm`
+
+Tool roles:
+
+- `Pencil.dev`
+  - define the five-screen structure
+  - design task cards, progress cards, output cards, and recover controls
+  - keep safe-area, tab bar, and one-handed-use constraints explicit
+- `gemini-cli`
+  - critique information density
+  - critique Android/mobile ergonomics
+  - propose wording improvements for `Crow` summaries and alerts
+  - provide a second-opinion lane, not a sovereign design decision
+
+Rule:
+
+- visual and layout changes should first land in `Pencil.dev`
+- product logic and routing remain defined by `Kernel`
+- `gemini-cli` may challenge the design, but not replace the state model
+
 ## 1. Design Goal
 
 The target user experience is:
