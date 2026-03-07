@@ -67,6 +67,30 @@ if head -n 8 "${CALLER_WORKFLOW}" | grep -q 'opened'; then
   echo "FAIL: fugue-caller should not auto-start from opened issues" >&2
   exit 1
 fi
+grep -Fq "trigger_label_name: \${{ github.event.label.name || '' }}" "${CALLER_WORKFLOW}" || {
+  echo "FAIL: fugue-caller should pass the triggering label into task router" >&2
+  exit 1
+}
+grep -Fq "comment_body: \${{ github.event.comment.body || '' }}" "${CALLER_WORKFLOW}" || {
+  echo "FAIL: fugue-caller should pass issue_comment body into task router" >&2
+  exit 1
+}
+if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  issues:'; then
+  echo "FAIL: fugue-task-router should no longer expose direct issues triggers" >&2
+  exit 1
+fi
+if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  issue_comment:'; then
+  echo "FAIL: fugue-task-router should no longer expose direct issue_comment triggers" >&2
+  exit 1
+fi
+grep -q 'EXPLICIT_TUTTI_TRIGGER="true"' "${TASK_ROUTER_WORKFLOW}" || {
+  echo "FAIL: task router should recognize manual tutti label as an explicit trigger" >&2
+  exit 1
+}
+if sed -n '1,40p' "${CANARY_WORKFLOW%orchestrator-canary.yml}tutti-caller.yml" | grep -q '^  issues:'; then
+  echo "FAIL: fugue-tutti-caller should be explicit-dispatch only" >&2
+  exit 1
+fi
 grep -q 'HAS_FUGUE}" != "true" && "${IS_VOTE_COMMAND}" != "true"' "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should allow /vote to bypass missing fugue-task label" >&2
   exit 1
