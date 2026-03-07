@@ -90,3 +90,27 @@ Recommended inputs:
   - `scripts/harness/run-canary.sh`
   - `fugue-task-router.yml`
   - `fugue-tutti-caller.yml`
+
+## Validation
+
+Validated on `2026-03-07` in production GitHub Actions:
+
+- `status`
+  - run `22792645301`
+  - success
+- `continuity-canary`
+  - first run `22792661632`
+  - failed because recovery console did not pass org-secret presence flags into `run-canary.sh`
+  - fixed in commit `c6a91fc`
+  - rerun `22792745904`
+  - success
+- `rollback-canary`
+  - run `22792807635`
+  - success
+
+Validated behaviors:
+
+- GitHub Mobile compatible `workflow_dispatch`
+- continuity canary on GitHub-hosted runner
+- `Kernel -> FUGUE` rollback verification without local shell
+- issue-level reroute path remains available through the same console
