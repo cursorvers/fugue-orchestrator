@@ -86,6 +86,24 @@ These old assumptions must not constrain the new kernel:
 | `Gemini` | UI/UX and visual review specialist | conditional yes | CLI/free-first, metered fallback |
 | `xAI` | realtime / X search specialist | conditional yes | metered last |
 
+### 4.0.1 Subscription / Cost Priority
+
+When multiple providers can plausibly satisfy the same lane, Kernel should prefer them in this order:
+
+1. `Codex CLI / ChatGPT Pro`
+2. `Claude CLI / Max`
+3. `GLM (Z.ai Pro)`
+4. `Gemini CLI`
+5. `Gemini API` fallback
+6. `xAI API`
+7. `Anthropic API`
+
+Important distinction:
+
+- `GLM` remains third in cost priority because it is part of the fixed-cost subscription stack for this workspace.
+- The current execution path for `GLM` is still API-backed, but it should be treated as subscription-priority in lane selection and budget policy.
+- `Claude` stays ahead of `GLM` only for local subscription execution; Claude rate-limit handling must remain bounded and must not dominate architecture.
+
 ## 4.1 Orchestrator Adapter Contract
 
 Kernel should separate `control-plane protocol` from `provider implementation`.
