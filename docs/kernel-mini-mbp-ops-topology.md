@@ -11,6 +11,11 @@ Goal:
 
 This is the recommended production layout once the new MBP arrives and the current `mac mini` can be dedicated to 24/7 orchestration.
 
+Related front-door design:
+
+- `Happy.app` single-front architecture:
+  [kernel-happy-app-single-front-architecture.md](./kernel-happy-app-single-front-architecture.md)
+
 ## Plasticity Rule
 
 This topology must preserve reversibility back to `FUGUE`.
