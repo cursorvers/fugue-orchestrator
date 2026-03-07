@@ -43,22 +43,22 @@
     {
       "id": "slack-session-mcp",
       "provider": "slack",
-      "access_mode": "kernel-adapter",
-      "runtime_availability": "adapter-backed",
+      "access_mode": "skill-cli",
+      "runtime_availability": "cli-backed",
       "control_plane": "kernel",
       "kernel_compatible": true,
       "fallback_route": "claude-session",
-      "path": "scripts/lib/mcp-kernel-adapter.sh"
+      "path": "scripts/lib/skill-cli-adapter.sh"
     },
     {
       "id": "vercel-session-mcp",
       "provider": "vercel",
-      "access_mode": "kernel-adapter",
-      "runtime_availability": "adapter-backed",
+      "access_mode": "skill-cli",
+      "runtime_availability": "cli-backed",
       "control_plane": "kernel",
       "kernel_compatible": true,
       "fallback_route": "claude-session",
-      "path": "scripts/lib/mcp-kernel-adapter.sh"
+      "path": "scripts/lib/skill-cli-adapter.sh"
     }
   ]
 }

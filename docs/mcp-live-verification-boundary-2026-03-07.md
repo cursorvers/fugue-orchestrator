@@ -26,13 +26,13 @@ Purpose:
     - healthcheck script
     - export/import/clear dry-run or local smoke against explicit server URL
 - `slack-session-mcp`
-  - route: `kernel-adapter` or `claude-session`
+  - route: `skill-cli` or `claude-session`
   - status: safe auth/webhook smoke only
   - automatic check:
     - `auth.test`
     - webhook delivery or `chat.postMessage`
 - `vercel-session-mcp`
-  - route: `kernel-adapter`
+  - route: `skill-cli`
   - status: safe identity/list-projects smoke only
   - automatic check:
     - `whoami`
@@ -65,4 +65,4 @@ Reason:
 
 - keep `pencil`, `slack`, `vercel` in `safe live smoke + contract` mode
 - treat full end-to-end session validation as a separate attended verification track
-- do not regress to `claude-session` by default when `kernel-adapter` is healthy
+- do not regress to `claude-session` by default when `skill-cli` or `kernel-adapter` is healthy

@@ -46,8 +46,8 @@ pass "adapter IDs unique"
 invalid="$(jq -r '
   .adapters[]
   | select(
-      (.access_mode | IN("rest-bridge","kernel-adapter","claude-session") | not)
-      or (.runtime_availability | IN("hybrid","adapter-backed","session-only") | not)
+      (.access_mode | IN("rest-bridge","kernel-adapter","skill-cli","claude-session") | not)
+      or (.runtime_availability | IN("hybrid","adapter-backed","cli-backed","session-only") | not)
       or (.control_plane | IN("kernel","claude") | not)
       or (.kernel_compatible | type != "boolean")
       or (.fallback_route | IN("none","manual","claude-session") | not)
@@ -84,14 +84,19 @@ excalidraw_route="$(KERNEL_EXCALIDRAW_HEALTHCHECK_SCRIPT="${fake_excalidraw_dir}
 [[ "$(echo "${excalidraw_route}" | jq -r '.available')" == "true" ]] || fail "excalidraw-session-mcp should be available via kernel adapter"
 pass "excalidraw kernel adapter opens without claude session"
 
-slack_route="$("${POLICY}" --adapter slack-session-mcp --execution-engine local --session-provider claude --format json)"
+slack_route="$(env -u SLACK_WEBHOOK_URL -u SLACK_BOT_TOKEN KERNEL_SLACK_SKILL_ENABLED=false "${POLICY}" --adapter slack-session-mcp --execution-engine local --session-provider claude --format json)"
 [[ "$(echo "${slack_route}" | jq -r '.route')" == "claude-session" ]] || fail "slack-session-mcp should fall back to claude-session when session is active"
 [[ "$(echo "${slack_route}" | jq -r '.available')" == "true" ]] || fail "slack-session-mcp should be available with Claude session"
 pass "slack session fallback preserved"
 
-vercel_route="$(KERNEL_VERCEL_ADAPTER_ENABLED=true "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none --format json)"
-[[ "$(echo "${vercel_route}" | jq -r '.route')" == "kernel-adapter" ]] || fail "vercel-session-mcp should resolve to kernel-adapter when enabled"
-[[ "$(echo "${vercel_route}" | jq -r '.available')" == "true" ]] || fail "vercel-session-mcp kernel adapter should be available when enabled"
-pass "vercel kernel adapter opt-in works"
+slack_skill_route="$(SLACK_WEBHOOK_URL="https://hooks.slack.test/services/demo" "${POLICY}" --adapter slack-session-mcp --execution-engine local --session-provider none --format json)"
+[[ "$(echo "${slack_skill_route}" | jq -r '.route')" == "skill-cli" ]] || fail "slack-session-mcp should resolve to skill-cli when webhook is present"
+[[ "$(echo "${slack_skill_route}" | jq -r '.available')" == "true" ]] || fail "slack-session-mcp skill-cli route should be available when webhook is present"
+pass "slack skill-cli route works"
+
+vercel_route="$(VERCEL_TOKEN="demo-token" "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none --format json)"
+[[ "$(echo "${vercel_route}" | jq -r '.route')" == "skill-cli" ]] || fail "vercel-session-mcp should resolve to skill-cli when token is present"
+[[ "$(echo "${vercel_route}" | jq -r '.available')" == "true" ]] || fail "vercel-session-mcp skill-cli route should be available when token is present"
+pass "vercel skill-cli route works"
 
 echo "mcp adapter contract check passed"

@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 POLICY="${ROOT_DIR}/scripts/lib/mcp-adapter-policy.sh"
 KERNEL_POLICY="${ROOT_DIR}/scripts/lib/mcp-kernel-adapter.sh"
 REST_BRIDGE="${ROOT_DIR}/scripts/lib/mcp-rest-bridge.sh"
+SKILL_CLI="${ROOT_DIR}/scripts/lib/skill-cli-adapter.sh"
 
 adapter_id=""
 action="resolve"
@@ -243,6 +244,34 @@ case "${route}" in
     bridge_output="$("${REST_BRIDGE}" --smoke)"
     details_json="$(echo "${bridge_output}" | jq -c '.')"
     emit_result "ok" "rest bridge smoke passed"
+    ;;
+  skill-cli)
+    skill_args=(
+      --provider "${provider}"
+      --action "${action}"
+      --session-provider "${session_provider}"
+      --format json
+    )
+    if [[ "${dry_run}" == "true" ]]; then
+      skill_args+=(--dry-run)
+    fi
+    if [[ -n "${channel}" ]]; then
+      skill_args+=(--channel "${channel}")
+    fi
+    if [[ -n "${text}" ]]; then
+      skill_args+=(--text "${text}")
+    fi
+    if [[ -n "${payload}" ]]; then
+      skill_args+=(--payload "${payload}")
+    fi
+    skill_output="$("${SKILL_CLI}" "${skill_args[@]}")"
+    details_json="$(echo "${skill_output}" | jq -c '{provider,route,backend,reason,fallback_route,details}')"
+    skill_status="$(echo "${skill_output}" | jq -r '.status')"
+    skill_message="$(echo "${skill_output}" | jq -r '.message')"
+    emit_result "${skill_status}" "${skill_message}"
+    if [[ "${skill_status}" != "ok" ]]; then
+      exit 6
+    fi
     ;;
   kernel-adapter)
     case "${provider}" in

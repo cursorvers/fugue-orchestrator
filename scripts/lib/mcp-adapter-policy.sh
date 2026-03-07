@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MANIFEST="${ROOT_DIR}/config/integrations/mcp-adapters.json"
 KERNEL_ADAPTER_SCRIPT="${ROOT_DIR}/scripts/lib/mcp-kernel-adapter.sh"
+SKILL_CLI_SCRIPT="${ROOT_DIR}/scripts/lib/skill-cli-adapter.sh"
 
 adapter_id=""
 execution_engine=""
@@ -64,6 +65,10 @@ if [[ ! -x "${KERNEL_ADAPTER_SCRIPT}" ]]; then
   echo "Error: kernel adapter script not found: ${KERNEL_ADAPTER_SCRIPT}" >&2
   exit 1
 fi
+if [[ ! -x "${SKILL_CLI_SCRIPT}" ]]; then
+  echo "Error: skill cli adapter script not found: ${SKILL_CLI_SCRIPT}" >&2
+  exit 1
+fi
 
 execution_engine="$(echo "${execution_engine:-local}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 case "${execution_engine}" in
@@ -109,6 +114,12 @@ case "${access_mode}" in
     route="$(echo "${kernel_route_json}" | jq -r '.route')"
     available="$(echo "${kernel_route_json}" | jq -r '.available')"
     fallback_route="$(echo "${kernel_route_json}" | jq -r '.fallback_route')"
+    ;;
+  skill-cli)
+    skill_route_json="$("${SKILL_CLI_SCRIPT}" --provider "${provider}" --action resolve --session-provider "${session_provider}" --format json)"
+    route="$(echo "${skill_route_json}" | jq -r '.route')"
+    available="$(echo "${skill_route_json}" | jq -r '.available')"
+    fallback_route="$(echo "${skill_route_json}" | jq -r '.fallback_route')"
     ;;
   claude-session)
     requires_session="true"

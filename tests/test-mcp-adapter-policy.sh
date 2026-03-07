@@ -62,26 +62,31 @@ assert_field "pencil-kernel-route" "route" "kernel-adapter" \
   env KERNEL_PENCIL_WRAPPER="${fake_pencil}" "${POLICY}" \
   --adapter pencil-session-mcp --execution-engine subscription --session-provider none
 assert_field "vercel-kernel-disabled" "route" "unavailable" \
-  "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none
+  env -u VERCEL_TOKEN KERNEL_VERCEL_SKILL_ENABLED=false "${POLICY}" \
+  --adapter vercel-session-mcp --execution-engine local --session-provider none
 assert_field "slack-session-fallback" "route" "claude-session" \
-  "${POLICY}" --adapter slack-session-mcp --execution-engine local --session-provider claude
+  env -u SLACK_WEBHOOK_URL -u SLACK_BOT_TOKEN KERNEL_SLACK_SKILL_ENABLED=false "${POLICY}" \
+  --adapter slack-session-mcp --execution-engine local --session-provider claude
+assert_field "slack-skill-cli" "route" "skill-cli" \
+  env SLACK_WEBHOOK_URL="https://hooks.slack.test/services/demo" "${POLICY}" \
+  --adapter slack-session-mcp --execution-engine local --session-provider none
 assert_field "session-only-available-flag" "available" "true" \
   env KERNEL_EXCALIDRAW_HEALTHCHECK_SCRIPT="${fake_excalidraw_dir}/healthcheck.cjs" "${POLICY}" \
   --adapter excalidraw-session-mcp --execution-engine local --session-provider claude
 
 total=$((total + 1))
-vercel_enabled_output="$(env KERNEL_VERCEL_ADAPTER_ENABLED=true "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none)" || {
-  echo "FAIL [vercel-kernel-enabled]: script exited with error"
+vercel_enabled_output="$(env VERCEL_TOKEN="demo-token" "${POLICY}" --adapter vercel-session-mcp --execution-engine local --session-provider none)" || {
+  echo "FAIL [vercel-skill-cli]: script exited with error"
   failed=$((failed + 1))
   vercel_enabled_output=""
 }
 if [[ -n "${vercel_enabled_output}" ]]; then
   eval "${vercel_enabled_output}"
-  if [[ "${route}" != "kernel-adapter" ]]; then
-    echo "FAIL [vercel-kernel-enabled]: route=${route}(expected kernel-adapter)"
+  if [[ "${route}" != "skill-cli" ]]; then
+    echo "FAIL [vercel-skill-cli]: route=${route}(expected skill-cli)"
     failed=$((failed + 1))
   else
-    echo "PASS [vercel-kernel-enabled]"
+    echo "PASS [vercel-skill-cli]"
     passed=$((passed + 1))
   fi
 fi
