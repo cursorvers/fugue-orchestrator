@@ -45,7 +45,7 @@ if [[ -n "${TMP_ADAPTER_CALLS_LOG:-}" ]]; then
   printf '%s\n' "${action}" >> "${TMP_ADAPTER_CALLS_LOG}"
 fi
 if [[ -n "${credentials_file}" && -n "${TMP_ADAPTER_CREDENTIALS_LOG:-}" ]]; then
-  cat "${credentials_file}" > "${TMP_ADAPTER_CREDENTIALS_LOG}"
+  printf '%s\t%s\n' "${action}" "$(tr -d '\n' < "${credentials_file}")" >> "${TMP_ADAPTER_CREDENTIALS_LOG}"
 fi
 
 meta_file="${run_dir}/googleworkspace/${action}-meta.json"
@@ -58,9 +58,15 @@ case "${action}" in
     cat "${raw_file}"
     ;;
   gmail-triage)
-    printf '%s' '{"status":"error","message":"mailbox unavailable"}' > "${meta_file}"
-    echo "mailbox unavailable" >&2
-    exit 1
+    if [[ -n "${credentials_file}" ]] && grep -q '"type":"authorized_user"' "${credentials_file}"; then
+      printf '%s' '{"resultSizeEstimate":3}' > "${raw_file}"
+      printf '%s' '{"status":"ok","message":"ok"}' > "${meta_file}"
+      cat "${raw_file}"
+    else
+      printf '%s' '{"status":"error","message":"mailbox unavailable"}' > "${meta_file}"
+      echo "mailbox unavailable" >&2
+      exit 1
+    fi
     ;;
   *)
     printf '%s' '{"status":"error","message":"unsupported action"}' > "${meta_file}"
@@ -152,7 +158,48 @@ test_partial_report_and_outputs() {
     grep -q '^meeting-prep$' "${calls_log}" &&
     grep -q '^gmail-triage$' "${calls_log}" &&
     ! grep -q 'docs-create' "${calls_log}" &&
-    grep -q '"type":"service_account"' "${credentials_log}"
+    grep -q $'^meeting-prep\t.*"type":"service_account"' "${credentials_log}" &&
+    grep -q $'^gmail-triage\t.*"type":"service_account"' "${credentials_log}"
+}
+
+test_prefers_user_oauth_for_mailbox_actions() {
+  local work_dir="${tmp_dir}/user-oauth"
+  local home_dir="${work_dir}/home"
+  local calls_log="${work_dir}/calls.log"
+  local credentials_log="${work_dir}/credentials.log"
+  local output_file="${work_dir}/github-output.txt"
+  local report_path="${work_dir}/report.md"
+
+  mkdir -p "${work_dir}" "${home_dir}"
+
+  env \
+    HOME="${home_dir}" \
+    TMP_ADAPTER_CALLS_LOG="${calls_log}" \
+    TMP_ADAPTER_CREDENTIALS_LOG="${credentials_log}" \
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON='{"type":"service_account","project_id":"demo"}' \
+    GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON='{"type":"authorized_user","client_id":"abc","client_secret":"def","refresh_token":"ghi"}' \
+    ISSUE_NUMBER="43" \
+    ISSUE_TITLE="Meeting and inbox context" \
+    ISSUE_BODY="Need meeting prep and inbox triage." \
+    WORKSPACE_ACTIONS="meeting-prep,gmail-triage" \
+    WORKSPACE_DOMAINS="calendar,gmail" \
+    WORKSPACE_REASON="Issue mentions meetings and unread mail." \
+    WORKSPACE_SUGGESTED_PHASES="preflight-enrich" \
+    REPORT_PATH="${report_path}" \
+    OUT_DIR="${work_dir}" \
+    RUN_DIR="${work_dir}/run" \
+    GITHUB_OUTPUT="${output_file}" \
+    ADAPTER="${fake_adapter}" \
+    bash "${SCRIPT}" >/dev/null
+
+  grep -q '^workspace_preflight_status=ok$' "${output_file}" &&
+    grep -q 'meeting-prep: next meeting at 10:00' "${output_file}" &&
+    grep -q 'gmail-triage: resultSizeEstimate=3' "${output_file}" &&
+    grep -q -- '- status: ok' "${report_path}" &&
+    grep -q '| meeting-prep | ok | next meeting at 10:00 |' "${report_path}" &&
+    grep -q '| gmail-triage | ok | resultSizeEstimate=3 |' "${report_path}" &&
+    grep -q $'^meeting-prep\t.*"type":"service_account"' "${credentials_log}" &&
+    grep -q $'^gmail-triage\t.*"type":"authorized_user"' "${credentials_log}"
 }
 
 echo "=== googleworkspace-preflight-enrich.sh unit tests ==="
@@ -160,6 +207,7 @@ echo ""
 
 assert_ok "skips-without-credentials" test_skips_without_credentials
 assert_ok "partial-report-and-outputs" test_partial_report_and_outputs
+assert_ok "prefers-user-oauth-for-mailbox-actions" test_prefers_user_oauth_for_mailbox_actions
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

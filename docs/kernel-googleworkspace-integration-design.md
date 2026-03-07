@@ -228,7 +228,8 @@ Kernel admission rules:
 ### 2. Morning Operator Brief
 
 1. Scheduler invokes `standup-report`.
-2. If user OAuth is available, also run `gmail-triage` or `weekly-digest`.
+2. If protected readonly user OAuth export is available, also run
+   `gmail-triage` or `weekly-digest`.
 3. Kernel emits one digest artifact and does not mutate state elsewhere.
 
 ### 3. Stakeholder Delivery
@@ -255,7 +256,9 @@ Kernel admission rules:
 3. Add optional read helpers for `drive search`, `docs read`, and `sheets read`
    to reduce fallback raw API usage.
 4. Add an approval receipt log for Workspace write actions.
-5. Keep CI Workspace auth limited to optional readonly service-account secrets;
-   do not run unattended write actions in reusable workflows.
+5. Keep CI Workspace auth limited to protected readonly secrets only:
+   service-account JSON for shared context and optional user OAuth export JSON
+   for mailbox helpers. Do not run unattended write actions in reusable
+   workflows.
 6. Require a protected GitHub `Environment` such as `workspace-readonly` before
    CI can access readonly Workspace credentials.
