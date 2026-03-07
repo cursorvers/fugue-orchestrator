@@ -20,10 +20,20 @@ Build the outer all-in-one mobile web app with `Happy.app` as the inner conversa
 
 The current implementation seed lives at:
 
+- `/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web`
+
+The architecture prototype remains at:
+
 - `/Users/masayuki/Dev/fugue-orchestrator/prototypes/happy-mobile-web`
 
-It is intentionally dependency-light and static so the IA, state model, and
-recovery semantics can be validated before choosing the final runtime host.
+Role split:
+
+- `apps/happy-web`
+  - implementation seed
+  - app structure, modules, and testable contracts
+- `prototypes/happy-mobile-web`
+  - design/IA reference
+  - architecture-facing fixture
 
 ## Open questions
 - Should the first slice live beside `cockpit-pwa` in the same repo or as a separate front-end package?

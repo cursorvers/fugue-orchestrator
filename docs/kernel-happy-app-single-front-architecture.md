@@ -19,6 +19,10 @@ Current prototype seed:
 
 - `/Users/masayuki/Dev/fugue-orchestrator/prototypes/happy-mobile-web`
 
+Current implementation seed:
+
+- `/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web`
+
 ## 1.a Front-End Delivery Strategy
 
 The correct delivery model is:
