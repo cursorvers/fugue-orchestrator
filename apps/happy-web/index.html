@@ -14,12 +14,31 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div>
+        <div class="topbar-copy">
           <p class="eyebrow">Kernel Mobile Front</p>
           <h1>Happy Web</h1>
+          <p class="topbar-subtitle">Outside shell for mobile command, progress, outputs, and recovery.</p>
         </div>
-        <span id="health-pill" class="pill healthy">HEALTHY</span>
+        <div class="topbar-status">
+          <span id="health-pill" class="pill healthy">HEALTHY</span>
+          <span class="pill subtle">local first</span>
+        </div>
       </header>
+
+      <section class="pulse-strip" aria-label="Kernel pulse">
+        <article class="pulse-card">
+          <span class="pulse-label">Primary</span>
+          <strong id="pulse-primary">local primary</strong>
+        </article>
+        <article class="pulse-card">
+          <span class="pulse-label">Heartbeat</span>
+          <strong id="pulse-heartbeat">14s ago</strong>
+        </article>
+        <article class="pulse-card">
+          <span class="pulse-label">Fallback</span>
+          <strong id="pulse-fallback">GHA warm</strong>
+        </article>
+      </section>
 
       <main class="viewport">
         <section id="screen-happy" class="screen is-active" data-screen="happy">
@@ -27,9 +46,20 @@
             <p class="eyebrow">Happy.app inside</p>
             <h2>Crow が指示を受理します</h2>
             <p id="crow-summary" class="muted"></p>
+            <div class="hero-route-row">
+              <span class="hero-badge">single mobile front</span>
+              <span class="hero-badge">Kernel sovereign</span>
+              <span class="hero-badge">FUGUE reversible</span>
+            </div>
           </div>
           <div class="panel composer">
-            <label for="happy-input">Happy</label>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Command</p>
+                <h3>Happy</h3>
+              </div>
+              <span class="section-note">one-thumb intake</span>
+            </div>
             <textarea
               id="happy-input"
               rows="4"
@@ -54,13 +84,22 @@
             <button id="submit-task" class="primary">Kernel に送る</button>
           </div>
           <div class="panel">
-            <h3>Normalized intake packet</h3>
-            <pre id="packet-preview" class="code-block"></pre>
-          </div>
-          <div class="panel">
-            <h3>Recent prompts</h3>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Quick reuse</p>
+                <h3>Recent prompts</h3>
+              </div>
+              <span class="section-note">tap to reuse</span>
+            </div>
             <ul id="recent-prompts" class="stacked-list"></ul>
           </div>
+          <details class="panel details-panel">
+            <summary>
+              <span>Normalized intake packet</span>
+              <span class="section-note">debug view</span>
+            </summary>
+            <pre id="packet-preview" class="code-block"></pre>
+          </details>
         </section>
 
         <section id="screen-now" class="screen" data-screen="now">
@@ -68,6 +107,10 @@
             <p class="eyebrow">Now</p>
             <h2 id="now-title"></h2>
             <p id="now-route" class="muted"></p>
+            <div class="hero-route-row">
+              <span id="phase-label" class="hero-badge"></span>
+              <span id="phase-confidence" class="hero-badge"></span>
+            </div>
           </div>
           <div class="grid two-up">
             <div class="panel metric-card">
@@ -88,13 +131,15 @@
             </div>
           </div>
           <div class="panel">
-            <h3>Current step</h3>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Execution</p>
+                <h3>Current step</h3>
+              </div>
+              <span class="section-note">phase-based progress</span>
+            </div>
             <div class="progress-track">
               <div id="progress-bar" class="progress-bar"></div>
-            </div>
-            <div class="progress-meta">
-              <span id="phase-label" class="tag"></span>
-              <span id="phase-confidence" class="tag"></span>
             </div>
             <p id="progress-copy" class="muted"></p>
             <div class="output-list">
@@ -110,6 +155,7 @@
           <div class="panel hero compact">
             <p class="eyebrow">Tasks</p>
             <h2>進行中 / 完了 / 要確認</h2>
+            <p class="muted">Tap any card to inspect outputs, decision, and bounded recovery.</p>
           </div>
           <div class="filter-tabs" role="tablist" aria-label="Task filters">
             <button class="filter-tab is-active" data-filter="in-progress">in progress</button>
@@ -124,6 +170,7 @@
           <div class="panel hero compact">
             <p class="eyebrow">Alerts</p>
             <h2>degraded / fallback / needs-human</h2>
+            <p class="muted">Only escalation-grade signals show here.</p>
           </div>
           <div id="alert-list" class="stack"></div>
         </section>
@@ -135,6 +182,13 @@
             <p class="muted">continuity / rollback / reroute を mobile から起動</p>
           </div>
           <div class="panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Safe actions</p>
+                <h3>Recovery controls</h3>
+              </div>
+              <span class="section-note">no destructive ops</span>
+            </div>
             <div id="recover-actions" class="action-stack"></div>
           </div>
           <div class="panel">

@@ -23,6 +23,8 @@ This app is the outer shell. The inner conversational surface is `Happy`.
 - `src/data/`
 - `src/render.js`
 - `src/app.js`
+- `pencil-brief.md`
+- `gemini-critique-prompt.md`
 - `tests/`
 
 ## Scope
@@ -60,11 +62,19 @@ These adapters are still backed by mock/local state so the UI stays portable and
 testable. The next implementation step is to replace the adapter internals with
 real endpoints without rewriting screen logic.
 
+## Design review helpers
+
+- `pencil-brief.md`
+  - visual/wireframe brief for Pencil.dev
+- `gemini-critique-prompt.md`
+  - critique prompt for Gemini CLI UI review
+
 ## Verification
 
 ```bash
 bash /Users/masayuki/Dev/fugue-orchestrator/apps/happy-web/tests/test-view-contract.sh
 bash /Users/masayuki/Dev/fugue-orchestrator/apps/happy-web/tests/test-state-contract.sh
+bash /Users/masayuki/Dev/fugue-orchestrator/apps/happy-web/tests/test-design-contract.sh
 bash /Users/masayuki/Dev/fugue-orchestrator/apps/happy-web/tests/test-pwa-shell.sh
 node /Users/masayuki/Dev/fugue-orchestrator/apps/happy-web/tests/test-behavior-contract.js
 ```

@@ -20,8 +20,17 @@ function renderHappy() {
   const recent = document.getElementById("recent-prompts");
   recent.innerHTML = "";
   state.recent_prompts.forEach((prompt) => {
-    const item = create("li", "recent-item");
-    item.textContent = prompt;
+    const item = create("li");
+    const button = create("button", "recent-item recent-prompt", prompt);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      const input = document.getElementById("happy-input");
+      input.value = prompt;
+      renderPacketPreview();
+      switchScreen("happy");
+      input.focus();
+    });
+    item.appendChild(button);
     recent.appendChild(item);
   });
 }
@@ -40,6 +49,9 @@ function renderPacketPreview() {
 function renderNow() {
   setText("now-title", state.current.title);
   setText("now-route", state.current.route);
+  setText("pulse-primary", state.current.primary);
+  setText("pulse-heartbeat", state.current.heartbeat);
+  setText("pulse-fallback", state.current.rollback === "ready" ? "FUGUE warm" : "fallback idle");
   setText("metric-primary", state.current.primary);
   setText("metric-heartbeat", state.current.heartbeat);
   setText("metric-lanes", String(state.current.lanes));
@@ -99,6 +111,7 @@ function renderTasks() {
     meta.appendChild(create("span", "tag", task.route));
     meta.appendChild(create("span", "tag", task.current_phase));
     meta.appendChild(create("span", "tag", task.last_update));
+    meta.appendChild(create("span", "tag", `${task.outputs.length} outputs`));
     card.appendChild(meta);
 
     const progress = create("div", "task-progress");
@@ -109,11 +122,11 @@ function renderTasks() {
     progress.appendChild(track);
     card.appendChild(progress);
 
-    const outputs = create("div", "output-list");
+    const outputs = create("div", "output-list compact-output-list");
     task.outputs.forEach((output) => {
       const row = create("div", "output-item");
-      row.appendChild(create("span", "muted", output.type));
-      const link = create("a", "output-link", output.value);
+      row.appendChild(create("span", "muted", `${output.type}${output.is_primary ? " · primary" : ""}`));
+      const link = create("a", "output-link", output.title);
       link.href = output.url;
       row.appendChild(link);
       outputs.appendChild(row);
@@ -193,9 +206,10 @@ function openTaskSheet(task) {
   const recover = document.getElementById("sheet-recover");
   recover.innerHTML = "";
   recoveryAdapter.listActions().forEach((action) => {
-    const button = create("button", "secondary", action);
+    const button = create("button", `secondary recover-button ${action.tone}`, action.title);
+    button.type = "button";
     button.addEventListener("click", () => {
-      refreshState(recoveryAdapter.run(action, task.title));
+      refreshState(recoveryAdapter.run(action.id, task.title));
     });
     recover.appendChild(button);
   });
@@ -256,12 +270,22 @@ function wireRecoverActions() {
   const container = document.getElementById("recover-actions");
   container.innerHTML = "";
   recoveryAdapter.listActions().forEach((action) => {
-    const button = create("button", "secondary", action);
-    button.dataset.recover = action;
-    button.addEventListener("click", () => {
-      refreshState(recoveryAdapter.run(action, "Happy Web"));
+    const card = create("button", `recover-card ${action.tone}`);
+    card.type = "button";
+    card.dataset.recover = action.id;
+
+    const copy = create("div", "recover-card-copy");
+    copy.appendChild(create("strong", "", action.title));
+    copy.appendChild(create("p", "muted", action.summary));
+
+    const badge = create("span", "recover-card-badge", action.tone);
+
+    card.appendChild(copy);
+    card.appendChild(badge);
+    card.addEventListener("click", () => {
+      refreshState(recoveryAdapter.run(action.id, "Happy Web"));
     });
-    container.appendChild(button);
+    container.appendChild(card);
   });
 }
 

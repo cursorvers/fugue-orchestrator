@@ -12,6 +12,7 @@ Build the outer all-in-one mobile web app with `Happy.app` as the inner conversa
 [x] Implement `Now` and `Tasks` views against a normalized `happy-app-state` adapter with canonical output cards
 [x] Implement task detail sheets and `Recover` controls over bounded `kernel-recovery-console` actions
 [x] Add a `Crow` summarization adapter that converts workflow/issue/task state into short mobile narratives
+[x] Add a mobile design contract plus `Pencil.dev` and `gemini-cli` review briefs to the implementation seed
 [ ] Verify the design contract with at least three parallel simulation lanes on every design-affecting change
 [ ] Run production-like smoke checks for progress visibility, output visibility, and recovery actions before any live cutover
 [ ] Keep `FUGUE` rollback and `GHA` continuity paths visible in the state model but secondary in the mobile UX
