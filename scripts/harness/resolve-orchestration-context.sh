@@ -48,6 +48,31 @@ normalize_multi_agent_mode() {
   esac
 }
 
+extract_mode_from_body() {
+  local b="$1"
+  local mode=""
+  mode="$(extract_body_section "${b}" "execution[[:space:]]+mode" "##")"
+  if [[ -z "${mode}" ]]; then
+    mode="$(extract_body_section "${b}" "execution[[:space:]]+mode" "###")"
+  fi
+  if [[ -z "${mode}" ]]; then
+    mode="$(extract_body_section "${b}" "mode" "##")"
+  fi
+  if [[ -z "${mode}" ]]; then
+    mode="$(extract_body_section "${b}" "mode" "###")"
+  fi
+  if [[ "${mode}" != "implement" && "${mode}" != "review" ]]; then
+    mode="$(echo "${b}" | sed -nE 's/^[[:space:]]*execution[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+  fi
+  if [[ "${mode}" != "implement" && "${mode}" != "review" ]]; then
+    mode="$(echo "${b}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+  fi
+  if [[ "${mode}" != "implement" && "${mode}" != "review" ]]; then
+    mode=""
+  fi
+  printf '%s' "${mode}"
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT_DIR}/scripts/lib/common-utils.sh"
 DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
@@ -57,9 +82,6 @@ CLAUDE_DEGRADED_ASSIST_POLICY="${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}"
 CLAUDE_ROLE_POLICY="${CLAUDE_ROLE_POLICY:-flex}"
 CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-sonnet-4-6}"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
-GOOGLEWORKSPACE_FEED_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-feed-policy.json"
-GOOGLEWORKSPACE_FEED_INGEST="${ROOT_DIR}/scripts/harness/googleworkspace-feed-ingest.sh"
-GOOGLEWORKSPACE_FEED_FETCH="${ROOT_DIR}/scripts/harness/googleworkspace-fetch-feed-artifacts.sh"
 
 ISSUE_NUMBER=""
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
@@ -97,6 +119,22 @@ if [[ -n "${vote_instruction_b64}" ]]; then
   vote_instruction="$(printf '%s' "${vote_instruction_b64}" | base64 --decode 2>/dev/null || true)"
   vote_instruction="$(printf '%s' "${vote_instruction}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 fi
+requested_execution_mode_input="$(echo "${REQUESTED_EXECUTION_MODE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${requested_execution_mode_input}" != "review" && "${requested_execution_mode_input}" != "implement" ]]; then
+  requested_execution_mode_input=""
+fi
+implement_request_input="$(echo "${IMPLEMENT_REQUEST_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${implement_request_input}" != "true" && "${implement_request_input}" != "false" ]]; then
+  implement_request_input=""
+fi
+implement_confirmed_input="$(echo "${IMPLEMENT_CONFIRMED_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${implement_confirmed_input}" != "true" && "${implement_confirmed_input}" != "false" ]]; then
+  implement_confirmed_input=""
+fi
+vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${vote_command}" != "true" ]]; then
+  vote_command="false"
+fi
 owner="${GITHUB_REPOSITORY%%/*}"
 
 has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
@@ -115,6 +153,12 @@ if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
 fi
 has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
 has_implement_confirmed="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement-confirmed") != null)')"
+if [[ -n "${implement_request_input}" ]]; then
+  has_implement="${implement_request_input}"
+fi
+if [[ -n "${implement_confirmed_input}" ]]; then
+  has_implement_confirmed="${implement_confirmed_input}"
+fi
 ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
   ci_execution_engine="subscription"
@@ -148,17 +192,13 @@ if [[ "${ci_execution_engine}" == "subscription" ]]; then
   fi
 fi
 labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
-body_mode="$(extract_body_section "${body}" "mode" "##")"
-if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
-  body_mode="$(extract_body_section "${body}" "execution[[:space:]]+mode" "###")"
-fi
-if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
-  body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
-fi
+body_mode="$(extract_mode_from_body "${body}")"
 # Explicit review mode in issue body always wins over stale labels.
-if [[ "${body_mode}" == "review" ]]; then
+if [[ "${requested_execution_mode_input}" == "review" || "${body_mode}" == "review" ]]; then
   has_implement="false"
   has_implement_confirmed="false"
+elif [[ "${requested_execution_mode_input}" == "implement" || "${body_mode}" == "implement" ]]; then
+  has_implement="true"
 fi
 label_main_provider="$(echo "${issue_json}" | jq -r '
   [ .labels[]? | .name ] as $labels
@@ -209,10 +249,6 @@ eval "$(
 workspace_suggested_phases=""
 workspace_readonly_actions=""
 workspace_approval_required_actions=""
-workspace_feed_status="skipped"
-workspace_feed_summary=""
-workspace_feed_profiles=""
-workspace_feed_context_path=""
 if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   workspace_policy_json="$(jq -cn \
     --arg action_hint "${workspace_action_hint}" \
@@ -247,61 +283,6 @@ if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   workspace_suggested_phases="$(echo "${workspace_policy_json}" | jq -r '.suggested_phases | join(",")')"
   workspace_readonly_actions="$(echo "${workspace_policy_json}" | jq -r '.readonly_actions | join(",")')"
   workspace_approval_required_actions="$(echo "${workspace_policy_json}" | jq -r '.approval_required_actions | join(",")')"
-fi
-
-workspace_feed_sync_enable="$(echo "${GOOGLEWORKSPACE_FEED_SYNC_ENABLE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ "${workspace_feed_sync_enable}" != "true" ]]; then
-  workspace_feed_sync_enable="false"
-fi
-workspace_feed_fetch_remote="$(echo "${GOOGLEWORKSPACE_FEED_FETCH_REMOTE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ "${workspace_feed_fetch_remote}" != "true" ]]; then
-  workspace_feed_fetch_remote="false"
-fi
-if [[ "${workspace_hint_applied}" == "true" && "${workspace_feed_sync_enable}" == "true" && -f "${GOOGLEWORKSPACE_FEED_POLICY}" && -f "${GOOGLEWORKSPACE_FEED_INGEST}" ]]; then
-  workspace_feed_out_root="${GOOGLEWORKSPACE_FEED_OUT_ROOT:-${ROOT_DIR}/.fugue/feeds/googleworkspace}"
-  workspace_feed_tmp_dir=""
-  if [[ "${workspace_feed_fetch_remote}" == "true" && -f "${GOOGLEWORKSPACE_FEED_FETCH}" ]]; then
-    workspace_feed_tmp_dir="$(mktemp -d)"
-    if env \
-      GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
-      OUT_ROOT="${workspace_feed_tmp_dir}" \
-      WORKFLOWS_CSV="${GOOGLEWORKSPACE_FEED_WORKFLOWS:-googleworkspace-feed-sync.yml,googleworkspace-personal-feed-sync.yml}" \
-      BRANCH="${GOOGLEWORKSPACE_FEED_BRANCH:-main}" \
-      bash "${GOOGLEWORKSPACE_FEED_FETCH}" >/dev/null 2>&1
-    then
-      workspace_feed_out_root="${workspace_feed_tmp_dir}"
-    else
-      rm -rf "${workspace_feed_tmp_dir}"
-      workspace_feed_tmp_dir=""
-    fi
-  fi
-
-  if [[ -d "${workspace_feed_out_root}" ]]; then
-    workspace_feed_context_path="$(mktemp)"
-    workspace_feed_output_file="$(mktemp)"
-    if env \
-      WORKSPACE_ACTIONS="${workspace_action_hint}" \
-      WORKSPACE_REASON="${workspace_reason}" \
-      GOOGLEWORKSPACE_FEED_POLICY_FILE="${GOOGLEWORKSPACE_FEED_POLICY}" \
-      OUT_ROOT="${workspace_feed_out_root}" \
-      OUT_FILE="${workspace_feed_context_path}" \
-      GITHUB_OUTPUT="${workspace_feed_output_file}" \
-      bash "${GOOGLEWORKSPACE_FEED_INGEST}" >/dev/null 2>&1
-    then
-      workspace_feed_status="$(grep -E '^feed_ingest_status=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
-      workspace_feed_profiles="$(grep -E '^feed_active_profiles=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
-      workspace_feed_summary="$(awk '
-        $0 == "feed_summary<<EOF" { capture = 1; next }
-        capture && $0 == "EOF" { exit }
-        capture { print }
-      ' "${workspace_feed_output_file}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
-    else
-      workspace_feed_status="skipped"
-      workspace_feed_summary=""
-      workspace_feed_profiles=""
-    fi
-    rm -f "${workspace_feed_output_file}"
-  fi
 fi
 
 requested_main_provider="${label_main_provider}"
@@ -918,12 +899,6 @@ fi
   echo "workspace_action_hint=${workspace_action_hint}"
   echo "workspace_domain_hint=${workspace_domain_hint}"
   echo "workspace_reason=${workspace_reason}"
-  echo "workspace_feed_status=${workspace_feed_status}"
-  echo "workspace_feed_profiles=${workspace_feed_profiles}"
-  echo "workspace_feed_context_path=${workspace_feed_context_path}"
-  echo "workspace_feed_summary<<EOF"
-  echo "${workspace_feed_summary}"
-  echo "EOF"
   echo "content_hint_applied=${content_hint_applied}"
   echo "content_action_hint=${content_action_hint}"
   echo "content_skill_hint=${content_skill_hint}"
@@ -982,6 +957,7 @@ fi
   echo "subscription_offline_policy=${subscription_offline_policy}"
   echo "trust_subject=${trust_subject}"
   echo "allow_processing_rerun=${allow_processing_rerun}"
+  echo "vote_command=${vote_command}"
   echo "vote_instruction<<EOF"
   echo "${vote_instruction}"
   echo "EOF"

@@ -6,6 +6,7 @@ CANARY_SCRIPT="${ROOT_DIR}/scripts/harness/run-canary.sh"
 CANARY_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-orchestrator-canary.yml"
 ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml"
 TASK_ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-task-router.yml"
+CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-caller.yml"
 RESOLVE_CONTEXT_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
 
@@ -56,6 +57,18 @@ grep -q 'echo "task_size_tier=${task_size_tier}"' "${ROUTER_WORKFLOW}" || {
 }
 grep -q "canary-dispatch-owned" "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should skip canary issues owned by run-canary dispatch" >&2
+  exit 1
+}
+head -n 8 "${CALLER_WORKFLOW}" | grep -q 'types: \[labeled\]' || {
+  echo "FAIL: fugue-caller should start issue flow only from labeled issues" >&2
+  exit 1
+}
+if head -n 8 "${CALLER_WORKFLOW}" | grep -q 'opened'; then
+  echo "FAIL: fugue-caller should not auto-start from opened issues" >&2
+  exit 1
+fi
+grep -q 'HAS_FUGUE}" != "true" && "${IS_VOTE_COMMAND}" != "true"' "${TASK_ROUTER_WORKFLOW}" || {
+  echo "FAIL: task router should allow /vote to bypass missing fugue-task label" >&2
   exit 1
 }
 
