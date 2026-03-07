@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: "codex-full"
+      execution_mode:
+        description: "Execution policy mode (primary|backup-safe|backup-heavy|record-only)"
+        required: false
+        type: string
+        default: "primary"
       risk_tier:
         description: "Resolved risk tier (low|medium|high)"
         required: false
@@ -112,6 +117,10 @@ on:
         required: false
       TARGET_REPO_PAT:
         required: false
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:
+        required: false
+      GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON:
+        required: false
 
 permissions:
   issues: write
@@ -173,7 +182,6 @@ jobs:
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
-          AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
           HAS_IMPLEMENT_CONFIRMED="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement-confirmed") != null)')"
           HAS_LARGE_REFACTOR="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("large-refactor") != null)')"
