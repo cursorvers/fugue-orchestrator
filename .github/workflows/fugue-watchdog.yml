@@ -33,6 +33,7 @@ jobs:
       failover_reason: ${{ steps.failover.outputs.failover_reason }}
       backup_router_execution_mode: ${{ steps.failover.outputs.backup_router_execution_mode }}
       gha_execution_mode: ${{ steps.failover.outputs.gha_execution_mode }}
+      failover_variable_sync_status: ${{ steps.failover.outputs.failover_variable_sync_status }}
 
     steps:
       - name: Count pending work (for alert gating)
@@ -310,6 +311,11 @@ jobs:
             echo "last_time=${LAST_TIME}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout repository for failover resolver
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Detect execution failover state
         id: failover
         env:
@@ -345,17 +351,22 @@ jobs:
               --format env
           )"
 
-          can_manage_variables="false"
+          can_manage_variables="true"
           if [[ -n "${OPS_TOKEN:-}" ]]; then
             GH_TOKEN="${OPS_TOKEN}"
             export GH_TOKEN
-            can_manage_variables="true"
           fi
 
-          if [[ "${can_manage_variables}" == "true" && "${failover_state}" != "${current_state}" ]]; then
-            gh variable set FUGUE_FAILOVER_STATE \
+          failover_variable_sync_status="unchanged"
+          if [[ "${failover_state}" != "${current_state}" ]]; then
+            if gh variable set FUGUE_FAILOVER_STATE \
               --repo "${GITHUB_REPOSITORY}" \
-              --body "${failover_state}" >/dev/null 2>&1 || true
+              --body "${failover_state}" >/dev/null 2>&1; then
+              failover_variable_sync_status="updated"
+            else
+              failover_variable_sync_status="failed"
+              echo "::warning::Failed to sync FUGUE_FAILOVER_STATE to ${failover_state}" >&2
+            fi
           fi
 
           {
@@ -367,6 +378,7 @@ jobs:
             echo "heartbeat_status=${heartbeat_status}"
             echo "heartbeat_age_minutes=${heartbeat_age_minutes}"
             echo "can_manage_variables=${can_manage_variables}"
+            echo "failover_variable_sync_status=${failover_variable_sync_status}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Decide whether to alert (throttle + relevance)

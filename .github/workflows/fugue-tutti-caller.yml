@@ -306,11 +306,56 @@ jobs:
       skip_reason: ${{ steps.policy.outputs.skip_reason }}
       codex_execution_mode: ${{ steps.policy.outputs.codex_execution_mode }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve live failover state
+        id: live_failover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+          PRIMARY_HEARTBEAT_AT: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_AT || '' }}
+          PRIMARY_HEARTBEAT_TTL_MINUTES: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_TTL_MINUTES || '8' }}
+          PRIMARY_HEARTBEAT_GRACE_MULTIPLIER: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_GRACE_MULTIPLIER || '3' }}
+        run: |
+          set -euo pipefail
+
+          online_count=0
+          runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
+          if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
+            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == $label))] | length')"
+          fi
+
+          eval "$(
+            scripts/lib/resolve-primary-heartbeat-state.sh \
+              --gha-execution-mode "${GHA_EXECUTION_MODE}" \
+              --current-state "${CURRENT_FAILOVER_STATE}" \
+              --runner-online-count "${online_count}" \
+              --pending-count 0 \
+              --mainframe-pending-count 1 \
+              --router-stale false \
+              --mainframe-stale false \
+              --heartbeat-at "${PRIMARY_HEARTBEAT_AT}" \
+              --heartbeat-ttl-minutes "${PRIMARY_HEARTBEAT_TTL_MINUTES}" \
+              --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
+              --format env
+          )"
+
+          {
+            echo "failover_state=${failover_state}"
+            echo "failover_reason=${failover_reason}"
+            echo "heartbeat_status=${heartbeat_status}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Resolve GHA execution policy
         id: policy
         env:
           GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
-          FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
           BACKUP_HEAVY_ENABLED: ${{ vars.FUGUE_GHA_BACKUP_HEAVY_ENABLED || 'false' }}
           EXECUTION_MODE_OVERRIDE_INPUT: ${{ github.event.inputs.execution_mode_override || 'auto' }}
         run: |
@@ -351,11 +396,11 @@ jobs:
             codex_execution_mode="primary"
             skip_reason="manual-primary-override"
           elif [[ "${override}" == "backup-safe" ]]; then
-            allow_tutti="true"
+            allow_tutti="false"
             allow_heavy="false"
             effective_mode="backup-safe"
             codex_execution_mode="backup-safe"
-            skip_reason="manual-backup-safe"
+            skip_reason="manual-backup-safe-review-only"
           elif [[ "${override}" == "backup-heavy" ]]; then
             allow_tutti="true"
             allow_heavy="true"
@@ -364,11 +409,11 @@ jobs:
             skip_reason="manual-backup-heavy"
           elif [[ "${gha_mode}" == "record-only" ]]; then
             if [[ "${failover_state}" == "offline" ]]; then
-              allow_tutti="true"
+              allow_tutti="false"
               allow_heavy="false"
               effective_mode="backup-safe"
               codex_execution_mode="backup-safe"
-              skip_reason="record-only-failover-${failover_state}"
+              skip_reason="record-only-failover-${failover_state}-review-only"
               if [[ "${failover_state}" == "offline" && "${backup_heavy_enabled}" == "true" ]]; then
                 allow_heavy="true"
                 effective_mode="backup-heavy"
@@ -395,6 +440,28 @@ jobs:
             echo "skip_reason=${skip_reason}"
             echo "codex_execution_mode=${codex_execution_mode}"
           } >> "${GITHUB_OUTPUT}"
+
+  backup-safe-hold:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.effective_mode == 'backup-safe'
+    needs: [ctx, execution-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hold issue in backup-safe mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --add-label "needs-human" \
+            --remove-label "processing" >/dev/null 2>&1 || true
+          gh issue comment "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "Primary executor is unavailable. Automatic GitHub backup-safe mode is observation-only and will not run Tutti or implementation lanes. Restore the primary executor or dispatch backup-heavy manually to continue on GitHub-hosted infrastructure."
 
   # Review mode: Tutti consensus (6+ parallel lanes baseline)
   tutti:

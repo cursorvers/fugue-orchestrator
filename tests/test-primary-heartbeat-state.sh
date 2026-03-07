@@ -46,9 +46,19 @@ ts_minutes_ago() {
   fi
 }
 
+ts_minutes_ahead() {
+  local minutes="$1"
+  if date -u -d "${minutes} minutes" +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
+    date -u -d "${minutes} minutes" +%Y-%m-%dT%H:%M:%SZ
+  else
+    date -u -v+"${minutes}"M +%Y-%m-%dT%H:%M:%SZ
+  fi
+}
+
 fresh_ts="$(ts_now)"
 late_ts="$(ts_minutes_ago 12)"
 missing_ts="$(ts_minutes_ago 40)"
+future_ts="$(ts_minutes_ahead 10)"
 
 echo "=== resolve-primary-heartbeat-state.sh unit tests ==="
 echo ""
@@ -100,6 +110,12 @@ assert_field "missing-heartbeat-no-work-degraded" "failover_state" "degraded" \
   --mainframe-pending-count 0 \
   --router-stale false \
   --mainframe-stale false
+
+assert_field "future-heartbeat-invalid" "heartbeat_status" "invalid" \
+  --gha-execution-mode record-only \
+  --heartbeat-at "${future_ts}" \
+  --runner-online-count 0 \
+  --heartbeat-future-skew-seconds 60
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

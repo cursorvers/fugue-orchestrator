@@ -86,22 +86,9 @@ if [[ ! -f "${PLIST_PATH}" ]]; then
 fi
 
 user_domain="gui/$(id -u)"
-token="${FUGUE_HEARTBEAT_GH_TOKEN:-${GH_TOKEN:-}}"
-
-if [[ -z "${token}" ]]; then
-  token="$(gh auth token)"
-fi
-
-if [[ -z "${token}" ]]; then
-  echo "Error: gh auth token returned an empty token." >&2
-  exit 2
-fi
 
 if [[ "${dry_run}" == "true" ]]; then
   cat <<EOF
-launchctl setenv GH_TOKEN <redacted>
-launchctl setenv GH_PROMPT_DISABLED 1
-launchctl setenv GH_NO_UPDATE_NOTIFIER 1
 launchctl bootout ${user_domain} ${PLIST_PATH}
 launchctl bootstrap ${user_domain} ${PLIST_PATH}
 launchctl kickstart -k ${user_domain}/${AGENT_LABEL}
@@ -110,9 +97,6 @@ EOF
   exit 0
 fi
 
-launchctl setenv GH_TOKEN "${token}"
-launchctl setenv GH_PROMPT_DISABLED 1
-launchctl setenv GH_NO_UPDATE_NOTIFIER 1
 launchctl bootout "${user_domain}" "${PLIST_PATH}" >/dev/null 2>&1 || true
 launchctl bootstrap "${user_domain}" "${PLIST_PATH}"
 launchctl kickstart -k "${user_domain}/${AGENT_LABEL}"

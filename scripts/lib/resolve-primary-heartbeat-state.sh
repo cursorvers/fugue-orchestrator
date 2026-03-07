@@ -11,6 +11,7 @@ mainframe_stale="false"
 heartbeat_at=""
 heartbeat_ttl_minutes="8"
 heartbeat_grace_multiplier="3"
+heartbeat_future_skew_seconds="300"
 format="env"
 
 usage() {
@@ -29,6 +30,7 @@ Options:
   --heartbeat-at <ISO8601>
   --heartbeat-ttl-minutes <n>
   --heartbeat-grace-multiplier <n>
+  --heartbeat-future-skew-seconds <n>
   --format <env|json>
   -h, --help
 EOF
@@ -101,6 +103,10 @@ while [[ $# -gt 0 ]]; do
       heartbeat_grace_multiplier="${2:-}"
       shift 2
       ;;
+    --heartbeat-future-skew-seconds)
+      heartbeat_future_skew_seconds="${2:-}"
+      shift 2
+      ;;
     --format)
       format="${2:-}"
       shift 2
@@ -143,6 +149,9 @@ fi
 if ! [[ "${heartbeat_grace_multiplier}" =~ ^[0-9]+$ ]] || [[ "${heartbeat_grace_multiplier}" == "0" ]]; then
   heartbeat_grace_multiplier="3"
 fi
+if ! [[ "${heartbeat_future_skew_seconds}" =~ ^[0-9]+$ ]]; then
+  heartbeat_future_skew_seconds="300"
+fi
 
 router_stale="$(normalize_bool "${router_stale}")"
 mainframe_stale="$(normalize_bool "${mainframe_stale}")"
@@ -155,15 +164,19 @@ now_epoch="$(epoch_now_utc)"
 if [[ -n "${heartbeat_at}" ]]; then
   if heartbeat_epoch="$(iso_to_epoch_utc "${heartbeat_at}" 2>/dev/null)"; then
     age_seconds=$((now_epoch - heartbeat_epoch))
-    if (( age_seconds < 0 )); then
+    if (( age_seconds < 0 - heartbeat_future_skew_seconds )); then
+      heartbeat_status="invalid"
+    elif (( age_seconds < 0 )); then
       age_seconds=0
     fi
-    heartbeat_age_minutes="$(((age_seconds + 59) / 60))"
-    heartbeat_status="missing"
-    if (( heartbeat_age_minutes <= heartbeat_ttl_minutes )); then
-      heartbeat_status="fresh"
-    elif (( heartbeat_age_minutes <= heartbeat_ttl_minutes * heartbeat_grace_multiplier )); then
-      heartbeat_status="late"
+    if [[ "${heartbeat_status}" != "invalid" ]]; then
+      heartbeat_age_minutes="$(((age_seconds + 59) / 60))"
+      heartbeat_status="missing"
+      if (( heartbeat_age_minutes <= heartbeat_ttl_minutes )); then
+        heartbeat_status="fresh"
+      elif (( heartbeat_age_minutes <= heartbeat_ttl_minutes * heartbeat_grace_multiplier )); then
+        heartbeat_status="late"
+      fi
     fi
   else
     heartbeat_status="invalid"

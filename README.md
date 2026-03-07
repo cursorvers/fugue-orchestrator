@@ -256,17 +256,16 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
 # NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
 # NOTE: `FUGUE_PRIMARY_HEARTBEAT_MODE=auto`（既定）では、gh が使えると実行開始/終了時に primary heartbeat を更新します。
-# NOTE: mac mini 24h 運用では下記 heartbeat loop を launchd/cron で常駐させると、idle 中も watchdog が primary 生存を判定できます。
+# NOTE: mac mini 24h 運用では `~/Library/LaunchAgents/com.cursorvers.fugue-primary-heartbeat.plist`
+#       を常駐させるのが正式手順です。下記 loop は ad-hoc な shell 実行や cron 用の補助経路です。
 #   ./scripts/local/run-primary-heartbeat-loop.sh --repo cursorvers/fugue-orchestrator --interval 60
-# NOTE: launchd で heartbeat を常駐させる場合は、まず bootstrap helper を実行して
-#       launchd session に `GH_TOKEN` を注入してから agent を再起動してください。
+# NOTE: launchd heartbeat を再初期化する場合は bootstrap helper を実行してください。
 #   ./scripts/local/bootstrap-primary-heartbeat-agent.sh --repo cursorvers/fugue-orchestrator
 # NOTE: ログイン時の自動復旧が必要なら `~/Library/LaunchAgents/com.cursorvers.fugue-primary-heartbeat-bootstrap.plist`
 #       を load しておくと、上記 helper が login 時に自動実行されます。
 # NOTE: 可能なら repo-scoped の fine-grained PAT を `FUGUE_HEARTBEAT_GH_TOKEN` に入れてから上記 helper を実行してください。
-#       未指定時は `gh auth token` を使って launchd session を初期化します。
-# NOTE: `GH_TOKEN` は login session の launchd environment に保持されるため、
-#       login bootstrap plist を使わない場合は再ログイン/再起動後に上記 helper を再実行してください。
+#       未指定時は各 heartbeat process が `gh auth token` を使って個別に認証します。
+# NOTE: login bootstrap plist を使わない場合は、再ログイン/再起動後に上記 helper を再実行してください。
 # NOTE: heartbeat は repo variables `FUGUE_PRIMARY_HEARTBEAT_*` に記録され、`fugue-watchdog` は fresh heartbeat を primary 判定の主信号として使います。
 # NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true` のときのみ、`FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` で
 #       `claude-opus-assist` の direct success が無ければ `ok_to_execute=false` になります。
