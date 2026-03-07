@@ -17,6 +17,7 @@ Goal: move GitHub Actions secrets to an org-first model while keeping `Kernel` a
 
 - `OPENAI_API_KEY`
 - `ZAI_API_KEY`
+- `XAI_API_KEY`
 - `DISCORD_ADMIN_WEBHOOK_URL`
 - `DISCORD_WEBHOOK_URL`
 - `DISCORD_SYSTEM_WEBHOOK`
