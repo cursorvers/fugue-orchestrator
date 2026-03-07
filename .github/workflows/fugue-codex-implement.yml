@@ -87,6 +87,21 @@ on:
         required: false
         type: string
         default: ""
+      workspace_feed_status:
+        description: "Latest scheduled Google Workspace feed ingest status"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_profiles:
+        description: "Comma-separated scheduled Google Workspace feed profiles used for context"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_summary:
+        description: "Bounded summary derived from scheduled Google Workspace feeds"
+        required: false
+        type: string
+        default: ""
       workspace_readonly_environment:
         description: "Protected GitHub Environment used for readonly Google Workspace CI preflight"
         required: false
@@ -614,6 +629,9 @@ jobs:
           WORKSPACE_REPORT_PATH: ${{ needs.workspace-preflight.outputs.workspace_report_path }}
           WORKSPACE_SUMMARY: ${{ needs.workspace-preflight.outputs.workspace_summary }}
           WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
+          WORKSPACE_FEED_STATUS: ${{ inputs.workspace_feed_status }}
+          WORKSPACE_FEED_PROFILES: ${{ inputs.workspace_feed_profiles }}
+          WORKSPACE_FEED_SUMMARY: ${{ inputs.workspace_feed_summary }}
         run: bash scripts/harness/codex-execute-validate.sh
 
       - name: Commit changes

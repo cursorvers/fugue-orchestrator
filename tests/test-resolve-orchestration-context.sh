@@ -49,6 +49,27 @@ exit 1
 EOF
 chmod +x "${fake_gh}"
 
+feed_root="${tmp_dir}/feeds"
+mkdir -p "${feed_root}/morning-brief-personal" "${feed_root}/weekly-digest-personal"
+
+cat > "${feed_root}/morning-brief-personal/latest.json" <<'EOF'
+{
+  "profile_id": "morning-brief-personal",
+  "status": "ok",
+  "summary": "gmail-triage: resultSizeEstimate=5",
+  "valid_until": "2099-01-01T00:00:00Z"
+}
+EOF
+
+cat > "${feed_root}/weekly-digest-personal/latest.json" <<'EOF'
+{
+  "profile_id": "weekly-digest-personal",
+  "status": "ok",
+  "summary": "weekly-digest: meetingCount=3, unreadEmails=11",
+  "valid_until": "2099-01-01T00:00:00Z"
+}
+EOF
+
 assert_output() {
   local test_name="$1"
   local issue_number="$2"
@@ -72,6 +93,8 @@ assert_output() {
     CLAUDE_MAIN_ASSIST_POLICY="codex" \
     CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
     CLAUDE_ROLE_POLICY="flex" \
+    GOOGLEWORKSPACE_FEED_SYNC_ENABLE="true" \
+    GOOGLEWORKSPACE_FEED_OUT_ROOT="${feed_root}" \
     bash "${SCRIPT}" >/dev/null 2>"${tmp_dir}/${test_name}.stderr"; then
     echo "FAIL [${test_name}]: script exited with error"
     failed=$((failed + 1))
@@ -97,6 +120,8 @@ assert_output "workspace-action-hint" "123" "workspace_action_hint" "meeting-pre
 assert_output "workspace-domain-hint" "123" "workspace_domain_hint" "calendar,drive,docs,gmail"
 assert_output "workspace-phase-hint" "123" "workspace_suggested_phases" "preflight-enrich"
 assert_output "workspace-readonly-actions" "123" "workspace_readonly_actions" "meeting-prep,gmail-triage"
+assert_output "workspace-feed-status" "123" "workspace_feed_status" "ok"
+assert_output "workspace-feed-profiles" "123" "workspace_feed_profiles" "morning-brief-personal"
 assert_output "workspace-none" "124" "workspace_hint_applied" "false"
 assert_output "content-hint-applied" "125" "content_hint_applied" "true"
 assert_output "content-action-hint" "125" "content_action_hint" "slide-deck"
