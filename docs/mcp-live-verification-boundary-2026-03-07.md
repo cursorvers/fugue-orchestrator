@@ -15,7 +15,7 @@ Purpose:
   - status: safe live smoke / contract verified
 - `pencil-session-mcp`
   - route: `kernel-adapter`
-  - status: safe readiness probe only
+  - status: safe readiness probe + local live readiness verified
   - automatic check:
     - wrapper resolved
     - local `Pencil` listen port detection if app is running
@@ -66,3 +66,15 @@ Reason:
 - keep `pencil`, `slack`, `vercel` in `safe live smoke + contract` mode
 - treat full end-to-end session validation as a separate attended verification track
 - do not regress to `claude-session` by default when `skill-cli` or `kernel-adapter` is healthy
+
+## Live Evidence (2026-03-07)
+
+- `pencil-session-mcp`
+  - local app launched
+  - adapter smoke returned `pencil adapter ready`
+  - detected WebSocket port: `55088`
+- `excalidraw-session-mcp`
+  - local live smoke returned `excalidraw smoke passed`
+  - auto-detected server URL: `http://localhost:3001`
+  - note: `localhost:3000` was occupied by another local app and is no longer the
+    preferred default for the adapter

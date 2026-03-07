@@ -53,6 +53,9 @@ Validated on `2026-03-07`:
   - `cursorvers/cursorvers_line_free_dev` `Manus Audit (Unified)` run
     `22793265594` success
   - `cloudflare-workers-hub` health endpoint returned `healthy`
+- local attended/live evidence for remaining adapter-backed MCP:
+  - `pencil-session-mcp` smoke returned `pencil adapter ready`
+  - `excalidraw-session-mcp` smoke returned `excalidraw smoke passed`
 
 ## Non-Goals
 

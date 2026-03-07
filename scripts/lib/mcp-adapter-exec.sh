@@ -113,6 +113,31 @@ read_json_file() {
   jq -c '.' "${path}"
 }
 
+resolve_excalidraw_url() {
+  if [[ -n "${EXCALIDRAW_SERVER_URL:-}" ]]; then
+    printf '%s\n' "${EXCALIDRAW_SERVER_URL}"
+    return 0
+  fi
+  if [[ -n "${EXPRESS_SERVER_URL:-}" ]]; then
+    printf '%s\n' "${EXPRESS_SERVER_URL}"
+    return 0
+  fi
+
+  local candidates=(
+    "http://localhost:3001"
+    "http://localhost:3000"
+  )
+  local candidate=""
+  for candidate in "${candidates[@]}"; do
+    if curl -sS -I "${candidate}" >/dev/null 2>&1; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  printf '%s\n' "http://localhost:3001"
+}
+
 slack_default_payload() {
   jq -cn \
     --arg channel "${channel}" \
@@ -308,7 +333,7 @@ case "${route}" in
       excalidraw)
         excalidraw_health_script="$(echo "${route_json}" | jq -r '.backend_hint')"
         excalidraw_root="$(dirname "${excalidraw_health_script}")"
-        excalidraw_url="${EXCALIDRAW_SERVER_URL:-${EXPRESS_SERVER_URL:-http://localhost:3000}}"
+        excalidraw_url="$(resolve_excalidraw_url)"
         case "${action}" in
           smoke)
             if [[ "${dry_run}" == "true" ]]; then
