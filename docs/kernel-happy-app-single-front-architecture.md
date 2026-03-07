@@ -151,7 +151,7 @@ All-in-one mobile web app / PWA
        -> GitHub continuity
        -> FUGUE rollback
   -> progress/event bus
-  -> Happy.app status surfaces
+  -> outer mobile app status surfaces
 ```
 
 More explicitly:
@@ -219,7 +219,7 @@ Primary actions:
 
 This is the place where the existing `Happy.app` experience lives.
 
-### 4.1.a Inbox Composer
+Composer module inside `Happy`:
 
 Purpose:
 
@@ -888,6 +888,15 @@ Implementation is considered ready when these are built:
 ## 15.a Simulation Walkthroughs
 
 The design should survive at least these scenario simulations.
+
+Simulation policy:
+
+- every design-affecting change must be verified with at least three parallel lanes
+- at minimum:
+  - architecture contract lane
+  - mobile/recovery coupling lane
+  - GPT/preset intake lane
+- a failed lane blocks the design from being treated as implementation-ready
 
 ### Simulation 1: quick bugfix from smartphone
 
