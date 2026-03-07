@@ -10,6 +10,7 @@ on:
         default: status
         options:
           - status
+          - mobile-progress
           - continuity-canary
           - rollback-canary
           - reroute-issue

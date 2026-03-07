@@ -29,12 +29,16 @@ if [[ "${canary_mode}" != "lite" && "${canary_mode}" != "full" ]]; then
 fi
 
 summary_file="${GITHUB_STEP_SUMMARY:-}"
+status_comment_file=""
 
 append_summary() {
   local line="${1:-}"
   printf '%s\n' "${line}"
   if [[ -n "${summary_file}" ]]; then
     printf '%s\n' "${line}" >> "${summary_file}"
+  fi
+  if [[ -n "${status_comment_file}" ]]; then
+    printf '%s\n' "${line}" >> "${status_comment_file}"
   fi
 }
 
@@ -83,6 +87,37 @@ workflow_url() {
     return 0
   fi
   printf 'https://github.com/%s/actions/runs/%s\n' "${repo}" "${run_id}"
+}
+
+current_run_url() {
+  local server_url="${GITHUB_SERVER_URL:-https://github.com}"
+  local run_id="${GITHUB_RUN_ID:-}"
+  if [[ -z "${run_id}" ]]; then
+    return 0
+  fi
+  printf '%s/%s/actions/runs/%s\n' "${server_url}" "${repo}" "${run_id}"
+}
+
+ensure_status_issue() {
+  local status_issue
+  status_issue="$(gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-status" --limit 1 --json number --jq '.[0].number // empty' || true)"
+  if [[ -n "${status_issue}" ]]; then
+    printf '%s\n' "${status_issue}"
+    return 0
+  fi
+
+  gh_retry 4 gh label create "fugue-status" \
+    --repo "${repo}" \
+    --description "Status reporting thread for FUGUE orchestration" \
+    --color "1D76DB" >/dev/null 2>&1 || true
+
+  status_issue_url="$(
+    gh_retry 4 gh issue create --repo "${repo}" \
+      --title "FUGUE Status Thread" \
+      --label "fugue-status" \
+      --body "Automated status and mobile progress reports are posted here."
+  )"
+  printf '%s\n' "${status_issue_url##*/}"
 }
 
 latest_workflow_run_json() {
@@ -191,6 +226,50 @@ summarize_status() {
   done
 }
 
+append_active_issue_summary() {
+  local issues_json issue_lines line_count
+  issues_json="$(gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-task" --limit 10 --json number,title,updatedAt,url,labels || echo '[]')"
+  append_summary ""
+  append_summary "### Active fugue-task issues"
+  line_count="$(printf '%s' "${issues_json}" | jq -r 'length')"
+  if [[ "${line_count}" == "0" ]]; then
+    append_summary "- none"
+    return 0
+  fi
+  while IFS= read -r issue_line; do
+    append_summary "${issue_line}"
+  done < <(
+    printf '%s' "${issues_json}" | jq -r '
+      .[]
+      | "- [#\(.number)](\(.url)) \(.title) — labels: \(([.labels[]?.name] | join(",")) // "none") — updated: \(.updatedAt // "n/a")"
+    '
+  )
+}
+
+mobile_progress() {
+  local status_issue
+  status_comment_file="$(mktemp)"
+  status_issue="$(ensure_status_issue)"
+
+  append_summary "## Kernel Mobile Progress Snapshot"
+  append_summary ""
+  append_summary "- repository: \`${repo}\`"
+  append_summary "- generated from: [kernel-recovery-console]($(current_run_url))"
+  append_summary "- mode: \`mobile-progress\`"
+
+  summarize_status
+  append_active_issue_summary
+
+  append_summary ""
+  append_summary "### Mobile usage"
+  append_summary "- Use this thread for quick status checks from GitHub Mobile."
+  append_summary "- For recovery actions, run \`kernel-recovery-console\` with \`continuity-canary\`, \`rollback-canary\`, or \`reroute-issue\`."
+
+  gh_retry 4 gh issue comment "${status_issue}" --repo "${repo}" --body-file "${status_comment_file}" >/dev/null
+  append_summary ""
+  append_summary "- posted snapshot to [fugue-status issue #${status_issue}](https://github.com/${repo}/issues/${status_issue})"
+}
+
 run_canary_mode() {
   local verify_rollback="$1"
   append_summary "## Kernel Recovery Canary"
@@ -275,6 +354,9 @@ reroute_issue() {
 case "${mode}" in
   status)
     summarize_status
+    ;;
+  mobile-progress)
+    mobile_progress
     ;;
   continuity-canary)
     run_canary_mode "false"

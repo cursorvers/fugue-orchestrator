@@ -25,6 +25,22 @@ Use first. This reports:
   - `fugue-task-router`
   - `fugue-tutti-caller`
 
+### `mobile-progress`
+
+Use when you want a phone-friendly progress snapshot without digging through multiple workflow pages.
+
+Behavior:
+
+- generates the same recovery status summary
+- appends the top open `fugue-task` issues
+- posts the snapshot into the open `fugue-status` issue thread
+
+Recommended input:
+
+- `mode=mobile-progress`
+
+This is the best default when you are away from your desk and just want to see what Kernel is doing from GitHub Mobile.
+
 ### `continuity-canary`
 
 Use when the local runner is suspected dead and you want to verify that Kernel can continue from GitHub-hosted execution.
@@ -71,9 +87,10 @@ Recommended inputs:
 ## Mobile Recovery Sequence
 
 1. Run `status`
-2. If local runner is unhealthy, run `continuity-canary`
-3. If legacy rollback must remain available, run `rollback-canary`
-4. If a real issue is stuck, run `reroute-issue`
+2. Run `mobile-progress` if you want a phone-friendly thread update
+3. If local runner is unhealthy, run `continuity-canary`
+4. If legacy rollback must remain available, run `rollback-canary`
+5. If a real issue is stuck, run `reroute-issue`
 
 ## Recovery Guarantees
 
@@ -98,6 +115,9 @@ Validated on `2026-03-07` in production GitHub Actions:
 - `status`
   - run `22792645301`
   - success
+- `mobile-progress`
+  - added after initial recovery rollout
+  - posts a compact progress snapshot into the `fugue-status` issue for GitHub Mobile
 - `continuity-canary`
   - first run `22792661632`
   - failed because recovery console did not pass org-secret presence flags into `run-canary.sh`
