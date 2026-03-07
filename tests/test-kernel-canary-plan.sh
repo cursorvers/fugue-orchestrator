@@ -9,9 +9,15 @@ TASK_ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-task-router.yml"
 CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-caller.yml"
 RESOLVE_CONTEXT_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
+HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/lib/resolve-primary-heartbeat-state.sh"
 
 if [[ ! -x "${CANARY_SCRIPT}" ]]; then
   echo "FAIL: missing executable script ${CANARY_SCRIPT}" >&2
+  exit 1
+fi
+
+if [[ ! -x "${HEARTBEAT_SCRIPT}" ]]; then
+  echo "FAIL: missing executable script ${HEARTBEAT_SCRIPT}" >&2
   exit 1
 fi
 
