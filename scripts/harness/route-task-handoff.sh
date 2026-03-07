@@ -325,9 +325,56 @@ gh label create "${assist_orchestrator_label}" \
   --color "0052CC" >/dev/null 2>&1 || true
 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
+gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content-action:slide-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" >/dev/null 2>&1 || true
 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "fugue-task" >/dev/null
 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${orchestrator_label}" >/dev/null
 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${assist_orchestrator_label}" >/dev/null
+
+content_skill_label=""
+content_action_label=""
+if [[ "${content_hint_applied}" == "true" ]]; then
+  gh label create "content-task" \
+    --repo "${GITHUB_REPOSITORY}" \
+    --description "Content-oriented task routed through Kernel/FUGUE" \
+    --color "BFDADC" >/dev/null 2>&1 || true
+  gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "content-task" >/dev/null || true
+  case "${content_skill_hint}" in
+    *academic-two-stage-slide*)
+      content_skill_label="content:academic-slide"
+      ;;
+    *slide*)
+      content_skill_label="content:slide"
+      ;;
+    *note-manuscript*)
+      content_skill_label="content:note"
+      ;;
+  esac
+  case "${content_action_hint}" in
+    *academic-slide*)
+      content_action_label="content-action:academic-slide"
+      ;;
+    *slide-deck*)
+      content_action_label="content-action:slide-deck"
+      ;;
+    *note-manuscript*)
+      content_action_label="content-action:note-manuscript"
+      ;;
+  esac
+  if [[ -n "${content_skill_label}" ]]; then
+    gh label create "${content_skill_label}" \
+      --repo "${GITHUB_REPOSITORY}" \
+      --description "Content skill hint detected from natural language" \
+      --color "C2E0C6" >/dev/null 2>&1 || true
+    gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${content_skill_label}" >/dev/null || true
+  fi
+  if [[ -n "${content_action_label}" ]]; then
+    gh label create "${content_action_label}" \
+      --repo "${GITHUB_REPOSITORY}" \
+      --description "Content action hint detected from natural language" \
+      --color "D4C5F9" >/dev/null 2>&1 || true
+    gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${content_action_label}" >/dev/null || true
+  fi
+fi
 
 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "tutti" >/dev/null
 
@@ -375,6 +422,10 @@ if [[ "${nl_hint_applied}" == "true" ]]; then
 elif [[ -n "${nl_inference_skipped_reason}" ]]; then
   nl_line="- Natural-language hints: skipped (${nl_inference_skipped_reason})"
 fi
+content_line=""
+if [[ "${content_hint_applied}" == "true" ]]; then
+  content_line="- Content intent: skill=${content_skill_hint:-none}, action=${content_action_hint:-none}"
+fi
 fallback_block="$(printf '%s\n%s\n' "${main_fallback_note}" "${assist_fallback_note}" | sed '/^$/d')"
 cat > handoff-comment.md <<EOF
 GHA24 mainframe handoff (natural language)
@@ -385,6 +436,7 @@ ${assist_provider_line}
 ${handoff_target_line}
 ${source_line}
 ${nl_line}
+${content_line}
 ${vote_instruction_line}
 ${confirmation_line}
 - Action: added labels \`fugue-task\` + \`tutti\`${extra}

@@ -31,6 +31,12 @@ JSON
 JSON
       exit 0
       ;;
+    repos/cursorvers/fugue-orchestrator/issues/125)
+      cat <<'JSON'
+{"title":"外出先から会社紹介スライドを作って","body":"note記事の原稿ではなく、営業向け deck を作りたい","url":"https://github.com/cursorvers/fugue-orchestrator/issues/125","labels":[{"name":"fugue-task"},{"name":"tutti"}]}
+JSON
+      exit 0
+      ;;
     *)
       echo "{}"
       exit 0
@@ -92,6 +98,9 @@ assert_output "workspace-domain-hint" "123" "workspace_domain_hint" "calendar,dr
 assert_output "workspace-phase-hint" "123" "workspace_suggested_phases" "preflight-enrich"
 assert_output "workspace-readonly-actions" "123" "workspace_readonly_actions" "meeting-prep,gmail-triage"
 assert_output "workspace-none" "124" "workspace_hint_applied" "false"
+assert_output "content-hint-applied" "125" "content_hint_applied" "true"
+assert_output "content-action-hint" "125" "content_action_hint" "slide-deck"
+assert_output "content-skill-hint" "125" "content_skill_hint" "slide"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

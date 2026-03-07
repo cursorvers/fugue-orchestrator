@@ -68,6 +68,10 @@ workspace_action_hint=""
 workspace_domain_hint=""
 workspace_reason=""
 workspace_hint_applied="false"
+content_action_hint=""
+content_skill_hint=""
+content_reason=""
+content_hint_applied="false"
 
 contains() {
   local pattern="$1"
@@ -240,6 +244,33 @@ if [[ -n "${workspace_action_hint}" || -n "${workspace_domain_hint}" ]]; then
   workspace_hint_applied="true"
 fi
 
+note_negated="false"
+if contains '(note\.com|note記事|note向け|note 用|noteを書|原稿|manuscript).{0,12}(ではなく|じゃなく|ではない|じゃない|not)'; then
+  note_negated="true"
+fi
+
+if contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド|資料作成)'; then
+  content_action_hint="$(append_csv_unique "${content_action_hint}" "slide-deck")"
+  content_skill_hint="$(append_csv_unique "${content_skill_hint}" "slide")"
+  content_reason="$(append_csv_unique "${content_reason}" "slide-request")"
+fi
+
+if contains '(academic|学術|学会|研究発表|講義資料)' && contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド)'; then
+  content_action_hint="$(append_csv_unique "${content_action_hint}" "academic-slide")"
+  content_skill_hint="$(append_csv_unique "${content_skill_hint}" "academic-two-stage-slide")"
+  content_reason="$(append_csv_unique "${content_reason}" "academic-slide-request")"
+fi
+
+if [[ "${note_negated}" != "true" ]] && contains '(note\.com|note記事|note向け|note 用|noteを書|原稿|manuscript|長文記事|記事を書いて|記事にして|note に)'; then
+  content_action_hint="$(append_csv_unique "${content_action_hint}" "note-manuscript")"
+  content_skill_hint="$(append_csv_unique "${content_skill_hint}" "note-manuscript")"
+  content_reason="$(append_csv_unique "${content_reason}" "note-request")"
+fi
+
+if [[ -n "${content_action_hint}" || -n "${content_skill_hint}" ]]; then
+  content_hint_applied="true"
+fi
+
 if [[ "${nl_main_hint}" != "claude" && "${nl_main_hint}" != "codex" ]]; then
   nl_main_hint=""
   nl_main_reason=""
@@ -266,6 +297,10 @@ if [[ "${format}" == "json" ]]; then
     --arg workspace_domain_hint "${workspace_domain_hint}" \
     --arg workspace_reason "${workspace_reason}" \
     --arg workspace_hint_applied "${workspace_hint_applied}" \
+    --arg content_action_hint "${content_action_hint}" \
+    --arg content_skill_hint "${content_skill_hint}" \
+    --arg content_reason "${content_reason}" \
+    --arg content_hint_applied "${content_hint_applied}" \
     '{
       nl_main_hint: $nl_main_hint,
       nl_assist_hint: $nl_assist_hint,
@@ -276,7 +311,11 @@ if [[ "${format}" == "json" ]]; then
       workspace_action_hint: $workspace_action_hint,
       workspace_domain_hint: $workspace_domain_hint,
       workspace_reason: $workspace_reason,
-      workspace_hint_applied: ($workspace_hint_applied == "true")
+      workspace_hint_applied: ($workspace_hint_applied == "true"),
+      content_action_hint: $content_action_hint,
+      content_skill_hint: $content_skill_hint,
+      content_reason: $content_reason,
+      content_hint_applied: ($content_hint_applied == "true")
     }'
 else
   printf 'nl_main_hint=%q\n' "${nl_main_hint}"
@@ -289,4 +328,8 @@ else
   printf 'workspace_domain_hint=%q\n' "${workspace_domain_hint}"
   printf 'workspace_reason=%q\n' "${workspace_reason}"
   printf 'workspace_hint_applied=%q\n' "${workspace_hint_applied}"
+  printf 'content_action_hint=%q\n' "${content_action_hint}"
+  printf 'content_skill_hint=%q\n' "${content_skill_hint}"
+  printf 'content_reason=%q\n' "${content_reason}"
+  printf 'content_hint_applied=%q\n' "${content_hint_applied}"
 fi

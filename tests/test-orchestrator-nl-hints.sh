@@ -88,6 +88,43 @@ assert_workspace() {
   fi
 }
 
+assert_content() {
+  local test_name="$1"
+  local expected_actions="$2"
+  local expected_skills="$3"
+  local expected_applied="$4"
+  shift 4
+
+  total=$((total + 1))
+  local output
+  output="$("${NL}" "$@" --format env)" || {
+    echo "FAIL [${test_name}]: script exited with error"
+    failed=$((failed + 1))
+    return
+  }
+
+  eval "${output}"
+
+  local errors=""
+  if [[ "${content_action_hint}" != "${expected_actions}" ]]; then
+    errors+=" actions=${content_action_hint}(expected ${expected_actions})"
+  fi
+  if [[ "${content_skill_hint}" != "${expected_skills}" ]]; then
+    errors+=" skills=${content_skill_hint}(expected ${expected_skills})"
+  fi
+  if [[ "${content_hint_applied}" != "${expected_applied}" ]]; then
+    errors+=" applied=${content_hint_applied}(expected ${expected_applied})"
+  fi
+
+  if [[ -n "${errors}" ]]; then
+    echo "FAIL [${test_name}]:${errors}"
+    failed=$((failed + 1))
+  else
+    echo "PASS [${test_name}]"
+    passed=$((passed + 1))
+  fi
+}
+
 echo "=== orchestrator-nl-hints.sh unit tests ==="
 echo ""
 
@@ -219,6 +256,19 @@ assert_workspace "workspace-digest" \
 assert_workspace "workspace-doc-sheet-domain-only" \
   "" "drive,docs,sheets" "true" \
   --text "共有資料と spreadsheet を参照してレポート表を作る"
+
+# --- Group 13: Content route hints ---
+assert_content "content-slide" \
+  "slide-deck" "slide" "true" \
+  --text "外出先から会社紹介スライドを作って"
+
+assert_content "content-academic-slide" \
+  "slide-deck,academic-slide" "slide,academic-two-stage-slide" "true" \
+  --text "研究発表の学会スライドを作って"
+
+assert_content "content-note" \
+  "note-manuscript" "note-manuscript" "true" \
+  --text "このテーマで note記事 の原稿を書いて"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="
