@@ -19,15 +19,18 @@ cat > "${policy_file}" <<'EOF'
   "profiles": {
     "morning-brief-shared": {
       "enabled_by_default": true,
-      "execution_target": "github-actions"
+      "execution_target": "github-actions",
+      "workflow_target": "shared"
     },
     "morning-brief-personal": {
       "enabled_by_default": true,
-      "execution_target": "local-only"
+      "execution_target": "github-actions",
+      "workflow_target": "personal"
     },
     "weekly-digest-personal": {
       "enabled_by_default": true,
-      "execution_target": "local-only"
+      "execution_target": "github-actions",
+      "workflow_target": "personal"
     }
   }
 }
@@ -80,7 +83,7 @@ assert_ok() {
   fi
 }
 
-test_defaults_to_local_profiles_only() {
+test_defaults_to_personal_fallback_profiles_only() {
   local calls_log="${tmp_dir}/local-calls.log"
   local ingest_profiles_log="${tmp_dir}/ingest-profiles.log"
   local ingest_out_file_log="${tmp_dir}/ingest-out-file.log"
@@ -106,7 +109,7 @@ test_defaults_to_local_profiles_only() {
 echo "=== googleworkspace feed local sync tests ==="
 echo ""
 
-assert_ok "defaults-to-local-profiles-only" test_defaults_to_local_profiles_only
+assert_ok "defaults-to-personal-fallback-profiles-only" test_defaults_to_personal_fallback_profiles_only
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

@@ -104,6 +104,28 @@ else
 
   mkdir -p "${snapshot_dir}"
 
+  service_credentials_file=""
+  service_credentials_json=""
+  user_credentials_file=""
+  user_credentials_json=""
+
+  case "${auth_mode}" in
+    service-account-readonly)
+      service_credentials_file="${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:-}"
+      service_credentials_json="${GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:-}"
+      ;;
+    user-oauth-readonly)
+      user_credentials_file="${GOOGLE_WORKSPACE_USER_CREDENTIALS_FILE:-}"
+      user_credentials_json="${GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON:-}"
+      ;;
+    *)
+      service_credentials_file="${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:-}"
+      service_credentials_json="${GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:-}"
+      user_credentials_file="${GOOGLE_WORKSPACE_USER_CREDENTIALS_FILE:-}"
+      user_credentials_json="${GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON:-}"
+      ;;
+  esac
+
   env \
     ISSUE_NUMBER="feed-${FEED_PROFILE}" \
     ISSUE_TITLE="${title}" \
@@ -117,10 +139,10 @@ else
     REPORT_PATH="${report_path}" \
     ADAPTER="${ADAPTER}" \
     GITHUB_OUTPUT="${output_path}" \
-    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:-}" \
-    GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON="${GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:-}" \
-    GOOGLE_WORKSPACE_USER_CREDENTIALS_FILE="${GOOGLE_WORKSPACE_USER_CREDENTIALS_FILE:-}" \
-    GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON="${GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON:-}" \
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="${service_credentials_file}" \
+    GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON="${service_credentials_json}" \
+    GOOGLE_WORKSPACE_USER_CREDENTIALS_FILE="${user_credentials_file}" \
+    GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON="${user_credentials_json}" \
     bash "${PREFLIGHT_SCRIPT}"
 
   feed_status="$(read_output_value "${output_path}" "workspace_preflight_status")"

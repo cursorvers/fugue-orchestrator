@@ -14,9 +14,11 @@ usage() {
 Usage:
   scripts/local/googleworkspace-feed-sync-local.sh [options]
 
+Fallback operator-only runner. The primary scheduled path is GitHub Actions.
+
 Options:
-  --profile <id|csv>     One or more local-only feed profiles to sync.
-  --all                  Sync all enabled local-only profiles (default).
+  --profile <id|csv>     One or more operator-fallback feed profiles to sync.
+  --all                  Sync all enabled operator-fallback profiles (default).
   --out-root <path>      Output root (default: .fugue/feeds/googleworkspace)
   --force-refresh        Ignore TTL cache and refresh manifests.
   --now-iso <timestamp>  Override current UTC timestamp for simulation.
@@ -89,7 +91,7 @@ if [[ -z "${NOW_ISO}" ]]; then
 fi
 
 if [[ -z "${PROFILE_CSV}" ]]; then
-  profiles_json="$(jq -c '[.profiles | to_entries[] | select(.value.execution_target == "local-only") | select(.value.enabled_by_default == true) | .key]' "${POLICY_FILE}")"
+  profiles_json="$(jq -c '[.profiles | to_entries[] | select(.value.enabled_by_default == true) | select((.value.execution_target == "local-only") or (.value.workflow_target == "personal")) | .key]' "${POLICY_FILE}")"
 else
   profiles_json="$(jq -cn --arg csv "${PROFILE_CSV}" '$csv | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))')"
 fi
@@ -102,7 +104,10 @@ mkdir -p "${OUT_ROOT}"
 while IFS= read -r profile; do
   [[ -n "${profile}" ]] || continue
   execution_target="$(jq -r --arg profile "${profile}" '.profiles[$profile].execution_target // ""' "${POLICY_FILE}")"
-  [[ "${execution_target}" == "local-only" ]] || fail "profile ${profile} is not local-only"
+  workflow_target="$(jq -r --arg profile "${profile}" '.profiles[$profile].workflow_target // ""' "${POLICY_FILE}")"
+  if [[ "${execution_target}" != "local-only" && "${workflow_target}" != "personal" ]]; then
+    fail "profile ${profile} is not available for local fallback"
+  fi
 
   env \
     FEED_PROFILE="${profile}" \

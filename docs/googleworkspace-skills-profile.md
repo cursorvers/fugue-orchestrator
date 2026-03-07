@@ -214,7 +214,9 @@ Recommended environment:
 - `workspace-readonly`
   - configure required reviewers or approval rules
   - expose `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` only in this environment
-  - optionally expose `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` for mailbox helpers
+- `workspace-personal-readonly`
+  - environment-scoped, no per-run reviewer gate
+  - expose `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` for personal mailbox feeds
 
 Secret:
 
@@ -238,6 +240,10 @@ Protection model:
 - first guard: readonly service-account scope only
 - second guard: protected `Environment` approval before the preflight job can
   read the secret
+- scheduled personal mailbox feeds use a separate environment-scoped secret and
+  do not share the protected approval path used by issue preflight
+- shared scheduled feeds receive only the service-account secret
+- personal scheduled feeds receive only the user OAuth export secret
 - mailbox helpers prefer `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` when present
   and otherwise degrade gracefully under service-account mode
 
@@ -261,9 +267,11 @@ Current CI path:
   - `.fugue/pre-implement/googleworkspace-run/googleworkspace/`
 - scheduled feed sync prototype:
   - `config/integrations/googleworkspace-feed-policy.json`
+  - `scripts/harness/resolve-googleworkspace-feed-matrix.sh`
   - `scripts/harness/googleworkspace-scheduled-extract.sh`
   - `scripts/harness/googleworkspace-feed-ingest.sh`
   - `.github/workflows/googleworkspace-feed-sync.yml`
+  - `.github/workflows/googleworkspace-personal-feed-sync.yml`
   - `scripts/local/googleworkspace-feed-sync-local.sh`
 
 ## Safety Rules
