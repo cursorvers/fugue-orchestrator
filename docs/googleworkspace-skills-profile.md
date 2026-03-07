@@ -199,6 +199,10 @@ Current repo-side Kernel integration helpers:
 - `scripts/harness/googleworkspace-preflight-enrich.sh`
   - produces a bounded readonly Workspace artifact for CI preflight
   - degrades to `skipped` when no Workspace credentials are available
+- `scripts/harness/googleworkspace-scheduled-extract.sh`
+  - generates TTL-bound readonly Workspace feed manifests for scheduled use
+- `scripts/harness/googleworkspace-feed-ingest.sh`
+  - collapses only fresh feed manifests into one bounded context artifact
 
 ## CI Secret Contract
 
@@ -255,6 +259,11 @@ Current CI path:
   - `.fugue/pre-implement/issue-<n>-googleworkspace.md`
 - raw readonly evidence lands at:
   - `.fugue/pre-implement/googleworkspace-run/googleworkspace/`
+- scheduled feed sync prototype:
+  - `config/integrations/googleworkspace-feed-policy.json`
+  - `scripts/harness/googleworkspace-scheduled-extract.sh`
+  - `scripts/harness/googleworkspace-feed-ingest.sh`
+  - `.github/workflows/googleworkspace-feed-sync.yml`
 
 ## Safety Rules
 
