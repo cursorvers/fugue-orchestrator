@@ -37,6 +37,18 @@ JSON
 JSON
       exit 0
       ;;
+    repos/cursorvers/fugue-orchestrator/issues/126)
+      cat <<'JSON'
+{"title":"review mode should win","body":"既存の実装ラベルは無視したい\n\n## Execution Mode\nreview","url":"https://github.com/cursorvers/fugue-orchestrator/issues/126","labels":[{"name":"fugue-task"},{"name":"tutti"},{"name":"implement"},{"name":"implement-confirmed"}]}
+JSON
+      exit 0
+      ;;
+    repos/cursorvers/fugue-orchestrator/issues/127)
+      cat <<'JSON'
+{"title":"handoff snapshot should survive label lag","body":"通常の実装 issue","url":"https://github.com/cursorvers/fugue-orchestrator/issues/127","labels":[{"name":"fugue-task"},{"name":"tutti"}]}
+JSON
+      exit 0
+      ;;
     *)
       echo "{}"
       exit 0
@@ -49,53 +61,37 @@ exit 1
 EOF
 chmod +x "${fake_gh}"
 
-feed_root="${tmp_dir}/feeds"
-mkdir -p "${feed_root}/morning-brief-personal" "${feed_root}/weekly-digest-personal"
-
-cat > "${feed_root}/morning-brief-personal/latest.json" <<'EOF'
-{
-  "profile_id": "morning-brief-personal",
-  "status": "ok",
-  "summary": "gmail-triage: resultSizeEstimate=5",
-  "valid_until": "2099-01-01T00:00:00Z"
-}
-EOF
-
-cat > "${feed_root}/weekly-digest-personal/latest.json" <<'EOF'
-{
-  "profile_id": "weekly-digest-personal",
-  "status": "ok",
-  "summary": "weekly-digest: meetingCount=3, unreadEmails=11",
-  "valid_until": "2099-01-01T00:00:00Z"
-}
-EOF
-
 assert_output() {
   local test_name="$1"
   local issue_number="$2"
   local field="$3"
   local expected="$4"
+  shift 4
+  local -a extra_env=("$@")
+  local out_file="${tmp_dir}/${test_name}.out"
+  local -a env_args=(
+    "PATH=${tmp_dir}:${PATH}"
+    "GITHUB_EVENT_NAME=issues"
+    "GITHUB_REPOSITORY=cursorvers/fugue-orchestrator"
+    "ISSUE_NUMBER_FROM_ISSUE=${issue_number}"
+    "ISSUE_NUMBER_FROM_DISPATCH="
+    "GITHUB_OUTPUT=${out_file}"
+    "CI_EXECUTION_ENGINE=api"
+    "CLAUDE_TRANSLATOR_MODE=off"
+    "DEFAULT_MAIN_ORCHESTRATOR_PROVIDER=codex"
+    "DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER=claude"
+    "CLAUDE_MAIN_ASSIST_POLICY=codex"
+    "CLAUDE_DEGRADED_ASSIST_POLICY=claude"
+    "CLAUDE_ROLE_POLICY=flex"
+  )
 
   total=$((total + 1))
-  local out_file="${tmp_dir}/${test_name}.out"
+  env_args[5]="GITHUB_OUTPUT=${out_file}"
+  if [[ "${#extra_env[@]}" -gt 0 ]]; then
+    env_args+=("${extra_env[@]}")
+  fi
 
-  if ! env \
-    PATH="${tmp_dir}:${PATH}" \
-    GITHUB_EVENT_NAME="issues" \
-    GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
-    ISSUE_NUMBER_FROM_ISSUE="${issue_number}" \
-    ISSUE_NUMBER_FROM_DISPATCH="" \
-    GITHUB_OUTPUT="${out_file}" \
-    CI_EXECUTION_ENGINE="api" \
-    CLAUDE_TRANSLATOR_MODE="off" \
-    DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
-    DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
-    CLAUDE_MAIN_ASSIST_POLICY="codex" \
-    CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
-    CLAUDE_ROLE_POLICY="flex" \
-    GOOGLEWORKSPACE_FEED_SYNC_ENABLE="true" \
-    GOOGLEWORKSPACE_FEED_OUT_ROOT="${feed_root}" \
-    bash "${SCRIPT}" >/dev/null 2>"${tmp_dir}/${test_name}.stderr"; then
+  if ! env "${env_args[@]}" bash "${SCRIPT}" >/dev/null 2>"${tmp_dir}/${test_name}.stderr"; then
     echo "FAIL [${test_name}]: script exited with error"
     failed=$((failed + 1))
     return
@@ -120,12 +116,21 @@ assert_output "workspace-action-hint" "123" "workspace_action_hint" "meeting-pre
 assert_output "workspace-domain-hint" "123" "workspace_domain_hint" "calendar,drive,docs,gmail"
 assert_output "workspace-phase-hint" "123" "workspace_suggested_phases" "preflight-enrich"
 assert_output "workspace-readonly-actions" "123" "workspace_readonly_actions" "meeting-prep,gmail-triage"
-assert_output "workspace-feed-status" "123" "workspace_feed_status" "ok"
-assert_output "workspace-feed-profiles" "123" "workspace_feed_profiles" "morning-brief-personal"
 assert_output "workspace-none" "124" "workspace_hint_applied" "false"
 assert_output "content-hint-applied" "125" "content_hint_applied" "true"
 assert_output "content-action-hint" "125" "content_action_hint" "slide-deck"
 assert_output "content-skill-hint" "125" "content_skill_hint" "slide"
+assert_output "review-heading-clears-implement" "126" "has_implement_request" "false"
+assert_output "review-heading-clears-confirm" "126" "has_implement_confirmed" "false"
+assert_output "handoff-mode-override" "127" "has_implement_request" "true" \
+  "REQUESTED_EXECUTION_MODE_INPUT=implement" \
+  "IMPLEMENT_REQUEST_INPUT=true"
+assert_output "handoff-confirm-override" "127" "has_implement_confirmed" "true" \
+  "REQUESTED_EXECUTION_MODE_INPUT=implement" \
+  "IMPLEMENT_REQUEST_INPUT=true" \
+  "IMPLEMENT_CONFIRMED_INPUT=true"
+assert_output "vote-command-output" "127" "vote_command" "true" \
+  "VOTE_COMMAND_INPUT=true"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

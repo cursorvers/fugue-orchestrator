@@ -209,6 +209,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
+# NOTE: plain issue の `opened` は intake-only です。mainframe 実行開始点は `/vote`、明示的な `tutti` label、または `workflow_dispatch` に限定します。
 # NOTE: 通常経路では実装実行に `implement` + `implement-confirmed` が必要です。`/vote` 経由は review-only 明示がない限り `implement-confirmed` を自動付与します。
 # NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
@@ -255,6 +256,20 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
 # NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
+# NOTE: `FUGUE_PRIMARY_HEARTBEAT_MODE=auto`（既定）では、gh が使えると実行開始/終了時に primary heartbeat を更新します。
+# NOTE: mac mini 24h 運用では `~/Library/LaunchAgents/com.cursorvers.fugue-primary-heartbeat.plist`
+#       を常駐させるのが正式手順です。下記 loop は ad-hoc な shell 実行や cron 用の補助経路です。
+#   ./scripts/local/run-primary-heartbeat-loop.sh --repo cursorvers/fugue-orchestrator --interval 60
+# NOTE: launchd heartbeat を再初期化する場合は bootstrap helper を実行してください。
+#   ./scripts/local/bootstrap-primary-heartbeat-agent.sh --repo cursorvers/fugue-orchestrator
+# NOTE: ログイン時の自動復旧が必要なら `~/Library/LaunchAgents/com.cursorvers.fugue-primary-heartbeat-bootstrap.plist`
+#       を load しておくと、上記 helper が login 時に自動実行されます。
+# NOTE: 可能なら repo-scoped の fine-grained PAT を `FUGUE_HEARTBEAT_GH_TOKEN` に入れてから上記 helper を実行してください。
+#       未指定時は各 heartbeat process が `gh auth token` を使って個別に認証します。
+# NOTE: login bootstrap plist を使わない場合は、再ログイン/再起動後に上記 helper を再実行してください。
+# NOTE: heartbeat は repo variables `FUGUE_PRIMARY_HEARTBEAT_*` に記録され、`fugue-watchdog` は fresh heartbeat を primary 判定の主信号として使います。
+# NOTE: 現在の warm-standby 到達点と `/vote` 検証結果は
+#       `docs/kernel-macmini-warm-standby-status-2026-03-08.md` を参照してください。
 # NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true` のときのみ、`FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` で
 #       `claude-opus-assist` の direct success が無ければ `ok_to_execute=false` になります。
 # NOTE: Claude rate limit 時は `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded|exhausted` を設定すると、

@@ -29,6 +29,26 @@ on:
         required: false
         type: string
         default: ""
+      requested_execution_mode:
+        description: "Resolved handoff mode snapshot (review|implement)"
+        required: false
+        type: string
+        default: ""
+      implement_request:
+        description: "Resolved implementation intent snapshot"
+        required: false
+        type: string
+        default: ""
+      implement_confirmed:
+        description: "Resolved implementation confirmation snapshot"
+        required: false
+        type: string
+        default: ""
+      vote_command:
+        description: "True when the handoff originated from `/vote`"
+        required: false
+        type: string
+        default: "false"
       dispatch_nonce:
         description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
         required: false
@@ -39,6 +59,11 @@ on:
         required: false
         type: string
         default: "kernel"
+      execution_mode_override:
+        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
+        required: false
+        type: string
+        default: "auto"
 
 permissions:
   issues: write
@@ -114,6 +139,7 @@ jobs:
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       handoff_target: ${{ steps.ctx.outputs.handoff_target }}
+      vote_command: ${{ steps.ctx.outputs.vote_command }}
       workspace_hint_applied: ${{ steps.ctx.outputs.workspace_hint_applied }}
       workspace_action_hint: ${{ steps.ctx.outputs.workspace_action_hint }}
       workspace_domain_hint: ${{ steps.ctx.outputs.workspace_domain_hint }}
@@ -121,9 +147,6 @@ jobs:
       workspace_suggested_phases: ${{ steps.ctx.outputs.workspace_suggested_phases }}
       workspace_readonly_actions: ${{ steps.ctx.outputs.workspace_readonly_actions }}
       workspace_approval_required_actions: ${{ steps.ctx.outputs.workspace_approval_required_actions }}
-      workspace_feed_status: ${{ steps.ctx.outputs.workspace_feed_status }}
-      workspace_feed_profiles: ${{ steps.ctx.outputs.workspace_feed_profiles }}
-      workspace_feed_summary: ${{ steps.ctx.outputs.workspace_feed_summary }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
@@ -138,6 +161,10 @@ jobs:
           ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
+          REQUESTED_EXECUTION_MODE_INPUT: ${{ github.event.inputs.requested_execution_mode || '' }}
+          IMPLEMENT_REQUEST_INPUT: ${{ github.event.inputs.implement_request || '' }}
+          IMPLEMENT_CONFIRMED_INPUT: ${{ github.event.inputs.implement_confirmed || '' }}
+          VOTE_COMMAND_INPUT: ${{ github.event.inputs.vote_command || 'false' }}
           HANDOFF_TARGET_INPUT: ${{ github.event.inputs.handoff_target || 'kernel' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -159,9 +186,6 @@ jobs:
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
           CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-sonnet-4-6' }}
-          GOOGLEWORKSPACE_FEED_SYNC_ENABLE: ${{ vars.FUGUE_GOOGLEWORKSPACE_FEED_SYNC_ENABLE || 'true' }}
-          GOOGLEWORKSPACE_FEED_FETCH_REMOTE: true
-          GOOGLEWORKSPACE_FEED_BRANCH: main
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
@@ -295,11 +319,181 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --body "Orchestrator auto-adjust applied. Main fallback: \`${{ steps.ctx.outputs.main_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.main_claude_fallback_reason }}\`). Assist fallback: \`${{ steps.ctx.outputs.assist_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.assist_claude_fallback_reason }}\`). Claude pressure guard: \`${{ steps.ctx.outputs.claude_pressure_guard_applied }}\` (\`${{ steps.ctx.outputs.claude_pressure_guard_reason }}\`). To force Claude for this issue, add label \`orchestrator-force:claude\`."
 
+  execution-policy:
+    if: ${{ needs.ctx.outputs.should_run == 'true' }}
+    needs: [ctx]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      allow_tutti: ${{ steps.policy.outputs.allow_tutti }}
+      allow_heavy: ${{ steps.policy.outputs.allow_heavy }}
+      effective_mode: ${{ steps.policy.outputs.effective_mode }}
+      skip_reason: ${{ steps.policy.outputs.skip_reason }}
+      codex_execution_mode: ${{ steps.policy.outputs.codex_execution_mode }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve live failover state
+        id: live_failover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+          PRIMARY_HEARTBEAT_AT: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_AT || '' }}
+          PRIMARY_HEARTBEAT_TTL_MINUTES: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_TTL_MINUTES || '8' }}
+          PRIMARY_HEARTBEAT_GRACE_MULTIPLIER: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_GRACE_MULTIPLIER || '3' }}
+        run: |
+          set -euo pipefail
+
+          online_count=0
+          runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
+          if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
+            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == $label))] | length')"
+          fi
+
+          eval "$(
+            scripts/lib/resolve-primary-heartbeat-state.sh \
+              --gha-execution-mode "${GHA_EXECUTION_MODE}" \
+              --current-state "${CURRENT_FAILOVER_STATE}" \
+              --runner-online-count "${online_count}" \
+              --pending-count 0 \
+              --mainframe-pending-count 1 \
+              --router-stale false \
+              --mainframe-stale false \
+              --heartbeat-at "${PRIMARY_HEARTBEAT_AT}" \
+              --heartbeat-ttl-minutes "${PRIMARY_HEARTBEAT_TTL_MINUTES}" \
+              --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
+              --format env
+          )"
+
+          {
+            echo "failover_state=${failover_state}"
+            echo "failover_reason=${failover_reason}"
+            echo "heartbeat_status=${heartbeat_status}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve GHA execution policy
+        id: policy
+        env:
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          BACKUP_HEAVY_ENABLED: ${{ vars.FUGUE_GHA_BACKUP_HEAVY_ENABLED || 'false' }}
+          EXECUTION_MODE_OVERRIDE_INPUT: ${{ github.event.inputs.execution_mode_override || 'auto' }}
+        run: |
+          set -euo pipefail
+
+          gha_mode="$(echo "${GHA_EXECUTION_MODE:-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${gha_mode}" != "record-only" ]]; then
+            gha_mode="full"
+          fi
+
+          failover_state="$(echo "${FAILOVER_STATE:-healthy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${failover_state}" in
+            healthy|degraded|offline|recovered) ;;
+            *) failover_state="healthy" ;;
+          esac
+
+          backup_heavy_enabled="$(echo "${BACKUP_HEAVY_ENABLED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${backup_heavy_enabled}" != "true" ]]; then
+            backup_heavy_enabled="false"
+          fi
+
+          override="$(echo "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${override}" in
+            auto|primary|backup-safe|backup-heavy) ;;
+            *) override="auto" ;;
+          esac
+
+          allow_tutti="true"
+          allow_heavy="true"
+          effective_mode="primary"
+          codex_execution_mode="primary"
+          skip_reason="gha-full"
+
+          if [[ "${override}" == "primary" ]]; then
+            allow_tutti="true"
+            allow_heavy="true"
+            effective_mode="primary"
+            codex_execution_mode="primary"
+            skip_reason="manual-primary-override"
+          elif [[ "${override}" == "backup-safe" ]]; then
+            allow_tutti="false"
+            allow_heavy="false"
+            effective_mode="backup-safe"
+            codex_execution_mode="backup-safe"
+            skip_reason="manual-backup-safe-review-only"
+          elif [[ "${override}" == "backup-heavy" ]]; then
+            allow_tutti="true"
+            allow_heavy="true"
+            effective_mode="backup-heavy"
+            codex_execution_mode="backup-heavy"
+            skip_reason="manual-backup-heavy"
+          elif [[ "${gha_mode}" == "record-only" ]]; then
+            if [[ "${failover_state}" == "offline" ]]; then
+              allow_tutti="false"
+              allow_heavy="false"
+              effective_mode="backup-safe"
+              codex_execution_mode="backup-safe"
+              skip_reason="record-only-failover-${failover_state}-review-only"
+              if [[ "${failover_state}" == "offline" && "${backup_heavy_enabled}" == "true" ]]; then
+                allow_heavy="true"
+                effective_mode="backup-heavy"
+                codex_execution_mode="backup-heavy"
+                skip_reason="record-only-offline-backup-heavy"
+              fi
+            else
+              allow_tutti="false"
+              allow_heavy="false"
+              effective_mode="record-only"
+              codex_execution_mode="record-only"
+              if [[ "${failover_state}" == "degraded" ]]; then
+                skip_reason="record-only-primary-uncertain"
+              else
+                skip_reason="record-only-primary-active"
+              fi
+            fi
+          fi
+
+          {
+            echo "allow_tutti=${allow_tutti}"
+            echo "allow_heavy=${allow_heavy}"
+            echo "effective_mode=${effective_mode}"
+            echo "skip_reason=${skip_reason}"
+            echo "codex_execution_mode=${codex_execution_mode}"
+          } >> "${GITHUB_OUTPUT}"
+
+  backup-safe-hold:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.effective_mode == 'backup-safe'
+    needs: [ctx, execution-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hold issue in backup-safe mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --add-label "needs-human" \
+            --remove-label "processing" >/dev/null 2>&1 || true
+          gh issue comment "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "Primary executor is unavailable. Automatic GitHub backup-safe mode is observation-only and will not run Tutti or implementation lanes. Restore the primary executor or dispatch backup-heavy manually to continue on GitHub-hosted infrastructure."
+
   # Review mode: Tutti consensus (6+ parallel lanes baseline)
   tutti:
     if: >-
-      needs.ctx.outputs.should_run == 'true'
-    needs: [ctx]
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_tutti == 'true'
+    needs: [ctx, execution-policy]
     permissions:
       issues: write
       contents: read
@@ -327,6 +521,7 @@ jobs:
       trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
       allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
       extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
+      vote_command: "${{ needs.ctx.outputs.vote_command }}"
       dispatch_nonce: "${{ github.event.inputs.dispatch_nonce || github.run_id }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -337,8 +532,9 @@ jobs:
 
   orchestration-scorecard:
     if: >-
-      needs.ctx.outputs.should_run == 'true'
-    needs: [ctx, tutti]
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_tutti == 'true'
+    needs: [ctx, execution-policy, tutti]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -516,10 +712,11 @@ jobs:
   codex-implement:
     if: >-
       needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_heavy == 'true' &&
       needs.ctx.outputs.has_implement_request == 'true' &&
       needs.ctx.outputs.has_implement_confirmed == 'true' &&
       needs.tutti.outputs.ok_to_execute == 'true'
-    needs: [ctx, tutti]
+    needs: [ctx, execution-policy, tutti]
     uses: ./.github/workflows/fugue-codex-implement.yml
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
@@ -537,10 +734,8 @@ jobs:
       workspace_suggested_phases: "${{ needs.ctx.outputs.workspace_suggested_phases }}"
       workspace_readonly_actions: "${{ needs.ctx.outputs.workspace_readonly_actions }}"
       workspace_approval_required_actions: "${{ needs.ctx.outputs.workspace_approval_required_actions }}"
-      workspace_feed_status: "${{ needs.ctx.outputs.workspace_feed_status }}"
-      workspace_feed_profiles: "${{ needs.ctx.outputs.workspace_feed_profiles }}"
-      workspace_feed_summary: "${{ needs.ctx.outputs.workspace_feed_summary }}"
       workspace_readonly_environment: "${{ vars.FUGUE_WORKSPACE_READONLY_ENV || 'workspace-readonly' }}"
+      execution_mode: "${{ needs.execution-policy.outputs.codex_execution_mode }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
@@ -548,10 +743,11 @@ jobs:
   implement-awaiting-confirmation:
     if: >-
       needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_heavy == 'true' &&
       needs.ctx.outputs.has_implement_request == 'true' &&
       needs.ctx.outputs.has_implement_confirmed != 'true' &&
       needs.tutti.outputs.ok_to_execute == 'true'
-    needs: [ctx, tutti]
+    needs: [ctx, execution-policy, tutti]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
