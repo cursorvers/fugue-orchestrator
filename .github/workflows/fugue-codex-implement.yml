@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: "codex-full"
+      execution_mode:
+        description: "Execution policy mode (primary|backup-safe|backup-heavy|record-only)"
+        required: false
+        type: string
+        default: "primary"
       risk_tier:
         description: "Resolved risk tier (low|medium|high)"
         required: false
@@ -96,6 +101,8 @@ on:
       OPENAI_API_KEY:
         required: false
       TARGET_REPO_PAT:
+        required: false
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:
         required: false
 
 permissions:
@@ -158,7 +165,6 @@ jobs:
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
-          AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
           HAS_IMPLEMENT_CONFIRMED="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement-confirmed") != null)')"
           HAS_LARGE_REFACTOR="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("large-refactor") != null)')"
@@ -272,17 +278,47 @@ jobs:
           TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+          EXECUTION_MODE: ${{ inputs.execution_mode }}
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
         run: |
           set -euo pipefail
 
           can_run="true"
           skip_reason=""
 
-          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+          execution_mode="$(echo "${EXECUTION_MODE:-primary}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${execution_mode}" in
+            primary|backup-safe|backup-heavy|record-only) ;;
+            *) execution_mode="primary" ;;
+          esac
+
+          gha_mode="$(echo "${GHA_EXECUTION_MODE:-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${gha_mode}" != "record-only" ]]; then
+            gha_mode="full"
+          fi
+
+          failover_state="$(echo "${FAILOVER_STATE:-healthy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${failover_state}" in
+            healthy|degraded|offline|recovered) ;;
+            *) failover_state="healthy" ;;
+          esac
+
+          if [[ "${execution_mode}" == "backup-safe" ]]; then
+            can_run="false"
+            skip_reason="backup-safe-review-only"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Codex implementation skipped: backup-safe mode is review-only. Use backup-heavy or primary mode for implementation."
+          elif [[ "${gha_mode}" == "record-only" && "${execution_mode}" == "primary" && "${failover_state}" != "degraded" && "${failover_state}" != "offline" ]]; then
+            can_run="false"
+            skip_reason="record-only-primary-active"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Codex implementation skipped: GHA is in record-only mode while the primary executor is considered available (\`${failover_state}\`)."
+          fi
+
+          if [[ "${can_run}" == "true" && -z "${OPENAI_API_KEY:-}" ]]; then
             can_run="false"
             skip_reason="missing-openai-api-key"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Escalating to humans."
-          elif [[ "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
+          elif [[ "${can_run}" == "true" && "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
             can_run="false"
             skip_reason="missing-target-repo-pat"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret \`TARGET_REPO_PAT\`. Escalating to humans."

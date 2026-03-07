@@ -2,7 +2,7 @@ name: fugue-watchdog
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       force_line_alert:
@@ -28,6 +28,11 @@ jobs:
   health:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      failover_state: ${{ steps.failover.outputs.failover_state }}
+      failover_reason: ${{ steps.failover.outputs.failover_reason }}
+      backup_router_execution_mode: ${{ steps.failover.outputs.backup_router_execution_mode }}
+      gha_execution_mode: ${{ steps.failover.outputs.gha_execution_mode }}
 
     steps:
       - name: Count pending work (for alert gating)
@@ -92,38 +97,43 @@ jobs:
             claude_max_plan="false"
           fi
 
-          curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+          if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
             https://api.openai.com/v1/models \
-            -H "Authorization: Bearer ${OPENAI_API_KEY}" >/dev/null 2>&1
-          [[ $? -eq 0 ]] && OPENAI_OK="true"
+            -H "Authorization: Bearer ${OPENAI_API_KEY}" >/dev/null 2>&1; then
+            OPENAI_OK="true"
+          fi
 
-          curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+          if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
             https://api.z.ai/api/coding/paas/v4/models \
-            -H "Authorization: Bearer ${ZAI_API_KEY}" >/dev/null 2>&1
-          [[ $? -eq 0 ]] && ZAI_OK="true"
+            -H "Authorization: Bearer ${ZAI_API_KEY}" >/dev/null 2>&1; then
+            ZAI_OK="true"
+          fi
 
           if [[ -n "${GEMINI_API_KEY:-}" ]]; then
             GEMINI_OK="false"
-            curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
-              "https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}" >/dev/null 2>&1
-            [[ $? -eq 0 ]] && GEMINI_OK="true"
+            if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+              "https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}" >/dev/null 2>&1; then
+              GEMINI_OK="true"
+            fi
           fi
 
           if [[ -n "${XAI_API_KEY:-}" ]]; then
             XAI_OK="false"
-            curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+            if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
               https://api.x.ai/v1/models \
-              -H "Authorization: Bearer ${XAI_API_KEY}" >/dev/null 2>&1
-            [[ $? -eq 0 ]] && XAI_OK="true"
+              -H "Authorization: Bearer ${XAI_API_KEY}" >/dev/null 2>&1; then
+              XAI_OK="true"
+            fi
           fi
 
           if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
             ANTHROPIC_OK="false"
-            curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+            if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
               https://api.anthropic.com/v1/models \
               -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-              -H "anthropic-version: 2023-06-01" >/dev/null 2>&1
-            [[ $? -eq 0 ]] && ANTHROPIC_OK="true"
+              -H "anthropic-version: 2023-06-01" >/dev/null 2>&1; then
+              ANTHROPIC_OK="true"
+            fi
           elif [[ "${claude_max_plan}" == "true" ]]; then
             ANTHROPIC_OK="proxy"
           fi
@@ -300,6 +310,65 @@ jobs:
             echo "last_time=${LAST_TIME}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Detect execution failover state
+        id: failover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          CURRENT_FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+          PRIMARY_HEARTBEAT_AT: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_AT || '' }}
+          PRIMARY_HEARTBEAT_TTL_MINUTES: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_TTL_MINUTES || '8' }}
+          PRIMARY_HEARTBEAT_GRACE_MULTIPLIER: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_GRACE_MULTIPLIER || '3' }}
+        run: |
+          set -euo pipefail
+
+          online_count=0
+          runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
+          if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
+            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == $label))] | length')"
+          fi
+          # shellcheck source=../scripts/lib/resolve-primary-heartbeat-state.sh
+          eval "$(
+            scripts/lib/resolve-primary-heartbeat-state.sh \
+              --gha-execution-mode "${GHA_EXECUTION_MODE}" \
+              --current-state "${CURRENT_FAILOVER_STATE}" \
+              --runner-online-count "${online_count}" \
+              --pending-count "${{ steps.pending.outputs.pending_count }}" \
+              --mainframe-pending-count "${{ steps.pending.outputs.mainframe_pending_count }}" \
+              --router-stale "${{ steps.last_success.outputs.stale }}" \
+              --mainframe-stale "${{ steps.mainframe_success.outputs.stale }}" \
+              --heartbeat-at "${PRIMARY_HEARTBEAT_AT}" \
+              --heartbeat-ttl-minutes "${PRIMARY_HEARTBEAT_TTL_MINUTES}" \
+              --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
+              --format env
+          )"
+
+          can_manage_variables="false"
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+            can_manage_variables="true"
+          fi
+
+          if [[ "${can_manage_variables}" == "true" && "${failover_state}" != "${current_state}" ]]; then
+            gh variable set FUGUE_FAILOVER_STATE \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "${failover_state}" >/dev/null 2>&1 || true
+          fi
+
+          {
+            echo "failover_state=${failover_state}"
+            echo "failover_reason=${failover_reason}"
+            echo "backup_router_execution_mode=${backup_router_execution_mode}"
+            echo "online_count=${online_count}"
+            echo "gha_execution_mode=${gha_execution_mode}"
+            echo "heartbeat_status=${heartbeat_status}"
+            echo "heartbeat_age_minutes=${heartbeat_age_minutes}"
+            echo "can_manage_variables=${can_manage_variables}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Decide whether to alert (throttle + relevance)
         id: decide
         env:
@@ -335,6 +404,12 @@ jobs:
           fi
           router_stale="${{ steps.last_success.outputs.stale }}"
           mainframe_stale="${{ steps.mainframe_success.outputs.stale }}"
+          failover_state="${{ steps.failover.outputs.failover_state }}"
+          failover_reason="${{ steps.failover.outputs.failover_reason }}"
+          runner_online_count="${{ steps.failover.outputs.online_count }}"
+          gha_execution_mode="${{ steps.failover.outputs.gha_execution_mode }}"
+          heartbeat_status="${{ steps.failover.outputs.heartbeat_status }}"
+          heartbeat_age_minutes="${{ steps.failover.outputs.heartbeat_age_minutes }}"
 
           router_hours="${{ steps.last_success.outputs.hours_since }}"
           mainframe_hours="${{ steps.mainframe_success.outputs.hours_since }}"
@@ -381,6 +456,18 @@ jobs:
             fi
           fi
 
+          if [[ "${failover_state}" == "offline" && ( "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ) ]]; then
+            if (( 10#${hour_utc} % 3 == 0 )); then
+              should_alert="true"
+              reasons+=("primary-offline")
+            fi
+          elif [[ "${failover_state}" == "degraded" && ( "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ) ]]; then
+            if (( 10#${hour_utc} % 6 == 0 )); then
+              should_alert="true"
+              reasons+=("primary-degraded")
+            fi
+          fi
+
           # Staleness alerts: page at 3h, then every 6h (3,6,12,18,24,...).
           if [[ "${router_stale}" == "true" ]]; then
             if [[ "${router_hours}" == "9999" || "${router_hours}" == "3" || $((router_hours % 6)) -eq 0 ]]; then
@@ -410,6 +497,12 @@ jobs:
           claude_rate_limit_state_age_hours: ${claude_state_age_hours}
           claude_fallback_mentions_24h: ${claude_fallback_mentions_24h}
           claude_max_plan_mode: ${claude_max_plan}
+          gha_execution_mode: ${gha_execution_mode}
+          failover_state: ${failover_state}
+          failover_reason: ${failover_reason}
+          primary_runner_online_count: ${runner_online_count}
+          primary_heartbeat_status: ${heartbeat_status}
+          primary_heartbeat_age_minutes: ${heartbeat_age_minutes}
           openai_ok: ${openai_ok}
           zai_ok: ${zai_ok}
           gemini_ok: ${gemini_ok}
@@ -489,6 +582,7 @@ jobs:
           fi
 
   reconcile:
+    needs: [health]
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -529,14 +623,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PENDING_JSON: ${{ steps.find.outputs.pending_json }}
+          EXECUTION_MODE_OVERRIDE: ${{ needs.health.outputs.backup_router_execution_mode }}
         run: |
           set -euo pipefail
 
           echo "Found unprocessed issues: ${PENDING_JSON}"
           for ISSUE_NUM in $(echo "${PENDING_JSON}" | jq -r '.[]'); do
             echo "Triggering router for issue #${ISSUE_NUM}"
-            gh workflow run fugue-task-router.yml \
-              --repo "${GITHUB_REPOSITORY}" \
-              -f issue_number="${ISSUE_NUM}"
+            cmd=(gh workflow run fugue-task-router.yml --repo "${GITHUB_REPOSITORY}" -f issue_number="${ISSUE_NUM}")
+            if [[ -n "${EXECUTION_MODE_OVERRIDE:-}" && "${EXECUTION_MODE_OVERRIDE}" != "auto" ]]; then
+              cmd+=(-f execution_mode_override="${EXECUTION_MODE_OVERRIDE}")
+            fi
+            "${cmd[@]}"
             sleep 2
           done

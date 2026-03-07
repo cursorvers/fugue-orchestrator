@@ -7,6 +7,11 @@ on:
         description: "Issue number to process"
         required: true
         type: string
+      execution_mode_override:
+        description: "Execution policy override (auto|primary|backup-safe)"
+        required: false
+        type: string
+        default: "auto"
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -27,6 +32,11 @@ on:
       issue_number:
         description: "Issue number to process"
         required: true
+        type: string
+      execution_mode_override:
+        description: "Execution policy override (auto|primary|backup-safe)"
+        required: false
+        default: "auto"
         type: string
 
 permissions:
@@ -338,8 +348,70 @@ jobs:
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           echo "has_tutti=${HAS_TUTTI}" >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve execution policy
+        id: exec_policy
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
+        env:
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || github.event.inputs.execution_mode_override || 'auto' }}
+        run: |
+          set -euo pipefail
+
+          gha_mode="$(echo "${GHA_EXECUTION_MODE:-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${gha_mode}" != "record-only" ]]; then
+            gha_mode="full"
+          fi
+
+          failover_state="$(echo "${FAILOVER_STATE:-healthy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${failover_state}" in
+            healthy|degraded|offline|recovered) ;;
+            *) failover_state="healthy" ;;
+          esac
+
+          override="$(echo "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${override}" in
+            auto|primary|backup-safe) ;;
+            *) override="auto" ;;
+          esac
+
+          allow_safe_execution="true"
+          effective_mode="primary"
+          skip_reason="gha-full"
+
+          if [[ "${override}" == "primary" ]]; then
+            allow_safe_execution="true"
+            effective_mode="primary"
+            skip_reason="manual-primary-override"
+          elif [[ "${override}" == "backup-safe" ]]; then
+            allow_safe_execution="true"
+            effective_mode="backup-safe"
+            skip_reason="manual-backup-safe"
+          elif [[ "${gha_mode}" == "record-only" ]]; then
+            if [[ "${failover_state}" == "offline" ]]; then
+              allow_safe_execution="true"
+              effective_mode="backup-safe"
+              skip_reason="record-only-failover-${failover_state}"
+            else
+              allow_safe_execution="false"
+              effective_mode="record-only"
+              skip_reason="record-only-primary-active"
+            fi
+          fi
+
+          {
+            echo "allow_safe_execution=${allow_safe_execution}"
+            echo "effective_mode=${effective_mode}"
+            echo "skip_reason=${skip_reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Standby record-only note
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution != 'true' }}
+        run: |
+          echo "Record-only standby mode active; primary executor should handle this issue."
+
       - name: Add processing label
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -357,7 +429,7 @@ jobs:
 
       - name: Classify intent (Node.js decision table)
         id: classify
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
         env:
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
@@ -395,7 +467,7 @@ jobs:
 
       - name: Check author trust
         id: trust
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -423,7 +495,7 @@ jobs:
 
       - name: Resolve final tier
         id: final
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
         run: |
           BASE_TIER="${{ steps.classify.outputs.tier }}"
           TRUSTED="${{ steps.trust.outputs.trusted }}"
@@ -434,7 +506,7 @@ jobs:
           echo "tier=${FINAL_TIER}" >> "${GITHUB_OUTPUT}"
 
       - name: Execute agent and post result (Tier 0-2)
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.final.outputs.tier != '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' && steps.final.outputs.tier != '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -577,7 +649,7 @@ jobs:
           fi
 
       - name: Tier 3 fallback
-        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.final.outputs.tier == '3' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' && steps.final.outputs.tier == '3' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -587,7 +659,7 @@ jobs:
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
 
       - name: Remove processing label
-        if: ${{ always() && steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' }}
+        if: ${{ always() && steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

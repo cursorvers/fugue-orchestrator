@@ -29,6 +29,10 @@ ISSUE_BODY_FILE="${ISSUE_BODY_FILE:-${FUGUE_LOCAL_ISSUE_BODY_FILE:-}}"
 ISSUE_URL_INPUT="${ISSUE_URL_INPUT:-${FUGUE_LOCAL_ISSUE_URL:-}}"
 ISSUE_LABELS_CSV_INPUT="${ISSUE_LABELS_CSV_INPUT:-${FUGUE_LOCAL_ISSUE_LABELS_CSV:-}}"
 FORCE_MANUAL_CONTEXT="${FORCE_MANUAL_CONTEXT:-${FUGUE_LOCAL_FORCE_MANUAL_CONTEXT:-false}}"
+PRIMARY_HEARTBEAT_MODE="${PRIMARY_HEARTBEAT_MODE:-${FUGUE_PRIMARY_HEARTBEAT_MODE:-auto}}"
+PRIMARY_HEARTBEAT_REPO="${PRIMARY_HEARTBEAT_REPO:-${FUGUE_PRIMARY_HEARTBEAT_REPO:-${REPO}}}"
+PRIMARY_HEARTBEAT_SOURCE="${PRIMARY_HEARTBEAT_SOURCE:-${FUGUE_PRIMARY_HEARTBEAT_SOURCE:-local-orchestration}}"
+PRIMARY_HEARTBEAT_NODE="${PRIMARY_HEARTBEAT_NODE:-${FUGUE_PRIMARY_HEARTBEAT_NODE:-}}"
 
 usage() {
   cat <<'EOF'
@@ -92,6 +96,12 @@ Environment:
                          true|false (default: false; when true, skip GitHub issue fetch entirely)
   FUGUE_CLAUDE_SESSION_HANDOFF
                          true|false (default: true; persist claude lane session IDs for resume/handoff)
+  FUGUE_PRIMARY_HEARTBEAT_MODE
+                         auto|true|false (default: auto; pulse GitHub heartbeat when gh is available)
+  FUGUE_PRIMARY_HEARTBEAT_REPO
+                         Repo receiving heartbeat updates (default: same repo as --repo)
+  FUGUE_PRIMARY_HEARTBEAT_SOURCE
+                         Heartbeat source label (default: local-orchestration)
 EOF
 }
 
@@ -281,6 +291,7 @@ CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+PRIMARY_HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/local/pulse-primary-heartbeat.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
   exit 2
@@ -337,6 +348,38 @@ if [[ "${WITH_LINKED_SYSTEMS}" == "true" && "${gh_available}" != "true" ]]; then
   echo "Error: --with-linked-systems requires gh command." >&2
   exit 2
 fi
+
+primary_heartbeat_mode="$(echo "${PRIMARY_HEARTBEAT_MODE:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${primary_heartbeat_mode}" in
+  auto|true|false) ;;
+  *) primary_heartbeat_mode="auto" ;;
+esac
+primary_heartbeat_enabled="false"
+if [[ "${primary_heartbeat_mode}" == "true" ]]; then
+  primary_heartbeat_enabled="true"
+elif [[ "${primary_heartbeat_mode}" == "auto" && "${gh_available}" == "true" && -x "${PRIMARY_HEARTBEAT_SCRIPT}" ]]; then
+  primary_heartbeat_enabled="true"
+fi
+if [[ -z "${PRIMARY_HEARTBEAT_NODE}" ]]; then
+  PRIMARY_HEARTBEAT_NODE="$(hostname -s 2>/dev/null || hostname || echo unknown)"
+fi
+
+pulse_primary_heartbeat() {
+  local hb_state="${1:-online}"
+  if [[ "${primary_heartbeat_enabled}" != "true" ]]; then
+    return 0
+  fi
+  if [[ ! -x "${PRIMARY_HEARTBEAT_SCRIPT}" ]]; then
+    echo "Warning: heartbeat script missing; skipping pulse." >&2
+    return 0
+  fi
+  "${PRIMARY_HEARTBEAT_SCRIPT}" \
+    --repo "${PRIMARY_HEARTBEAT_REPO}" \
+    --state "${hb_state}" \
+    --source "${PRIMARY_HEARTBEAT_SOURCE}" \
+    --node "${PRIMARY_HEARTBEAT_NODE}" >/dev/null 2>&1 || \
+    echo "Warning: failed to publish primary heartbeat (${hb_state})." >&2
+}
 
 ISSUE_TITLE=""
 ISSUE_BODY=""
@@ -399,6 +442,8 @@ RUN_DIR="${OUT_DIR}/issue-${ISSUE_NUMBER}-${run_id}"
 LANE_DIR="${RUN_DIR}/lanes"
 TMP_DIR="${RUN_DIR}/tmp"
 mkdir -p "${LANE_DIR}" "${TMP_DIR}"
+
+pulse_primary_heartbeat "busy"
 
 workspace_hint_json="$("${ORCHESTRATOR_NL_HINTS}" \
   --title "${ISSUE_TITLE}" \
@@ -1039,6 +1084,8 @@ EOF
 if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then
   gh issue comment "${ISSUE_NUMBER}" --repo "${REPO}" --body-file "${summary_md}" >/dev/null
 fi
+
+pulse_primary_heartbeat "online"
 
 echo "Local orchestration completed."
 echo "Run directory: ${RUN_DIR}"
