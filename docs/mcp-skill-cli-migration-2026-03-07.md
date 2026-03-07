@@ -47,6 +47,12 @@ Validated on `2026-03-07`:
 - `tests/test-mcp-adapter-exec.sh`
 - `scripts/check-mcp-adapters.sh`
 - `scripts/sim-kernel-peripherals.sh`
+- production canary:
+  - `cursorvers/fugue-orchestrator` run `22793439430` success
+- latest production peripheral evidence:
+  - `cursorvers/cursorvers_line_free_dev` `Manus Audit (Unified)` run
+    `22793265594` success
+  - `cloudflare-workers-hub` health endpoint returned `healthy`
 
 ## Non-Goals
 
