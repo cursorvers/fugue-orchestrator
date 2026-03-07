@@ -73,6 +73,18 @@ Use:
 bash scripts/audit-org-secrets.sh --org cursorvers
 ```
 
+To sync available current-shell or external-file values across every configured repo:
+
+```bash
+bash scripts/local/sync-gh-secrets-matrix.sh --org cursorvers --dry-run
+```
+
+Apply mode:
+
+```bash
+bash scripts/local/sync-gh-secrets-matrix.sh --org cursorvers --apply
+```
+
 If the current `gh` identity does not have org-level secret access, the script now
 falls back to repo-only classification and prints:
 
