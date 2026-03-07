@@ -201,12 +201,20 @@ Current implemented baseline:
   - converts readonly Workspace hints into a bounded CI artifact
   - returns `ok`, `partial`, or `skipped`
   - degrades to `skipped` when CI credentials are unavailable
+- `scripts/harness/googleworkspace-scheduled-extract.sh`
+  - turns scheduled readonly profiles into cached Workspace feed manifests
+- `scripts/harness/googleworkspace-feed-ingest.sh`
+  - rehydrates only fresh feed manifests into a bounded context envelope
+- `scripts/local/googleworkspace-feed-sync-local.sh`
+  - runs personal mailbox feed profiles on the local machine with user OAuth
 - `.github/workflows/fugue-tutti-caller.yml`
   - forwards `workspace_*` hints into the reusable Codex implementation workflow
 - `.github/workflows/fugue-codex-implement.yml`
   - runs readonly Workspace preflight in a dedicated protected-environment job
   - uploads Workspace artifact and raw evidence alongside existing protocol logs
   - keeps Workspace credentials out of the main implementation job
+- `.github/workflows/googleworkspace-feed-sync.yml`
+  - runs low-frequency shared readonly feed sync profiles on schedule or manual dispatch
 
 Kernel admission rules:
 
@@ -262,3 +270,7 @@ Kernel admission rules:
    workflows.
 6. Require a protected GitHub `Environment` such as `workspace-readonly` before
    CI can access readonly Workspace credentials.
+7. Add scheduled feed extraction only for low-frequency readonly profiles and
+   gate stale feeds with TTL before reinjecting into Kernel/FUGUE prompts.
+8. Keep personal mailbox feed extraction on the local machine rather than
+   unattended GitHub Actions.
