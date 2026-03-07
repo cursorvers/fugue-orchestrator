@@ -62,6 +62,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_ACTOR: ${{ github.actor }}
+          HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           RECOVERY_MODE: ${{ github.event.inputs.mode }}
           RECOVERY_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
           RECOVERY_HANDOFF_TARGET: ${{ github.event.inputs.handoff_target }}
