@@ -114,6 +114,13 @@ jobs:
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       handoff_target: ${{ steps.ctx.outputs.handoff_target }}
+      workspace_hint_applied: ${{ steps.ctx.outputs.workspace_hint_applied }}
+      workspace_action_hint: ${{ steps.ctx.outputs.workspace_action_hint }}
+      workspace_domain_hint: ${{ steps.ctx.outputs.workspace_domain_hint }}
+      workspace_reason: ${{ steps.ctx.outputs.workspace_reason }}
+      workspace_suggested_phases: ${{ steps.ctx.outputs.workspace_suggested_phases }}
+      workspace_readonly_actions: ${{ steps.ctx.outputs.workspace_readonly_actions }}
+      workspace_approval_required_actions: ${{ steps.ctx.outputs.workspace_approval_required_actions }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
@@ -517,6 +524,14 @@ jobs:
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       lessons_required: "${{ needs.ctx.outputs.lessons_required }}"
       correction_signal: "${{ needs.ctx.outputs.correction_signal }}"
+      workspace_hint_applied: "${{ needs.ctx.outputs.workspace_hint_applied }}"
+      workspace_action_hint: "${{ needs.ctx.outputs.workspace_action_hint }}"
+      workspace_domain_hint: "${{ needs.ctx.outputs.workspace_domain_hint }}"
+      workspace_reason: "${{ needs.ctx.outputs.workspace_reason }}"
+      workspace_suggested_phases: "${{ needs.ctx.outputs.workspace_suggested_phases }}"
+      workspace_readonly_actions: "${{ needs.ctx.outputs.workspace_readonly_actions }}"
+      workspace_approval_required_actions: "${{ needs.ctx.outputs.workspace_approval_required_actions }}"
+      workspace_readonly_environment: "${{ vars.FUGUE_WORKSPACE_READONLY_ENV || 'workspace-readonly' }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

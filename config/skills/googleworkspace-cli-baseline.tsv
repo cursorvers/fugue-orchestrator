@@ -1,0 +1,21 @@
+# skill_id\tprofile\trationale
+gws-shared	required	Shared auth, global flags, and safety rules for all Google Workspace CLI usage.
+gws-gmail	required	Gmail API surface for read and triage automation.
+gws-gmail-triage	required	Read-only unread inbox summary for operator morning triage.
+gws-calendar	required	Calendar API surface used by meeting-prep and schedule workflows.
+gws-drive	required	Drive API surface for file lookup, sharing, and upload flows.
+gws-docs	required	Docs API surface for memo and report generation workflows.
+gws-sheets	required	Sheets API surface for status tables and report inputs.
+gws-workflow	required	Cross-service workflow entrypoint for higher-level Workspace tasks.
+gws-workflow-meeting-prep	required	Read-only next-meeting summary for exec-assistant style flows.
+gws-workflow-standup-report	required	Morning status synthesis across Workspace surfaces.
+gws-workflow-weekly-digest	required	Weekly readout workflow for FUGUE and Kernel operator digests.
+gws-gmail-send	optional	Write-capable email helper; keep optional because it has side effects.
+gws-drive-upload	optional	Write-capable upload helper; keep optional because it changes Drive state.
+gws-docs-write	optional	Write-capable Docs helper for generated summaries and reports.
+gws-sheets-read	optional	Focused helper for quick table extraction from Sheets.
+gws-sheets-append	optional	Write-capable helper for logging rows into Sheets.
+gws-workflow-email-to-task	optional	Promotes mailbox-driven work into task workflows when needed.
+gws-workflow-file-announce	optional	Announces Drive files to downstream channels and collaborators.
+persona-exec-assistant	optional	Role guide tying together Gmail, Calendar, Drive, and Chat workflows.
+recipe-generate-report-from-sheet	optional	End-to-end reporting pattern from Sheets to Docs and Drive sharing.

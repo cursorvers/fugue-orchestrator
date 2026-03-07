@@ -69,6 +69,15 @@ normalize_multi_agent_mode() {
   esac
 }
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
+DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+CLAUDE_MAIN_ASSIST_POLICY="${CLAUDE_MAIN_ASSIST_POLICY:-codex}"
+CLAUDE_DEGRADED_ASSIST_POLICY="${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}"
+CLAUDE_ROLE_POLICY="${CLAUDE_ROLE_POLICY:-flex}"
+CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-sonnet-4-6}"
+GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+
 ISSUE_NUMBER=""
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
   ISSUE_NUMBER="${ISSUE_NUMBER_FROM_DISPATCH}"
@@ -209,10 +218,49 @@ if [[ -z "${body_assist_provider}" ]]; then
 fi
 
 eval "$(
-  scripts/lib/orchestrator-nl-hints.sh \
+  "${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh" \
     --title "${title}" \
     --body "${body}"
 )"
+
+workspace_suggested_phases=""
+workspace_readonly_actions=""
+workspace_approval_required_actions=""
+if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
+  workspace_policy_json="$(jq -cn \
+    --arg action_hint "${workspace_action_hint}" \
+    --arg domain_hint "${workspace_domain_hint}" \
+    --arg reason "${workspace_reason}" \
+    --arg hint_applied "${workspace_hint_applied}" \
+    --slurpfile policy "${GOOGLEWORKSPACE_KERNEL_POLICY}" \
+    '($action_hint | split(",") | map(select(length > 0))) as $actions
+     | ($domain_hint | split(",") | map(select(length > 0))) as $domains
+     | {
+         workspace_hint_applied: ($hint_applied == "true"),
+         workspace_action_hint: $action_hint,
+         workspace_domain_hint: $domain_hint,
+         workspace_reason: $reason,
+         suggested_actions: $actions,
+         suggested_domains: $domains,
+         suggested_phases: (
+           $actions
+           | map($policy[0].action_policy[.]?.default_phase)
+           | map(select(. != null))
+           | unique
+         ),
+         readonly_actions: (
+           $actions
+           | map(select(($policy[0].action_policy[.]?.side_effect // false) | not))
+         ),
+         approval_required_actions: (
+           $actions
+           | map(select(($policy[0].action_policy[.]?.side_effect // false) == true))
+         )
+       }')"
+  workspace_suggested_phases="$(echo "${workspace_policy_json}" | jq -r '.suggested_phases | join(",")')"
+  workspace_readonly_actions="$(echo "${workspace_policy_json}" | jq -r '.readonly_actions | join(",")')"
+  workspace_approval_required_actions="$(echo "${workspace_policy_json}" | jq -r '.approval_required_actions | join(",")')"
+fi
 
 requested_main_provider="${label_main_provider}"
 main_provider_source="label"
@@ -225,7 +273,7 @@ if [[ -z "${requested_main_provider}" && -n "${nl_main_hint}" ]]; then
   main_provider_source="body-natural-language"
 fi
 if [[ -z "${requested_main_provider}" ]]; then
-  requested_main_provider="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
+  requested_main_provider="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}"
   main_provider_source="default"
 fi
 requested_main_provider="$(echo "${requested_main_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -284,12 +332,12 @@ if [[ -n "${label_assist_provider}" || -n "${body_assist_provider}" || -n "${nl_
   assist_explicit="true"
 fi
 if [[ -z "${requested_assist_provider}" ]]; then
-  requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+  requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}"
   assist_provider_source="default"
 fi
 requested_assist_provider="$(echo "${requested_assist_provider}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${requested_assist_provider}" != "claude" && "${requested_assist_provider}" != "codex" && "${requested_assist_provider}" != "none" ]]; then
-  requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
+  requested_assist_provider="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER}"
   assist_provider_source="default"
 fi
 
@@ -352,9 +400,9 @@ translation_payload=""
 normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
 CODEX_MAIN_MODEL="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ -x "scripts/lib/model-policy.sh" ]]; then
+if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
   eval "$(
-    scripts/lib/model-policy.sh \
+    "${ROOT_DIR}/scripts/lib/model-policy.sh" \
       --codex-main-model "${CODEX_MAIN_MODEL}" \
       --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
       --claude-model "claude-sonnet-4-6" \
@@ -369,10 +417,6 @@ if [[ -x "scripts/lib/model-policy.sh" ]]; then
 elif ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
   CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
 fi
-if [[ "${CLAUDE_TRANSLATOR_MODEL}" != "claude-sonnet-4-6" ]]; then
-  CLAUDE_TRANSLATOR_MODEL="claude-sonnet-4-6"
-fi
-
 if [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
   judge_sys_prompt="You are Codex Orchestrator gate. Decide if Claude translation should be inserted before orchestration. Return ONLY compact JSON: {\"score\":0-100,\"should_translate\":true|false,\"reason\":\"short\",\"signals\":[\"...\"]}."
   judge_user_prompt="Analyze this issue text for ambiguity/conflict/risk/implicit constraints. Prioritize translation when requirements are unclear, mixed-language, or high-risk refactor/migration. Text:\n${normalized_text}"
@@ -561,7 +605,7 @@ elif [[ "${translation_gate_decision}" == "true" ]]; then
 fi
 
 eval "$(
-  scripts/lib/orchestrator-policy.sh \
+  "${ROOT_DIR}/scripts/lib/orchestrator-policy.sh" \
     --main "${requested_main_provider_initial}" \
     --assist "${requested_assist_provider}" \
     --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
@@ -656,9 +700,9 @@ claude_teams_reason="policy-script-missing"
 claude_teams_collaboration_signal="false"
 claude_teams_member_cap="3"
 claude_teams_max_invocations="1"
-if [[ -x "scripts/lib/claude-teams-policy.sh" ]]; then
+if [[ -x "${ROOT_DIR}/scripts/lib/claude-teams-policy.sh" ]]; then
   eval "$(
-    scripts/lib/claude-teams-policy.sh \
+    "${ROOT_DIR}/scripts/lib/claude-teams-policy.sh" \
       --task-size-tier "${task_size_tier}" \
       --risk-tier "${risk_tier}" \
       --claude-state "${claude_state}" \
@@ -734,7 +778,7 @@ if [[ "${assist_explicit}" != "true" && "${force_claude}" != "true" && "${reques
   fi
 fi
 eval "$(
-  scripts/lib/orchestrator-policy.sh \
+  "${ROOT_DIR}/scripts/lib/orchestrator-policy.sh" \
     --main "${requested_main_provider_initial}" \
     --assist "${requested_assist_provider}" \
     --default-main "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER}" \
@@ -828,6 +872,13 @@ fi
   echo "nl_main_reason=${nl_main_reason}"
   echo "nl_assist_reason=${nl_assist_reason}"
   echo "nl_inference_skipped_reason=${nl_inference_skipped_reason}"
+  echo "workspace_hint_applied=${workspace_hint_applied}"
+  echo "workspace_action_hint=${workspace_action_hint}"
+  echo "workspace_domain_hint=${workspace_domain_hint}"
+  echo "workspace_reason=${workspace_reason}"
+  echo "workspace_suggested_phases=${workspace_suggested_phases}"
+  echo "workspace_readonly_actions=${workspace_readonly_actions}"
+  echo "workspace_approval_required_actions=${workspace_approval_required_actions}"
   echo "claude_fallback_applied=${main_claude_fallback_applied}"
   echo "claude_fallback_reason=${main_claude_fallback_reason}"
   echo "main_claude_fallback_applied=${main_claude_fallback_applied}"

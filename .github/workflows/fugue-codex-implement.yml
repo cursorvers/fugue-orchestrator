@@ -52,6 +52,46 @@ on:
         required: false
         type: string
         default: "auto"
+      workspace_hint_applied:
+        description: "Whether Google Workspace readonly preflight is relevant"
+        required: false
+        type: string
+        default: "false"
+      workspace_action_hint:
+        description: "Comma-separated Google Workspace action hints"
+        required: false
+        type: string
+        default: ""
+      workspace_domain_hint:
+        description: "Comma-separated Google Workspace domain hints"
+        required: false
+        type: string
+        default: ""
+      workspace_reason:
+        description: "Short explanation for Google Workspace relevance"
+        required: false
+        type: string
+        default: ""
+      workspace_suggested_phases:
+        description: "Comma-separated Kernel phases suggested for Workspace use"
+        required: false
+        type: string
+        default: ""
+      workspace_readonly_actions:
+        description: "Comma-separated readonly Google Workspace actions allowed in CI preflight"
+        required: false
+        type: string
+        default: ""
+      workspace_approval_required_actions:
+        description: "Comma-separated write Google Workspace actions requiring approval"
+        required: false
+        type: string
+        default: ""
+      workspace_readonly_environment:
+        description: "Protected GitHub Environment used for readonly Google Workspace CI preflight"
+        required: false
+        type: string
+        default: "workspace-readonly"
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -257,9 +297,70 @@ jobs:
             echo "skip_reason=${skip_reason}"
           } >> "${GITHUB_OUTPUT}"
 
-  implement:
-    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' }}
+  workspace-preflight:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && inputs.workspace_hint_applied == 'true' }}
     needs: [prepare, credential-guard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.workspace_readonly_environment }}
+    outputs:
+      workspace_preflight_status: ${{ steps.workspace_preflight.outputs.workspace_preflight_status }}
+      workspace_report_path: ${{ steps.workspace_preflight.outputs.workspace_report_path }}
+      workspace_summary: ${{ steps.workspace_preflight.outputs.workspace_summary }}
+      workspace_artifact_name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.prepare.outputs.target_repo }}
+          token: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Google Workspace CLI
+        run: npm install -g @googleworkspace/cli
+
+      - name: Set Workspace artifact metadata
+        id: workspace_meta
+        run: |
+          echo "workspace_artifact_name=googleworkspace-preflight-${{ needs.prepare.outputs.issue_number }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run Google Workspace readonly preflight
+        id: workspace_preflight
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          WORKSPACE_ACTIONS: ${{ inputs.workspace_readonly_actions || inputs.workspace_action_hint }}
+          WORKSPACE_DOMAINS: ${{ inputs.workspace_domain_hint }}
+          WORKSPACE_REASON: ${{ inputs.workspace_reason }}
+          WORKSPACE_SUGGESTED_PHASES: ${{ inputs.workspace_suggested_phases }}
+          OUT_DIR: .fugue/pre-implement
+          RUN_DIR: .fugue/pre-implement/googleworkspace-run
+          REPORT_PATH: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-googleworkspace.md
+          ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
+          GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
+        run: bash scripts/harness/googleworkspace-preflight-enrich.sh
+
+      - name: Upload Google Workspace preflight artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
+          path: |
+            .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-googleworkspace.md
+            .fugue/pre-implement/googleworkspace-run
+          if-no-files-found: ignore
+
+  implement:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && (needs.workspace-preflight.result == 'success' || needs.workspace-preflight.result == 'skipped') }}
+    needs: [prepare, credential-guard, workspace-preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -301,6 +402,13 @@ jobs:
       - name: Create working branch
         run: |
           git checkout -b "${{ needs.prepare.outputs.branch_name }}"
+
+      - name: Download Google Workspace preflight artifact
+        if: ${{ inputs.workspace_hint_applied == 'true' && needs.workspace-preflight.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.workspace-preflight.outputs.workspace_artifact_name }}
+          path: .
 
       - name: Run parallel preflight nodes
         id: preflight_parallel
@@ -502,6 +610,9 @@ jobs:
           RESEARCH_REPORT_PATH: ${{ steps.preflight_parallel.outputs.research_report_path }}
           PLAN_REPORT_PATH: ${{ steps.preflight_parallel.outputs.plan_report_path }}
           CRITIC_REPORT_PATH: ${{ steps.preflight_parallel.outputs.critic_report_path }}
+          WORKSPACE_REPORT_PATH: ${{ needs.workspace-preflight.outputs.workspace_report_path }}
+          WORKSPACE_SUMMARY: ${{ needs.workspace-preflight.outputs.workspace_summary }}
+          WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
         run: bash scripts/harness/codex-execute-validate.sh
 
       - name: Commit changes
@@ -574,11 +685,13 @@ jobs:
             ${{ steps.codex.outputs.research_report_path }}
             ${{ steps.codex.outputs.plan_report_path }}
             ${{ steps.codex.outputs.critic_report_path }}
+            ${{ needs.workspace-preflight.outputs.workspace_report_path }}
+            .fugue/pre-implement/googleworkspace-run
           if-no-files-found: ignore
 
   finalize:
     if: always() && needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true'
-    needs: [prepare, credential-guard, implement]
+    needs: [prepare, credential-guard, workspace-preflight, implement]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -588,24 +701,32 @@ jobs:
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
           PR_URL: ${{ needs.implement.outputs.pr_url }}
           CODEX_EXIT: ${{ needs.implement.outputs.codex_exit }}
+          WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
         run: |
           set -euo pipefail
 
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
             --remove-label "processing" || true
 
+          workspace_note=""
+          if [[ -n "${WORKSPACE_PREFLIGHT_STATUS}" ]]; then
+            workspace_note="
+
+          Workspace preflight: ${WORKSPACE_PREFLIGHT_STATUS}"
+          fi
+
           if [[ -n "${PR_URL}" ]]; then
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation complete. PR created: ${PR_URL}
 
-          Exit code: ${CODEX_EXIT}"
+          Exit code: ${CODEX_EXIT}${workspace_note}"
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --add-label "completed"
           elif [[ "${CODEX_EXIT}" != "0" ]]; then
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation stopped before PR creation because mandatory protocol checks failed.
 
-          Exit code: ${CODEX_EXIT}
+          Exit code: ${CODEX_EXIT}${workspace_note}
           Check artifacts for protocol reports and codex output log."
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --add-label "needs-review"
@@ -613,7 +734,7 @@ jobs:
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation did not produce changes.
 
-          Exit code: ${CODEX_EXIT}
+          Exit code: ${CODEX_EXIT}${workspace_note}
           This may mean: no code changes were needed, the task was unclear, or Codex encountered an error.
 
           Check the workflow run artifacts for the full Codex output log."
