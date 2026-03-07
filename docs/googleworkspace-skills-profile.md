@@ -235,6 +235,10 @@ Current CI path:
 - the protected job reads secrets only from `workspace-readonly`
 - implementation job downloads the preflight artifact and does not receive the
   Workspace credential secret directly
+- manual smoke entrypoint:
+  - `.github/workflows/googleworkspace-readonly-smoke.yml`
+  - use this when protected readonly Workspace verification is needed without
+    going through Tutti execution approval
 - readonly preflight artifact lands at:
   - `.fugue/pre-implement/issue-<n>-googleworkspace.md`
 - raw readonly evidence lands at:
