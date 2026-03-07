@@ -36,7 +36,7 @@ export function createRecoveryAdapter({ stateAdapter }) {
     listActions() {
       return RECOVERY_ACTIONS.map((item) => ({ ...item }));
     },
-    run(action, scope = "Happy Web") {
+    async run(action, scope = "Happy Web") {
       const safeAction = RECOVERY_ACTIONS.find((item) => item.id === action)?.id || "status";
       const prefix =
         safeAction === "status"
@@ -49,7 +49,8 @@ export function createRecoveryAdapter({ stateAdapter }) {
                 ? "Rollback canary"
                 : "Issue reroute";
       return stateAdapter.setRecoverResult(
-        `${prefix} queued from ${scope}. FUGUE reversibility preserved.`
+        `${prefix} queued from ${scope}. FUGUE reversibility preserved.`,
+        { action: safeAction, scope }
       );
     },
   };

@@ -15,6 +15,11 @@ function refreshState(nextState) {
   renderRecover();
 }
 
+async function syncRemoteState() {
+  if (typeof stateAdapter.syncRemoteState !== "function") return;
+  refreshState(await stateAdapter.syncRemoteState());
+}
+
 function renderHappy() {
   setText("crow-summary", state.crowSummary);
   const recent = document.getElementById("recent-prompts");
@@ -208,8 +213,8 @@ function openTaskSheet(task) {
   recoveryAdapter.listActions().forEach((action) => {
     const button = create("button", `secondary recover-button ${action.tone}`, action.title);
     button.type = "button";
-    button.addEventListener("click", () => {
-      refreshState(recoveryAdapter.run(action.id, task.title));
+    button.addEventListener("click", async () => {
+      refreshState(await recoveryAdapter.run(action.id, task.title));
     });
     recover.appendChild(button);
   });
@@ -233,7 +238,7 @@ function wireComposer() {
       renderPacketPreview();
     });
   });
-  document.getElementById("submit-task").addEventListener("click", () => {
+  document.getElementById("submit-task").addEventListener("click", async () => {
     const value = input.value.trim();
     if (!value) return;
     const packet = buildIntakePacket({
@@ -244,7 +249,7 @@ function wireComposer() {
     const summary = crowAdapter.summarizeAcceptedPacket(packet);
     input.value = "";
     document.querySelectorAll(".chip.is-active").forEach((chip) => chip.classList.remove("is-active"));
-    refreshState(stateAdapter.submitPrompt(packet, summary));
+    refreshState(await stateAdapter.submitPrompt(packet, summary));
   });
 }
 
@@ -282,24 +287,25 @@ function wireRecoverActions() {
 
     card.appendChild(copy);
     card.appendChild(badge);
-    card.addEventListener("click", () => {
-      refreshState(recoveryAdapter.run(action.id, "Happy Web"));
+    card.addEventListener("click", async () => {
+      refreshState(await recoveryAdapter.run(action.id, "Happy Web"));
     });
     container.appendChild(card);
   });
 }
 
-function boot() {
-  refreshState(stateAdapter.refreshSummary());
+async function boot() {
+  refreshState(await stateAdapter.refreshSummary());
   wireNav();
   wireComposer();
   wireTaskFilters();
   wireTaskSheet();
   wireRecoverActions();
+  await syncRemoteState();
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
 }
 
-boot();
+boot().catch(() => {});

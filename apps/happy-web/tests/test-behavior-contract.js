@@ -8,6 +8,8 @@ const intake = fs.readFileSync(`${root}/src/adapters/happy-app-intake.js`, "utf8
 const stateAdapter = fs.readFileSync(`${root}/src/adapters/happy-app-state.js`, "utf8");
 const recovery = fs.readFileSync(`${root}/src/adapters/happy-app-recovery.js`, "utf8");
 const mockState = fs.readFileSync(`${root}/src/data/mock-kernel-state.js`, "utf8");
+const config = fs.readFileSync(`${root}/src/config/happy-runtime-config.js`, "utf8");
+const endpointClient = fs.readFileSync(`${root}/src/adapters/happy-endpoint-client.js`, "utf8");
 
 function assert(condition, message) {
   if (!condition) {
@@ -28,5 +30,9 @@ assert(app.includes("refreshState"), "missing state refresh loop");
 assert(app.includes("stateAdapter.submitPrompt"), "missing adapter submission");
 assert(stateAdapter.includes("normalizeState"), "missing persisted state normalization");
 assert(app.includes("recoveryAdapter.listActions()"), "missing adapter-driven recovery actions");
+assert(state.includes("runtimeConfig"), "missing runtime config wiring");
+assert(stateAdapter.includes("syncRemoteState"), "missing remote sync path");
+assert(config.includes("happy-runtime-mode"), "missing runtime config meta binding");
+assert(endpointClient.includes("fetchJson"), "missing endpoint client");
 
 console.log("PASS [apps-happy-web-behavior-contract]");

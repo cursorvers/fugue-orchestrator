@@ -63,6 +63,14 @@ function draftTaskFromPacket(packet) {
   };
 }
 
+function buildRemoteFailureAlert(error) {
+  return {
+    severity: "degraded",
+    title: "Remote sync unavailable",
+    detail: `Happy Web fell back to local state: ${error.message}`,
+  };
+}
+
 function updateCurrent(state, task) {
   state.current = {
     title: task.title,
@@ -193,8 +201,17 @@ function normalizeState(raw) {
   };
 }
 
-export function createStateAdapter({ crowAdapter } = {}) {
+export function createStateAdapter({ crowAdapter, config, endpointClient } = {}) {
   const state = loadPersistedState() || clone(initialState);
+
+  function setHealth(value) {
+    state.health = value;
+  }
+
+  function prependAlert(alert) {
+    state.alerts.unshift(alert);
+    state.alerts = state.alerts.slice(0, 6);
+  }
 
   function refreshSummary() {
     if (crowAdapter) {
@@ -211,14 +228,57 @@ export function createStateAdapter({ crowAdapter } = {}) {
     return clone(state);
   }
 
-  return {
-    getState,
-    setRecoverResult(message) {
-      state.recover_result = message;
+  async function hydrateFromRemote() {
+    if (!config?.remoteEnabled || !config?.stateEndpoint || !endpointClient) {
       refreshSummary();
       return commit();
+    }
+
+    try {
+      const payload = await endpointClient.fetchJson(config.stateEndpoint);
+      const nextState = normalizeState(payload?.state || payload);
+      Object.assign(state, nextState);
+      setHealth(nextState.health || "healthy");
+      refreshSummary();
+      return commit();
+    } catch (error) {
+      setHealth("degraded");
+      prependAlert(buildRemoteFailureAlert(error));
+      refreshSummary();
+      return commit();
+    }
+  }
+
+  return {
+    getState,
+    async syncRemoteState() {
+      return hydrateFromRemote();
     },
-    submitPrompt(packet, crowSummary) {
+    async setRecoverResult(message, metadata = {}) {
+      state.recover_result = message;
+      if (!config?.remoteEnabled || !config?.recoveryEndpoint || !endpointClient) {
+        refreshSummary();
+        return commit();
+      }
+
+      try {
+        await endpointClient.fetchJson(config.recoveryEndpoint, {
+          method: "POST",
+          body: {
+            scope: metadata.scope || "Happy Web",
+            action: metadata.action || "status",
+            result_preview: message,
+          },
+        });
+        return hydrateFromRemote();
+      } catch (error) {
+        setHealth("degraded");
+        prependAlert(buildRemoteFailureAlert(error));
+        refreshSummary();
+        return commit();
+      }
+    },
+    async submitPrompt(packet, crowSummary) {
       if (packet.body && packet.body !== "(empty)") {
         state.recent_prompts.unshift(packet.body);
         state.recent_prompts = state.recent_prompts.slice(0, 5);
@@ -228,9 +288,29 @@ export function createStateAdapter({ crowAdapter } = {}) {
       state.crowSummary = crowSummary;
       state.health = "healthy";
       updateCurrent(state, task);
-      return commit();
+      const localState = commit();
+
+      if (!config?.remoteEnabled || !config?.intakeEndpoint || !endpointClient) {
+        return localState;
+      }
+
+      try {
+        await endpointClient.fetchJson(config.intakeEndpoint, {
+          method: "POST",
+          body: {
+            packet,
+            crow_summary: crowSummary,
+          },
+        });
+        return hydrateFromRemote();
+      } catch (error) {
+        setHealth("degraded");
+        prependAlert(buildRemoteFailureAlert(error));
+        refreshSummary();
+        return commit();
+      }
     },
-    refreshSummary() {
+    async refreshSummary() {
       refreshSummary();
       return commit();
     },

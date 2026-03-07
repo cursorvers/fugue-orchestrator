@@ -62,6 +62,13 @@ These adapters are still backed by mock/local state so the UI stays portable and
 testable. The next implementation step is to replace the adapter internals with
 real endpoints without rewriting screen logic.
 
+The current seed is now `remote-ready`.
+
+- local mode remains the default
+- runtime config is read from HTML meta tags or `window.__HAPPY_RUNTIME_CONFIG__`
+- if `remoteEnabled=true` and endpoints are configured, state/intake/recovery
+  will attempt remote sync first and fall back to local continuity on failure
+
 ## Design review helpers
 
 - `pencil-brief.md`
