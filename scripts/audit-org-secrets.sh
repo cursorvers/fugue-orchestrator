@@ -85,19 +85,20 @@ tmpdir="$(mktemp -d)"
 chmod 700 "${tmpdir}"
 trap 'rm -rf "${tmpdir}"' EXIT
 
+org_secrets_tsv="${tmpdir}/org-secrets.tsv"
 org_access=true
 org_api_err="${tmpdir}/org-secrets.err"
-org_secrets_json=""
 
-# Fetch org secrets list (names + visibility).
-if ! org_secrets_json="$(gh api "orgs/${ORG}/actions/secrets" --paginate 2>"${org_api_err}")"; then
+# Prefer the stable gh subcommand output first; fall back to repo-only mode if unavailable.
+if ! gh secret list --org "${ORG}" >"${org_secrets_tsv}" 2>"${org_api_err}"; then
   org_access=false
   FALLBACK_REASON="$(tr '\n' ' ' <"${org_api_err}" | sed 's/[[:space:]]\+/ /g')"
-  org_secrets_json='{"secrets":[]}'
+  : > "${org_secrets_tsv}"
+else
+  tmp_org_secrets="${tmpdir}/org-secrets-normalized.tsv"
+  awk 'NF >= 3 { print $1 "\t" tolower($3) "\t" $2 }' "${org_secrets_tsv}" > "${tmp_org_secrets}"
+  mv "${tmp_org_secrets}" "${org_secrets_tsv}"
 fi
-
-org_secrets_tsv="${tmpdir}/org-secrets.tsv"
-printf '%s' "${org_secrets_json}" | jq -r '.secrets[] | [.name, .visibility, .updated_at] | @tsv' | sort -u > "${org_secrets_tsv}"
 
 org_secret_visibility() {
   local secret="$1"
