@@ -21,6 +21,7 @@ The correct delivery model is:
 - `web-first`
 - `PWA-first`
 - `Happy.app` as a branded shell over the same state and command surface
+- `desktop` remains the high-context operator surface through `Codex` / `ChatGPT`
 
 This is better than making the first implementation fully native because:
 
@@ -34,6 +35,8 @@ Therefore:
 - the primary implementation target is a mobile web app
 - `Happy.app` may embed or wrap that web experience
 - native wrappers may be added later, but must not fork the product logic
+- desktop does not need a separate `Happy.app`-first workflow in phase 1
+- desktop users may continue to drive `Kernel` directly from the existing Codex surface
 
 ## 1.b Design Toolchain
 
@@ -88,6 +91,12 @@ The target user experience is:
    - hand off to specialist workflows
    - fall back to `FUGUE`
 5. the user sees progress and alerts in the same app
+
+The complementary desktop experience is:
+
+1. while at a desk, the user stays in the existing `Codex` / terminal workflow
+2. the user drives `Kernel` directly from the high-context desktop surface
+3. mobile remains optimized for quick intake, progress checks, and bounded intervention
 
 The user should not need to care whether the actual executor is:
 
@@ -840,3 +849,4 @@ This preserves:
 - `Kernel/FUGUE` plasticity
 - future host migration from `MBP` temporary primary to `mac mini` primary
 - mobile-visible progress and outputs without exposing infrastructure sprawl
+- desktop productivity by keeping the existing Codex-centric operator workflow
