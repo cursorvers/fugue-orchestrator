@@ -264,6 +264,7 @@ Current CI path:
   - `scripts/harness/googleworkspace-scheduled-extract.sh`
   - `scripts/harness/googleworkspace-feed-ingest.sh`
   - `.github/workflows/googleworkspace-feed-sync.yml`
+  - `scripts/local/googleworkspace-feed-sync-local.sh`
 
 ## Safety Rules
 

@@ -18,23 +18,39 @@ cat > "${policy_file}" <<'EOF'
   "version": 1,
   "out_root": "__OUT_ROOT__",
   "profiles": {
-    "morning-brief": {
-      "title": "Morning operator brief",
+    "morning-brief-shared": {
+      "title": "Morning shared operator brief",
       "phase": "scheduled-operator-loop",
       "enabled_by_default": true,
+      "execution_target": "github-actions",
       "schedule_mode": "daily-weekday",
       "recommended_cron_utc": "0 21 * * 0-4",
-      "actions": ["standup-report", "gmail-triage"],
-      "domains": ["calendar", "gmail"],
-      "reason": ["standup-context", "mail-context"],
+      "actions": ["standup-report"],
+      "domains": ["calendar"],
+      "reason": ["standup-context"],
       "ttl_minutes": 60,
-      "auth_mode": "service-and-user-readonly",
-      "summary_purpose": "Morning digest"
+      "auth_mode": "service-account-readonly",
+      "summary_purpose": "Shared morning digest"
     },
-    "weekly-digest": {
-      "title": "Weekly workspace digest",
+    "morning-brief-personal": {
+      "title": "Morning personal mailbox brief",
       "phase": "scheduled-operator-loop",
       "enabled_by_default": true,
+      "execution_target": "local-only",
+      "schedule_mode": "daily-weekday-local",
+      "recommended_cron_utc": "",
+      "actions": ["gmail-triage"],
+      "domains": ["gmail"],
+      "reason": ["mail-context"],
+      "ttl_minutes": 60,
+      "auth_mode": "user-oauth-readonly",
+      "summary_purpose": "Personal mailbox digest"
+    },
+    "weekly-digest-personal": {
+      "title": "Weekly personal workspace digest",
+      "phase": "scheduled-operator-loop",
+      "enabled_by_default": true,
+      "execution_target": "local-only",
       "schedule_mode": "weekly",
       "recommended_cron_utc": "15 21 * * 0",
       "actions": ["weekly-digest"],
@@ -64,8 +80,11 @@ printf '%s' '{"status":"ok"}' > "${RUN_DIR}/googleworkspace/fake-meta.json"
 
 summary=""
 case "${WORKSPACE_ACTIONS}" in
-  standup-report,gmail-triage)
-    summary="standup-report: meetings=2,gmail-triage: resultSizeEstimate=5"
+  standup-report)
+    summary="standup-report: meetings=2"
+    ;;
+  gmail-triage)
+    summary="gmail-triage: resultSizeEstimate=5"
     ;;
   weekly-digest)
     summary="weekly-digest: meetingCount=6, unreadEmails=14"
@@ -119,19 +138,19 @@ run_extract() {
 
 test_generates_feed_manifest_and_latest() {
   local output_file="${tmp_dir}/extract-1.out"
-  run_extract "morning-brief" "2026-03-07T00:00:00Z" "${output_file}"
+  run_extract "morning-brief-shared" "2026-03-07T00:00:00Z" "${output_file}"
 
-  local latest="${out_root}/morning-brief/latest.json"
+  local latest="${out_root}/morning-brief-shared/latest.json"
   [[ -f "${latest}" ]] &&
     grep -q '^feed_status=ok$' "${output_file}" &&
     grep -q '^feed_cache_hit=false$' "${output_file}" &&
-    jq -e '.profile_id == "morning-brief" and .status == "ok" and .valid_until == "2026-03-07T01:00:00Z"' "${latest}" >/dev/null &&
-    jq -e '.summary == "standup-report: meetings=2,gmail-triage: resultSizeEstimate=5"' "${latest}" >/dev/null
+    jq -e '.profile_id == "morning-brief-shared" and .status == "ok" and .valid_until == "2026-03-07T01:00:00Z"' "${latest}" >/dev/null &&
+    jq -e '.summary == "standup-report: meetings=2"' "${latest}" >/dev/null
 }
 
 test_cache_hit_within_ttl() {
   local output_file="${tmp_dir}/extract-2.out"
-  run_extract "morning-brief" "2026-03-07T00:30:00Z" "${output_file}"
+  run_extract "morning-brief-shared" "2026-03-07T00:30:00Z" "${output_file}"
 
   grep -q '^feed_cache_hit=true$' "${output_file}" &&
     [[ "$(wc -l < "${tmp_dir}/calls.log")" -eq 1 ]]
@@ -139,7 +158,7 @@ test_cache_hit_within_ttl() {
 
 test_refreshes_when_stale() {
   local output_file="${tmp_dir}/extract-3.out"
-  run_extract "morning-brief" "2026-03-07T01:30:00Z" "${output_file}"
+  run_extract "morning-brief-shared" "2026-03-07T01:30:00Z" "${output_file}"
 
   grep -q '^feed_cache_hit=false$' "${output_file}" &&
     [[ "$(wc -l < "${tmp_dir}/calls.log")" -eq 2 ]]
@@ -150,10 +169,10 @@ test_ingests_only_fresh_feeds() {
   local ingest_output="${tmp_dir}/ingest.out"
   local context_file="${tmp_dir}/feed-context.json"
 
-  run_extract "weekly-digest" "2026-03-07T00:00:00Z" "${weekly_output}"
+  run_extract "weekly-digest-personal" "2026-03-07T00:00:00Z" "${weekly_output}"
 
   env \
-    FEED_PROFILES="morning-brief,weekly-digest" \
+    FEED_PROFILES="morning-brief-shared,weekly-digest-personal" \
     NOW_ISO="2026-03-07T02:31:00Z" \
     GOOGLEWORKSPACE_FEED_POLICY_FILE="${policy_file}" \
     OUT_ROOT="${out_root}" \
@@ -162,10 +181,10 @@ test_ingests_only_fresh_feeds() {
     bash "${INGEST_SCRIPT}" >/dev/null
 
   grep -q '^feed_ingest_status=partial$' "${ingest_output}" &&
-    grep -q '^feed_active_profiles=weekly-digest$' "${ingest_output}" &&
-    jq -e '.active_profiles == ["weekly-digest"]' "${context_file}" >/dev/null &&
-    jq -e '.stale_profiles == ["morning-brief"]' "${context_file}" >/dev/null &&
-    jq -e '.summary | contains("weekly-digest: weekly-digest: meetingCount=6, unreadEmails=14")' "${context_file}" >/dev/null
+    grep -q '^feed_active_profiles=weekly-digest-personal$' "${ingest_output}" &&
+    jq -e '.active_profiles == ["weekly-digest-personal"]' "${context_file}" >/dev/null &&
+    jq -e '.stale_profiles == ["morning-brief-shared"]' "${context_file}" >/dev/null &&
+    jq -e '.summary | contains("weekly-digest-personal: weekly-digest: meetingCount=6, unreadEmails=14")' "${context_file}" >/dev/null
 }
 
 echo "=== googleworkspace scheduled extract tests ==="

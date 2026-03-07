@@ -14,7 +14,8 @@ Do not run a `24/7` daemon.
 
 Use:
 
-- scheduled bounded extraction for stable operator rhythms
+- shared scheduled bounded extraction for stable operator rhythms
+- local personal mailbox extraction for user-owned context
 - on-demand preflight for issue-specific context
 - TTL-gated feed reuse to avoid repeated API calls and prompt bloat
 
@@ -26,22 +27,25 @@ Source of truth:
 
 Initial profiles:
 
-- `morning-brief`
-  - actions: `standup-report`, `gmail-triage`
+- `morning-brief-shared`
+  - execution target: GitHub Actions
+  - actions: `standup-report`
   - ttl: `360m`
   - schedule: weekdays morning
+- `morning-brief-personal`
+  - execution target: local machine
+  - actions: `gmail-triage`
+  - ttl: `360m`
+  - schedule: weekdays local morning
 - `pre-meeting-scan`
   - actions: `meeting-prep`
   - ttl: `45m`
   - default mode: dispatch only
-- `daily-mailbox-digest`
-  - actions: `gmail-triage`
-  - ttl: `180m`
-  - default mode: dispatch only
-- `weekly-digest`
+- `weekly-digest-personal`
+  - execution target: local machine
   - actions: `weekly-digest`
   - ttl: `10080m`
-  - schedule: weekly
+  - schedule: weekly local
 
 ## Feed Artifact Model
 
@@ -68,18 +72,17 @@ Canonical manifest fields:
 
 ## Auth Model
 
-Read-only feed sync reuses the existing dual auth split:
+Read-only feed sync uses a split auth model:
 
-- service-account credentials for shared calendar/report flows
-- optional `authorized_user` export for mailbox helpers
+- service-account credentials for unattended shared calendar/report feeds
+- local encrypted `gws auth login` credentials for personal mailbox feeds
 
-Protected CI secret contract:
+Protected CI secret contract for shared feeds:
 
 - `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON`
-- `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON`
 
-Mailbox actions prefer the user OAuth export when present and degrade when it
-is absent.
+Personal mailbox feeds should run locally and should not require GitHub Actions
+to store long-lived user refresh tokens for unattended schedule execution.
 
 ## Reflection Into Kernel/FUGUE
 
@@ -90,6 +93,8 @@ Reflection happens in two stages:
 2. `googleworkspace-feed-ingest.sh`
    - selects only fresh manifests
    - collapses them into one bounded context JSON
+3. `googleworkspace-feed-sync-local.sh`
+   - runs local-only profiles with user OAuth on the operator machine
 
 The sovereign prompt should ingest only the combined summary, not the raw
 payloads.
@@ -101,6 +106,8 @@ payloads.
 - scheduled sync remains read-only only
 - write adapters are out of scope for feed sync
 - schedule frequency should stay low and task-shaped
+- unattended GitHub Actions schedule should not depend on user OAuth refresh
+  tokens
 
 ## Simulation Result
 
@@ -114,3 +121,4 @@ The prototype is considered valid if all of these pass:
 This is verified by:
 
 - `tests/test-googleworkspace-scheduled-extract.sh`
+- `tests/test-googleworkspace-feed-sync-local.sh`
