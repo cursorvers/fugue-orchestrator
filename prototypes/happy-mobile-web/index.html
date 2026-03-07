@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#111827" />
+    <title>Kernel Mobile Front</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Kernel Mobile Front</p>
+          <h1>Happy Outer App Prototype</h1>
+        </div>
+        <span id="health-pill" class="pill healthy">HEALTHY</span>
+      </header>
+
+      <main class="viewport">
+        <section id="screen-happy" class="screen is-active" data-screen="happy">
+          <div class="panel hero">
+            <p class="eyebrow">Happy.app inside</p>
+            <h2>Crow が指示を受理します</h2>
+            <p id="crow-summary" class="muted"></p>
+          </div>
+          <div class="panel composer">
+            <label for="happy-input">Happy</label>
+            <textarea
+              id="happy-input"
+              rows="4"
+              placeholder="例: note原稿を書いて / 会社紹介スライドを作って / 今どうなってる？"
+            ></textarea>
+            <div class="chip-row">
+              <button class="chip" data-chip="build">build</button>
+              <button class="chip" data-chip="review">review</button>
+              <button class="chip" data-chip="research">research</button>
+              <button class="chip" data-chip="slide">slide</button>
+              <button class="chip" data-chip="note">note</button>
+              <button class="chip" data-chip="status">status</button>
+            </div>
+            <div class="urgency-row">
+              <label for="urgency">Urgency</label>
+              <select id="urgency">
+                <option value="normal">normal</option>
+                <option value="today">today</option>
+                <option value="urgent">urgent</option>
+              </select>
+            </div>
+            <button id="submit-task" class="primary">Kernel に送る</button>
+          </div>
+          <div class="panel">
+            <h3>Normalized intake packet</h3>
+            <pre id="packet-preview" class="code-block"></pre>
+          </div>
+          <div class="panel">
+            <h3>Recent prompts</h3>
+            <ul id="recent-prompts" class="stacked-list"></ul>
+          </div>
+        </section>
+
+        <section id="screen-now" class="screen" data-screen="now">
+          <div class="panel hero">
+            <p class="eyebrow">Now</p>
+            <h2 id="now-title"></h2>
+            <p id="now-route" class="muted"></p>
+          </div>
+          <div class="grid two-up">
+            <div class="panel metric-card">
+              <span class="label">Primary</span>
+              <strong id="metric-primary"></strong>
+            </div>
+            <div class="panel metric-card">
+              <span class="label">Heartbeat</span>
+              <strong id="metric-heartbeat"></strong>
+            </div>
+            <div class="panel metric-card">
+              <span class="label">Lane Count</span>
+              <strong id="metric-lanes"></strong>
+            </div>
+            <div class="panel metric-card">
+              <span class="label">Rollback</span>
+              <strong id="metric-rollback"></strong>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Current step</h3>
+            <div class="progress-track">
+              <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="phase-label" class="tag"></span>
+              <span id="phase-confidence" class="tag"></span>
+            </div>
+            <p id="progress-copy" class="muted"></p>
+            <div class="output-list">
+              <div class="output-item">
+                <span class="muted">Latest output</span>
+                <a id="latest-output" class="output-link" href="#"></a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="screen-tasks" class="screen" data-screen="tasks">
+          <div class="panel hero compact">
+            <p class="eyebrow">Tasks</p>
+            <h2>進行中 / 完了 / 要確認</h2>
+          </div>
+          <div class="filter-tabs" role="tablist" aria-label="Task filters">
+            <button class="filter-tab is-active" data-filter="in-progress">in progress</button>
+            <button class="filter-tab" data-filter="needs-review">needs review</button>
+            <button class="filter-tab" data-filter="needs-human">needs human</button>
+            <button class="filter-tab" data-filter="done">done</button>
+          </div>
+          <div id="task-list" class="task-list"></div>
+        </section>
+
+        <section id="screen-alerts" class="screen" data-screen="alerts">
+          <div class="panel hero compact">
+            <p class="eyebrow">Alerts</p>
+            <h2>degraded / fallback / needs-human</h2>
+          </div>
+          <div id="alert-list" class="stack"></div>
+        </section>
+
+        <section id="screen-recover" class="screen" data-screen="recover">
+          <div class="panel hero compact">
+            <p class="eyebrow">Recover</p>
+            <h2>bounded recovery only</h2>
+            <p class="muted">continuity / rollback / reroute を mobile から起動</p>
+          </div>
+          <div class="panel">
+            <div class="action-stack">
+              <button class="secondary" data-recover="status">status</button>
+              <button class="secondary" data-recover="refresh-progress">refresh-progress</button>
+              <button class="secondary" data-recover="continuity-canary">continuity-canary</button>
+              <button class="secondary" data-recover="rollback-canary">rollback-canary</button>
+              <button class="secondary" data-recover="reroute-issue">reroute-issue</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Latest recover result</h3>
+            <p id="recover-result" class="muted"></p>
+          </div>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="Primary">
+        <button class="nav-item is-active" data-target="happy">Happy</button>
+        <button class="nav-item" data-target="now">Now</button>
+        <button class="nav-item" data-target="tasks">Tasks</button>
+        <button class="nav-item" data-target="alerts">Alerts</button>
+        <button class="nav-item" data-target="recover">Recover</button>
+      </nav>
+    </div>
+
+    <div id="task-sheet" class="sheet-backdrop" hidden>
+      <div class="sheet">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">Task detail</p>
+            <h3 id="sheet-title"></h3>
+          </div>
+          <button id="sheet-close" class="secondary">close</button>
+        </header>
+        <section class="sheet-section">
+          <h4>Summary</h4>
+          <p id="sheet-summary" class="muted"></p>
+        </section>
+        <section class="sheet-section">
+          <h4>Progress</h4>
+          <p id="sheet-progress" class="muted"></p>
+        </section>
+        <section class="sheet-section">
+          <h4>Outputs</h4>
+          <div id="sheet-outputs" class="output-list"></div>
+        </section>
+        <section class="sheet-section">
+          <h4>Decision</h4>
+          <p id="sheet-decision" class="muted"></p>
+        </section>
+        <section class="sheet-section">
+          <h4>Recover</h4>
+          <div id="sheet-recover" class="action-stack"></div>
+        </section>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

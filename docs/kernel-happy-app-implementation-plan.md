@@ -16,6 +16,15 @@ Build the outer all-in-one mobile web app with `Happy.app` as the inner conversa
 [ ] Run production-like smoke checks for progress visibility, output visibility, and recovery actions before any live cutover
 [ ] Keep `FUGUE` rollback and `GHA` continuity paths visible in the state model but secondary in the mobile UX
 
+## Prototype seed
+
+The current implementation seed lives at:
+
+- `/Users/masayuki/Dev/fugue-orchestrator/prototypes/happy-mobile-web`
+
+It is intentionally dependency-light and static so the IA, state model, and
+recovery semantics can be validated before choosing the final runtime host.
+
 ## Open questions
 - Should the first slice live beside `cockpit-pwa` in the same repo or as a separate front-end package?
 - Which authentication boundary should the mobile app use first: existing Cockpit auth or a narrower task-status token flow?

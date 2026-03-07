@@ -15,6 +15,10 @@ The guiding decision is:
 This document is written as an implementation-prep spec, not a loose concept
 note.
 
+Current prototype seed:
+
+- `/Users/masayuki/Dev/fugue-orchestrator/prototypes/happy-mobile-web`
+
 ## 1.a Front-End Delivery Strategy
 
 The correct delivery model is:
