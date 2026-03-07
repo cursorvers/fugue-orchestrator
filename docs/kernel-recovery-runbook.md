@@ -2,11 +2,18 @@
 
 Use this when the local machine or self-hosted subscription runner is unavailable and recovery must be driven from GitHub Web or GitHub Mobile.
 
+For routine phone-based progress checks, the `fugue-status` issue is also kept fresh by `kernel-mobile-progress`, which runs automatically after key orchestration workflows complete.
+
 ## Entry Point
 
 - Open `cursorvers/fugue-orchestrator`
 - Go to `Actions`
 - Run `kernel-recovery-console`
+
+For passive mobile monitoring:
+
+- open the `fugue-status` issue thread
+- read the latest `Kernel Mobile Progress Snapshot` comment
 
 This workflow is designed to be operable from a phone. It requires only `workflow_dispatch`.
 
@@ -107,6 +114,18 @@ Recommended inputs:
   - `scripts/harness/run-canary.sh`
   - `fugue-task-router.yml`
   - `fugue-tutti-caller.yml`
+
+## Automatic Mobile Progress
+
+`.github/workflows/kernel-mobile-progress.yml` posts a compact mobile snapshot into the `fugue-status` thread after these workflows complete:
+
+- `kernel-recovery-console`
+- `fugue-task-router`
+- `fugue-tutti-caller`
+- `fugue-orchestrator-canary`
+- `fugue-watchdog`
+
+This is the default "read-only from phone" path. If intervention is needed, switch to `kernel-recovery-console`.
 
 ## Validation
 
