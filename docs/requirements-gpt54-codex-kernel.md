@@ -30,7 +30,7 @@ These principles are worth migrating as-is or with minimal translation:
    - Safety and execution approval live in the orchestration layer, not in ad hoc post-processing.
 
 2. `Fixed-cost first, metered last`
-   - Prefer subscription-backed models and tools before metered specialists.
+   - Prefer subscription-backed models and CLI/free-tier tools before metered specialists.
 
 3. `Multi-voice council`
    - Do not trust a single model for write/ship decisions when another strong fixed-cost reviewer is available.
@@ -83,7 +83,7 @@ These old assumptions must not constrain the new kernel:
 | `Claude Code / Claude executor` | adapter worker for Claude-native capabilities | yes, when participating in council | fixed-cost first |
 | `GLM (Z.ai)` | baseline reviewer, critic, invariants, math | yes | fixed-cost first |
 | `Manus` | artifact engine, wide research, browser-heavy execution | no by default | fixed-cost first |
-| `Gemini` | UI/UX and visual review specialist | conditional yes | metered last |
+| `Gemini` | UI/UX and visual review specialist | conditional yes | CLI/free-first, metered fallback |
 | `xAI` | realtime / X search specialist | conditional yes | metered last |
 
 ## 4.1 Orchestrator Adapter Contract

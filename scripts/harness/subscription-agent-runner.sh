@@ -4,7 +4,8 @@ set -euo pipefail
 # Subscription-first runner:
 # - Codex lane -> `codex exec`
 # - Claude lane -> `claude --print`
-# - Optional GLM/Gemini specialist lanes -> direct API calls (hybrid mode)
+# - Gemini lane -> `gemini` CLI first, API fallback
+# - Optional GLM specialist lanes -> direct API calls (hybrid mode)
 
 sys_prompt="You are ${AGENT_ROLE}. Analyze the GitHub issue and return ONLY valid JSON with keys: risk (LOW|MEDIUM|HIGH), approve (boolean), findings (array of strings), recommendation (string), rationale (string)."
 user_prompt="Issue Title: ${ISSUE_TITLE}
@@ -164,6 +165,10 @@ fi
 claude_runner_available="false"
 if command -v claude >/dev/null 2>&1; then
   claude_runner_available="true"
+fi
+gemini_runner_available="false"
+if command -v gemini >/dev/null 2>&1; then
+  gemini_runner_available="true"
 fi
 
 write_skipped_result() {
@@ -440,6 +445,47 @@ execute_gemini_model() {
   local model="$1"
   local out_file="${tmp_dir}/gemini-${model}-response.json"
   local req content gemini_url
+  local err_file="${tmp_dir}/gemini-${model}-stderr.log"
+  local -a gemini_cmd
+
+  if [[ "${gemini_runner_available}" == "true" ]]; then
+    gemini_cmd=(
+      gemini
+      --model "${model}"
+      --output-format json
+      "SYSTEM:
+${sys_prompt}
+
+USER:
+${user_prompt}
+
+Return ONLY valid JSON."
+    )
+
+    set +e
+    run_with_timeout "${subscription_timeout_sec}" \
+      "${gemini_cmd[@]}" >"${out_file}" 2>"${err_file}"
+    local rc=$?
+    set -e
+
+    append_attempt "gemini-cli" "${model}" "exit${rc}"
+    if [[ "${rc}" -eq 0 && -s "${out_file}" ]]; then
+      content="$(jq -r '.result // .response // .text // .content // empty' "${out_file}" 2>/dev/null || true)"
+      if [[ -z "${content}" ]]; then
+        content="$(cat "${out_file}")"
+      fi
+      if parsed="$(extract_json_object "${content}")"; then
+        chosen_model="${model}"
+        effective_provider="gemini"
+        execution_route="gemini-cli"
+        http_code="cli:0"
+        append_attempt "gemini-cli" "${model}" "ok"
+        return 0
+      fi
+      append_attempt "gemini-cli" "${model}" "parse-failed"
+    fi
+  fi
+
   req="$(jq -n \
     --arg text "SYSTEM:\n${sys_prompt}\n\nUSER:\n${user_prompt}\n\nReturn ONLY JSON." \
     '{contents:[{parts:[{text:$text}]}],generationConfig:{temperature:0.1}}')"
@@ -582,12 +628,22 @@ elif [[ "${PROVIDER}" == "glm" ]]; then
       "glm-api-failed"
   fi
 elif [[ "${PROVIDER}" == "gemini" ]]; then
-  if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+  gemini_cli_preferred="$(echo "${FUGUE_GEMINI_CLI_FIRST:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${gemini_cli_preferred}" != "true" ]]; then
+    gemini_cli_preferred="false"
+  fi
+  if [[ "${gemini_cli_preferred}" != "true" && -z "${GEMINI_API_KEY:-}" ]]; then
     write_skipped_result \
       "Skipped: Gemini lane requires GEMINI_API_KEY in subscription hybrid mode" \
       "Set GEMINI_API_KEY to enable design-oriented Gemini voter" \
       "Gemini API credential was not configured" \
       "gemini-api-key-missing"
+  elif [[ "${gemini_runner_available}" != "true" && -z "${GEMINI_API_KEY:-}" ]]; then
+    write_skipped_result \
+      "Skipped: Gemini lane requires Gemini CLI login or GEMINI_API_KEY" \
+      "Login to Gemini CLI for subscription/free-first use, or set GEMINI_API_KEY for API fallback" \
+      "Neither Gemini CLI nor API credential was available" \
+      "gemini-cli-and-api-unavailable"
   fi
   candidates=("${MODEL}")
   if [[ -z "${MODEL}" ]]; then
