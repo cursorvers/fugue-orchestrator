@@ -91,6 +91,8 @@ org_secrets_tsv="${tmpdir}/org-secrets.tsv"
 org_access=true
 org_api_err="${tmpdir}/org-secrets.err"
 org_variables_tsv="${tmpdir}/org-variables.tsv"
+org_variables_access=true
+org_variables_err="${tmpdir}/org-variables.err"
 
 # Prefer the stable gh subcommand output first; fall back to repo-only mode if unavailable.
 if ! gh secret list --org "${ORG}" >"${org_secrets_tsv}" 2>"${org_api_err}"; then
@@ -103,7 +105,8 @@ else
   mv "${tmp_org_secrets}" "${org_secrets_tsv}"
 fi
 
-if ! gh variable list --org "${ORG}" >"${org_variables_tsv}" 2>/dev/null; then
+if ! gh variable list --org "${ORG}" >"${org_variables_tsv}" 2>"${org_variables_err}"; then
+  org_variables_access=false
   : > "${org_variables_tsv}"
 else
   tmp_org_variables="${tmpdir}/org-variables-normalized.tsv"
@@ -131,11 +134,19 @@ org_secret_updated_at() {
 
 org_variable_visibility() {
   local variable="$1"
+  if [[ "${org_variables_access}" != "true" ]]; then
+    echo "unknown"
+    return 0
+  fi
   awk -F'\t' -v s="${variable}" '$1==s{print $2; found=1} END{if(!found) print "missing"}' "${org_variables_tsv}"
 }
 
 org_variable_updated_at() {
   local variable="$1"
+  if [[ "${org_variables_access}" != "true" ]]; then
+    echo ""
+    return 0
+  fi
   awk -F'\t' -v s="${variable}" '$1==s{print $3; found=1} END{if(!found) print ""}' "${org_variables_tsv}"
 }
 
@@ -243,7 +254,10 @@ if [[ -n "${preferred_org_variables}" ]]; then
     [[ -z "${v}" ]] && continue
     vis="$(org_variable_visibility "${v}")"
     updated="$(org_variable_updated_at "${v}")"
-    if [[ "${vis}" == "missing" ]]; then
+    if [[ "${vis}" == "unknown" ]]; then
+      printf 'SKIP     %s (org variable access unavailable)\n' "${v}"
+      warnings=$((warnings+1))
+    elif [[ "${vis}" == "missing" ]]; then
       printf 'MISSING  %s\n' "${v}"
       failures=$((failures+1))
     else
