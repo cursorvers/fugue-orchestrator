@@ -483,6 +483,25 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --body "Primary executor is unavailable. Automatic GitHub backup-safe mode is observation-only and will not run Tutti or implementation lanes. Restore the primary executor or dispatch backup-heavy manually to continue on GitHub-hosted infrastructure."
 
+  record-only-note:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.effective_mode == 'record-only'
+    needs: [ctx, execution-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Post record-only observation note
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+          SKIP_REASON: ${{ needs.execution-policy.outputs.skip_reason }}
+        run: |
+          set -euo pipefail
+          gh issue comment "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "GitHub mainframe dispatch resolved to \`record-only\` (\`${SKIP_REASON}\`). No Tutti or implementation lanes ran on GitHub; this issue remains a handoff/audit record while the primary executor stays authoritative. To force GitHub-hosted execution, dispatch \`fugue-caller.yml\` or \`fugue-tutti-caller.yml\` with \`execution_mode_override=primary\`."
+
   # Review mode: Tutti consensus (6+ parallel lanes baseline)
   tutti:
     if: >-

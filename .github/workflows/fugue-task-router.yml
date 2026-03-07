@@ -33,7 +33,7 @@ on:
         type: string
         default: ""
       execution_mode_override:
-        description: "Execution policy override (auto|primary|backup-safe)"
+        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
         type: string
         default: "auto"
@@ -78,7 +78,7 @@ on:
         type: string
         default: ""
       execution_mode_override:
-        description: "Execution policy override (auto|primary|backup-safe)"
+        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
         default: "auto"
         type: string
@@ -379,6 +379,7 @@ jobs:
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
           CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
+          EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || github.event.inputs.execution_mode_override || 'auto' }}
         run: bash scripts/harness/route-task-handoff.sh
 
       - name: Detect post-handoff routing state
@@ -477,7 +478,7 @@ jobs:
 
           override="$(echo "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           case "${override}" in
-            auto|primary|backup-safe) ;;
+            auto|primary|backup-safe|backup-heavy) ;;
             *) override="auto" ;;
           esac
 
@@ -489,6 +490,10 @@ jobs:
             allow_safe_execution="true"
             effective_mode="primary"
             skip_reason="manual-primary-override"
+          elif [[ "${override}" == "backup-heavy" ]]; then
+            allow_safe_execution="true"
+            effective_mode="backup-heavy"
+            skip_reason="manual-backup-heavy"
           elif [[ "${override}" == "backup-safe" ]]; then
             allow_safe_execution="false"
             effective_mode="backup-safe"

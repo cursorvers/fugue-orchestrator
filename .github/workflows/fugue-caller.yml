@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       execution_mode_override:
-        description: "Execution policy override (auto|primary|backup-safe)"
+        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
         type: string
         default: "auto"
@@ -24,7 +24,9 @@ permissions:
 
 jobs:
   route:
-    if: ${{ github.event_name != 'issue_comment' || github.actor != 'github-actions[bot]' }}
+    if: >-
+      (github.event_name != 'issue_comment' || github.actor != 'github-actions[bot]') &&
+      (github.event_name != 'issues' || github.event.label.name == 'tutti')
     uses: ./.github/workflows/fugue-task-router.yml
     with:
       issue_number: ${{ github.event.issue.number || github.event.inputs.issue_number }}

@@ -14,6 +14,7 @@ requested_execution_mode=""
 implement_request=""
 implement_confirmed=""
 vote_command="false"
+execution_mode_override="auto"
 dry_run="false"
 workflow_file="fugue-tutti-caller.yml"
 
@@ -33,6 +34,7 @@ Options:
   --implement-request <bool>       Resolved implementation intent snapshot
   --implement-confirmed <bool>     Resolved implementation confirmation snapshot
   --vote-command <bool>            True when the handoff originated from `/vote`
+  --execution-mode-override <v>    Execution policy override (auto|primary|backup-safe|backup-heavy)
   --dry-run                        Print the resolved gh command without executing it
   -h, --help                       Show help
 EOF
@@ -78,6 +80,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vote-command)
       vote_command="${2:-}"
+      shift 2
+      ;;
+    --execution-mode-override)
+      execution_mode_override="${2:-}"
       shift 2
       ;;
     --dry-run)
@@ -146,6 +152,14 @@ fi
 vote_command="$(printf '%s' "${vote_command}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${vote_command}" == "true" ]]; then
   dispatch_cmd+=(-f vote_command="true")
+fi
+execution_mode_override="$(printf '%s' "${execution_mode_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${execution_mode_override}" in
+  auto|primary|backup-safe|backup-heavy) ;;
+  *) execution_mode_override="auto" ;;
+esac
+if [[ "${execution_mode_override}" != "auto" ]]; then
+  dispatch_cmd+=(-f execution_mode_override="${execution_mode_override}")
 fi
 
 if [[ "${dry_run}" == "true" ]]; then

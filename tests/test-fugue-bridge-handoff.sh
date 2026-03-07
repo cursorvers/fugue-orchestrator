@@ -24,6 +24,7 @@ dry_run_cmd="$(
     --implement-request "false" \
     --implement-confirmed "false" \
     --vote-command "true" \
+    --execution-mode-override "backup-heavy" \
     --allow-processing-rerun \
     --dry-run
 )"
@@ -41,6 +42,7 @@ for expected in \
   "implement_request=false" \
   "implement_confirmed=false" \
   "vote_command=true" \
+  "execution_mode_override=backup-heavy" \
   "allow_processing_rerun=true"
 do
   if [[ "${dry_run_cmd}" != *"${expected}"* ]]; then
@@ -70,7 +72,8 @@ runtime_output="$(
     --requested-execution-mode "implement" \
     --implement-request "true" \
     --implement-confirmed "true" \
-    --vote-command "true"
+    --vote-command "true" \
+    --execution-mode-override "primary"
 )"
 
 if [[ "${runtime_output}" != *"handoff_target=fugue-bridge"* ]]; then
@@ -95,7 +98,8 @@ for expected in \
   "-f requested_execution_mode=implement" \
   "-f implement_request=true" \
   "-f implement_confirmed=true" \
-  "-f vote_command=true"
+  "-f vote_command=true" \
+  "-f execution_mode_override=primary"
 do
   if [[ "${logged_cmd}" != *"${expected}"* ]]; then
     echo "FAIL: runtime invocation missing '${expected}'" >&2
@@ -117,6 +121,10 @@ grep -q 'handoff_target: "\${{ needs.ctx.outputs.handoff_target }}"' "${CALLER_W
 }
 grep -q 'vote_command: "\${{ needs.ctx.outputs.vote_command }}"' "${CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing vote_command passthrough" >&2
+  exit 1
+}
+grep -q "github.event.label.name == 'tutti'" "${SCRIPT_DIR}/.github/workflows/fugue-caller.yml" || {
+  echo "FAIL: caller workflow missing tutti-only label gate" >&2
   exit 1
 }
 grep -q 'legacy_bridge_active="true"' "${ROUTER_WORKFLOW}" || {

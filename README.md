@@ -209,9 +209,10 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
-# NOTE: plain issue の `opened` は intake-only です。mainframe 実行開始点は `/vote`、明示的な `tutti` label、または `workflow_dispatch` に限定します。
+# NOTE: plain issue の `opened` は intake-only です。mainframe 実行開始点は `/vote`、明示的な `tutti` label、または `workflow_dispatch` に限定します。`issues:labeled` では `tutti` 以外の label churn は caller 入口で無視します。
 # NOTE: 通常経路では実装実行に `implement` + `implement-confirmed` が必要です。`/vote` 経由は review-only 明示がない限り `implement-confirmed` を自動付与します。
-# NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。
+# NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。信頼判定は `vote-bypass` として audit に残るため、trusted collaborator 専用とみなすなら運用ではなく code/doc のどちらか一方に寄せてください。
+# NOTE: `FUGUE_GHA_EXECUTION_MODE=record-only` のとき、GitHub mainframe は handoff/audit 記録のみ行い、Tutti / implementation lane は走りません。強制的に GitHub-hosted 実行へ切り替える場合は `execution_mode_override=primary` を使います。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
 # NOTE: `risk-tier (low|medium|high)` を算出し、preflight/dialogue最小値と review fan-out を調整します。
 # NOTE: local 実行でも `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX=true`（既定）により assist=claude かつ high-risk（または `FUGUE_LOCAL_AMBIGUITY_SIGNAL=true`）時に claude-opus-assist 成功が必須になります。
