@@ -6,7 +6,8 @@ This document defines the implementation-ready front-door architecture for
 
 The guiding decision is:
 
-- the user should normally touch `Happy.app` only
+- the user should normally touch one mobile app only
+- that mobile app contains the `Happy.app` experience inside it
 - `Cockpit` stays a deep-debug admin surface
 - `GitHub Actions` stays an execution, continuity, and recovery substrate
 - `FUGUE` remains the rollback sovereign path
@@ -20,7 +21,8 @@ The correct delivery model is:
 
 - `web-first`
 - `PWA-first`
-- `Happy.app` as a branded shell over the same state and command surface
+- a new all-in-one mobile web app as the outer container
+- `Happy.app` as the inner conversational/command experience inside that app
 - `desktop` remains the high-context operator surface through `Codex` / `ChatGPT`
 
 This is better than making the first implementation fully native because:
@@ -33,7 +35,8 @@ This is better than making the first implementation fully native because:
 Therefore:
 
 - the primary implementation target is a mobile web app
-- `Happy.app` may embed or wrap that web experience
+- the outer mobile app owns navigation, state views, and recovery views
+- `Happy.app` lives inside the outer app as the conversational front door
 - native wrappers may be added later, but must not fork the product logic
 - desktop does not need a separate `Happy.app`-first workflow in phase 1
 - desktop users may continue to drive `Kernel` directly from the existing Codex surface
@@ -78,19 +81,20 @@ Rule:
 
 The target user experience is:
 
-1. while away from a desk, the user opens `Happy.app`
-2. the user types natural language such as:
-   - `この不具合を直して`
-   - `会社紹介スライドを作って`
-   - `note原稿を書いて`
-   - `今どこまで進んでる？`
-3. `Happy.app` sends a normalized command to `Kernel`
-4. `Kernel` decides whether to:
+1. while away from a desk, the user opens the all-in-one mobile app
+2. the app lands on the `Happy.app` conversational surface
+3. the user types natural language such as:
+- `この不具合を直して`
+- `会社紹介スライドを作って`
+- `note原稿を書いて`
+- `今どこまで進んでる？`
+4. the conversational surface sends a normalized command to `Kernel`
+5. `Kernel` decides whether to:
    - execute locally on the primary host
    - continue through GitHub-hosted continuity
    - hand off to specialist workflows
    - fall back to `FUGUE`
-5. the user sees progress and alerts in the same app
+6. the user sees progress and alerts elsewhere in the same mobile app
 
 The complementary desktop experience is:
 
@@ -109,7 +113,7 @@ They also should not need to care whether the front surface is:
 
 - pure mobile web
 - installed PWA
-- a thin `Happy.app` shell
+- a native wrapper over the same all-in-one app
 
 ## 2. Core Principle
 
@@ -138,7 +142,8 @@ That means:
 ## 3. Top-Level Model
 
 ```text
-Happy.app shell / PWA / mobile web
+All-in-one mobile web app / PWA
+  -> Happy.app conversational surface
   -> Crow UI layer
   -> Kernel intake gateway
   -> Kernel sovereign routing
@@ -153,14 +158,14 @@ More explicitly:
 
 ```text
 ┌──────────────────────────────┐
-│ Happy.app shell / web app    │
-│ Inbox / Now / Tasks / Alerts │
+│ All-in-one mobile app        │
+│ Happy / Now / Tasks / Alerts │
 │ Recover                      │
 └──────────────┬───────────────┘
                │
                v
 ┌─────────────────────────────────────────────┐
-│ Crow facade                                 │
+│ Happy.app inner surface + Crow facade       │
 │ normalize input / summarize state / notify  │
 └──────────────┬──────────────────────────────┘
                │
@@ -186,14 +191,35 @@ More explicitly:
          progress + status events
                    │
                    v
-              Happy.app views
+           all-in-one app views
 ```
 
 ## 4. Five-Screen Information Architecture
 
-The front surface should be only these five views.
+The outer mobile app should expose only these five views.
 
-### 4.1 Inbox
+### 4.1 Happy
+
+Purpose:
+
+- act as the conversational home screen
+- receive natural-language commands
+- show the latest concise `Crow` summary
+
+Primary actions:
+
+- free text input
+- recent prompts
+- quick chips:
+  - `build`
+  - `review`
+  - `research`
+  - `slide`
+  - `note`
+
+This is the place where the existing `Happy.app` experience lives.
+
+### 4.1.a Inbox Composer
 
 Purpose:
 
@@ -552,7 +578,7 @@ After dedicated 24/7 operation begins:
 
 - `mac mini` becomes primary
 - `MBP` becomes attended operator cockpit
-- the Happy.app surface does not change
+- the outer mobile app surface does not change
 
 This host swap must not require a mobile UX redesign.
 
@@ -581,7 +607,7 @@ The single-front rule does not forbid secondary notifications.
 
 Notification policy:
 
-- primary interaction surface: `Happy.app`
+- primary interaction surface: the outer mobile app, centered on the `Happy` tab
 - mirrored alerts:
   - `Discord`
   - `LINE`
@@ -608,7 +634,7 @@ Recommended model:
 Kernel / Crow / workflows
   -> normalized task-event bus
   -> happy-app-state adapter
-  -> Happy.app views
+  -> outer mobile app views
 ```
 
 This adapter must collapse multiple mirrored systems into one mobile narrative.
@@ -633,8 +659,10 @@ Rule:
 
 ## 12. Detailed Mapping to Existing Surfaces
 
-### Happy.app -> existing implementation
+### All-in-one mobile app -> existing implementation
 
+- `Happy`
+  - maps to the `Crow` conversational front door
 - `Inbox`
   - maps to issue/dispatched intake
 - `Now`
@@ -658,7 +686,7 @@ The first implementation should expose:
 
 Then:
 
-- `Happy.app` can wrap the same web surface
+- the outer mobile app can host the same web surface
 - `Cockpit` can deep-link into the same task identifiers
 - `GitHub Mobile` remains fallback only
 
@@ -677,14 +705,61 @@ But it must be explicitly treated as secondary.
 
 The first version of this design has weaknesses.
 
-### Weakness 1: Happy.app may become a thin GitHub skin
+### Architecture Comparison: Which Side Should Own The App Shell?
+
+Two candidate shapes were considered.
+
+#### Option A: `Happy.app` as the outer app shell
+
+Pros:
+
+- simple naming alignment
+- intuitive if `Happy.app` is already the recognizable brand
+
+Cons:
+
+- `Happy.app` becomes overloaded with:
+  - conversation
+  - navigation
+  - status surfaces
+  - recover controls
+- the conversational layer and the operational layer blur together
+- replacing or refactoring the command surface later becomes harder
+
+#### Option B: one all-in-one mobile app outside, with `Happy.app` inside it
+
+Pros:
+
+- the outer app can own navigation and task/state surfaces cleanly
+- `Happy.app` can remain the conversational center, not the whole shell
+- `Crow` fits naturally between the inner conversation layer and the outer operational views
+- task, alert, and recovery views can evolve without distorting the conversational model
+
+Cons:
+
+- naming must be explained clearly to avoid confusion
+- product branding needs discipline so users still feel they are \"in Happy\"
+
+#### Decision
+
+Option B is better.
+
+Reason:
+
+- the outer app owns stateful operations
+- `Happy.app` owns conversational entry
+- `Kernel` owns routing and sovereignty
+
+This separation is more resilient and easier to evolve.
+
+### Weakness 1: The outer app may become a thin GitHub skin
 
 If the app only forwards issue creation and status comments, the UX gain is
 small.
 
 Correction:
 
-- `Happy.app` must present task state directly, not merely embed GitHub pages
+- the mobile app must present task state directly, not merely embed GitHub pages
 - the app must collapse issue/workflow/comments into one mobile narrative
 
 ### Weakness 1.a: Native-first implementation may create platform forks
@@ -695,7 +770,7 @@ may diverge too early and the integration cost will grow.
 Correction:
 
 - implement the first production surface as web/PWA
-- allow `Happy.app` to brand and host the same surface
+- allow the same outer app to be branded and hosted in different shells
 - keep product logic and state adapters outside any one mobile shell
 
 ### Weakness 2: Crow may become decorative
@@ -758,17 +833,35 @@ Correction:
 - show confidence level
 - use percentages only for deterministic workflows
 
+### Weakness 8: The \"Happy inside outer app\" model may confuse first-time users
+
+If the information architecture is not explicit, users may not understand why
+the app has a `Happy` tab instead of the whole product simply being named
+`Happy.app`.
+
+Correction:
+
+- the first screen should clearly present `Happy` as the conversational home
+- navigation labels should remain operationally explicit:
+  - `Happy`
+  - `Now`
+  - `Tasks`
+  - `Alerts`
+  - `Recover`
+- product copy should describe `Happy` as the assistant layer inside the app
+
 ## 14. Revised Implementation-Ready Design
 
 After the critique above, the implementation-ready version is:
 
-1. `Happy.app` is the only normal user-facing surface
-2. `Crow` is a real summarization and intake layer
-3. `Recover` is limited to four safe controls
-4. route state is singular and explicit
-5. content tasks are first-class task types, not metadata afterthoughts
-6. outputs are canonicalized into one task detail model
-7. progress is phase-based unless determinism justifies percentages
+1. one all-in-one mobile app is the only normal user-facing mobile surface
+2. `Happy.app` is the inner conversational layer
+3. `Crow` is a real summarization and intake layer
+4. `Recover` is limited to four safe controls
+5. route state is singular and explicit
+6. content tasks are first-class task types, not metadata afterthoughts
+7. outputs are canonicalized into one task detail model
+8. progress is phase-based unless determinism justifies percentages
 
 ## 15. Implementation Boundary
 
@@ -790,7 +883,96 @@ Implementation is considered ready when these are built:
   - issue comments
   - note/slide/artifact links
 - mobile-safe recover adapter over `kernel-recovery-console`
-- PWA packaging or `Happy.app` shell integration over the same endpoints
+- PWA packaging or outer-app integration over the same endpoints
+
+## 15.a Simulation Walkthroughs
+
+The design should survive at least these scenario simulations.
+
+### Simulation 1: quick bugfix from smartphone
+
+1. user opens the outer mobile app
+2. user enters the `Happy` tab
+3. user types `この不具合を直して`
+4. `Crow` normalizes the request
+5. `Kernel` routes to local primary
+6. `Now` updates with:
+   - route=`local`
+   - state=`executing`
+7. `Tasks` shows the active item
+8. task finishes with primary output:
+   - PR or commit link
+
+Expected outcome:
+
+- no GitHub UI exposure is required
+- output is visible from task detail
+
+### Simulation 2: content task while away from desk
+
+1. user enters `会社紹介スライドを作って`
+2. task is classified as `content`
+3. `Kernel` applies content routing
+4. `Tasks` card shows `slide` badge
+5. task detail later shows:
+   - slide deck primary output
+   - mirrored issue/workflow links
+
+Expected outcome:
+
+- content tasks feel first-class
+- outputs are readable on mobile
+
+### Simulation 3: local primary degrades mid-task
+
+1. user has an active task
+2. heartbeat becomes `late`, then `missing`
+3. system state changes to `degraded`, then `continuity`
+4. `Alerts` shows fallback activation
+5. `Now` switches primary path to `github`
+
+Expected outcome:
+
+- only one active primary is shown
+- user sees continuity, not infrastructure confusion
+
+### Simulation 4: rollback needed
+
+1. task hits a rollback condition
+2. `Kernel` chooses `fugue-bridge`
+3. `Now` shows route=`fugue`
+4. task detail shows rollback history
+5. `Recover` exposes only bounded follow-up actions
+
+Expected outcome:
+
+- rollback remains visible and auditable
+- the user still stays inside one mobile app
+
+### Simulation 5: user checks progress only
+
+1. user opens the app without submitting a task
+2. `Now` shows current active work
+3. `Tasks` lists in-progress and done
+4. user opens one task detail
+5. outputs and blockers are visible immediately
+
+Expected outcome:
+
+- the app is useful even when used purely as a monitor
+
+### Simulation 6: desktop/mobile split
+
+1. user starts a high-context task on desktop via Codex
+2. shared task state updates
+3. later the user opens the mobile app outside
+4. `Now` and `Tasks` reflect the same task
+5. mobile remains lightweight while desktop keeps the full operator surface
+
+Expected outcome:
+
+- one shared state model
+- no need to force desktop into the mobile app model
 
 ## 16. First Implementation Slice
 
@@ -834,8 +1016,9 @@ This design does not require:
 
 The correct architecture is:
 
-- `Happy.app` as the single front
-- implemented first as web/PWA, optionally wrapped by `Happy.app`
+- one all-in-one mobile front
+- implemented first as web/PWA
+- with `Happy.app` inside it as the conversational center
 - `Crow` as the presence and summarization layer
 - `Kernel` as the sovereign brain
 - `GitHub Actions` as execution/recovery substrate
