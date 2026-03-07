@@ -4,6 +4,8 @@
 
 **Shared API keys go in Organization Secrets. Project-specific keys go in Repository Secrets.**
 
+**Live secrets must never be stored in repository `.env` files.**
+
 ## Hierarchy
 
 ```
@@ -56,6 +58,13 @@ export ANTHROPIC_API_KEY=...
 
 Do not treat `.env` inside the workspace as a trusted storage layer. Any agent or tool with file-read access may inspect repository files. If you must use an env file locally, keep it outside the repo and use it only to bootstrap GitHub/platform secret stores.
 
+## Workspace Rule
+
+- Do not create or keep live `.env`, `.env.local`, `.env.production`, or similar secret-bearing files inside repository workspaces.
+- `.env.example` is allowed only with dummy placeholders.
+- If a live env file is needed temporarily for bootstrap, place it outside the workspace and source it explicitly.
+- `Kernel` and `FUGUE` secret operations must assume that workspace files are readable by tools and agents.
+
 ## Kernel / FUGUE Compatibility
 
 - Secret **names** are the contract. Orchestrator choice must not require renaming secrets.
@@ -68,4 +77,5 @@ Do not treat `.env` inside the workspace as a trusted storage layer. Any agent o
 - Never hardcode secrets in source code
 - Never commit `.env` files (ensure `.gitignore` covers them)
 - Never keep live secrets in the repo workspace as the primary source of truth
+- Never rely on “local `.env` is safe because the agent will not read it”
 - Never store secrets in plaintext in documentation

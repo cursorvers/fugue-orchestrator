@@ -6,6 +6,12 @@ Goal: make `Kernel` and `FUGUE` interchangeable at the orchestration layer witho
 
 The source of truth is **not** `.env` in the repository. The source of truth is the secret store closest to the execution boundary.
 
+This is a hard rule, not a convenience preference:
+
+- do not store live secrets in repository `.env*` files
+- do not assume agents or LLM tools will ignore workspace env files
+- do not treat workspace-local secret files as a long-term fallback
+
 ## Secret Planes
 
 ```text
@@ -86,6 +92,7 @@ Allowed:
 Not allowed:
 
 - keeping live secrets in repo root
+- keeping live secrets in any repository `.env*` file
 - making workspace `.env` the operational source of truth
 - relying on agents to “not read” local secret files
 
