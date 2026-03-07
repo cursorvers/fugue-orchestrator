@@ -162,7 +162,7 @@ summarize_status() {
   runner_label="$(gh_var_default "FUGUE_SUBSCRIPTION_RUNNER_LABEL" "fugue-subscription")"
   claude_state="$(gh_var_default "FUGUE_CLAUDE_RATE_LIMIT_STATE" "ok")"
 
-  runner_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 4 || echo '{}')"
+  runner_json="$(fugue_gh_api_retry "repos/${repo}/actions/runners?per_page=100" 4 || echo '{}')"
   runner_online_count="$(printf '%s' "${runner_json}" | jq -r --arg label "${runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
 
   pending_json="$(fugue_gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-task" --limit 200 --json number,labels || echo '[]')"
@@ -201,7 +201,7 @@ summarize_status() {
 
 append_active_issue_summary() {
   local issues_json issue_lines line_count
-  issues_json="$(gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-task" --limit 10 --json number,title,updatedAt,url,labels || echo '[]')"
+  issues_json="$(fugue_gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-task" --limit 10 --json number,title,updatedAt,url,labels || echo '[]')"
   append_summary ""
   append_summary "### Active fugue-task issues"
   line_count="$(printf '%s' "${issues_json}" | jq -r 'length')"
@@ -238,7 +238,7 @@ mobile_progress() {
   append_summary "- Use this thread for quick status checks from GitHub Mobile."
   append_summary "- For recovery actions, run \`kernel-recovery-console\` with \`continuity-canary\`, \`rollback-canary\`, or \`reroute-issue\`."
 
-  gh_retry 4 gh issue comment "${status_issue}" --repo "${repo}" --body-file "${status_comment_file}" >/dev/null
+  fugue_gh_retry 4 gh issue comment "${status_issue}" --repo "${repo}" --body-file "${status_comment_file}" >/dev/null
   append_summary ""
   append_summary "- posted snapshot to [fugue-status issue #${status_issue}](https://github.com/${repo}/issues/${status_issue})"
 }
@@ -268,7 +268,7 @@ dispatch_workflow() {
   baseline_json="$(latest_workflow_run_json "${workflow_file}")"
   baseline_id="$(printf '%s' "${baseline_json}" | jq -r '.databaseId // 0')"
 
-  gh_retry 4 gh workflow run "${workflow_file}" --repo "${repo}" "$@" >/dev/null
+  fugue_gh_retry 4 gh workflow run "${workflow_file}" --repo "${repo}" "$@" >/dev/null
   sleep 5
 
   run_json="$(wait_for_workflow_dispatch_run "${workflow_file}" "${baseline_id}" 18 5 || echo '{}')"
@@ -288,7 +288,7 @@ reroute_issue() {
     exit 1
   fi
 
-  issue_json="$(gh_api_retry "repos/${repo}/issues/${issue_number}" 4)"
+  issue_json="$(fugue_gh_api_retry "repos/${repo}/issues/${issue_number}" 4)"
   labels_json="$(printf '%s' "${issue_json}" | jq -c '[.labels[]?.name]')"
   has_tutti="$(printf '%s' "${labels_json}" | jq -r 'index("tutti") != null')"
   has_processing="$(printf '%s' "${labels_json}" | jq -r 'index("processing") != null')"
