@@ -15,7 +15,7 @@ Do not run a `24/7` daemon.
 Use:
 
 - shared scheduled bounded extraction for stable operator rhythms
-- local personal mailbox extraction for user-owned context
+- personal scheduled mailbox extraction on always-on GitHub Actions
 - on-demand preflight for issue-specific context
 - TTL-gated feed reuse to avoid repeated API calls and prompt bloat
 
@@ -29,23 +29,26 @@ Initial profiles:
 
 - `morning-brief-shared`
   - execution target: GitHub Actions
+  - environment: `workspace-readonly`
   - actions: `standup-report`
   - ttl: `360m`
   - schedule: weekdays morning
 - `morning-brief-personal`
-  - execution target: local machine
+  - execution target: GitHub Actions
+  - environment: `workspace-personal-readonly`
   - actions: `gmail-triage`
   - ttl: `360m`
-  - schedule: weekdays local morning
+  - schedule: weekdays morning
 - `pre-meeting-scan`
   - actions: `meeting-prep`
   - ttl: `45m`
   - default mode: dispatch only
 - `weekly-digest-personal`
-  - execution target: local machine
+  - execution target: GitHub Actions
+  - environment: `workspace-personal-readonly`
   - actions: `weekly-digest`
   - ttl: `10080m`
-  - schedule: weekly local
+  - schedule: weekly
 
 ## Feed Artifact Model
 
@@ -75,14 +78,23 @@ Canonical manifest fields:
 Read-only feed sync uses a split auth model:
 
 - service-account credentials for unattended shared calendar/report feeds
-- local encrypted `gws auth login` credentials for personal mailbox feeds
+- exported user OAuth credentials for unattended personal mailbox feeds
 
-Protected CI secret contract for shared feeds:
+Protected CI secret contract:
 
 - `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON`
+- `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON`
 
-Personal mailbox feeds should run locally and should not require GitHub Actions
-to store long-lived user refresh tokens for unattended schedule execution.
+Environment split:
+
+- `workspace-readonly`
+  - protected
+  - reviewer-gated
+  - shared readonly service-account feeds and issue preflight
+- `workspace-personal-readonly`
+  - environment-scoped
+  - no per-run approval requirement
+  - personal readonly mailbox feeds only
 
 ## Reflection Into Kernel/FUGUE
 
@@ -93,8 +105,10 @@ Reflection happens in two stages:
 2. `googleworkspace-feed-ingest.sh`
    - selects only fresh manifests
    - collapses them into one bounded context JSON
-3. `googleworkspace-feed-sync-local.sh`
-   - runs local-only profiles with user OAuth on the operator machine
+3. `googleworkspace-personal-feed-sync.yml`
+   - runs personal readonly profiles on always-on GitHub Actions
+4. `googleworkspace-feed-sync-local.sh`
+   - remains an operator fallback, not the primary scheduler
 
 The sovereign prompt should ingest only the combined summary, not the raw
 payloads.
@@ -106,8 +120,9 @@ payloads.
 - scheduled sync remains read-only only
 - write adapters are out of scope for feed sync
 - schedule frequency should stay low and task-shaped
-- unattended GitHub Actions schedule should not depend on user OAuth refresh
-  tokens
+- shared and personal feeds must remain in separate GitHub Environments
+- personal scheduled feeds may use user OAuth refresh tokens only inside the
+  dedicated `workspace-personal-readonly` environment
 
 ## Simulation Result
 
@@ -117,8 +132,10 @@ The prototype is considered valid if all of these pass:
 - TTL cache hit without rerunning preflight
 - stale refresh after TTL expiry
 - feed ingest only includes fresh manifests
+- workflow-target matrix resolution keeps shared and personal feeds separated
 
 This is verified by:
 
 - `tests/test-googleworkspace-scheduled-extract.sh`
+- `tests/test-resolve-googleworkspace-feed-matrix.sh`
 - `tests/test-googleworkspace-feed-sync-local.sh`

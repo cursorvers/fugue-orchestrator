@@ -14,6 +14,8 @@ usage() {
 Usage:
   scripts/local/googleworkspace-feed-sync-local.sh [options]
 
+Fallback operator-only runner. The primary scheduled path is GitHub Actions.
+
 Options:
   --profile <id|csv>     One or more local-only feed profiles to sync.
   --all                  Sync all enabled local-only profiles (default).

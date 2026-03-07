@@ -1,18 +1,18 @@
-name: Google Workspace Shared Feed Sync
+name: Google Workspace Personal Feed Sync
 
 on:
   schedule:
-    - cron: "0 21 * * 0-4"
+    - cron: "5 21 * * 0-4"
     - cron: "15 21 * * 0"
   workflow_dispatch:
     inputs:
       profile:
-        description: "Shared feed profile to sync (`all-shared` or a shared profile id)"
+        description: "Personal feed profile to sync (`all-personal` or a personal profile id)"
         required: false
         type: string
-        default: "all-shared"
+        default: "all-personal"
       environment_override:
-        description: "Optional environment override for all selected shared profiles"
+        description: "Optional environment override for all selected personal profiles"
         required: false
         type: string
         default: ""
@@ -44,7 +44,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SCHEDULE_EXPR: ${{ github.event.schedule }}
           INPUT_PROFILE: ${{ inputs.profile }}
-          INPUT_WORKFLOW_TARGET: shared
+          INPUT_WORKFLOW_TARGET: personal
           INPUT_ENVIRONMENT_OVERRIDE: ${{ inputs.environment_override }}
           INPUT_FORCE_REFRESH: ${{ inputs.force_refresh }}
         run: bash scripts/harness/resolve-googleworkspace-feed-matrix.sh
@@ -73,7 +73,6 @@ jobs:
         run: npm install -g @googleworkspace/cli
 
       - name: Run feed sync
-        id: feed
         env:
           FEED_PROFILE: ${{ matrix.profile.profile }}
           FORCE_REFRESH: ${{ needs.resolve-profiles.outputs.force_refresh }}

@@ -205,8 +205,10 @@ Current implemented baseline:
   - turns scheduled readonly profiles into cached Workspace feed manifests
 - `scripts/harness/googleworkspace-feed-ingest.sh`
   - rehydrates only fresh feed manifests into a bounded context envelope
+- `scripts/harness/resolve-googleworkspace-feed-matrix.sh`
+  - resolves shared vs personal feed profiles into workflow matrices
 - `scripts/local/googleworkspace-feed-sync-local.sh`
-  - runs personal mailbox feed profiles on the local machine with user OAuth
+  - remains an operator fallback when local-only replay is needed
 - `.github/workflows/fugue-tutti-caller.yml`
   - forwards `workspace_*` hints into the reusable Codex implementation workflow
 - `.github/workflows/fugue-codex-implement.yml`
@@ -215,6 +217,8 @@ Current implemented baseline:
   - keeps Workspace credentials out of the main implementation job
 - `.github/workflows/googleworkspace-feed-sync.yml`
   - runs low-frequency shared readonly feed sync profiles on schedule or manual dispatch
+- `.github/workflows/googleworkspace-personal-feed-sync.yml`
+  - runs always-on personal readonly mailbox feeds in a dedicated environment
 
 Kernel admission rules:
 
@@ -237,7 +241,7 @@ Kernel admission rules:
 
 1. Scheduler invokes `standup-report`.
 2. If protected readonly user OAuth export is available, also run
-   `gmail-triage` or `weekly-digest`.
+   `gmail-triage` or `weekly-digest` in the personal readonly environment.
 3. Kernel emits one digest artifact and does not mutate state elsewhere.
 
 ### 3. Stakeholder Delivery
@@ -272,5 +276,5 @@ Kernel admission rules:
    CI can access readonly Workspace credentials.
 7. Add scheduled feed extraction only for low-frequency readonly profiles and
    gate stale feeds with TTL before reinjecting into Kernel/FUGUE prompts.
-8. Keep personal mailbox feed extraction on the local machine rather than
-   unattended GitHub Actions.
+8. Keep personal mailbox feed extraction in a dedicated readonly GitHub
+   environment rather than relying on a local machine to stay online.
