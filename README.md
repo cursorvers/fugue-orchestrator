@@ -267,6 +267,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 #       未指定時は各 heartbeat process が `gh auth token` を使って個別に認証します。
 # NOTE: login bootstrap plist を使わない場合は、再ログイン/再起動後に上記 helper を再実行してください。
 # NOTE: heartbeat は repo variables `FUGUE_PRIMARY_HEARTBEAT_*` に記録され、`fugue-watchdog` は fresh heartbeat を primary 判定の主信号として使います。
+# NOTE: 現在の warm-standby 到達点と `/vote` 検証結果は
+#       `docs/kernel-macmini-warm-standby-status-2026-03-08.md` を参照してください。
 # NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true` のときのみ、`FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` で
 #       `claude-opus-assist` の direct success が無ければ `ok_to_execute=false` になります。
 # NOTE: Claude rate limit 時は `FUGUE_CLAUDE_RATE_LIMIT_STATE=degraded|exhausted` を設定すると、
