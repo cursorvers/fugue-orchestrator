@@ -42,38 +42,11 @@ append_summary() {
   fi
 }
 
-gh_retry() {
-  local attempts="${1:-3}"
-  shift
-  local sleep_sec=1
-  local i out
-  for ((i=1; i<=attempts; i++)); do
-    if out="$("$@" 2>/dev/null)"; then
-      printf '%s\n' "${out}"
-      return 0
-    fi
-    if (( i == attempts )); then
-      return 1
-    fi
-    sleep "${sleep_sec}"
-    if (( sleep_sec < 4 )); then
-      sleep_sec=$((sleep_sec * 2))
-    fi
-  done
-  return 1
-}
-
-gh_api_retry() {
-  local endpoint="$1"
-  local attempts="${2:-3}"
-  gh_retry "${attempts}" gh api "${endpoint}"
-}
-
 gh_var_default() {
   local name="$1"
   local fallback="$2"
   local value
-  value="$(gh_retry 3 gh variable get "${name}" --repo "${repo}" --json value -q '.value' || true)"
+  value="$(fugue_gh_retry 3 gh variable get "${name}" --repo "${repo}" --json value -q '.value' || true)"
   if [[ -n "${value}" ]]; then
     printf '%s\n' "${value}"
   else
@@ -100,19 +73,19 @@ current_run_url() {
 
 ensure_status_issue() {
   local status_issue
-  status_issue="$(gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-status" --limit 1 --json number --jq '.[0].number // empty' || true)"
+  status_issue="$(fugue_gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-status" --limit 1 --json number --jq '.[0].number // empty' || true)"
   if [[ -n "${status_issue}" ]]; then
     printf '%s\n' "${status_issue}"
     return 0
   fi
 
-  gh_retry 4 gh label create "fugue-status" \
+  fugue_gh_retry 4 gh label create "fugue-status" \
     --repo "${repo}" \
     --description "Status reporting thread for FUGUE orchestration" \
     --color "1D76DB" >/dev/null 2>&1 || true
 
   status_issue_url="$(
-    gh_retry 4 gh issue create --repo "${repo}" \
+    fugue_gh_retry 4 gh issue create --repo "${repo}" \
       --title "FUGUE Status Thread" \
       --label "fugue-status" \
       --body "Automated status and mobile progress reports are posted here."
@@ -123,7 +96,7 @@ ensure_status_issue() {
 latest_workflow_run_json() {
   local workflow_name="$1"
   (
-    gh_api_retry "repos/${repo}/actions/runs?per_page=100" 4 || echo '{"workflow_runs":[]}'
+    fugue_gh_api_retry "repos/${repo}/actions/runs?per_page=100" 4 || echo '{"workflow_runs":[]}'
   ) | jq -c --arg wf "${workflow_name}" '
       [.workflow_runs[]?
         | select((((.path // "") | endswith("/" + $wf)) or ((.path // "") | endswith($wf))))
@@ -152,7 +125,7 @@ wait_for_workflow_dispatch_run() {
   for ((i=1; i<=attempts; i++)); do
     candidate="$(
       (
-        gh_api_retry "repos/${repo}/actions/runs?per_page=100" 4 || echo '{"workflow_runs":[]}'
+        fugue_gh_api_retry "repos/${repo}/actions/runs?per_page=100" 4 || echo '{"workflow_runs":[]}'
       ) | jq -c --arg wf "${workflow_name}" --argjson baseline "${baseline_id}" '
         [.workflow_runs[]?
           | select(.event == "workflow_dispatch")
@@ -192,7 +165,7 @@ summarize_status() {
   runner_json="$(gh_api_retry "repos/${repo}/actions/runners?per_page=100" 4 || echo '{}')"
   runner_online_count="$(printf '%s' "${runner_json}" | jq -r --arg label "${runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
 
-  pending_json="$(gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-task" --limit 200 --json number,labels || echo '[]')"
+  pending_json="$(fugue_gh_retry 4 gh issue list --repo "${repo}" --state open --label "fugue-task" --limit 200 --json number,labels || echo '[]')"
   pending_count="$(printf '%s' "${pending_json}" | jq -r 'length')"
   processing_count="$(printf '%s' "${pending_json}" | jq -r '[.[] | select((([.labels[]?.name] | index("processing")) != null))] | length')"
   needs_human_count="$(printf '%s' "${pending_json}" | jq -r '[.[] | select((([.labels[]?.name] | index("needs-human")) != null))] | length')"

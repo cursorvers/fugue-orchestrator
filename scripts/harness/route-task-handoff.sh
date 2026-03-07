@@ -15,6 +15,8 @@ set -euo pipefail
 #
 # Usage: bash scripts/harness/route-task-handoff.sh
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/common-utils.sh"
 
 title="${ISSUE_TITLE}"
 body="${ISSUE_BODY}"
@@ -49,7 +51,7 @@ extract_heading_value() {
   '
 }
 
-issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+issue_json="$(fugue_gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" 5)"
 label_main_provider="$(echo "${issue_json}" | jq -r '
   [ .labels[]? | .name ] as $labels
   | if ((($labels | index("orchestrator:claude")) != null) and (($labels | index("orchestrator:codex")) != null)) then ""
@@ -275,7 +277,7 @@ fi
 # Safety guard: when review-only is explicitly requested, clear any
 # stale implementation intent labels before handing off to Tutti.
 if [[ "${wants_implement}" != "true" ]]; then
-  gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+  fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
     --remove-label "implement" \
     --remove-label "codex-implement" \
     --remove-label "claude-implement" \
@@ -287,57 +289,57 @@ fi
 if [[ "${wants_implement}" == "true" ]]; then
   # Keep only one compatibility label in sync with the resolved
   # orchestrator provider to avoid stale dual-label drift.
-  gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+  fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
     --remove-label "codex-implement" \
     --remove-label "claude-implement" >/dev/null 2>&1 || true
-  gh label create "implement" \
+  fugue_gh_retry 4 gh label create "implement" \
     --repo "${GITHUB_REPOSITORY}" \
     --description "Implementation intent (provider-agnostic)" \
     --color "1D76DB" >/dev/null 2>&1 || true
-  gh label create "${compat_label}" \
+  fugue_gh_retry 4 gh label create "${compat_label}" \
     --repo "${GITHUB_REPOSITORY}" \
     --description "Implementation intent compatibility label" \
     --color "0052CC" >/dev/null 2>&1 || true
-  gh label create "implement-confirmed" \
+  fugue_gh_retry 4 gh label create "implement-confirmed" \
     --repo "${GITHUB_REPOSITORY}" \
     --description "Human has explicitly confirmed implementation execution" \
     --color "0E8A16" >/dev/null 2>&1 || true
-  gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement" >/dev/null
-  gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${compat_label}" >/dev/null
+  fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement" >/dev/null
+  fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${compat_label}" >/dev/null
   if [[ "${confirm_implement}" == "true" ]]; then
-    gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement-confirmed" >/dev/null
+    fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement-confirmed" >/dev/null
   else
-    gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "implement-confirmed" >/dev/null 2>&1 || true
+    fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "implement-confirmed" >/dev/null 2>&1 || true
   fi
 fi
 
-gh label create "fugue-task" \
+fugue_gh_retry 4 gh label create "fugue-task" \
   --repo "${GITHUB_REPOSITORY}" \
   --description "FUGUE task routing target" \
   --color "5319E7" >/dev/null 2>&1 || true
-gh label create "${orchestrator_label}" \
+fugue_gh_retry 4 gh label create "${orchestrator_label}" \
   --repo "${GITHUB_REPOSITORY}" \
   --description "Requested orchestrator profile for Tutti routing" \
   --color "5319E7" >/dev/null 2>&1 || true
-gh label create "${assist_orchestrator_label}" \
+fugue_gh_retry 4 gh label create "${assist_orchestrator_label}" \
   --repo "${GITHUB_REPOSITORY}" \
   --description "Requested assist orchestrator profile for Tutti routing" \
   --color "0052CC" >/dev/null 2>&1 || true
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content-action:slide-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" >/dev/null 2>&1 || true
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "fugue-task" >/dev/null
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${orchestrator_label}" >/dev/null
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${assist_orchestrator_label}" >/dev/null
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content-action:slide-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" >/dev/null 2>&1 || true
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "fugue-task" >/dev/null
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${orchestrator_label}" >/dev/null
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${assist_orchestrator_label}" >/dev/null
 
 content_skill_label=""
 content_action_label=""
 if [[ "${content_hint_applied}" == "true" ]]; then
-  gh label create "content-task" \
+  fugue_gh_retry 4 gh label create "content-task" \
     --repo "${GITHUB_REPOSITORY}" \
     --description "Content-oriented task routed through Kernel/FUGUE" \
     --color "BFDADC" >/dev/null 2>&1 || true
-  gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "content-task" >/dev/null || true
+  fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "content-task" >/dev/null || true
   case "${content_skill_hint}" in
     *academic-two-stage-slide*)
       content_skill_label="content:academic-slide"
@@ -361,22 +363,22 @@ if [[ "${content_hint_applied}" == "true" ]]; then
       ;;
   esac
   if [[ -n "${content_skill_label}" ]]; then
-    gh label create "${content_skill_label}" \
+    fugue_gh_retry 4 gh label create "${content_skill_label}" \
       --repo "${GITHUB_REPOSITORY}" \
       --description "Content skill hint detected from natural language" \
       --color "C2E0C6" >/dev/null 2>&1 || true
-    gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${content_skill_label}" >/dev/null || true
+    fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${content_skill_label}" >/dev/null || true
   fi
   if [[ -n "${content_action_label}" ]]; then
-    gh label create "${content_action_label}" \
+    fugue_gh_retry 4 gh label create "${content_action_label}" \
       --repo "${GITHUB_REPOSITORY}" \
       --description "Content action hint detected from natural language" \
       --color "D4C5F9" >/dev/null 2>&1 || true
-    gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${content_action_label}" >/dev/null || true
+    fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${content_action_label}" >/dev/null || true
   fi
 fi
 
-gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "tutti" >/dev/null
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "tutti" >/dev/null
 
 mode="$( [[ "${wants_implement}" == "true" ]] && echo "implement" || echo "review" )"
 extra=""

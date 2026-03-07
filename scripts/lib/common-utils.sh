@@ -21,4 +21,45 @@ normalize_bool() {
   fi
 }
 
+fugue_gh_backoff_sleep() {
+  local base="${1:-1}"
+  local jitter_max="${2:-2}"
+  local jitter="0"
+  if [[ "${jitter_max}" =~ ^[0-9]+$ ]] && (( jitter_max > 0 )); then
+    jitter=$(( RANDOM % (jitter_max + 1) ))
+  fi
+  sleep "$(( base + jitter ))"
+}
+
+fugue_gh_retry() {
+  local attempts="${1:-5}"
+  shift
+  local sleep_sec=1
+  local max_sleep="${FUGUE_GH_RETRY_MAX_SLEEP_SEC:-16}"
+  local i out
+  for ((i=1; i<=attempts; i++)); do
+    if out="$("$@" 2>/dev/null)"; then
+      printf '%s\n' "${out}"
+      return 0
+    fi
+    if (( i == attempts )); then
+      return 1
+    fi
+    fugue_gh_backoff_sleep "${sleep_sec}" 2
+    if (( sleep_sec < max_sleep )); then
+      sleep_sec=$((sleep_sec * 2))
+      if (( sleep_sec > max_sleep )); then
+        sleep_sec="${max_sleep}"
+      fi
+    fi
+  done
+  return 1
+}
+
+fugue_gh_api_retry() {
+  local endpoint="$1"
+  local attempts="${2:-5}"
+  fugue_gh_retry "${attempts}" gh api "${endpoint}"
+}
+
 fi

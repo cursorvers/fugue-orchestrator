@@ -53,6 +53,33 @@ jobs:
         run: |
           set -euo pipefail
 
+          gh_retry() {
+            local attempts="${1:-5}"
+            shift
+            local sleep_sec=1
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$("$@" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "$(( sleep_sec + (RANDOM % 3) ))"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
+
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            gh_retry "${attempts}" gh api "${endpoint}"
+          }
+
           COMMENT_BODY=""
           COMMENT_AUTHOR=""
           IS_VOTE_COMMAND="false"
@@ -70,10 +97,10 @@ jobs:
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
             ISSUE_NUMBER="${{ inputs.issue_number }}"
-            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
-            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           else
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
@@ -95,7 +122,7 @@ jobs:
             TRUST_SUBJECT="${COMMENT_AUTHOR}"
           fi
           PERM="none"
-          PERM_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission" 2>/dev/null || echo '{}')"
+          PERM_JSON="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission" 4 2>/dev/null || echo '{}')"
           if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
             PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
           fi
@@ -212,7 +239,7 @@ jobs:
 
           # 1) Prefer fully-qualified owner/repo found inside backticks.
           target_repo="$(printf '%s\n' "${text}" \
-            | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
+            | sed -nE "s/.*\`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\`.*/\\1/p" \
             | head -n1)"
 
           # 1b) Also accept plain "owner/repo" (common on mobile forms).
@@ -224,7 +251,7 @@ jobs:
           if [[ -z "${target_repo}" ]]; then
             bare_repo="$(printf '%s\n' "${text}" \
               | grep -E 'repo|Repo|repository|Repository|リポジトリ|対象|target' \
-              | sed -nE 's/.*`([A-Za-z0-9_.-]+)`.*/\1/p' \
+              | sed -nE "s/.*\`([A-Za-z0-9_.-]+)\`.*/\\1/p" \
               | head -n1 || true)"
             if [[ -n "${bare_repo}" ]]; then
               target_repo="${owner}/${bare_repo}"
@@ -287,7 +314,27 @@ jobs:
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
         run: |
           set -euo pipefail
-          issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          gh_retry() {
+            local attempts="${1:-4}"
+            shift
+            local sleep_sec=1
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$("$@" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "$(( sleep_sec + (RANDOM % 3) ))"
+              if (( sleep_sec < 8 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
+          issue_json="$(gh_retry 4 gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
           echo "has_tutti=${HAS_TUTTI}" >> "${GITHUB_OUTPUT}"
 
@@ -303,9 +350,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          PERMISSION: ${{ steps.ctx.outputs.permission }}
         run: |
           set -euo pipefail
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Mainframe handoff is restricted to trusted collaborators (write/maintain/admin). Current permission: `${{ steps.ctx.outputs.permission }}`."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Mainframe handoff is restricted to trusted collaborators (write/maintain/admin). Current permission: [${PERMISSION}]."
 
       - name: Classify intent (Node.js decision table)
         id: classify
@@ -506,7 +554,7 @@ jobs:
           fi
 
           if [[ -z "${RESP}" ]]; then
-            ANSWER="自動実行で外部LLM呼び出しに失敗しました。`needs-human` を付与したので、手動確認をお願いします。"
+            ANSWER="自動実行で外部LLM呼び出しに失敗しました。needs-human を付与したので、手動確認をお願いします。"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${ANSWER}"
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-review" || true
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"

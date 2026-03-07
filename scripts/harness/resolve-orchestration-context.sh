@@ -14,27 +14,6 @@ set -euo pipefail
 #
 # Usage: bash scripts/harness/resolve-orchestration-context.sh
 
-gh_api_retry() {
-  local endpoint="$1"
-  local attempts="${2:-5}"
-  local sleep_sec=2
-  local i out
-  for ((i=1; i<=attempts; i++)); do
-    if out="$(gh api "${endpoint}" 2>/dev/null)"; then
-      printf '%s\n' "${out}"
-      return 0
-    fi
-    if (( i == attempts )); then
-      return 1
-    fi
-    sleep "${sleep_sec}"
-    if (( sleep_sec < 16 )); then
-      sleep_sec=$((sleep_sec * 2))
-    fi
-  done
-  return 1
-}
-
 # Extract the first non-empty line under a markdown heading from issue body.
 # Usage: extract_body_section "$body" "heading regex" "##|###"
 extract_body_section() {
@@ -70,6 +49,7 @@ normalize_multi_agent_mode() {
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${ROOT_DIR}/scripts/lib/common-utils.sh"
 DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
 DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
 CLAUDE_MAIN_ASSIST_POLICY="${CLAUDE_MAIN_ASSIST_POLICY:-codex}"
@@ -86,7 +66,7 @@ else
 fi
 
 issue_endpoint="repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}"
-if ! issue_json="$(gh_api_retry "${issue_endpoint}" 5)"; then
+if ! issue_json="$(fugue_gh_api_retry "${issue_endpoint}" 5)"; then
   echo "Failed to fetch issue context after retries: ${issue_endpoint}" >&2
   exit 1
 fi
@@ -122,7 +102,7 @@ has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti")
 if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
   for _label_retry in 1 2 3; do
     sleep "$((2 ** _label_retry))"
-    issue_json="$(gh_api_retry "${issue_endpoint}" 4 2>/dev/null || echo "${issue_json}")"
+    issue_json="$(fugue_gh_api_retry "${issue_endpoint}" 4 2>/dev/null || echo "${issue_json}")"
     has_fugue="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
     has_tutti="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
     if [[ "${has_fugue}" == "true" && "${has_tutti}" == "true" ]]; then
@@ -155,7 +135,7 @@ fi
 self_hosted_online_count="0"
 if [[ "${ci_execution_engine}" == "subscription" ]]; then
   runners_endpoint="repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100"
-  runners_json="$(gh_api_retry "${runners_endpoint}" 5 || echo '{}')"
+  runners_json="$(fugue_gh_api_retry "${runners_endpoint}" 5 || echo '{}')"
   self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
   self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
   if [[ -z "${self_hosted_online_count}" ]]; then
@@ -688,7 +668,7 @@ else
 fi
 
 eval "$(
-  scripts/lib/workflow-risk-policy.sh \
+  "${ROOT_DIR}/scripts/lib/workflow-risk-policy.sh" \
     --title "${title}" \
     --body "${body}" \
     --labels "${labels_csv}" \
