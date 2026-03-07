@@ -57,6 +57,9 @@ CLAUDE_DEGRADED_ASSIST_POLICY="${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}"
 CLAUDE_ROLE_POLICY="${CLAUDE_ROLE_POLICY:-flex}"
 CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-sonnet-4-6}"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+GOOGLEWORKSPACE_FEED_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-feed-policy.json"
+GOOGLEWORKSPACE_FEED_INGEST="${ROOT_DIR}/scripts/harness/googleworkspace-feed-ingest.sh"
+GOOGLEWORKSPACE_FEED_FETCH="${ROOT_DIR}/scripts/harness/googleworkspace-fetch-feed-artifacts.sh"
 
 ISSUE_NUMBER=""
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
@@ -206,6 +209,10 @@ eval "$(
 workspace_suggested_phases=""
 workspace_readonly_actions=""
 workspace_approval_required_actions=""
+workspace_feed_status="skipped"
+workspace_feed_summary=""
+workspace_feed_profiles=""
+workspace_feed_context_path=""
 if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   workspace_policy_json="$(jq -cn \
     --arg action_hint "${workspace_action_hint}" \
@@ -240,6 +247,61 @@ if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   workspace_suggested_phases="$(echo "${workspace_policy_json}" | jq -r '.suggested_phases | join(",")')"
   workspace_readonly_actions="$(echo "${workspace_policy_json}" | jq -r '.readonly_actions | join(",")')"
   workspace_approval_required_actions="$(echo "${workspace_policy_json}" | jq -r '.approval_required_actions | join(",")')"
+fi
+
+workspace_feed_sync_enable="$(echo "${GOOGLEWORKSPACE_FEED_SYNC_ENABLE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${workspace_feed_sync_enable}" != "true" ]]; then
+  workspace_feed_sync_enable="false"
+fi
+workspace_feed_fetch_remote="$(echo "${GOOGLEWORKSPACE_FEED_FETCH_REMOTE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${workspace_feed_fetch_remote}" != "true" ]]; then
+  workspace_feed_fetch_remote="false"
+fi
+if [[ "${workspace_hint_applied}" == "true" && "${workspace_feed_sync_enable}" == "true" && -f "${GOOGLEWORKSPACE_FEED_POLICY}" && -f "${GOOGLEWORKSPACE_FEED_INGEST}" ]]; then
+  workspace_feed_out_root="${GOOGLEWORKSPACE_FEED_OUT_ROOT:-${ROOT_DIR}/.fugue/feeds/googleworkspace}"
+  workspace_feed_tmp_dir=""
+  if [[ "${workspace_feed_fetch_remote}" == "true" && -f "${GOOGLEWORKSPACE_FEED_FETCH}" ]]; then
+    workspace_feed_tmp_dir="$(mktemp -d)"
+    if env \
+      GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
+      OUT_ROOT="${workspace_feed_tmp_dir}" \
+      WORKFLOWS_CSV="${GOOGLEWORKSPACE_FEED_WORKFLOWS:-googleworkspace-feed-sync.yml,googleworkspace-personal-feed-sync.yml}" \
+      BRANCH="${GOOGLEWORKSPACE_FEED_BRANCH:-main}" \
+      bash "${GOOGLEWORKSPACE_FEED_FETCH}" >/dev/null 2>&1
+    then
+      workspace_feed_out_root="${workspace_feed_tmp_dir}"
+    else
+      rm -rf "${workspace_feed_tmp_dir}"
+      workspace_feed_tmp_dir=""
+    fi
+  fi
+
+  if [[ -d "${workspace_feed_out_root}" ]]; then
+    workspace_feed_context_path="$(mktemp)"
+    workspace_feed_output_file="$(mktemp)"
+    if env \
+      WORKSPACE_ACTIONS="${workspace_action_hint}" \
+      WORKSPACE_REASON="${workspace_reason}" \
+      GOOGLEWORKSPACE_FEED_POLICY_FILE="${GOOGLEWORKSPACE_FEED_POLICY}" \
+      OUT_ROOT="${workspace_feed_out_root}" \
+      OUT_FILE="${workspace_feed_context_path}" \
+      GITHUB_OUTPUT="${workspace_feed_output_file}" \
+      bash "${GOOGLEWORKSPACE_FEED_INGEST}" >/dev/null 2>&1
+    then
+      workspace_feed_status="$(grep -E '^feed_ingest_status=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
+      workspace_feed_profiles="$(grep -E '^feed_active_profiles=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
+      workspace_feed_summary="$(awk '
+        $0 == "feed_summary<<EOF" { capture = 1; next }
+        capture && $0 == "EOF" { exit }
+        capture { print }
+      ' "${workspace_feed_output_file}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
+    else
+      workspace_feed_status="skipped"
+      workspace_feed_summary=""
+      workspace_feed_profiles=""
+    fi
+    rm -f "${workspace_feed_output_file}"
+  fi
 fi
 
 requested_main_provider="${label_main_provider}"
@@ -856,6 +918,12 @@ fi
   echo "workspace_action_hint=${workspace_action_hint}"
   echo "workspace_domain_hint=${workspace_domain_hint}"
   echo "workspace_reason=${workspace_reason}"
+  echo "workspace_feed_status=${workspace_feed_status}"
+  echo "workspace_feed_profiles=${workspace_feed_profiles}"
+  echo "workspace_feed_context_path=${workspace_feed_context_path}"
+  echo "workspace_feed_summary<<EOF"
+  echo "${workspace_feed_summary}"
+  echo "EOF"
   echo "content_hint_applied=${content_hint_applied}"
   echo "content_action_hint=${content_action_hint}"
   echo "content_skill_hint=${content_skill_hint}"

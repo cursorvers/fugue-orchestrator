@@ -106,9 +106,19 @@ Reflection happens in two stages:
 2. `googleworkspace-feed-ingest.sh`
    - selects only fresh manifests
    - collapses them into one bounded context JSON
-3. `googleworkspace-personal-feed-sync.yml`
+3. `googleworkspace-fetch-feed-artifacts.sh`
+   - downloads the latest successful shared and personal feed artifacts when CI
+     needs fresh scheduled evidence
+4. `resolve-orchestration-context.sh`
+   - emits `workspace_feed_status`, `workspace_feed_profiles`, and
+     `workspace_feed_summary` for reusable workflows
+5. `codex-execute-validate.sh`
+   - injects only the combined feed summary into the prompt as peripheral evidence
+6. `googleworkspace-personal-feed-sync.yml`
    - runs personal readonly profiles on always-on GitHub Actions
-4. `googleworkspace-feed-sync-local.sh`
+7. `run-local-orchestration.sh`
+   - stores `googleworkspace-feed-context.json` beside each local run summary
+8. `googleworkspace-feed-sync-local.sh`
    - remains an operator fallback, not the primary scheduler
 
 The sovereign prompt should ingest only the combined summary, not the raw

@@ -266,6 +266,7 @@ Current CI path:
 - raw readonly evidence lands at:
   - `.fugue/pre-implement/googleworkspace-run/googleworkspace/`
 - scheduled feed sync prototype:
+  - `scripts/harness/googleworkspace-fetch-feed-artifacts.sh`
   - `config/integrations/googleworkspace-feed-policy.json`
   - `scripts/harness/resolve-googleworkspace-feed-matrix.sh`
   - `scripts/harness/googleworkspace-scheduled-extract.sh`
@@ -273,6 +274,13 @@ Current CI path:
   - `.github/workflows/googleworkspace-feed-sync.yml`
   - `.github/workflows/googleworkspace-personal-feed-sync.yml`
   - `scripts/local/googleworkspace-feed-sync-local.sh`
+  - `scripts/harness/resolve-orchestration-context.sh` can fetch the latest
+    feed artifacts and emit `workspace_feed_*` outputs
+  - `scripts/harness/codex-execute-validate.sh` injects only feed summaries,
+    never raw payloads, into Codex execution prompts
+  - `scripts/local/run-local-orchestration.sh` writes
+    `googleworkspace-feed-context.json` into each run directory
+  - `fugue-status` reports the latest feed workflow runs in status comments
 
 ## Safety Rules
 

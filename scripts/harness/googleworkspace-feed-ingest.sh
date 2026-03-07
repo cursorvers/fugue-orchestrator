@@ -6,6 +6,8 @@ POLICY_FILE="${GOOGLEWORKSPACE_FEED_POLICY_FILE:-config/integrations/googleworks
 OUT_ROOT="${OUT_ROOT:-}"
 NOW_ISO="${NOW_ISO:-}"
 OUT_FILE="${OUT_FILE:-}"
+WORKSPACE_ACTIONS="${WORKSPACE_ACTIONS:-}"
+WORKSPACE_REASON="${WORKSPACE_REASON:-}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -37,6 +39,22 @@ fi
 
 if [[ -n "${FEED_PROFILES}" ]]; then
   requested_profiles_json="$(csv_to_json_array "${FEED_PROFILES}")"
+elif [[ -n "${WORKSPACE_ACTIONS}" || -n "${WORKSPACE_REASON}" ]]; then
+  requested_profiles_json="$(jq -c \
+    --arg actions_csv "${WORKSPACE_ACTIONS}" \
+    --arg reason_csv "${WORKSPACE_REASON}" '
+    ($actions_csv | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))) as $actions
+    | ($reason_csv | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))) as $reasons
+    | [
+        .profiles
+        | to_entries[]
+        | select(.value.enabled_by_default == true)
+        | select(
+            ([ (.value.actions // [])[] as $profile_action | select($actions | index($profile_action) != null) ] | length) > 0
+            or ([ (.value.reason // [])[] as $profile_reason | select($reasons | index($profile_reason) != null) ] | length) > 0
+          )
+        | .key
+      ]' "${POLICY_FILE}")"
 else
   requested_profiles_json="$(jq -c '[.profiles | to_entries[] | select(.value.enabled_by_default == true) | .key]' "${POLICY_FILE}")"
 fi
@@ -111,6 +129,7 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "feed_ingest_status=${status}"
     echo "feed_context_file=${OUT_FILE}"
+    echo "feed_requested_profiles=$(printf '%s' "${requested_profiles_json}" | jq -r 'join(",")')"
     echo "feed_summary<<EOF"
     echo "${combined_summary}"
     echo "EOF"

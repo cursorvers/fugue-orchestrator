@@ -121,6 +121,9 @@ jobs:
       workspace_suggested_phases: ${{ steps.ctx.outputs.workspace_suggested_phases }}
       workspace_readonly_actions: ${{ steps.ctx.outputs.workspace_readonly_actions }}
       workspace_approval_required_actions: ${{ steps.ctx.outputs.workspace_approval_required_actions }}
+      workspace_feed_status: ${{ steps.ctx.outputs.workspace_feed_status }}
+      workspace_feed_profiles: ${{ steps.ctx.outputs.workspace_feed_profiles }}
+      workspace_feed_summary: ${{ steps.ctx.outputs.workspace_feed_summary }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
@@ -156,6 +159,9 @@ jobs:
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
           CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-sonnet-4-6' }}
+          GOOGLEWORKSPACE_FEED_SYNC_ENABLE: ${{ vars.FUGUE_GOOGLEWORKSPACE_FEED_SYNC_ENABLE || 'true' }}
+          GOOGLEWORKSPACE_FEED_FETCH_REMOTE: true
+          GOOGLEWORKSPACE_FEED_BRANCH: main
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
@@ -531,6 +537,9 @@ jobs:
       workspace_suggested_phases: "${{ needs.ctx.outputs.workspace_suggested_phases }}"
       workspace_readonly_actions: "${{ needs.ctx.outputs.workspace_readonly_actions }}"
       workspace_approval_required_actions: "${{ needs.ctx.outputs.workspace_approval_required_actions }}"
+      workspace_feed_status: "${{ needs.ctx.outputs.workspace_feed_status }}"
+      workspace_feed_profiles: "${{ needs.ctx.outputs.workspace_feed_profiles }}"
+      workspace_feed_summary: "${{ needs.ctx.outputs.workspace_feed_summary }}"
       workspace_readonly_environment: "${{ vars.FUGUE_WORKSPACE_READONLY_ENV || 'workspace-readonly' }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

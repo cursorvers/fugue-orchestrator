@@ -281,6 +281,8 @@ CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+GOOGLEWORKSPACE_FEED_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-feed-policy.json"
+GOOGLEWORKSPACE_FEED_INGEST="${ROOT_DIR}/scripts/harness/googleworkspace-feed-ingest.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
   exit 2
@@ -303,6 +305,14 @@ if [[ ! -x "${ORCHESTRATOR_NL_HINTS}" ]]; then
 fi
 if [[ ! -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   echo "Error: Google Workspace Kernel policy missing: ${GOOGLEWORKSPACE_KERNEL_POLICY}" >&2
+  exit 2
+fi
+if [[ ! -f "${GOOGLEWORKSPACE_FEED_POLICY}" ]]; then
+  echo "Error: Google Workspace feed policy missing: ${GOOGLEWORKSPACE_FEED_POLICY}" >&2
+  exit 2
+fi
+if [[ ! -x "${GOOGLEWORKSPACE_FEED_INGEST}" ]]; then
+  echo "Error: Google Workspace feed ingest script missing or not executable: ${GOOGLEWORKSPACE_FEED_INGEST}" >&2
   exit 2
 fi
 if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
@@ -409,6 +419,10 @@ workspace_hint_applied="$(echo "${workspace_hint_json}" | jq -r '.workspace_hint
 workspace_action_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_action_hint // ""')"
 workspace_domain_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_domain_hint // ""')"
 workspace_reason="$(echo "${workspace_hint_json}" | jq -r '.workspace_reason // ""')"
+workspace_feed_context_file="${RUN_DIR}/googleworkspace-feed-context.json"
+workspace_feed_status="skipped"
+workspace_feed_summary=""
+workspace_feed_profiles=""
 jq -cn \
   --argjson hints "${workspace_hint_json}" \
   --slurpfile policy "${GOOGLEWORKSPACE_KERNEL_POLICY}" \
@@ -437,6 +451,31 @@ jq -cn \
        ),
        policy_file: "config/integrations/googleworkspace-kernel-policy.json"
      }' > "${workspace_context_file}"
+
+if [[ "${workspace_hint_applied}" == "true" ]]; then
+  feed_out_root="${GOOGLEWORKSPACE_FEED_OUT_ROOT:-${ROOT_DIR}/.fugue/feeds/googleworkspace}"
+  if [[ -d "${feed_out_root}" ]]; then
+    workspace_feed_output_file="$(mktemp)"
+    if env \
+      WORKSPACE_ACTIONS="${workspace_action_hint}" \
+      WORKSPACE_REASON="${workspace_reason}" \
+      GOOGLEWORKSPACE_FEED_POLICY_FILE="${GOOGLEWORKSPACE_FEED_POLICY}" \
+      OUT_ROOT="${feed_out_root}" \
+      OUT_FILE="${workspace_feed_context_file}" \
+      GITHUB_OUTPUT="${workspace_feed_output_file}" \
+      bash "${GOOGLEWORKSPACE_FEED_INGEST}" >/dev/null 2>&1
+    then
+      workspace_feed_status="$(grep -E '^feed_ingest_status=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
+      workspace_feed_profiles="$(grep -E '^feed_active_profiles=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
+      workspace_feed_summary="$(awk '
+        $0 == "feed_summary<<EOF" { capture = 1; next }
+        capture && $0 == "EOF" { exit }
+        capture { print }
+      ' "${workspace_feed_output_file}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
+    fi
+    rm -f "${workspace_feed_output_file}"
+  fi
+fi
 
 strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}"
 strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}"
@@ -995,7 +1034,11 @@ jq -n \
     workspace_action_hint:$workspace_action_hint,
     workspace_domain_hint:$workspace_domain_hint,
     workspace_reason:$workspace_reason,
-    workspace_context_file:$workspace_context_file
+    workspace_context_file:$workspace_context_file,
+    workspace_feed_status:$workspace_feed_status,
+    workspace_feed_summary:$workspace_feed_summary,
+    workspace_feed_profiles:$workspace_feed_profiles,
+    workspace_feed_context_file:$workspace_feed_context_file
   }' > "${integrated_json}"
 
 summary_md="${RUN_DIR}/summary.md"
@@ -1032,6 +1075,10 @@ cat > "${summary_md}" <<EOF
 - workspace action hint: ${workspace_action_hint}
 - workspace domain hint: ${workspace_domain_hint}
 - workspace context file: ${workspace_context_file}
+- workspace feed status: ${workspace_feed_status}
+- workspace feed profiles: ${workspace_feed_profiles}
+- workspace feed summary: ${workspace_feed_summary}
+- workspace feed context file: ${workspace_feed_context_file}
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}
 EOF
