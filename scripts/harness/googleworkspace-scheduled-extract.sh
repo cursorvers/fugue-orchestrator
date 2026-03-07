@@ -57,7 +57,7 @@ read_output_value() {
 require_cmd jq
 [[ -n "${FEED_PROFILE}" ]] || fail "FEED_PROFILE is required"
 [[ -f "${POLICY_FILE}" ]] || fail "policy file not found: ${POLICY_FILE}"
-[[ -x "${PREFLIGHT_SCRIPT}" ]] || fail "preflight script missing or not executable: ${PREFLIGHT_SCRIPT}"
+[[ -f "${PREFLIGHT_SCRIPT}" ]] || fail "preflight script missing: ${PREFLIGHT_SCRIPT}"
 
 profile_json="$(jq -cer --arg profile "${FEED_PROFILE}" '.profiles[$profile]' "${POLICY_FILE}")" \
   || fail "profile not found in policy: ${FEED_PROFILE}"

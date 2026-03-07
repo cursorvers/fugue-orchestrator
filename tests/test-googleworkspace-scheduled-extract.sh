@@ -164,6 +164,17 @@ test_refreshes_when_stale() {
     [[ "$(wc -l < "${tmp_dir}/calls.log")" -eq 2 ]]
 }
 
+test_accepts_non_executable_preflight_when_invoked_via_bash() {
+  local output_file="${tmp_dir}/extract-nonexec.out"
+
+  chmod 0644 "${fake_preflight}"
+  run_extract "morning-brief-shared" "2026-03-07T03:00:00Z" "${output_file}"
+  chmod +x "${fake_preflight}"
+
+  grep -q '^feed_status=ok$' "${output_file}" &&
+    grep -q '^feed_cache_hit=false$' "${output_file}"
+}
+
 test_ingests_only_fresh_feeds() {
   local weekly_output="${tmp_dir}/extract-weekly.out"
   local ingest_output="${tmp_dir}/ingest.out"
@@ -194,6 +205,7 @@ assert_ok "generates-feed-manifest-and-latest" test_generates_feed_manifest_and_
 assert_ok "cache-hit-within-ttl" test_cache_hit_within_ttl
 assert_ok "refreshes-when-stale" test_refreshes_when_stale
 assert_ok "ingests-only-fresh-feeds" test_ingests_only_fresh_feeds
+assert_ok "accepts-non-executable-preflight-when-invoked-via-bash" test_accepts_non_executable_preflight_when_invoked_via_bash
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="
