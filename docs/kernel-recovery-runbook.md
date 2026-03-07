@@ -107,10 +107,20 @@ Validated on `2026-03-07` in production GitHub Actions:
 - `rollback-canary`
   - run `22792807635`
   - success
+- `reroute-issue`
+  - recovery-console run `22792929084`
+  - success
+  - dispatched `fugue-tutti-caller` run `22792931136`
+  - downstream workflow success
+
+Additional hardening:
+
+- `run-recovery-console.sh` now retries `gh api`, `gh issue list`, `gh variable get`, and `gh workflow run`
+- this reduces flakiness during transient GitHub API connectivity failures
 
 Validated behaviors:
 
 - GitHub Mobile compatible `workflow_dispatch`
 - continuity canary on GitHub-hosted runner
 - `Kernel -> FUGUE` rollback verification without local shell
-- `reroute-issue` is implemented in the same console, but live validation was deferred because GitHub issue creation hit transient API connectivity errors during the final verification pass
+- live reroute from the same console into `fugue-tutti-caller`
