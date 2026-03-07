@@ -7,11 +7,11 @@ Build the outer all-in-one mobile web app with `Happy.app` as the inner conversa
 - Out: desktop replacement, `Cockpit` replacement, `GWS` integration work, native-first mobile shells
 
 ## Action items
-[ ] Create the outer mobile app skeleton and route structure for `Happy`, `Now`, `Tasks`, `Alerts`, and `Recover`
-[ ] Implement the `Happy` conversational surface and intake composer against a `happy-app-intake` adapter
-[ ] Implement `Now` and `Tasks` views against a normalized `happy-app-state` adapter with canonical output cards
-[ ] Implement task detail sheets and `Recover` controls over bounded `kernel-recovery-console` actions
-[ ] Add a `Crow` summarization adapter that converts workflow/issue/task state into short mobile narratives
+[x] Create the outer mobile app skeleton and route structure for `Happy`, `Now`, `Tasks`, `Alerts`, and `Recover`
+[x] Implement the `Happy` conversational surface and intake composer against a `happy-app-intake` adapter
+[x] Implement `Now` and `Tasks` views against a normalized `happy-app-state` adapter with canonical output cards
+[x] Implement task detail sheets and `Recover` controls over bounded `kernel-recovery-console` actions
+[x] Add a `Crow` summarization adapter that converts workflow/issue/task state into short mobile narratives
 [ ] Verify the design contract with at least three parallel simulation lanes on every design-affecting change
 [ ] Run production-like smoke checks for progress visibility, output visibility, and recovery actions before any live cutover
 [ ] Keep `FUGUE` rollback and `GHA` continuity paths visible in the state model but secondary in the mobile UX

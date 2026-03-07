@@ -19,6 +19,8 @@ This app is the outer shell. The inner conversational surface is `Happy`.
 - `manifest.webmanifest`
 - `sw.js`
 - `src/kernel-state.js`
+- `src/adapters/`
+- `src/data/`
 - `src/render.js`
 - `src/app.js`
 - `tests/`
@@ -39,6 +41,24 @@ It does not replace:
 - Cockpit deep-debug view
 - GitHub Actions continuity/recovery
 - FUGUE rollback path
+
+## Adapter model
+
+The first implementation slice now uses explicit adapters instead of wiring the
+UI directly to a single state blob.
+
+- `happy-app-intake`
+  - packet normalization and composer contract
+- `happy-app-state`
+  - normalized mobile state and local cache
+- `happy-app-crow`
+  - short operational narratives for mobile use
+- `happy-app-recovery`
+  - bounded recovery actions over the shared recovery model
+
+These adapters are still backed by mock/local state so the UI stays portable and
+testable. The next implementation step is to replace the adapter internals with
+real endpoints without rewriting screen logic.
 
 ## Verification
 

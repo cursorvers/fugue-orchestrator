@@ -23,6 +23,16 @@ Current implementation seed:
 
 - `/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web`
 
+The current implementation seed already includes:
+
+- a `happy-app-intake` adapter
+- a `happy-app-state` adapter
+- a `happy-app-crow` adapter
+- a `happy-app-recovery` adapter
+
+These adapters are still backed by mock/local state, but the screen layer is no
+longer coupled to a single inline state blob.
+
 ## 1.a Front-End Delivery Strategy
 
 The correct delivery model is:

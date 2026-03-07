@@ -1,7 +1,19 @@
-import { buildIntakePacket, state } from "./kernel-state.js";
+import { buildIntakePacket, crowAdapter, recoveryAdapter, stateAdapter } from "./kernel-state.js";
 import { create, setText, switchScreen } from "./render.js";
 
 let activeTaskFilter = "in-progress";
+let state = stateAdapter.getState();
+
+function refreshState(nextState) {
+  state = nextState;
+  renderHealth();
+  renderHappy();
+  renderPacketPreview();
+  renderNow();
+  renderTasks();
+  renderAlerts();
+  renderRecover();
+}
 
 function renderHappy() {
   setText("crow-summary", state.crowSummary);
@@ -180,11 +192,10 @@ function openTaskSheet(task) {
 
   const recover = document.getElementById("sheet-recover");
   recover.innerHTML = "";
-  ["status", "refresh-progress", "continuity-canary", "rollback-canary"].forEach((action) => {
+  recoveryAdapter.listActions().forEach((action) => {
     const button = create("button", "secondary", action);
     button.addEventListener("click", () => {
-      state.recover_result = `Queued ${action} from ${task.title}. FUGUE reversibility preserved.`;
-      renderRecover();
+      refreshState(recoveryAdapter.run(action, task.title));
     });
     recover.appendChild(button);
   });
@@ -211,12 +222,15 @@ function wireComposer() {
   document.getElementById("submit-task").addEventListener("click", () => {
     const value = input.value.trim();
     if (!value) return;
-    state.recent_prompts.unshift(value);
-    state.recent_prompts = state.recent_prompts.slice(0, 5);
-    state.crowSummary = `Crow accepted: ${value}`;
+    const packet = buildIntakePacket({
+      input: value,
+      tags: selectedTags(),
+      urgency: document.getElementById("urgency").value,
+    });
+    const summary = crowAdapter.summarizeAcceptedPacket(packet);
     input.value = "";
-    renderHappy();
-    renderPacketPreview();
+    document.querySelectorAll(".chip.is-active").forEach((chip) => chip.classList.remove("is-active"));
+    refreshState(stateAdapter.submitPrompt(packet, summary));
   });
 }
 
@@ -238,32 +252,29 @@ function wireTaskSheet() {
   });
 }
 
-function wireRecover() {
-  document.querySelectorAll("[data-recover]").forEach((button) => {
+function wireRecoverActions() {
+  const container = document.getElementById("recover-actions");
+  container.innerHTML = "";
+  recoveryAdapter.listActions().forEach((action) => {
+    const button = create("button", "secondary", action);
+    button.dataset.recover = action;
     button.addEventListener("click", () => {
-      const action = button.dataset.recover;
-      state.recover_result = `Queued ${action}. Kernel will prefer bounded recovery and preserve FUGUE reversibility.`;
-      renderRecover();
+      refreshState(recoveryAdapter.run(action, "Happy Web"));
     });
+    container.appendChild(button);
   });
 }
 
 function boot() {
-  renderHealth();
-  renderHappy();
-  renderPacketPreview();
-  renderNow();
-  renderTasks();
-  renderAlerts();
-  renderRecover();
+  refreshState(stateAdapter.refreshSummary());
   wireNav();
   wireComposer();
   wireTaskFilters();
   wireTaskSheet();
-  wireRecover();
+  wireRecoverActions();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("../sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
 }
 
