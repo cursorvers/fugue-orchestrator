@@ -19,6 +19,12 @@ Sync script:
 
 - `scripts/skills/sync-openclaw-skills.sh`
 
+Vendor-specific shared profile:
+
+- Google Workspace: `docs/googleworkspace-skills-profile.md`
+- Google Workspace manifest: `config/skills/googleworkspace-cli-baseline.tsv`
+- Google Workspace sync: `scripts/skills/sync-googleworkspace-skills.sh`
+
 ## Selected Skills
 
 Required profile:

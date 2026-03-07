@@ -294,6 +294,12 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # ./scripts/skills/sync-openclaw-skills.sh --target both --with-optional --dry-run
 # NOTE: third-party skills は pin SHA 取得 + ブロックリスト検査 + managed marker で保護
 
+# 3.10 Google Workspace skills + CLI 同期（Codex/Claude 共通）
+# npm install -g @googleworkspace/cli
+# ./scripts/skills/sync-googleworkspace-skills.sh --target both
+# ./scripts/skills/sync-googleworkspace-skills.sh --target both --with-optional
+# NOTE: Google Workspace は MCP 常用ではなく skills + CLI を第一選択にする
+
 # Note:
 # `orchestrator provider` は Tutti のレーン選択プロファイルです（実装エンジン切替ではありません）。
 # 実装実行エンジンは `fugue-codex-implement`（Codex CLI）で固定です。
@@ -342,6 +348,11 @@ Orchestrator切替（Codex/Claude）時も同一能力を維持するため、FU
 - Profile: `docs/fugue-skills-profile.md`
 - Manifest: `config/skills/fugue-openclaw-baseline.tsv`
 - Sync script: `scripts/skills/sync-openclaw-skills.sh`
+- Google Workspace profile: `docs/googleworkspace-skills-profile.md`
+- Google Workspace Kernel design: `docs/kernel-googleworkspace-integration-design.md`
+- Google Workspace manifest: `config/skills/googleworkspace-cli-baseline.tsv`
+- Google Workspace Kernel policy: `config/integrations/googleworkspace-kernel-policy.json`
+- Google Workspace sync: `scripts/skills/sync-googleworkspace-skills.sh`
 
 ## Shared Workflow Playbook
 

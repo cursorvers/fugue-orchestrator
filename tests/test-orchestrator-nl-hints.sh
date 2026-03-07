@@ -51,6 +51,43 @@ assert_nl() {
   fi
 }
 
+assert_workspace() {
+  local test_name="$1"
+  local expected_actions="$2"
+  local expected_domains="$3"
+  local expected_applied="$4"
+  shift 4
+
+  total=$((total + 1))
+  local output
+  output="$("${NL}" "$@" --format env)" || {
+    echo "FAIL [${test_name}]: script exited with error"
+    failed=$((failed + 1))
+    return
+  }
+
+  eval "${output}"
+
+  local errors=""
+  if [[ "${workspace_action_hint}" != "${expected_actions}" ]]; then
+    errors+=" actions=${workspace_action_hint}(expected ${expected_actions})"
+  fi
+  if [[ "${workspace_domain_hint}" != "${expected_domains}" ]]; then
+    errors+=" domains=${workspace_domain_hint}(expected ${expected_domains})"
+  fi
+  if [[ "${workspace_hint_applied}" != "${expected_applied}" ]]; then
+    errors+=" applied=${workspace_hint_applied}(expected ${expected_applied})"
+  fi
+
+  if [[ -n "${errors}" ]]; then
+    echo "FAIL [${test_name}]:${errors}"
+    failed=$((failed + 1))
+  else
+    echo "PASS [${test_name}]"
+    passed=$((passed + 1))
+  fi
+}
+
 echo "=== orchestrator-nl-hints.sh unit tests ==="
 echo ""
 
@@ -165,6 +202,23 @@ assert_nl "title-body-combined" \
 assert_nl "uppercase-providers" \
   "claude" "codex" "true" \
   --text "CLAUDEをMAINにしてCODEXをSUBにする"
+
+# --- Group 12: Workspace route hints ---
+assert_workspace "workspace-meeting" \
+  "meeting-prep" "calendar,drive,docs" "true" \
+  --text "会議前に agenda と linked docs を確認したい"
+
+assert_workspace "workspace-mail" \
+  "gmail-triage" "gmail" "true" \
+  --text "受信箱の未読メールを triage したい"
+
+assert_workspace "workspace-digest" \
+  "weekly-digest" "calendar,gmail" "true" \
+  --text "週次 digest を作って"
+
+assert_workspace "workspace-doc-sheet-domain-only" \
+  "" "drive,docs,sheets" "true" \
+  --text "共有資料と spreadsheet を参照してレポート表を作る"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

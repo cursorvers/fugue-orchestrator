@@ -195,11 +195,19 @@ Use live rehearsal only when needed and clean up synthetic issues after verifica
   - `scripts/skills/sync-openclaw-skills.sh`
 - Profile details:
   - `docs/fugue-skills-profile.md`
+- Vendor-specific skill profile:
+  - `docs/googleworkspace-skills-profile.md`
+- Vendor-specific manifest:
+  - `config/skills/googleworkspace-cli-baseline.tsv`
+- Vendor-specific sync script:
+  - `scripts/skills/sync-googleworkspace-skills.sh`
 
 Security guardrails:
 - Do not install unpinned third-party skills directly from `main`.
 - Reject skills with unsafe auto-execution guidance (`--yolo`, `--full-auto`) in default profile.
 - Keep Codex and Claude skill sets synchronized from the same manifest so orchestrator switching does not change capabilities.
+- Prefer `SKILL.md + CLI` over MCP by default for Google Workspace because it keeps the active context surface smaller and preserves provider-agnostic parity.
+- Reserve `gws mcp` for MCP-only clients or when structured tool exposure is explicitly required.
 
 ## 10. Shared Workflow Playbook (Codex/Claude)
 

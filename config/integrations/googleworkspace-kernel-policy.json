@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "name": "googleworkspace-kernel-policy",
+  "default_adapters": {
+    "readonly": "googleworkspace-cli-readonly",
+    "write": "googleworkspace-cli-write"
+  },
+  "auth_profiles": {
+    "service-account-readonly": {
+      "interactive": false,
+      "allows_side_effects": false,
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report"
+      ],
+      "notes": [
+        "Use for scheduled or unattended Kernel routines.",
+        "Do not assume Gmail mailbox access."
+      ]
+    },
+    "user-oauth-readonly": {
+      "interactive": true,
+      "allows_side_effects": false,
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report",
+        "weekly-digest",
+        "gmail-triage"
+      ],
+      "notes": [
+        "Preferred for operator-bound context gathering.",
+        "Use bounded output only."
+      ]
+    },
+    "user-oauth-write": {
+      "interactive": true,
+      "allows_side_effects": true,
+      "allowed_actions": [
+        "gmail-send",
+        "drive-upload",
+        "calendar-insert",
+        "docs-create",
+        "docs-insert-text",
+        "sheets-create",
+        "sheets-append"
+      ],
+      "notes": [
+        "Requires ok_to_execute and human approval.",
+        "Prefer dry-run before actual execution."
+      ]
+    }
+  },
+  "phase_policy": [
+    {
+      "phase": "intake-classify",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [],
+      "auth_profiles": [],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "route-hint"
+    },
+    {
+      "phase": "preflight-enrich",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report",
+        "weekly-digest",
+        "gmail-triage"
+      ],
+      "auth_profiles": [
+        "service-account-readonly",
+        "user-oauth-readonly"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "evidence"
+    },
+    {
+      "phase": "scheduled-operator-loop",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report",
+        "weekly-digest"
+      ],
+      "auth_profiles": [
+        "service-account-readonly",
+        "user-oauth-readonly"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "digest"
+    },
+    {
+      "phase": "execute-dry-run",
+      "adapter_id": "googleworkspace-cli-write",
+      "allowed_actions": [
+        "gmail-send",
+        "drive-upload",
+        "calendar-insert"
+      ],
+      "auth_profiles": [
+        "user-oauth-write"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "preview"
+    },
+    {
+      "phase": "approved-execute",
+      "adapter_id": "googleworkspace-cli-write",
+      "allowed_actions": [
+        "gmail-send",
+        "drive-upload",
+        "calendar-insert",
+        "docs-create",
+        "docs-insert-text",
+        "sheets-create",
+        "sheets-append"
+      ],
+      "auth_profiles": [
+        "user-oauth-write"
+      ],
+      "requires_ok_to_execute": true,
+      "requires_human_approval": true,
+      "result_class": "receipt"
+    },
+    {
+      "phase": "recovery-rehydrate",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [
+        "meeting-prep",
+        "weekly-digest",
+        "gmail-triage"
+      ],
+      "auth_profiles": [
+        "user-oauth-readonly"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "evidence"
+    }
+  ],
+  "action_policy": {
+    "meeting-prep": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "preflight-enrich",
+      "fallback": "skip-if-auth-unavailable"
+    },
+    "standup-report": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "scheduled-operator-loop",
+      "fallback": "service-account-preferred"
+    },
+    "weekly-digest": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "scheduled-operator-loop",
+      "fallback": "degrade-without-gmail"
+    },
+    "gmail-triage": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "preflight-enrich",
+      "fallback": "skip-with-service-account"
+    },
+    "gmail-send": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": true
+    },
+    "drive-upload": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": true
+    },
+    "calendar-insert": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": true
+    },
+    "docs-create": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    },
+    "docs-insert-text": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    },
+    "sheets-create": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    },
+    "sheets-append": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    }
+  }
+}

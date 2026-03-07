@@ -79,6 +79,9 @@ lessons_report=".fugue/pre-implement/lessons.md"
 research_report="${RESEARCH_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-research.md}"
 plan_report="${PLAN_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-plan.md}"
 critic_report="${CRITIC_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-critic.md}"
+workspace_report="${WORKSPACE_REPORT_PATH:-}"
+workspace_summary="$(printf '%s' "${WORKSPACE_SUMMARY:-}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
+workspace_preflight_status="$(echo "${WORKSPACE_PREFLIGHT_STATUS:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 title_text="$(printf '%s\n' "${ISSUE_TITLE}" | tr '[:upper:]' '[:lower:]')"
 goal_text="$(printf '%s\n' "${ISSUE_BODY}" | awk '
   BEGIN { capture=0 }
@@ -92,6 +95,20 @@ if [[ "${LARGE_REFACTOR_LABEL:-false}" == "true" ]]; then
   is_large_refactor="true"
 elif echo "${task_signal_text}" | grep -Eqi '(大規模|全面|全体|リファクタ|refactor|migration|rewrite|アーキテクチャ刷新)'; then
   is_large_refactor="true"
+fi
+workspace_instruction=""
+if [[ -n "${workspace_report}" || -n "${workspace_summary}" || -n "${workspace_preflight_status}" ]]; then
+  workspace_instruction="$(cat <<EOF
+
+## Google Workspace peripheral evidence
+- Treat Google Workspace only as supplementary peripheral evidence.
+- Do not treat Workspace artifacts as control-plane truth.
+- Workspace preflight status: ${workspace_preflight_status:-none}
+- Workspace report path: ${workspace_report:-none}
+- Workspace summary: ${workspace_summary:-none}
+- Use Workspace evidence only to enrich context, coordination, and stakeholder-facing artifacts.
+EOF
+)"
 fi
 
 # Build instruction from issue
@@ -166,6 +183,7 @@ ${ISSUE_BODY}
   - Preventive rule
   - Trigger signal
 - Before finalizing, include concrete verification evidence (tests, logs, or behavioral diff).
+${workspace_instruction}
 
 ## Rules
 - Implement the changes described above

@@ -123,6 +123,32 @@
       "path": "../cloudflare-workers-hub-deploy/cockpit-pwa/src/app/page.tsx"
     },
     {
+      "id": "googleworkspace-cli-readonly",
+      "name": "Google Workspace CLI Read Only",
+      "scope": "skill",
+      "kind": "knowledge",
+      "adapter_class": "shell",
+      "authority": "service-adapter",
+      "validation_mode": "smoke",
+      "contract_owner": "external",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "path": "scripts/lib/googleworkspace-cli-adapter.sh"
+    },
+    {
+      "id": "googleworkspace-cli-write",
+      "name": "Google Workspace CLI Write",
+      "scope": "skill",
+      "kind": "service",
+      "adapter_class": "shell",
+      "authority": "service-adapter",
+      "validation_mode": "smoke",
+      "contract_owner": "external",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "path": "scripts/lib/googleworkspace-cli-adapter.sh"
+    },
+    {
       "id": "slide-specialist",
       "name": "Slide Specialist Workflow",
       "scope": "skill",

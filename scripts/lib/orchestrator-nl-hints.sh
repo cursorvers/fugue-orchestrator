@@ -64,10 +64,35 @@ nl_assist_hint=""
 nl_main_reason=""
 nl_assist_reason=""
 nl_inference_skipped_reason=""
+workspace_action_hint=""
+workspace_domain_hint=""
+workspace_reason=""
+workspace_hint_applied="false"
 
 contains() {
   local pattern="$1"
   printf '%s\n' "${flat}" | grep -Eqi "${pattern}"
+}
+
+append_csv_unique() {
+  local current="$1"
+  local value="$2"
+  if [[ -z "${value}" ]]; then
+    printf '%s' "${current}"
+    return 0
+  fi
+  case ",${current}," in
+    *,"${value}",*)
+      printf '%s' "${current}"
+      ;;
+    *)
+      if [[ -z "${current}" ]]; then
+        printf '%s' "${value}"
+      else
+        printf '%s,%s' "${current}" "${value}"
+      fi
+      ;;
+  esac
 }
 
 question_like="false"
@@ -173,6 +198,48 @@ else
   fi
 fi
 
+if contains '(meeting[[:space:]_-]*prep|meeting|calendar|agenda|attendee|会議|打ち合わせ|予定|アジェンダ|参加者)'; then
+  workspace_action_hint="$(append_csv_unique "${workspace_action_hint}" "meeting-prep")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "calendar")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "drive")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "docs")"
+  workspace_reason="$(append_csv_unique "${workspace_reason}" "meeting-context")"
+fi
+
+if contains '(standup|daily[[:space:]_-]*report|daily[[:space:]_-]*brief|朝会|日報|スタンドアップ)'; then
+  workspace_action_hint="$(append_csv_unique "${workspace_action_hint}" "standup-report")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "calendar")"
+  workspace_reason="$(append_csv_unique "${workspace_reason}" "standup-context")"
+fi
+
+if contains '(weekly[[:space:]_-]*digest|週次|週報|digest|ダイジェスト)'; then
+  workspace_action_hint="$(append_csv_unique "${workspace_action_hint}" "weekly-digest")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "calendar")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "gmail")"
+  workspace_reason="$(append_csv_unique "${workspace_reason}" "digest-context")"
+fi
+
+if contains '(gmail|email|e-mail|mail|inbox|受信箱|未読|メール|triage|トリアージ)'; then
+  workspace_action_hint="$(append_csv_unique "${workspace_action_hint}" "gmail-triage")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "gmail")"
+  workspace_reason="$(append_csv_unique "${workspace_reason}" "mail-context")"
+fi
+
+if contains '(drive|folder|file|files|document|docs|doc|資料|添付|共有ファイル|共有資料)'; then
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "drive")"
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "docs")"
+  workspace_reason="$(append_csv_unique "${workspace_reason}" "document-context")"
+fi
+
+if contains '(sheet|sheets|spreadsheet|スプレッドシート|表計算|csv|table|レポート表)'; then
+  workspace_domain_hint="$(append_csv_unique "${workspace_domain_hint}" "sheets")"
+  workspace_reason="$(append_csv_unique "${workspace_reason}" "sheet-context")"
+fi
+
+if [[ -n "${workspace_action_hint}" || -n "${workspace_domain_hint}" ]]; then
+  workspace_hint_applied="true"
+fi
+
 if [[ "${nl_main_hint}" != "claude" && "${nl_main_hint}" != "codex" ]]; then
   nl_main_hint=""
   nl_main_reason=""
@@ -195,13 +262,21 @@ if [[ "${format}" == "json" ]]; then
     --arg nl_assist_reason "${nl_assist_reason}" \
     --arg nl_inference_skipped_reason "${nl_inference_skipped_reason}" \
     --arg nl_hint_applied "${nl_hint_applied}" \
+    --arg workspace_action_hint "${workspace_action_hint}" \
+    --arg workspace_domain_hint "${workspace_domain_hint}" \
+    --arg workspace_reason "${workspace_reason}" \
+    --arg workspace_hint_applied "${workspace_hint_applied}" \
     '{
       nl_main_hint: $nl_main_hint,
       nl_assist_hint: $nl_assist_hint,
       nl_main_reason: $nl_main_reason,
       nl_assist_reason: $nl_assist_reason,
       nl_inference_skipped_reason: $nl_inference_skipped_reason,
-      nl_hint_applied: ($nl_hint_applied == "true")
+      nl_hint_applied: ($nl_hint_applied == "true"),
+      workspace_action_hint: $workspace_action_hint,
+      workspace_domain_hint: $workspace_domain_hint,
+      workspace_reason: $workspace_reason,
+      workspace_hint_applied: ($workspace_hint_applied == "true")
     }'
 else
   printf 'nl_main_hint=%q\n' "${nl_main_hint}"
@@ -210,4 +285,8 @@ else
   printf 'nl_assist_reason=%q\n' "${nl_assist_reason}"
   printf 'nl_inference_skipped_reason=%q\n' "${nl_inference_skipped_reason}"
   printf 'nl_hint_applied=%q\n' "${nl_hint_applied}"
+  printf 'workspace_action_hint=%q\n' "${workspace_action_hint}"
+  printf 'workspace_domain_hint=%q\n' "${workspace_domain_hint}"
+  printf 'workspace_reason=%q\n' "${workspace_reason}"
+  printf 'workspace_hint_applied=%q\n' "${workspace_hint_applied}"
 fi

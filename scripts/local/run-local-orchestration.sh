@@ -279,6 +279,8 @@ MODEL_POLICY="${ROOT_DIR}/scripts/lib/model-policy.sh"
 WORKFLOW_RISK_POLICY="${ROOT_DIR}/scripts/lib/workflow-risk-policy.sh"
 CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
+ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
+GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
   exit 2
@@ -293,6 +295,14 @@ if [[ ! -x "${WORKFLOW_RISK_POLICY}" ]]; then
 fi
 if [[ ! -x "${CLAUDE_TEAMS_POLICY}" ]]; then
   echo "Error: required Claude Teams policy script is missing or not executable: ${CLAUDE_TEAMS_POLICY}" >&2
+  exit 2
+fi
+if [[ ! -x "${ORCHESTRATOR_NL_HINTS}" ]]; then
+  echo "Error: required NL hint script is missing or not executable: ${ORCHESTRATOR_NL_HINTS}" >&2
+  exit 2
+fi
+if [[ ! -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
+  echo "Error: Google Workspace Kernel policy missing: ${GOOGLEWORKSPACE_KERNEL_POLICY}" >&2
   exit 2
 fi
 if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
@@ -389,6 +399,44 @@ RUN_DIR="${OUT_DIR}/issue-${ISSUE_NUMBER}-${run_id}"
 LANE_DIR="${RUN_DIR}/lanes"
 TMP_DIR="${RUN_DIR}/tmp"
 mkdir -p "${LANE_DIR}" "${TMP_DIR}"
+
+workspace_hint_json="$("${ORCHESTRATOR_NL_HINTS}" \
+  --title "${ISSUE_TITLE}" \
+  --body "${ISSUE_BODY}" \
+  --format json)"
+workspace_context_file="${RUN_DIR}/googleworkspace-context.json"
+workspace_hint_applied="$(echo "${workspace_hint_json}" | jq -r '.workspace_hint_applied // false')"
+workspace_action_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_action_hint // ""')"
+workspace_domain_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_domain_hint // ""')"
+workspace_reason="$(echo "${workspace_hint_json}" | jq -r '.workspace_reason // ""')"
+jq -cn \
+  --argjson hints "${workspace_hint_json}" \
+  --slurpfile policy "${GOOGLEWORKSPACE_KERNEL_POLICY}" \
+  '($hints.workspace_action_hint | split(",") | map(select(length > 0))) as $actions
+   | ($hints.workspace_domain_hint | split(",") | map(select(length > 0))) as $domains
+   | {
+       workspace_hint_applied: ($hints.workspace_hint_applied // false),
+       workspace_action_hint: $hints.workspace_action_hint,
+       workspace_domain_hint: $hints.workspace_domain_hint,
+       workspace_reason: $hints.workspace_reason,
+       suggested_actions: $actions,
+       suggested_domains: $domains,
+       suggested_phases: (
+         $actions
+         | map($policy[0].action_policy[.]?.default_phase)
+         | map(select(. != null))
+         | unique
+       ),
+       readonly_actions: (
+         $actions
+         | map(select(($policy[0].action_policy[.]?.side_effect // false) | not))
+       ),
+       approval_required_actions: (
+         $actions
+         | map(select(($policy[0].action_policy[.]?.side_effect // false) == true))
+       ),
+       policy_file: "config/integrations/googleworkspace-kernel-policy.json"
+     }' > "${workspace_context_file}"
 
 strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}"
 strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}"
@@ -894,6 +942,11 @@ jq -n \
   --argjson claude_session_count "${claude_session_count}" \
   --arg claude_sessions_file "${claude_sessions_file}" \
   --arg claude_resume_hint "${claude_resume_hint}" \
+  --arg workspace_hint_applied "${workspace_hint_applied}" \
+  --arg workspace_action_hint "${workspace_action_hint}" \
+  --arg workspace_domain_hint "${workspace_domain_hint}" \
+  --arg workspace_reason "${workspace_reason}" \
+  --arg workspace_context_file "${workspace_context_file}" \
   '{
     issue_number:($issue_number|tonumber),
     issue_url:$issue_url,
@@ -937,7 +990,12 @@ jq -n \
     glm_baseline_success:$glm_baseline_success,
     claude_session_count:$claude_session_count,
     claude_sessions_file:$claude_sessions_file,
-    claude_resume_hint:$claude_resume_hint
+    claude_resume_hint:$claude_resume_hint,
+    workspace_hint_applied:($workspace_hint_applied=="true"),
+    workspace_action_hint:$workspace_action_hint,
+    workspace_domain_hint:$workspace_domain_hint,
+    workspace_reason:$workspace_reason,
+    workspace_context_file:$workspace_context_file
   }' > "${integrated_json}"
 
 summary_md="${RUN_DIR}/summary.md"
@@ -970,6 +1028,10 @@ cat > "${summary_md}" <<EOF
 - claude session handoff: ${claude_session_handoff} (sessions ${claude_session_count})
 - claude sessions file: ${claude_sessions_file}
 - claude resume hint: ${claude_resume_hint}
+- workspace hint applied: ${workspace_hint_applied}
+- workspace action hint: ${workspace_action_hint}
+- workspace domain hint: ${workspace_domain_hint}
+- workspace context file: ${workspace_context_file}
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}
 EOF
