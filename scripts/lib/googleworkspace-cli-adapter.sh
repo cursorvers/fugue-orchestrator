@@ -144,6 +144,33 @@ print_command() {
   printf '\n'
 }
 
+run_gws_command() {
+  local stdout_path="${1:-}"
+  local stderr_path="${2:-}"
+  shift 2
+  local cmd=("$@")
+  local env_cmd=(
+    env
+    -u GOOGLE_API_KEY
+    -u GOOGLE_APPLICATION_CREDENTIALS
+    -u GOOGLE_CLOUD_PROJECT
+    -u GCLOUD_PROJECT
+    -u GOOGLE_CREDENTIALS_PATH
+    -u GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE
+    -u FUGUE_GWS_CREDENTIALS_FILE
+    -u KERNEL_GWS_CREDENTIALS_FILE
+  )
+  if [[ -n "${credentials_file}" ]]; then
+    env_cmd+=("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=${credentials_file}")
+  fi
+
+  if [[ -n "${stdout_path}" ]]; then
+    "${env_cmd[@]}" "${cmd[@]}" > "${stdout_path}" 2> "${stderr_path}"
+  else
+    "${env_cmd[@]}" "${cmd[@]}"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --action)
@@ -456,52 +483,21 @@ fi
 require_cmd gws
 
 if [[ "${action}" == "smoke" ]]; then
-  if [[ -n "${credentials_file}" ]]; then
-    env -u GOOGLE_API_KEY \
-      -u GOOGLE_APPLICATION_CREDENTIALS \
-      -u GOOGLE_CLOUD_PROJECT \
-      -u GCLOUD_PROJECT \
-      -u GOOGLE_CREDENTIALS_PATH \
-      GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="${credentials_file}" \
-      "${cmd[@]}" >/dev/null
-  else
-    "${cmd[@]}" >/dev/null
-  fi
+  run_gws_command "/dev/null" "/dev/null" "${cmd[@]}"
   write_meta "ok" 0 "adapter ready" "{}"
   echo "googleworkspace-cli adapter ready"
   exit 0
 fi
 
 if [[ -z "${meta_output_path}" ]]; then
-  if [[ -n "${credentials_file}" ]]; then
-    exec env -u GOOGLE_API_KEY \
-      -u GOOGLE_APPLICATION_CREDENTIALS \
-      -u GOOGLE_CLOUD_PROJECT \
-      -u GCLOUD_PROJECT \
-      -u GOOGLE_CREDENTIALS_PATH \
-      GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="${credentials_file}" \
-      "${cmd[@]}"
-  fi
-  exec "${cmd[@]}"
+  run_gws_command "" "" "${cmd[@]}"
+  exit 0
 fi
 
-if [[ -n "${credentials_file}" ]]; then
-  set +e
-  env -u GOOGLE_API_KEY \
-    -u GOOGLE_APPLICATION_CREDENTIALS \
-    -u GOOGLE_CLOUD_PROJECT \
-    -u GCLOUD_PROJECT \
-    -u GOOGLE_CREDENTIALS_PATH \
-    GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="${credentials_file}" \
-    "${cmd[@]}" > "${raw_output_path}" 2> "${stderr_output_path}"
-  rc=$?
-  set -e
-else
-  set +e
-  "${cmd[@]}" > "${raw_output_path}" 2> "${stderr_output_path}"
-  rc=$?
-  set -e
-fi
+set +e
+run_gws_command "${raw_output_path}" "${stderr_output_path}" "${cmd[@]}"
+rc=$?
+set -e
 
 receipt_json="$(extract_receipt "${raw_output_path}")"
 status="ok"
