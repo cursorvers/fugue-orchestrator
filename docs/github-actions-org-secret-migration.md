@@ -5,6 +5,7 @@ Goal: move GitHub Actions secrets to an org-first model while keeping `Kernel` a
 ## Rule
 
 - If a secret is only used by GitHub Actions, prefer **Organization Secret** with `selected repositories`.
+- Use `ALL` only by exception. The default should be `selected repositories`.
 - If a secret is used by a deployed runtime, the runtime copy remains on the platform.
 - If GitHub Actions must sync that runtime secret during deploy, controlled duplication is allowed:
   - GitHub Org Secret = CI distribution source
