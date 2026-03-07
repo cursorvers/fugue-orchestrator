@@ -18,6 +18,7 @@ set -euo pipefail
 
 ORG=""
 CONFIG="scripts/org-secrets-audit.json"
+FALLBACK_REASON=""
 
 while [[ $# -gt 0 ]]; do
   case "${1}" in
@@ -30,6 +31,8 @@ while [[ $# -gt 0 ]]; do
 Usage: scripts/audit-org-secrets.sh --org <org> [--config <path>]
 
 Audits GitHub Actions secrets to help centralize them as organization secrets.
+If org-level secret access is unavailable, the script falls back to repo-only
+classification so migration planning can continue.
 EOF
       exit 0;;
     *)
@@ -78,22 +81,39 @@ echo ""
 preferred_org_secrets="$(json_get '.preferred_org_secrets[]?' | sed '/^null$/d' || true)"
 allow_repo_secrets="$(json_get '.allow_repo_secrets[]?' | sed '/^null$/d' || true)"
 
-# Fetch org secrets list (names + visibility).
-org_secrets_json="$(gh api "orgs/${ORG}/actions/secrets" --paginate)"
 tmpdir="$(mktemp -d)"
 chmod 700 "${tmpdir}"
 trap 'rm -rf "${tmpdir}"' EXIT
+
+org_access=true
+org_api_err="${tmpdir}/org-secrets.err"
+org_secrets_json=""
+
+# Fetch org secrets list (names + visibility).
+if ! org_secrets_json="$(gh api "orgs/${ORG}/actions/secrets" --paginate 2>"${org_api_err}")"; then
+  org_access=false
+  FALLBACK_REASON="$(tr '\n' ' ' <"${org_api_err}" | sed 's/[[:space:]]\+/ /g')"
+  org_secrets_json='{"secrets":[]}'
+fi
 
 org_secrets_tsv="${tmpdir}/org-secrets.tsv"
 printf '%s' "${org_secrets_json}" | jq -r '.secrets[] | [.name, .visibility, .updated_at] | @tsv' | sort -u > "${org_secrets_tsv}"
 
 org_secret_visibility() {
   local secret="$1"
+  if [[ "${org_access}" != "true" ]]; then
+    echo "unknown"
+    return 0
+  fi
   awk -F'\t' -v s="${secret}" '$1==s{print $2; found=1} END{if(!found) print "missing"}' "${org_secrets_tsv}"
 }
 
 org_secret_updated_at() {
   local secret="$1"
+  if [[ "${org_access}" != "true" ]]; then
+    echo ""
+    return 0
+  fi
   awk -F'\t' -v s="${secret}" '$1==s{print $3; found=1} END{if(!found) print ""}' "${org_secrets_tsv}"
 }
 
@@ -121,6 +141,10 @@ secret_is_covered_for_repo() {
 
   if printf '%s\n' "${repo_secrets}" | has_line_exact "${secret}"; then
     return 0
+  fi
+
+  if [[ "${org_access}" != "true" ]]; then
+    return 1
   fi
 
   local org_vis org_covers
@@ -156,7 +180,10 @@ if [[ -n "${preferred_org_secrets}" ]]; then
     [[ -z "${s}" ]] && continue
     vis="$(org_secret_visibility "${s}")"
     updated="$(org_secret_updated_at "${s}")"
-    if [[ "${vis}" == "missing" ]]; then
+    if [[ "${vis}" == "unknown" ]]; then
+      printf 'SKIP     %s (org access unavailable)\n' "${s}"
+      warnings=$((warnings+1))
+    elif [[ "${vis}" == "missing" ]]; then
       printf 'MISSING  %s\n' "${s}"
       failures=$((failures+1))
     else
@@ -167,6 +194,12 @@ else
   echo "(none configured)"
 fi
 echo ""
+
+if [[ "${org_access}" != "true" ]]; then
+  echo "WARN: org-level secret access unavailable; using repo-only fallback"
+  echo "      ${FALLBACK_REASON}"
+  echo ""
+fi
 
 echo "=== Repo Coverage ==="
 while IFS= read -r repo; do
@@ -221,6 +254,12 @@ while IFS= read -r repo; do
       else
         printf '  OK    %s (repo secret)\n' "${secret}"
       fi
+      continue
+    fi
+
+    if [[ "${org_access}" != "true" ]]; then
+      printf '  WARN  %s (repo secret missing; org coverage unknown without org access)\n' "${secret}"
+      warnings=$((warnings+1))
       continue
     fi
 
@@ -281,12 +320,34 @@ while IFS= read -r repo; do
 
       if [[ "${group_ok}" == "true" ]]; then
         printf '  OK    required_any[%s] (%s)\n' "${group_idx}" "${satisfied_by}"
+      elif [[ "${org_access}" != "true" ]]; then
+        group_desc="$(printf '%s' "${group_json}" | jq -r 'map(if type=="string" then . elif (type=="object" and has("all_of")) then (.all_of|join(" + ")) else "invalid" end) | join(" OR ")')"
+        printf '  WARN  required_any[%s] (%s) org coverage unknown without org access\n' "${group_idx}" "${group_desc}"
+        warnings=$((warnings+1))
       else
         group_desc="$(printf '%s' "${group_json}" | jq -r 'map(if type=="string" then . elif (type=="object" and has("all_of")) then (.all_of|join(" + ")) else "invalid" end) | join(" OR ")')"
         printf '  FAIL  required_any[%s] (%s)\n' "${group_idx}" "${group_desc}"
         failures=$((failures+1))
       fi
     done < <(jq -c --arg r "${repo}" '.repos[$r].required_any[]? // empty' "${CONFIG}")
+  fi
+
+  if [[ -n "${preferred_org_secrets}" ]]; then
+    migrate_candidates=""
+    while IFS= read -r repo_secret; do
+      [[ -z "${repo_secret}" ]] && continue
+      if printf '%s\n' "${preferred_org_secrets}" | has_line_exact "${repo_secret}" && ! printf '%s\n' "${allow_repo_secrets}" | has_line_exact "${repo_secret}"; then
+        migrate_candidates+="${repo_secret}"$'\n'
+      fi
+    done <<<"${repo_secrets}"
+
+    if [[ -n "${migrate_candidates}" ]]; then
+      echo "  MIGRATE preferred org candidates:"
+      while IFS= read -r candidate; do
+        [[ -z "${candidate}" ]] && continue
+        printf '    - %s\n' "${candidate}"
+      done <<<"${migrate_candidates}"
+    fi
   fi
 done <<<"${repos}"
 

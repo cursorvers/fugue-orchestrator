@@ -72,6 +72,36 @@ Use:
 bash scripts/audit-org-secrets.sh --org cursorvers
 ```
 
+If the current `gh` identity does not have org-level secret access, the script now
+falls back to repo-only classification and prints:
+
+- secrets that should migrate from repo to org
+- required coverage that cannot be verified without org access
+- repo-specific exceptions that may remain in repo/environment scope
+
+This lets migration planning continue before org permissions are granted.
+
+## Minimum Access Model
+
+For long-term operations, the best setup is:
+
+- a dedicated GitHub automation identity or GitHub App for secret management
+- org permission to manage Actions organization secrets and variables
+- repo/environment permissions only where a repo-specific exception is justified
+
+For a human operator using `gh`, the minimum practical setup is:
+
+```bash
+gh auth refresh -h github.com -s admin:org,repo,read:org
+```
+
+And the GitHub account must have either:
+
+- org owner access, or
+- a custom role that can manage Actions organization secrets and variables
+
+Without that, repo-level classification still works, but org coverage cannot be proven.
+
 Config source:
 
 - [org-secrets-audit.json](/Users/masayuki/Dev/fugue-orchestrator/scripts/org-secrets-audit.json)
