@@ -125,3 +125,8 @@ flowchart TD
   - Where Claude-native skills, MCPs, and linked systems are actually invoked.
 - `Verification + Rollback`
   - Kernel is not considered healthy unless simulations pass and `fugue-bridge` remains runnable.
+
+## Related Ops Docs
+
+- [Kernel Recovery Runbook](/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-recovery-runbook.md)
+- [Kernel Mini/MBP Operations Topology](/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-mini-mbp-ops-topology.md)
