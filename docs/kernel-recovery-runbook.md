@@ -113,4 +113,4 @@ Validated behaviors:
 - GitHub Mobile compatible `workflow_dispatch`
 - continuity canary on GitHub-hosted runner
 - `Kernel -> FUGUE` rollback verification without local shell
-- issue-level reroute path remains available through the same console
+- `reroute-issue` is implemented in the same console, but live validation was deferred because GitHub issue creation hit transient API connectivity errors during the final verification pass
