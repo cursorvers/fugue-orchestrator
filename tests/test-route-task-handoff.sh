@@ -116,8 +116,8 @@ assert_case() {
     return
   fi
 
-  if ! grep -Fq 'Mainframe dispatches and evaluates execution policy.' "${ROOT_DIR}/handoff-comment.md"; then
-    echo "FAIL [${name}]: handoff comment missing execution-policy note"
+  if ! grep -Fq 'GitHub-hosted Tutti consensus starts now and continues development from the current issue state.' "${ROOT_DIR}/handoff-comment.md"; then
+    echo "FAIL [${name}]: handoff comment missing continuation UX note"
     failed=$((failed + 1))
     return
   fi
