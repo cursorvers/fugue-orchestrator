@@ -36,6 +36,8 @@ If a file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - Do not rely on `~/.codex/prompts/kernel.md` alone for repository work; treat the global prompt as convenience only.
 - Hot reload is not guaranteed. After changing `.codex/prompts/kernel.md`, start a new Codex session before assuming the update is active.
 - If `/kernel` is not recognized, restart Codex from this repository root and retry before doing manual fallback work.
+- `/kernel` bootstrap must launch at least 2 active subagent lanes before the first acknowledgement.
+- The first valid acknowledgement must include a `Lane manifest:` section describing currently active lanes, not planned lanes.
 
 ## Precision Rule
 
@@ -63,6 +65,7 @@ For `/kernel` prompt verification:
 
 - static contract check: `bash tests/test-codex-kernel-prompt.sh`
 - runtime smoke on a fresh session: `RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh`
+- runtime smoke passes only when the acknowledgement includes both `Kernel orchestration is active ...` and a lane manifest with at least 2 active lanes
 
 ## Current Intent
 

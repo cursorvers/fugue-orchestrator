@@ -54,6 +54,8 @@ Main Orchestrator（統合・報告）
 - `~/.codex/prompts/kernel.md` は補助扱いであり、この repo の実行契約は repo-local prompt を基準にします。
 - prompt の hot reload は保証しません。`.codex/prompts/kernel.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
 - `/kernel` が plain text として扱われた場合は、repo root で新規セッションを起動し直してから再実行してください。
+- `/kernel` の bootstrap は acknowledgement より先に最低 2 本の active lane を起動している必要があります。
+- 最初の有効な応答には `Lane manifest:` と、現在アクティブな lane を最低 2 本列挙した行が必要です。
 
 ## ファイル構成
 
@@ -268,6 +270,7 @@ bash tests/test-codex-kernel-prompt.sh
 
 # /kernel prompt の fresh-session smoke test（Codex CLI ログイン済み環境）
 RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh
+# 合格条件: acknowledgement + lane manifest + 2 本以上の active lane
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
 # CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \

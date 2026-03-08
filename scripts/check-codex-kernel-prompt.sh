@@ -37,18 +37,28 @@ assert_file "${README_FILE}"
 assert_contains "${PROMPT_FILE}" "maintain at least 2 materially distinct active lanes" "prompt requires >=2 active lanes"
 assert_contains "${PROMPT_FILE}" "do not collapse, defer, or silently degrade to single-thread execution" "prompt forbids single-thread degradation"
 assert_contains "${PROMPT_FILE}" "treat de-parallelization as a policy violation" "prompt marks de-parallelization as violation"
+assert_contains "${PROMPT_FILE}" "launch at least 2 materially distinct subagents immediately before any substantive analysis" "prompt requires immediate subagent launch"
+assert_contains "${PROMPT_FILE}" "Lane manifest:" "prompt requires lane manifest"
+assert_contains "${PROMPT_FILE}" "currently active lanes, not planned lanes" "prompt forbids planned-lane manifest"
 
 assert_contains "${CODEX_FILE}" "fresh Codex session started at the repository root and then \`/kernel\`" "CODEX documents fresh-session repo-root contract"
 assert_contains "${CODEX_FILE}" "Hot reload is not guaranteed." "CODEX documents restart requirement"
 assert_contains "${CODEX_FILE}" "runtime smoke on a fresh session" "CODEX documents runtime smoke path"
+assert_contains "${CODEX_FILE}" "launch at least 2 active subagent lanes before the first acknowledgement" "CODEX documents subagent-first bootstrap"
+assert_contains "${CODEX_FILE}" "Lane manifest:" "CODEX documents lane manifest"
 
 assert_contains "${README_FILE}" "repo root で新規に開いた Codex セッションから \`/kernel\`" "README documents repo-root contract"
 assert_contains "${README_FILE}" "hot reload は保証しません" "README documents hot reload limitation"
 assert_contains "${README_FILE}" "RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh" "README documents smoke command"
+assert_contains "${README_FILE}" "最低 2 本の active lane" "README documents minimum active lanes"
+assert_contains "${README_FILE}" "Lane manifest:" "README documents lane manifest"
 
 if [[ "${RUN_CODEX_KERNEL_SMOKE:-0}" == "1" ]]; then
   smoke_output="$(codex exec -C "${ROOT_DIR}" "/kernel" 2>&1 || true)"
-  if grep -Eq 'Kernel orchestration is active (in|for) this session\.' <<<"${smoke_output}"; then
+  lane_manifest_count="$(printf '%s\n' "${smoke_output}" | grep -Ec '^- .+: .+ - .+$' || true)"
+  if grep -Eq 'Kernel orchestration is active (in|for) this session\.' <<<"${smoke_output}" \
+    && grep -Fq 'Lane manifest:' <<<"${smoke_output}" \
+    && [[ "${lane_manifest_count}" -ge 2 ]]; then
     echo "[PASS] runtime smoke: /kernel acknowledged in fresh session" >&2
   else
     echo "[FAIL] runtime smoke: /kernel acknowledgement missing" >&2
