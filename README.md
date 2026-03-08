@@ -50,10 +50,15 @@ Main Orchestrator（統合・報告）
 ## `/kernel` 運用契約
 
 - この repo で Kernel orchestration を始める正式な入口は、repo root で新規に開いた Codex セッションから `/kernel` を実行することです。
+- chat 欄から 1語で起動したい場合の local alias は `/k` です。`/k` は `/kernel` と同じ Kernel bootstrap 契約に従います。
+- ローカルでの推奨実行経路は `kernel` または `codex-prompt-launch kernel` で、どちらも guard 前提が満たされる限り `codex-kernel-guard launch` を経由する adapter として扱います。
+- ローカル実行契約の authority は shell wrapper ではなく `codex-kernel-guard launch` です。shell alias や launcher はその adapter に留めます。
 - この repo の SSOT は [`.codex/prompts/kernel.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/kernel.md) です。
+- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/k.md) です。
 - `~/.codex/prompts/kernel.md` は補助扱いであり、この repo の実行契約は repo-local prompt を基準にします。
 - prompt の hot reload は保証しません。`.codex/prompts/kernel.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
 - `/kernel` が plain text として扱われた場合は、repo root で新規セッションを起動し直してから再実行してください。
+- bare `/kernel` は Codex chat UI の upstream 実装に依存するため、この repo のローカル SLO/保証経路には含めません。
 - `/kernel` の bootstrap は acknowledgement より先に最低 6 本の active lane を起動している必要があります。
 - 通常運用では複数 LLM モデルまたは model profile をまたいだ 6 列以上の並列を最低形とします。
 - 最初の有効な応答には `Bootstrap target: 6+ lanes (minimum 6).` と `Lane manifest:`、および現在アクティブな lane を最低 6 本列挙した行が必要です。
