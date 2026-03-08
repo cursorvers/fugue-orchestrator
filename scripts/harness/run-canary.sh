@@ -25,6 +25,7 @@ set -euo pipefail
 # Optional env vars:
 #   OPS_TOKEN            — preferred over GH_TOKEN for issue operations
 #   CANARY_MODE_INPUT    — full (default) or lite
+#   CANARY_EXECUTION_MODE_OVERRIDE — canary dispatch override (default: primary)
 #   CANARY_PLAN_ONLY     — true to print resolved cases without touching GitHub
 #
 # Usage: bash scripts/harness/run-canary.sh
@@ -162,6 +163,11 @@ canary_offline_policy_override="$(lower_trim "$(gh_var_default "${repo}" "${CANA
 if [[ "${canary_offline_policy_override}" != "inherit" && "${canary_offline_policy_override}" != "hold" && "${canary_offline_policy_override}" != "continuity" ]]; then
   canary_offline_policy_override="continuity"
 fi
+canary_execution_mode_override="$(lower_trim "$(gh_var_default "${repo}" "${CANARY_EXECUTION_MODE_OVERRIDE:-}" "FUGUE_CANARY_EXECUTION_MODE_OVERRIDE" "primary")")"
+case "${canary_execution_mode_override}" in
+  auto|primary|backup-safe|backup-heavy) ;;
+  *) canary_execution_mode_override="primary" ;;
+esac
 emergency_continuity_mode="$(normalize_bool "$(gh_var_default "${repo}" "${EMERGENCY_CONTINUITY_MODE:-}" "FUGUE_EMERGENCY_CONTINUITY_MODE" "false")")"
 subscription_runner_label="$(echo "$(gh_var_default "${repo}" "${SUBSCRIPTION_RUNNER_LABEL:-}" "FUGUE_SUBSCRIPTION_RUNNER_LABEL" "fugue-subscription")" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -z "${subscription_runner_label}" ]]; then
@@ -507,6 +513,9 @@ create_issue() {
   fi
   if [[ -n "${dispatch_offline_policy}" ]]; then
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
+  fi
+  if [[ -n "${canary_execution_mode_override}" && "${canary_execution_mode_override}" != "auto" ]]; then
+    run_cmd+=(-f execution_mode_override="${canary_execution_mode_override}")
   fi
   echo "Canary: dispatching tutti caller for issue #${issue_num} handoff=${handoff_target}" >&2
   GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
