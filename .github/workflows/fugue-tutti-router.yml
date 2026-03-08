@@ -387,6 +387,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VOTE_COMMAND: ${{ steps.ctx.outputs.vote_command }}
           CANARY_DISPATCH_OWNED: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
+          ISSUE_AUTHOR: ${{ steps.ctx.outputs.author }}
         run: |
           set -euo pipefail
           gh_api_retry() {
@@ -415,32 +418,26 @@ jobs:
             TRUST_SUBJECT="${{ steps.ctx.outputs.author }}"
           fi
           PERM="none"
-
-          canary_dispatch_owned="$(printf '%s' "${CANARY_DISPATCH_OWNED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${canary_dispatch_owned}" == "true" ]]; then
-            PERM="canary-bypass"
-          else
-            perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission"
-            perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
-            if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
-              PERM="$(echo "${perm_json}" | jq -r '.permission')"
-            fi
+          perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission"
+          perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
+          if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${perm_json}" | jq -r '.permission')"
           fi
 
-          TRUSTED="false"
-          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" || "${PERM}" == "canary-bypass" ]]; then
-            TRUSTED="true"
-          fi
-          if [[ "${VOTE_COMMAND}" == "true" ]]; then
-            TRUSTED="true"
-            if [[ "${PERM}" == "none" ]]; then
-              PERM="vote-bypass"
-            fi
-          fi
+          eval "$(
+            bash scripts/lib/canary-trust-policy.sh \
+              --permission "${PERM}" \
+              --vote-command "${VOTE_COMMAND}" \
+              --canary-dispatch-owned "${CANARY_DISPATCH_OWNED}" \
+              --issue-title "${ISSUE_TITLE}" \
+              --issue-body "${ISSUE_BODY}" \
+              --issue-author "${ISSUE_AUTHOR}"
+          )"
 
           {
             echo "permission=${PERM}"
             echo "trusted=${TRUSTED}"
+            echo "trust_reason=${trust_reason}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Add processing label
