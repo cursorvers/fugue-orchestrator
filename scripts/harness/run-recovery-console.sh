@@ -268,7 +268,10 @@ dispatch_workflow() {
   baseline_json="$(latest_workflow_run_json "${workflow_file}")"
   baseline_id="$(printf '%s' "${baseline_json}" | jq -r '.databaseId // 0')"
 
-  fugue_gh_retry 4 gh workflow run "${workflow_file}" --repo "${repo}" "$@" >/dev/null
+  if ! fugue_gh_retry 4 gh workflow run "${workflow_file}" --repo "${repo}" "$@" >/dev/null; then
+    append_summary "- dispatch \`${workflow_file}\`: failed to queue workflow dispatch"
+    return 1
+  fi
   sleep 5
 
   run_json="$(wait_for_workflow_dispatch_run "${workflow_file}" "${baseline_id}" 18 5 || echo '{}')"
@@ -281,8 +284,25 @@ dispatch_workflow() {
   append_summary "- dispatch \`${workflow_file}\`: [run ${run_id}](${run_url})"
 }
 
+load_reconcile_claim_state() {
+  if gh variable list --repo "${repo}" >/dev/null 2>&1; then
+    gh api "repos/${repo}/actions/variables/FUGUE_RECONCILE_CLAIM_STATE" --jq '.value' 2>/dev/null || printf '{}'
+  else
+    printf '{}'
+  fi
+}
+
+persist_reconcile_claim_state() {
+  local state_json="$1"
+  if gh variable list --repo "${repo}" >/dev/null 2>&1; then
+    gh variable set FUGUE_RECONCILE_CLAIM_STATE --repo "${repo}" --body "${state_json}" >/dev/null 2>&1 || true
+  fi
+}
+
 reroute_issue() {
   local issue_json labels_json has_tutti has_processing has_fugue
+  local claim_state claim_env dispatch_issue_numbers_json dispatch_count next_state_json
+  local state_update_required persist_state_effective failed_issue_numbers_json persist_json
   if [[ -z "${issue_number}" ]]; then
     echo "RECOVERY_ISSUE_NUMBER is required for reroute-issue" >&2
     exit 1
@@ -302,22 +322,60 @@ reroute_issue() {
   append_summary "- offline policy override: \`${offline_policy}\`"
   append_summary ""
 
+  claim_state="$(load_reconcile_claim_state)"
+  claim_env="$(
+    bash "${SCRIPT_DIR}/../lib/watchdog-reconcile-claim-policy.sh" \
+      --pending-json "[${issue_number}]" \
+      --previous-state-json "${claim_state}" \
+      --persist-state true \
+      --now-epoch "$(date +%s)" \
+      --ttl-seconds 1800 \
+      --format env
+  )"
+  eval "${claim_env}"
+
+  if [[ "${dispatch_count}" == "0" ]]; then
+    append_summary "- reconcile claim: active claim already exists; reroute skipped"
+    return 0
+  fi
+
+  failed_issue_numbers_json='[]'
   if [[ "${has_tutti}" == "true" || "${has_processing}" == "true" ]]; then
-    dispatch_workflow \
+    if ! dispatch_workflow \
       "fugue-tutti-caller.yml" \
       -f issue_number="${issue_number}" \
       -f trust_subject="${trust_subject}" \
       -f allow_processing_rerun=true \
       -f subscription_offline_policy_override="${offline_policy}" \
       -f handoff_target="${handoff_target}" \
-      -f dispatch_nonce="${dispatch_nonce}"
+      -f dispatch_nonce="${dispatch_nonce}"; then
+      failed_issue_numbers_json="[${issue_number}]"
+    fi
+    if [[ "${state_update_required}" == "true" && "${persist_state}" == "true" ]]; then
+      persist_json="$(jq -cn \
+        --argjson state "${next_state_json}" \
+        --argjson failed "${failed_issue_numbers_json}" '
+          reduce $failed[] as $issue ($state; .claims |= (del(.[($issue|tostring)])))
+        ')"
+      persist_reconcile_claim_state "${persist_json}"
+    fi
     return 0
   fi
 
   if [[ "${has_fugue}" == "true" ]]; then
-    dispatch_workflow \
+    if ! dispatch_workflow \
       "fugue-task-router.yml" \
-      -f issue_number="${issue_number}"
+      -f issue_number="${issue_number}"; then
+      failed_issue_numbers_json="[${issue_number}]"
+    fi
+    if [[ "${state_update_required}" == "true" && "${persist_state}" == "true" ]]; then
+      persist_json="$(jq -cn \
+        --argjson state "${next_state_json}" \
+        --argjson failed "${failed_issue_numbers_json}" '
+          reduce $failed[] as $issue ($state; .claims |= (del(.[($issue|tostring)])))
+        ')"
+      persist_reconcile_claim_state "${persist_json}"
+    fi
     return 0
   fi
 
