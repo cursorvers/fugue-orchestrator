@@ -61,6 +61,25 @@ Each peripheral adapter should declare:
   - `manus`
 - `protected_interface`
 
+Ingress-facing adapters should also declare:
+
+- `ingress_surface`
+  - `public-web`
+  - `public-webhook`
+  - `private-admin-ui`
+  - `service-private`
+- `ingress_auth`
+  - `webhook-signature`
+  - `tailscale-auth`
+  - `session-auth`
+  - `service-to-service`
+- `accepts_signed_payload`
+- `routing_domain`
+- `dedupe_strategy`
+  - required for `gateway` adapters
+- `fail_closed`
+  - required and `true` for `gateway` adapters
+
 ## Authority Model
 
 ### `artifact-only`
@@ -80,6 +99,7 @@ Each peripheral adapter should declare:
 - adapter is an ingress or authoritative runtime boundary
 - example:
   - Cloudflare Discord ingress
+- must define explicit ingress auth, routing domain, and fail-closed behavior
 
 ### `protected-external`
 

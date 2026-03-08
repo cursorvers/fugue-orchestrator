@@ -15,6 +15,10 @@ Related front-door design:
 
 - `Happy.app` single-front architecture:
   [kernel-happy-app-single-front-architecture.md](./kernel-happy-app-single-front-architecture.md)
+- `Tailscale` / `Railway` edge and admin split:
+  [kernel-tailscale-railway-integration-design.md](./kernel-tailscale-railway-integration-design.md)
+- `Kernel` unattended runtime substrate:
+  [kernel-unattended-runtime-substrate.md](./kernel-unattended-runtime-substrate.md)
 
 ## Plasticity Rule
 
@@ -37,6 +41,7 @@ That means:
 Responsibilities:
 
 - run the local `Kernel` daemon
+- host the unattended runtime substrate scheduler / reconciler
 - host the self-hosted subscription runner
 - execute normal local-first development tasks
 - keep `Codex CLI`, `Claude CLI`, `Gemini CLI`, and local adapters available
@@ -118,6 +123,7 @@ It remains:
 │ mac mini             │  │ GitHub Actions       │  │ FUGUE rollback       │
 │ Kernel primary       │  │ warm standby         │  │ legacy path          │
 │ local daemon         │  │ continuity/canary    │  │ fugue-bridge         │
+│ runtime substrate    │  │ recovery substrate   │  │                      │
 │ self-hosted runner   │  │ mobile recovery      │  │                      │
 └──────────┬───────────┘  └──────────┬───────────┘  └──────────────────────┘
            │                         │

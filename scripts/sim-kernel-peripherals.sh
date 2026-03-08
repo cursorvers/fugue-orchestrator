@@ -238,6 +238,30 @@ contract_probe() {
     echo "missing peripheral adapter manifest entries"
     failures=1
   }
+  jq -e '.adapters[] | select(.id == "railway-kernel-edge-intake" and .authority == "gateway" and .ingress_auth == "webhook-signature" and .accepts_signed_payload == true and .fail_closed == true and (.dedupe_strategy | length > 0))' "${ROOT_DIR}/config/integrations/peripheral-adapters.json" >/dev/null 2>&1 || {
+    echo "missing Railway edge intake fail-closed contract"
+    failures=1
+  }
+  jq -e '.adapters[] | select(.id == "tailscale-admin-ui" and .authority == "ui-boundary" and .ingress_auth == "tailscale-auth" and .ingress_surface == "private-admin-ui")' "${ROOT_DIR}/config/integrations/peripheral-adapters.json" >/dev/null 2>&1 || {
+    echo "missing Tailscale admin UI private-boundary contract"
+    failures=1
+  }
+  jq -e '.adapters[] | select(.id == "railway-happy-web-boundary" and .authority == "ui-boundary" and .ingress_auth == "session-auth" and .ingress_surface == "public-web")' "${ROOT_DIR}/config/integrations/peripheral-adapters.json" >/dev/null 2>&1 || {
+    echo "missing Railway Happy web boundary contract"
+    failures=1
+  }
+  rg -q "dedupe_key" "${ROOT_DIR}/docs/kernel-tailscale-railway-integration-design.md" || {
+    echo "missing Railway dedupe contract in design doc"
+    failures=1
+  }
+  rg -q "deferred-relay-failure" "${ROOT_DIR}/docs/kernel-tailscale-railway-integration-design.md" || {
+    echo "missing Railway deferred-relay-failure outcome in design doc"
+    failures=1
+  }
+  rg -q "tailnet membership alone is not sufficient" "${ROOT_DIR}/docs/kernel-tailscale-railway-integration-design.md" || {
+    echo "missing Tailscale privileged UI allowlist rule in design doc"
+    failures=1
+  }
   rg -q "SUPABASE_URL" "${ROOT_DIR}/scripts/lib/mcp-rest-bridge.sh" || {
     echo "missing Supabase REST bridge contract"
     failures=1
