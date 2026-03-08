@@ -46,8 +46,7 @@ assert_field "line-push-ok-allows-persist" "persist_allowed" "true" \
   --line-status ok \
   --line-transport push
 
-assert_field "line-webhook-accepted-upstream-still-persists-attempt" "persist_allowed" "true" \
-  --line-attempted true \
+assert_field "line-webhook-accepted-upstream-persists" "persist_allowed" "true" \
   --line-sent true \
   --line-status ok \
   --line-transport webhook \
@@ -60,7 +59,7 @@ assert_field "line-webhook-delivered-allows-persist" "persist_allowed" "true" \
   --line-transport webhook \
   --line-delivery-state delivered
 
-assert_field "attempted-failed-line-still-persists" "persist_allowed" "true" \
+assert_field "attempted-failed-line-does-not-persist" "persist_allowed" "false" \
   --line-attempted true \
   --line-sent false \
   --line-status error \

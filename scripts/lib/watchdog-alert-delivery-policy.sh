@@ -94,16 +94,15 @@ fi
 
 persist_allowed="false"
 persist_reason="no-confirmed-delivery"
-if [[ "${discord_attempted}" == "true" || "${line_attempted}" == "true" ]]; then
-  persist_allowed="true"
-  persist_reason="attempted-delivery"
-fi
 if [[ "${discord_sent}" == "true" ]]; then
   persist_allowed="true"
   persist_reason="discord-delivered"
-elif [[ "${line_delivery_confirmed}" == "true" ]]; then
+elif [[ "${line_sent}" == "true" && "${line_status}" == "ok" ]]; then
   persist_allowed="true"
-  persist_reason="${line_reason}"
+  persist_reason="line-accepted"
+  if [[ "${line_delivery_confirmed}" == "true" ]]; then
+    persist_reason="${line_reason}"
+  fi
 fi
 
 if [[ "${format}" == "env" ]]; then
