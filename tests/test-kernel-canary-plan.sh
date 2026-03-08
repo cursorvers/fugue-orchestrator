@@ -100,6 +100,14 @@ grep -q 'if \[\[ "\${canary_dispatch_owned}" == "true" \]\]; then' "${ROUTER_WOR
   echo "FAIL: router workflow should trust explicit caller-owned canary dispatch input" >&2
   exit 1
 }
+grep -q 'CANARY_DISPATCH_OWNED: \${{ steps.ctx.outputs.canary_dispatch_owned }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive canary dispatch ownership env" >&2
+  exit 1
+}
+grep -q 'PERM="canary-bypass"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should bypass collaborator permission for canary-owned dispatches" >&2
+  exit 1
+}
 echo "PASS [workflow-wiring]"
 
 plan_output="$(
