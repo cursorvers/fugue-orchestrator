@@ -350,7 +350,12 @@ jobs:
           online_count=0
           runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
           if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
-            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[]? | objects | select(.status == "online") | select(any((.labels // [])[]?; .name == $label))] | length' 2>/dev/null || printf '0')"
+            online_count_raw="$(echo "${runners_json}" | jq -r --arg label "${RUNNER_LABEL}" '[.runners[]? | objects | select(.status == "online") | select(any((.labels // [])[]?; .name == $label))] | length' 2>/dev/null || true)"
+            online_count="$(printf '%s\n' "${online_count_raw}" | awk 'NF { last=$0 } END { print last }')"
+            online_count="$(printf '%s' "${online_count}" | tr -cd '0-9')"
+            if [[ -z "${online_count}" ]]; then
+              online_count="0"
+            fi
           fi
           # shellcheck source=../scripts/lib/resolve-primary-heartbeat-state.sh
           resolver_env="$(
