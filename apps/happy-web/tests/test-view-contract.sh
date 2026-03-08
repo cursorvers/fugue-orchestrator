@@ -11,6 +11,7 @@ grep -q 'data-screen="alerts"' "$HTML"
 grep -q 'data-screen="recover"' "$HTML"
 grep -q 'Task detail' "$HTML"
 grep -q 'Normalized intake packet' "$HTML"
+grep -q 'Recent events' "$HTML"
 grep -q 'Happy.app inside' "$HTML"
 
 echo "PASS [apps-happy-web-view-contract]"

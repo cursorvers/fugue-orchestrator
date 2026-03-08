@@ -1,9 +1,9 @@
 {
-  "name": "Happy Web",
-  "short_name": "Happy",
+  "name": "Kernel Orchestration",
+  "short_name": "Kernel",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#090d17",
-  "theme_color": "#111827",
-  "description": "Outer mobile app for Kernel with Happy.app inside."
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "description": "Mobile orchestration surface for Kernel with command, event flow, and recovery."
 }

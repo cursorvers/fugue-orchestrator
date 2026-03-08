@@ -1,318 +1,541 @@
-import { initialState } from "../data/mock-kernel-state.js";
+import { EVENT_TYPES, QUEUE_KINDS, recoveryDedupeSlot } from "../domain/happy-event-protocol.js";
+import { createEventStore } from "../domain/happy-event-store.js";
+import {
+  DEFAULT_PHASE_TOTAL,
+  clone,
+  endpointUrl,
+  fallbackUrl,
+  isOnline,
+  makeId,
+  normalizeState,
+  nowIso,
+  taskTitleFromPacket,
+} from "../domain/happy-event-normalizers.js";
+import {
+  buildEventsFromRemoteSnapshot,
+  normalizeRemoteFeedPayload,
+  projectState,
+} from "../domain/happy-state-projector.js";
 
-const STORAGE_KEY = "happy-web-state-v1";
-
-function clone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function hasStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
-function loadPersistedState() {
-  if (!hasStorage()) return null;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? normalizeState(JSON.parse(raw)) : null;
-  } catch (_error) {
-    return null;
+export function createStateAdapter({ crowAdapter, config, endpointClient, intakeAdapter } = {}) {
+  const store = createEventStore({ config, crowAdapter, intakeAdapter });
+  const listeners = new Set();
+  const orchestrationSurface = "Kernel orchestration";
+  function currentQueueState() {
+    return {
+      items: intakeAdapter?.listQueue?.() || [],
+      summary: intakeAdapter?.getQueueSummary?.() || null,
+    };
   }
-}
+  let projectedState = projectState(store.read(), {
+    crowAdapter,
+    config,
+    queueState: currentQueueState(),
+    runtime: {
+      nowMs: Date.now(),
+      online: isOnline(),
+    },
+  });
+  let flushScheduled = false;
+  let flushInFlight = null;
+  const detailCursorByTaskId = new Map();
 
-function persist(state) {
-  if (!hasStorage()) return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (_error) {
-    // Local storage is only an optimization for mobile continuity.
-  }
-}
-
-function draftTaskFromPacket(packet) {
-  const prefix =
-    packet.content_type === "slide"
-      ? "スライド"
-      : packet.content_type === "note"
-        ? "note"
-        : packet.task_type;
-
-  return {
-    title: `${prefix}: ${packet.title}`,
-    status: "running",
-    route: "local",
-    summary: "Crow accepted the request. Kernel is normalizing the packet and preparing execution.",
-    last_update: "just now",
-    current_phase: "intake-normalized",
-    phase_index: 1,
-    phase_total: 5,
-    progress_confidence: "medium",
-    decision: "Auto-routing pending. GHA continuity and FUGUE rollback remain available.",
-    outputs: [
-      {
-        type: "intake_packet",
-        title: "Normalized intake packet",
-        value: packet.title,
-        url: "https://github.com/cursorvers/fugue-orchestrator/issues/55",
-        source_system: "happy-app",
-        created_at: packet.client_timestamp,
-        supersedes: null,
-        is_primary: true,
-      },
-    ],
-  };
-}
-
-function buildRemoteFailureAlert(error) {
-  return {
-    severity: "degraded",
-    title: "Remote sync unavailable",
-    detail: `Happy Web fell back to local state: ${error.message}`,
-  };
-}
-
-function updateCurrent(state, task) {
-  state.current = {
-    title: task.title,
-    route: task.route,
-    primary: "local primary",
-    heartbeat: "just now",
-    lanes: 3,
-    rollback: "ready",
-    phase_index: task.phase_index,
-    phase_total: task.phase_total,
-    phase_label: task.current_phase,
-    progress_confidence: task.progress_confidence,
-    latest_output: task.outputs[0]?.value || "pending",
-    latest_output_url:
-      task.outputs[0]?.url || "https://github.com/cursorvers/fugue-orchestrator/issues/55",
-    latest_step: "Kernel normalized the request and queued the next execution step.",
-  };
-}
-
-function normalizeOutput(output) {
-  return {
-    type: typeof output?.type === "string" ? output.type : "artifact",
-    title: typeof output?.title === "string" ? output.title : "Untitled output",
-    value: typeof output?.value === "string" ? output.value : "pending",
-    url:
-      typeof output?.url === "string"
-        ? output.url
-        : "https://github.com/cursorvers/fugue-orchestrator/issues/55",
-    source_system: typeof output?.source_system === "string" ? output.source_system : "kernel",
-    created_at:
-      typeof output?.created_at === "string" ? output.created_at : new Date().toISOString(),
-    supersedes: output?.supersedes ?? null,
-    is_primary: Boolean(output?.is_primary),
-  };
-}
-
-function normalizeTask(task) {
-  return {
-    title: typeof task?.title === "string" ? task.title : "Untitled task",
-    status: typeof task?.status === "string" ? task.status : "running",
-    route: typeof task?.route === "string" ? task.route : "local",
-    summary:
-      typeof task?.summary === "string"
-        ? task.summary
-        : "Kernel task state was restored from fallback storage.",
-    last_update: typeof task?.last_update === "string" ? task.last_update : "unknown",
-    current_phase: typeof task?.current_phase === "string" ? task.current_phase : "planning",
-    phase_index: Number.isFinite(task?.phase_index) ? task.phase_index : 1,
-    phase_total: Number.isFinite(task?.phase_total) ? task.phase_total : 1,
-    progress_confidence:
-      typeof task?.progress_confidence === "string" ? task.progress_confidence : "medium",
-    decision:
-      typeof task?.decision === "string"
-        ? task.decision
-        : "Fallback state loaded. Review before taking recovery actions.",
-    outputs: Array.isArray(task?.outputs) ? task.outputs.map(normalizeOutput) : [],
-  };
-}
-
-function normalizeAlert(alert) {
-  return {
-    severity: typeof alert?.severity === "string" ? alert.severity : "info",
-    title: typeof alert?.title === "string" ? alert.title : "Kernel alert",
-    detail:
-      typeof alert?.detail === "string"
-        ? alert.detail
-        : "A fallback alert was restored from cached state.",
-  };
-}
-
-function normalizeCurrent(current, fallbackTask) {
-  return {
-    title: typeof current?.title === "string" ? current.title : fallbackTask?.title || "Kernel task",
-    route: typeof current?.route === "string" ? current.route : fallbackTask?.route || "local",
-    primary: typeof current?.primary === "string" ? current.primary : "local primary",
-    heartbeat: typeof current?.heartbeat === "string" ? current.heartbeat : "unknown",
-    lanes: Number.isFinite(current?.lanes) ? current.lanes : 1,
-    rollback: typeof current?.rollback === "string" ? current.rollback : "ready",
-    phase_index: Number.isFinite(current?.phase_index) ? current.phase_index : fallbackTask?.phase_index || 1,
-    phase_total: Number.isFinite(current?.phase_total) ? current.phase_total : fallbackTask?.phase_total || 1,
-    phase_label:
-      typeof current?.phase_label === "string"
-        ? current.phase_label
-        : fallbackTask?.current_phase || "planning",
-    progress_confidence:
-      typeof current?.progress_confidence === "string"
-        ? current.progress_confidence
-        : fallbackTask?.progress_confidence || "medium",
-    latest_output:
-      typeof current?.latest_output === "string"
-        ? current.latest_output
-        : fallbackTask?.outputs?.[0]?.value || "pending",
-    latest_output_url:
-      typeof current?.latest_output_url === "string"
-        ? current.latest_output_url
-        : fallbackTask?.outputs?.[0]?.url || "https://github.com/cursorvers/fugue-orchestrator/issues/55",
-    latest_step:
-      typeof current?.latest_step === "string"
-        ? current.latest_step
-        : "Recovered from cached state. Refresh status to re-sync.",
-  };
-}
-
-function normalizeState(raw) {
-  if (!raw || typeof raw !== "object") {
-    return clone(initialState);
-  }
-
-  const tasks = Array.isArray(raw.tasks) && raw.tasks.length > 0
-    ? raw.tasks.map(normalizeTask)
-    : clone(initialState.tasks);
-  const fallbackTask = tasks[0];
-
-  return {
-    health: typeof raw.health === "string" ? raw.health : initialState.health,
-    crowSummary:
-      typeof raw.crowSummary === "string" ? raw.crowSummary : initialState.crowSummary,
-    current: normalizeCurrent(raw.current, fallbackTask),
-    recent_prompts: Array.isArray(raw.recent_prompts)
-      ? raw.recent_prompts.filter((item) => typeof item === "string").slice(0, 5)
-      : clone(initialState.recent_prompts),
-    tasks,
-    alerts: Array.isArray(raw.alerts) && raw.alerts.length > 0
-      ? raw.alerts.map(normalizeAlert)
-      : clone(initialState.alerts),
-    recover_result:
-      typeof raw.recover_result === "string" ? raw.recover_result : initialState.recover_result,
-  };
-}
-
-export function createStateAdapter({ crowAdapter, config, endpointClient } = {}) {
-  const state = loadPersistedState() || clone(initialState);
-
-  function setHealth(value) {
-    state.health = value;
-  }
-
-  function prependAlert(alert) {
-    state.alerts.unshift(alert);
-    state.alerts = state.alerts.slice(0, 6);
-  }
-
-  function refreshSummary() {
-    if (crowAdapter) {
-      state.crowSummary = crowAdapter.summarizeState(state);
-    }
-  }
-
-  function commit() {
-    persist(state);
-    return getState();
+  function currentRuntime() {
+    return {
+      nowMs: Date.now(),
+      online: isOnline(),
+    };
   }
 
   function getState() {
-    return clone(state);
+    return clone(projectedState);
   }
 
-  async function hydrateFromRemote() {
-    if (!config?.remoteEnabled || !config?.stateEndpoint || !endpointClient) {
-      refreshSummary();
+  function notify(nextState) {
+    listeners.forEach((listener) => {
+      try {
+        listener(clone(nextState));
+      } catch (_error) {
+        // Listener failures must not break state propagation.
+      }
+    });
+  }
+
+  function commit() {
+    store.persist();
+    projectedState = projectState(store.read(), {
+      crowAdapter,
+      config,
+      queueState: currentQueueState(),
+      runtime: currentRuntime(),
+    });
+    notify(projectedState);
+    return getState();
+  }
+
+  function appendEvent(event) {
+    return store.appendEvent(event);
+  }
+
+  function appendAndCommit(event) {
+    if (!appendEvent(event)) return getState();
+    return commit();
+  }
+
+  function queueTaskId(queueItem) {
+    return queueItem.packet?.client_task_id || queueItem.recovery?.task_id || null;
+  }
+
+  function queueTaskTitle(queueItem) {
+    if (queueItem.packet) return taskTitleFromPacket(queueItem.packet);
+    if (!queueItem.recovery?.task_id) return "";
+    return (
+      projectedState.tasks.find((task) => task.id === queueItem.recovery.task_id)?.title ||
+      queueItem.recovery.scope ||
+      ""
+    );
+  }
+
+  function appendQueueEvent(queueItem, type, summary, extra = {}) {
+    appendEvent({
+      type,
+      task_id: queueTaskId(queueItem),
+      title: queueTaskTitle(queueItem),
+      summary,
+      message: summary,
+      at: nowIso(),
+      dedupe_key: `${type}:${queueItem.queue_id}:${extra.dedupeSuffix || ""}`,
+      ...extra,
+    });
+  }
+
+  function applySnapshotState(snapshot) {
+    const nextEvents = buildEventsFromRemoteSnapshot(snapshot, projectedState, config, {
+      at: nowIso(),
+    });
+    store.appendEvents(nextEvents);
+    return commit();
+  }
+
+  function applyRemoteFeed(payload) {
+    const feed = normalizeRemoteFeedPayload(payload, config);
+    let requiresCommit = false;
+
+    if (feed.reset) {
+      store.replace({
+        remoteCursor: null,
+        baseSnapshot: feed.state || null,
+        eventLog: [],
+      });
+      requiresCommit = true;
+    }
+
+    if (feed.state && !feed.reset && !feed.events.length && !store.getRemoteCursor()) {
+      const nextState = applySnapshotState(feed.state);
+      if (feed.nextCursor) {
+        store.setRemoteCursor(feed.nextCursor);
+        store.persist();
+      }
+      return nextState;
+    }
+
+    if (feed.events.length) {
+      requiresCommit = store.appendEvents(feed.events) || requiresCommit;
+    }
+
+    if (feed.nextCursor) {
+      store.setRemoteCursor(feed.nextCursor);
+      requiresCommit = true;
+    }
+
+    return requiresCommit ? commit() : getState();
+  }
+
+  async function syncRemoteEvents() {
+    if (!config?.remoteEnabled || !endpointClient || !config?.eventsEndpoint) {
+      return { used: false, failed: false, state: getState(), eventCount: 0 };
+    }
+
+    try {
+      const payload = await endpointClient.fetchJson(
+        endpointUrl(config.eventsEndpoint, {
+          cursor: store.getRemoteCursor(),
+        })
+      );
+      const feed = normalizeRemoteFeedPayload(payload, config);
+      const nextState = applyRemoteFeed(payload);
+      return {
+        used: true,
+        failed: false,
+        state: nextState,
+        eventCount: feed.events.length,
+      };
+    } catch (error) {
+      appendEvent({
+        type: EVENT_TYPES.healthChanged,
+        health: "degraded",
+        at: nowIso(),
+        dedupe_key: `remote-events-health:${error.message}`,
+      });
+      appendEvent({
+        type: EVENT_TYPES.alertAdded,
+        severity: "degraded",
+        title: "Remote event feed unavailable",
+        detail: `Kernel orchestration fell back to the last projected state: ${error.message}`,
+        at: nowIso(),
+        dedupe_key: `remote-events-alert:${error.message}`,
+      });
+      return {
+        used: true,
+        failed: true,
+        state: commit(),
+        eventCount: 0,
+      };
+    }
+  }
+
+  function scheduleQueueFlush() {
+    if (flushScheduled) return;
+    flushScheduled = true;
+    setTimeout(() => {
+      flushScheduled = false;
+      void syncRemoteStateInternal();
+    }, 24);
+  }
+
+  async function flushQueue() {
+    if (flushInFlight) return flushInFlight;
+    if (!config?.remoteEnabled || !endpointClient || !intakeAdapter) {
+      return getState();
+    }
+    if (!isOnline()) return getState();
+
+    flushInFlight = (async () => {
+      const pendingItems = intakeAdapter
+        .listQueue()
+        .filter((item) => item.status === "pending" || item.status === "retry");
+
+      for (const queueItem of pendingItems) {
+        intakeAdapter.markAttempt(queueItem.queue_id);
+        appendQueueEvent(
+          queueItem,
+          EVENT_TYPES.queueSyncing,
+          queueItem.kind === QUEUE_KINDS.recovery
+            ? `${queueItem.recovery.action} is syncing to Recover.`
+            : "Queued packet is syncing to Kernel."
+        );
+        commit();
+
+        try {
+          if (queueItem.kind === QUEUE_KINDS.recovery && !config?.recoveryEndpoint) {
+            throw new Error("Missing recovery endpoint");
+          }
+          if (queueItem.kind === QUEUE_KINDS.intake && !config?.intakeEndpoint) {
+            throw new Error("Missing intake endpoint");
+          }
+
+          const payload =
+            queueItem.kind === QUEUE_KINDS.recovery
+              ? await endpointClient.fetchJson(config.recoveryEndpoint, {
+                  method: "POST",
+                  body: {
+                    scope: queueItem.recovery.scope,
+                    action: queueItem.recovery.action,
+                    task_id: queueItem.recovery.task_id || null,
+                    request_id: queueItem.recovery.request_id,
+                  },
+                })
+              : await endpointClient.fetchJson(config.intakeEndpoint, {
+                  method: "POST",
+                  body: {
+                    packet: queueItem.packet,
+                    idempotency_key: queueItem.idempotency_key,
+                  },
+                });
+
+          intakeAdapter.markSynced(queueItem.queue_id);
+          appendQueueEvent(
+            queueItem,
+            EVENT_TYPES.queueSynced,
+            queueItem.kind === QUEUE_KINDS.recovery
+              ? `${queueItem.recovery.action} was accepted by Recover.`
+              : "Kernel accepted the queued packet."
+          );
+
+          if (queueItem.kind === QUEUE_KINDS.recovery) {
+            appendEvent({
+              type: EVENT_TYPES.recoverAcknowledged,
+              task_id: queueItem.recovery.task_id || null,
+              message: `${queueItem.recovery.action} acknowledged from ${queueItem.recovery.scope}. Reversibility preserved.`,
+              phase_label: "recover",
+              latest_step: "Recovery action synced without duplicate execution.",
+              at: nowIso(),
+              recovery_key: recoveryDedupeSlot(
+                queueItem.recovery.action,
+                queueItem.recovery.task_id || null
+              ),
+              dedupe_key: `recover-ack:${queueItem.idempotency_key}`,
+            });
+          }
+
+          commit();
+
+          if (payload?.events || payload?.next_cursor || payload?.cursor || payload?.reset) {
+            applyRemoteFeed(payload);
+          } else if (payload?.state || config?.stateEndpoint) {
+            await hydrateFromRemote(payload?.state || null);
+          }
+        } catch (error) {
+          intakeAdapter.markDeferred(queueItem.queue_id, error.message);
+          appendQueueEvent(
+            queueItem,
+            EVENT_TYPES.queueDeferred,
+            queueItem.kind === QUEUE_KINDS.recovery
+              ? `${queueItem.recovery.action} stayed in the local queue for retry.`
+              : "Queued packet remains local-first and will retry later."
+          );
+          appendAndCommit({
+            type: EVENT_TYPES.alertAdded,
+            severity: "degraded",
+            title: "Remote sync unavailable",
+            detail:
+              queueItem.kind === QUEUE_KINDS.recovery
+                ? `Recover action stayed local-first: ${error.message}`
+                : `Kernel orchestration kept the request locally: ${error.message}`,
+            at: nowIso(),
+            dedupe_key: `sync-failed:${queueItem.idempotency_key}:${error.message}`,
+          });
+        }
+      }
+
+      return getState();
+    })();
+
+    try {
+      return await flushInFlight;
+    } finally {
+      flushInFlight = null;
+    }
+  }
+
+  async function hydrateFromRemote(prefetchedPayload = null) {
+    if (!config?.remoteEnabled || !endpointClient || !config?.stateEndpoint) {
       return commit();
     }
 
     try {
-      const payload = await endpointClient.fetchJson(config.stateEndpoint);
-      const nextState = normalizeState(payload?.state || payload);
-      Object.assign(state, nextState);
-      setHealth(nextState.health || "healthy");
-      refreshSummary();
-      return commit();
+      const payload = prefetchedPayload || (await endpointClient.fetchJson(config.stateEndpoint));
+      const snapshot = normalizeState(payload?.state || payload, config);
+      return applySnapshotState(snapshot);
     } catch (error) {
-      setHealth("degraded");
-      prependAlert(buildRemoteFailureAlert(error));
-      refreshSummary();
+      appendEvent({
+        type: EVENT_TYPES.healthChanged,
+        health: "degraded",
+        at: nowIso(),
+        dedupe_key: `remote-health:degraded:${error.message}`,
+      });
+      appendEvent({
+        type: EVENT_TYPES.alertAdded,
+        severity: "degraded",
+        title: "Remote state unavailable",
+        detail: `Kernel orchestration stayed on the projected event surface: ${error.message}`,
+        at: nowIso(),
+        dedupe_key: `remote-alert:${error.message}`,
+      });
       return commit();
     }
   }
 
+  async function syncTaskDetailInternal(taskId) {
+    if (!taskId || !config?.remoteEnabled || !endpointClient || !config?.taskDetailEndpoint) {
+      return getState();
+    }
+
+    try {
+      const detailCursor = detailCursorByTaskId.get(taskId) || null;
+      const payload = await endpointClient.fetchJson(
+        endpointUrl(config.taskDetailEndpoint, {
+          task_id: taskId,
+          cursor: detailCursor,
+        })
+      );
+
+      if (payload?.events || payload?.next_cursor || payload?.cursor || payload?.reset) {
+        if (payload?.reset) {
+          detailCursorByTaskId.delete(taskId);
+        } else if (typeof payload?.next_cursor === "string") {
+          detailCursorByTaskId.set(taskId, payload.next_cursor);
+        }
+        const {
+          next_cursor: _ignoredNextCursor,
+          cursor: _ignoredCursor,
+          reset: _ignoredReset,
+          ...detailPayload
+        } = payload || {};
+        return applyRemoteFeed(detailPayload);
+      }
+
+      if (payload?.state) {
+        return applySnapshotState(normalizeState(payload.state, config));
+      }
+
+      return getState();
+    } catch (error) {
+      appendEvent({
+        type: EVENT_TYPES.alertAdded,
+        severity: "degraded",
+        title: "Task detail unavailable",
+        detail: `Kernel orchestration kept the current task projection: ${error.message}`,
+        at: nowIso(),
+        dedupe_key: `task-detail:${taskId}:${error.message}`,
+      });
+      return commit();
+    }
+  }
+
+  async function syncRemoteStateInternal() {
+    await flushQueue();
+    const feedResult = await syncRemoteEvents();
+    if (
+      feedResult.used &&
+      !feedResult.failed &&
+      (feedResult.eventCount > 0 || !config?.stateEndpoint || store.getRemoteCursor())
+    ) {
+      return feedResult.state;
+    }
+    return hydrateFromRemote();
+  }
+
+  function requestRecoveryAction({ action = "status", scope = orchestrationSurface, taskId = null } = {}) {
+    const dedupeSlot = recoveryDedupeSlot(action, taskId);
+    const existingRequest = intakeAdapter?.findActiveByDedupeSlot?.(dedupeSlot);
+
+    if (existingRequest) {
+      appendEvent({
+        type: EVENT_TYPES.recoverDeduplicated,
+        task_id: taskId,
+        message: `${action} already queued from ${scope}. Reusing the existing action token.`,
+        phase_label: "recover",
+        latest_step: "Idempotent recover prevented duplicate enqueue.",
+        at: nowIso(),
+        recovery_key: dedupeSlot,
+        dedupe_key: `recover-dedupe:${dedupeSlot}`,
+      });
+      return commit();
+    }
+
+    const queueItem = intakeAdapter?.enqueueRecoveryAction?.({ action, scope, taskId });
+    appendAndCommit({
+      type: EVENT_TYPES.recoverRequested,
+      task_id: taskId,
+      message: `${action} queued from ${scope}. FUGUE reversibility preserved.`,
+      phase_label: "recover",
+      latest_step: "Recovery action entered the event log.",
+      at: nowIso(),
+      recovery_key: dedupeSlot,
+      dedupe_key: `recover-request:${dedupeSlot}`,
+    });
+
+    if (queueItem) {
+      appendEvent({
+        type: EVENT_TYPES.queueEnqueued,
+        task_id: taskId,
+        title: queueTaskTitle(queueItem),
+        summary: `${action} was saved locally and will sync later if needed.`,
+        at: nowIso(),
+        dedupe_key: `recover-queued:${queueItem.queue_id}`,
+      });
+      commit();
+    }
+
+    scheduleQueueFlush();
+    return getState();
+  }
+
   return {
     getState,
+    getEventLog() {
+      return store.getEventLog();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     async syncRemoteState() {
-      return hydrateFromRemote();
+      return syncRemoteStateInternal();
     },
-    async setRecoverResult(message, metadata = {}) {
-      state.recover_result = message;
-      if (!config?.remoteEnabled || !config?.recoveryEndpoint || !endpointClient) {
-        refreshSummary();
-        return commit();
+    async syncTaskDetail(taskId) {
+      return syncTaskDetailInternal(taskId);
+    },
+    requestRecoveryAction,
+    submitPrompt(packet) {
+      const taskId = packet.client_task_id || packet.idempotency_key || makeId("task");
+      const title = taskTitleFromPacket(packet);
+
+      const queueItem = intakeAdapter?.enqueuePacket?.(packet);
+      appendEvent({
+        type: EVENT_TYPES.promptRecorded,
+        prompt: packet.body,
+        at: packet.client_timestamp || nowIso(),
+        dedupe_key: `prompt:${packet.idempotency_key}`,
+      });
+      appendEvent({
+        type: EVENT_TYPES.accepted,
+        task_id: taskId,
+        title,
+        prompt: packet.body,
+        route: "local-queue",
+        summary: "Crow accepted the request and projected it into Now/Tasks immediately.",
+        phase_label: "accepted",
+        phase_index: 1,
+        phase_total: DEFAULT_PHASE_TOTAL,
+        progress_confidence: "medium",
+        latest_step: "Optimistic task created locally without waiting for backend round-trip.",
+        decision: "Queue-first intake active. Continuity and rollback remain available.",
+        at: packet.client_timestamp || nowIso(),
+        idempotency_key: packet.idempotency_key,
+        dedupe_key: `accepted:${packet.idempotency_key}`,
+      });
+      appendEvent({
+        type: EVENT_TYPES.outputAdded,
+        task_id: taskId,
+        title,
+        route: "local-queue",
+        summary: "Normalized intake packet appended to the task detail stream.",
+        phase_label: "accepted",
+        phase_index: 1,
+        phase_total: DEFAULT_PHASE_TOTAL,
+        progress_confidence: "medium",
+        latest_step: "Initial packet is visible before backend acknowledgement.",
+        output: {
+          type: "artifact",
+          title: "Normalized intake packet",
+          value: packet.title,
+          url: fallbackUrl(config),
+          source_system: "happy-app",
+          created_at: packet.client_timestamp || nowIso(),
+          supersedes: null,
+          is_primary: false,
+        },
+        at: packet.client_timestamp || nowIso(),
+        dedupe_key: `accepted-output:${packet.idempotency_key}`,
+      });
+      if (queueItem) {
+        appendEvent({
+          type: EVENT_TYPES.queueEnqueued,
+          task_id: taskId,
+          title,
+          summary: isOnline()
+            ? "Request was saved locally and queued for background sync."
+            : "Device is offline. Request was saved locally for later sync.",
+          at: packet.client_timestamp || nowIso(),
+          dedupe_key: `queue-enqueued:${queueItem.queue_id}`,
+        });
       }
 
-      try {
-        await endpointClient.fetchJson(config.recoveryEndpoint, {
-          method: "POST",
-          body: {
-            scope: metadata.scope || "Happy Web",
-            action: metadata.action || "status",
-            result_preview: message,
-          },
-        });
-        return hydrateFromRemote();
-      } catch (error) {
-        setHealth("degraded");
-        prependAlert(buildRemoteFailureAlert(error));
-        refreshSummary();
-        return commit();
-      }
-    },
-    async submitPrompt(packet, crowSummary) {
-      if (packet.body && packet.body !== "(empty)") {
-        state.recent_prompts.unshift(packet.body);
-        state.recent_prompts = state.recent_prompts.slice(0, 5);
-      }
-      const task = draftTaskFromPacket(packet);
-      state.tasks.unshift(task);
-      state.crowSummary = crowSummary;
-      state.health = "healthy";
-      updateCurrent(state, task);
       const localState = commit();
-
-      if (!config?.remoteEnabled || !config?.intakeEndpoint || !endpointClient) {
-        return localState;
-      }
-
-      try {
-        await endpointClient.fetchJson(config.intakeEndpoint, {
-          method: "POST",
-          body: {
-            packet,
-            crow_summary: crowSummary,
-          },
-        });
-        return hydrateFromRemote();
-      } catch (error) {
-        setHealth("degraded");
-        prependAlert(buildRemoteFailureAlert(error));
-        refreshSummary();
-        return commit();
-      }
-    },
-    async refreshSummary() {
-      refreshSummary();
-      return commit();
+      scheduleQueueFlush();
+      return localState;
     },
   };
 }

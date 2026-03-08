@@ -4,17 +4,19 @@
     <meta charset="utf-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#111827" />
-    <meta name="happy-runtime-mode" content="local" />
-    <meta name="happy-remote-enabled" content="false" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="happy-runtime-mode" content="remote" />
+    <meta name="happy-remote-enabled" content="true" />
     <meta name="happy-status-issue-url" content="https://github.com/cursorvers/fugue-orchestrator/issues/55" />
-    <meta name="happy-state-endpoint" content="" />
-    <meta name="happy-intake-endpoint" content="" />
-    <meta name="happy-recovery-endpoint" content="" />
+    <meta name="happy-state-endpoint" content="/api/happy/state" />
+    <meta name="happy-events-endpoint" content="/api/happy/events" />
+    <meta name="happy-intake-endpoint" content="/api/happy/intake" />
+    <meta name="happy-recovery-endpoint" content="/api/happy/recovery" />
+    <meta name="happy-task-detail-endpoint" content="/api/happy/task-detail" />
     <meta name="happy-crow-endpoint" content="" />
-    <title>Happy Web</title>
+    <title>Kernel Orchestration</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -23,12 +25,12 @@
       <header class="topbar">
         <div class="topbar-copy">
           <p class="eyebrow">Kernel Mobile Front</p>
-          <h1>Happy Web</h1>
-          <p class="topbar-subtitle">Outside shell for mobile command, progress, outputs, and recovery.</p>
+          <h1>Kernel Orchestration</h1>
+          <p class="topbar-subtitle">Mobile command, progress, outputs, and bounded recovery for Kernel.</p>
         </div>
         <div class="topbar-status">
-          <span id="health-pill" class="pill healthy">HEALTHY</span>
-          <span class="pill subtle">local first</span>
+          <span id="health-pill" class="pill healthy" aria-live="polite">HEALTHY</span>
+          <span id="queue-pill" class="pill subtle" aria-live="polite">queue clear</span>
         </div>
       </header>
 
@@ -47,6 +49,16 @@
         </article>
       </section>
 
+      <section class="status-strip" aria-label="Kernel sync and network status">
+        <div class="status-strip-badges">
+          <span id="network-pill" class="pill subtle" aria-live="polite">online</span>
+          <span id="sync-pill" class="pill subtle" aria-live="polite">sync idle</span>
+        </div>
+        <p id="sync-copy" class="status-copy" aria-live="polite">
+          Local queue is ready. Remote sync state will appear here.
+        </p>
+      </section>
+
       <main class="viewport">
         <section id="screen-happy" class="screen is-active" data-screen="happy">
           <div class="panel hero">
@@ -58,6 +70,23 @@
               <span class="hero-badge">Kernel sovereign</span>
               <span class="hero-badge">FUGUE reversible</span>
             </div>
+            <div class="hero-signal-grid" aria-label="Kernel live summary">
+              <article class="signal-card signal-card-emphasis">
+                <span class="signal-label">Active</span>
+                <strong id="hero-live-count">0</strong>
+                <p id="hero-live-copy" class="muted">No live lanes</p>
+              </article>
+              <article class="signal-card">
+                <span class="signal-label">Review</span>
+                <strong id="hero-review-count">0</strong>
+                <p id="hero-review-copy" class="muted">Nothing blocked</p>
+              </article>
+              <article class="signal-card">
+                <span class="signal-label">Outputs</span>
+                <strong id="hero-output-count">0</strong>
+                <p id="hero-output-copy" class="muted">No artifacts yet</p>
+              </article>
+            </div>
           </div>
           <div class="panel composer">
             <div class="section-head">
@@ -67,6 +96,7 @@
               </div>
               <span class="section-note">one-thumb intake</span>
             </div>
+            <label for="happy-input" class="field-label">Command for Kernel</label>
             <textarea
               id="happy-input"
               rows="4"
@@ -89,17 +119,63 @@
               </select>
             </div>
             <button id="submit-task" class="primary">Kernel に送る</button>
+            <p id="composer-status" class="section-note composer-status">Queue ready for mobile intake.</p>
           </div>
-          <div class="panel">
+          <div class="panel spotlight-panel">
             <div class="section-head">
               <div>
-                <p class="eyebrow">Quick reuse</p>
-                <h3>Recent prompts</h3>
+                <p class="eyebrow">Spotlight</p>
+                <h3>What needs attention now</h3>
               </div>
-              <span class="section-note">tap to reuse</span>
+              <button id="spotlight-open" class="secondary compact-action" type="button">open task</button>
             </div>
-            <ul id="recent-prompts" class="stacked-list"></ul>
+            <div class="spotlight-card">
+              <div class="spotlight-copy">
+                <p id="spotlight-status" class="eyebrow">idle</p>
+                <h3 id="spotlight-title">Waiting for the next command</h3>
+                <p id="spotlight-summary" class="muted">Accepted work and recovery-needed tasks will surface here first.</p>
+              </div>
+              <div class="spotlight-meta">
+                <span id="spotlight-route" class="tag">route</span>
+                <span id="spotlight-phase" class="tag">phase</span>
+                <span id="spotlight-updated" class="tag">updated</span>
+              </div>
+              <div class="progress-track spotlight-track">
+                <div id="spotlight-progress" class="progress-bar"></div>
+              </div>
+              <p id="spotlight-output" class="muted">No artifact yet</p>
+            </div>
           </div>
+          <div class="panel queue-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Live lane</p>
+                <h3>Top tasks without refresh</h3>
+              </div>
+              <span class="section-note">tap to inspect</span>
+            </div>
+            <div id="home-live-list" class="stacked-list"></div>
+          </div>
+          <details class="panel details-panel" open>
+            <summary>
+              <span>
+                <span class="eyebrow">Flow</span>
+                <span class="summary-title">Recent events</span>
+              </span>
+              <span id="sync-note" class="section-note">queue clear</span>
+            </summary>
+            <div id="event-stream" class="event-stream" aria-live="polite"></div>
+          </details>
+          <details class="panel details-panel">
+            <summary>
+              <span>
+                <span class="eyebrow">Quick reuse</span>
+                <span class="summary-title">Recent prompts</span>
+              </span>
+              <span class="section-note">tap to reuse</span>
+            </summary>
+            <ul id="recent-prompts" class="stacked-list"></ul>
+          </details>
           <details class="panel details-panel">
             <summary>
               <span>Normalized intake packet</span>
@@ -121,19 +197,19 @@
           </div>
           <div class="grid two-up">
             <div class="panel metric-card">
-              <span class="label">Primary</span>
+              <span class="label">Active</span>
               <strong id="metric-primary"></strong>
             </div>
             <div class="panel metric-card">
-              <span class="label">Heartbeat</span>
+              <span class="label">Review</span>
               <strong id="metric-heartbeat"></strong>
             </div>
             <div class="panel metric-card">
-              <span class="label">Lane Count</span>
+              <span class="label">Queued</span>
               <strong id="metric-lanes"></strong>
             </div>
             <div class="panel metric-card">
-              <span class="label">Rollback</span>
+              <span class="label">Artifacts</span>
               <strong id="metric-rollback"></strong>
             </div>
           </div>
@@ -165,12 +241,12 @@
             <p class="muted">Tap any card to inspect outputs, decision, and bounded recovery.</p>
           </div>
           <div class="filter-tabs" role="tablist" aria-label="Task filters">
-            <button class="filter-tab is-active" data-filter="in-progress">in progress</button>
-            <button class="filter-tab" data-filter="needs-review">needs review</button>
-            <button class="filter-tab" data-filter="needs-human">needs human</button>
-            <button class="filter-tab" data-filter="done">done</button>
+            <button class="filter-tab is-active" data-filter="in-progress" role="tab" aria-selected="true">in progress</button>
+            <button class="filter-tab" data-filter="needs-review" role="tab" aria-selected="false">needs review</button>
+            <button class="filter-tab" data-filter="needs-human" role="tab" aria-selected="false">needs human</button>
+            <button class="filter-tab" data-filter="done" role="tab" aria-selected="false">done</button>
           </div>
-          <div id="task-list" class="task-list"></div>
+          <div id="task-list" class="task-list" aria-live="polite"></div>
         </section>
 
         <section id="screen-alerts" class="screen" data-screen="alerts">
@@ -179,7 +255,7 @@
             <h2>degraded / fallback / needs-human</h2>
             <p class="muted">Only escalation-grade signals show here.</p>
           </div>
-          <div id="alert-list" class="stack"></div>
+          <div id="alert-list" class="stack" aria-live="polite"></div>
         </section>
 
         <section id="screen-recover" class="screen" data-screen="recover">
@@ -200,22 +276,37 @@
           </div>
           <div class="panel">
             <h3>Latest recover result</h3>
-            <p id="recover-result" class="muted"></p>
+            <p id="recover-result" class="muted" aria-live="polite"></p>
           </div>
         </section>
       </main>
 
       <nav class="bottom-nav" aria-label="Primary">
-        <button class="nav-item is-active" data-target="happy">Happy</button>
-        <button class="nav-item" data-target="now">Now</button>
-        <button class="nav-item" data-target="tasks">Tasks</button>
-        <button class="nav-item" data-target="alerts">Alerts</button>
-        <button class="nav-item" data-target="recover">Recover</button>
+        <button class="nav-item is-active" data-target="happy" data-count="">
+          <span class="nav-kicker">intake</span>
+          <span class="nav-label">Happy</span>
+        </button>
+        <button class="nav-item" data-target="now" data-count="">
+          <span class="nav-kicker">live</span>
+          <span class="nav-label">Now</span>
+        </button>
+        <button class="nav-item" data-target="tasks" data-count="">
+          <span class="nav-kicker">queue</span>
+          <span class="nav-label">Tasks</span>
+        </button>
+        <button class="nav-item" data-target="alerts" data-count="">
+          <span class="nav-kicker">risk</span>
+          <span class="nav-label">Alerts</span>
+        </button>
+        <button class="nav-item" data-target="recover" data-count="">
+          <span class="nav-kicker">safe</span>
+          <span class="nav-label">Recover</span>
+        </button>
       </nav>
     </div>
 
     <div id="task-sheet" class="sheet-backdrop" hidden>
-      <div class="sheet">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" aria-describedby="sheet-summary">
         <header class="sheet-header">
           <div>
             <p class="eyebrow">Task detail</p>
@@ -230,19 +321,24 @@
         <section class="sheet-section">
           <h4>Progress</h4>
           <p id="sheet-progress" class="muted"></p>
+          <p id="sheet-sync-status" class="section-note">detail idle</p>
         </section>
-        <section class="sheet-section">
-          <h4>Outputs</h4>
+        <details class="sheet-section sheet-collapsible" open>
+          <summary>Outputs</summary>
           <div id="sheet-outputs" class="output-list"></div>
-        </section>
+        </details>
+        <details class="sheet-section sheet-collapsible">
+          <summary>Event stream</summary>
+          <div id="sheet-events" class="event-stream"></div>
+        </details>
         <section class="sheet-section">
           <h4>Decision</h4>
           <p id="sheet-decision" class="muted"></p>
         </section>
-        <section class="sheet-section">
-          <h4>Recover</h4>
+        <details class="sheet-section sheet-collapsible">
+          <summary>Recover</summary>
           <div id="sheet-recover" class="action-stack"></div>
-        </section>
+        </details>
       </div>
     </div>
 

@@ -25,8 +25,11 @@ export function resolveHappyRuntimeConfig() {
       metaContent("happy-status-issue-url") ||
       "https://github.com/cursorvers/fugue-orchestrator/issues/55",
     stateEndpoint: globalConfig.stateEndpoint || metaContent("happy-state-endpoint"),
+    eventsEndpoint: globalConfig.eventsEndpoint || metaContent("happy-events-endpoint"),
     intakeEndpoint: globalConfig.intakeEndpoint || metaContent("happy-intake-endpoint"),
     recoveryEndpoint: globalConfig.recoveryEndpoint || metaContent("happy-recovery-endpoint"),
+    taskDetailEndpoint:
+      globalConfig.taskDetailEndpoint || metaContent("happy-task-detail-endpoint"),
     crowEndpoint: globalConfig.crowEndpoint || metaContent("happy-crow-endpoint"),
     authToken: globalConfig.authToken || metaContent("happy-auth-token"),
     remoteEnabled:
@@ -37,5 +40,9 @@ export function resolveHappyRuntimeConfig() {
 }
 
 export function isRemoteReady(config) {
-  return Boolean(config?.remoteEnabled && config?.stateEndpoint && config?.intakeEndpoint);
+  return Boolean(
+    config?.remoteEnabled &&
+      config?.intakeEndpoint &&
+      (config?.eventsEndpoint || config?.stateEndpoint)
+  );
 }

@@ -22,7 +22,12 @@ export function createEndpointClient({ config }) {
       throw new Error(`HTTP ${response.status}: ${text || response.statusText}`);
     }
 
-    return response.json();
+    if (response.status === 204) return {};
+
+    const text = await response.text();
+    if (!text.trim()) return {};
+
+    return JSON.parse(text);
   }
 
   return {
