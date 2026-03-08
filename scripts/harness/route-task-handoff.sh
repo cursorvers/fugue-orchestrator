@@ -485,7 +485,7 @@ ${confirmation_line}
 ${fallback_block}
 ${confirm_note}
 
-Next: Mainframe dispatches and evaluates execution policy. Tutti posts the vote/audit comment only when GitHub execution remains active; otherwise this issue stays as a handoff/audit record until the primary executor proceeds.
+Next: GitHub-hosted Tutti consensus starts now and continues development from the current issue state. You do not need to restate prior context; the current issue thread and labels are carried forward into the vote/execution flow.
 EOF
 gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file handoff-comment.md
 
