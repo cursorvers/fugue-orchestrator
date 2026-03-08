@@ -617,7 +617,7 @@ jobs:
           XAI_MODEL: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_PRIMARY_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
-          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
@@ -630,7 +630,7 @@ jobs:
           TIER="${{ steps.final.outputs.tier }}"
           TITLE="${ISSUE_TITLE}"
           BODY="${ISSUE_BODY}"
-          CODEX_MAIN_MODEL="gpt-5-codex"
+          CODEX_MAIN_MODEL="gpt-5.4"
           if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
             CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
           fi
@@ -654,7 +654,7 @@ jobs:
           RESP_PROVIDER=""
           # Try OpenAI first if provider is codex
           if [[ "${PROVIDER}" == "codex" && -n "${OPENAI_API_KEY}" ]]; then
-            OPENAI_MODEL_CANDIDATES=("${CODEX_MULTI_AGENT_MODEL}" "${CODEX_MAIN_MODEL}" "gpt-5-codex")
+            OPENAI_MODEL_CANDIDATES=("${CODEX_MULTI_AGENT_MODEL}" "${CODEX_MAIN_MODEL}" "gpt-5.4")
             for OPENAI_MODEL in "${OPENAI_MODEL_CANDIDATES[@]}"; do
               REQ="$(jq -n --arg model "${OPENAI_MODEL}" --arg s "${SYS_PROMPT}" --arg u "${USER_PROMPT}" '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.2}')"
               raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
