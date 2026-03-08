@@ -67,6 +67,11 @@ on:
         required: false
         type: string
         default: "kernel"
+      intake_source:
+        description: "Intake source marker for audit/policy"
+        required: false
+        type: string
+        default: ""
       canary_dispatch_owned:
         description: "True when the caller resolved this workflow_call as a canary-owned dispatch"
         required: false
@@ -107,6 +112,11 @@ on:
         required: false
         type: string
         default: ""
+      vote_command:
+        description: "True when the handoff originated from `/vote`"
+        required: false
+        type: string
+        default: "false"
       dispatch_nonce:
         description: "Optional unique nonce to isolate concurrent workflow_call runs"
         required: false
@@ -198,6 +208,7 @@ jobs:
       extra_issue_instruction: ${{ steps.ctx.outputs.extra_issue_instruction }}
       author: ${{ steps.ctx.outputs.author }}
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
+      intake_source: ${{ steps.ctx.outputs.intake_source }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       emergency_continuity_mode: ${{ steps.ctx.outputs.emergency_continuity_mode }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
@@ -216,6 +227,8 @@ jobs:
           ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           EXTRA_ISSUE_INSTRUCTION_INPUT: ${{ inputs.extra_issue_instruction || '' }}
+          VOTE_COMMAND_INPUT: ${{ inputs.vote_command || 'false' }}
+          INTAKE_SOURCE_INPUT: ${{ inputs.intake_source || '' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
@@ -270,6 +283,22 @@ jobs:
           if [[ "${allow_processing_rerun}" != "true" ]]; then
             allow_processing_rerun="false"
           fi
+          vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${vote_command}" != "true" ]]; then
+            vote_command="false"
+          fi
+          intake_source="$(echo "${INTAKE_SOURCE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${intake_source}" in
+            ""|github-issue-label|github-vote-comment|github-issue-handoff|workflow-dispatch|github-recovery-console|railway-public-edge) ;;
+            *) intake_source="" ;;
+          esac
+          if [[ -z "${intake_source}" ]]; then
+            if [[ "${vote_command}" == "true" ]]; then
+              intake_source="github-vote-comment"
+            else
+              intake_source="workflow-dispatch"
+            fi
+          fi
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
           HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
@@ -278,6 +307,22 @@ jobs:
           fi
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
           HAS_IMPLEMENT_REQUEST="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
+            for _label_retry in 1 2 3; do
+              sleep "$((2 ** _label_retry))"
+              issue_json="$(gh_api_retry "${issue_endpoint}" 4 || echo "${issue_json}")"
+              HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
+              HAS_TUTTI="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("tutti") != null')"
+              if [[ "${canary_dispatch_owned}" == "true" ]]; then
+                HAS_TUTTI="true"
+              fi
+              HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
+              HAS_IMPLEMENT_REQUEST="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+              if [[ "${HAS_FUGUE}" == "true" && "${HAS_TUTTI}" == "true" ]]; then
+                break
+              fi
+            done
+          fi
           ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
@@ -347,6 +392,8 @@ jobs:
             echo "self_hosted_online_count=${self_hosted_online_count}"
             echo "subscription_runner_label=${subscription_runner_label}"
             echo "allow_processing_rerun=${allow_processing_rerun}"
+            echo "vote_command=${vote_command}"
+            echo "intake_source=${intake_source}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"

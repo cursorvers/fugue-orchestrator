@@ -28,6 +28,12 @@ if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
 else
   text="$(printf '%s\n%s\n%s\n' "${title}" "${body}" "${comment}")"
 fi
+mode_text="${text}"
+if [[ -n "${vote_instruction}" ]]; then
+  # Accept plain-text mode overrides from `/vote ...` without trusting
+  # arbitrary headings injected in the comment body.
+  mode_text="$(printf '%s\n%s\n' "${mode_text}" "${vote_instruction}")"
+fi
 
 extract_heading_value() {
   local source="$1"
@@ -237,16 +243,21 @@ if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
   body_mode="$(extract_heading_value "${body}" "mode")"
 fi
 if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
+  body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*execution[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+fi
+if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
   body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
 fi
 wants_review=false
 wants_implement=false
 if [[ "${body_mode}" == "implement" ]]; then
   wants_implement=true
-elif echo "${text}" | grep -Eqi '(#implement|implement mode|実装モード|実装して|実装まで|pr作成|pull request|完遂|最後まで)'; then
+elif echo "${mode_text}" | grep -Eqi '(#implement|implement mode|実装モード|実装して|実装まで|pr作成|pull request|完遂|最後まで)'; then
   wants_implement=true
 fi
-if echo "${text}" | grep -Eqi '(レビューのみ|指摘のみ|実装しない|実装不要|review only|no implement|no-implement|#review)'; then
+if [[ "${body_mode}" == "review" ]]; then
+  wants_review=true
+elif echo "${mode_text}" | grep -Eqi '(レビューのみ|指摘のみ|実装しない|実装不要|review only|no implement|no-implement|#review)'; then
   wants_review=true
 fi
 if [[ "${wants_review}" == "true" ]]; then
@@ -272,6 +283,10 @@ auto_confirmed_by_vote="false"
 if [[ "${IS_VOTE_COMMAND}" == "true" && "${wants_implement}" == "true" && "${wants_review}" != "true" ]]; then
   confirm_implement="true"
   auto_confirmed_by_vote="true"
+fi
+if [[ "${wants_implement}" != "true" ]]; then
+  confirm_implement="false"
+  auto_confirmed_by_vote="false"
 fi
 
 # Safety guard: when review-only is explicitly requested, clear any
@@ -408,6 +423,10 @@ if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
     vote_instruction_line="- Vote instruction: none (command only)"
   fi
 fi
+intake_source="github-issue-handoff"
+if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+  intake_source="github-vote-comment"
+fi
 provider_line="- Orchestrator: ${provider}"
 if [[ -n "${main_fallback_note}" ]]; then
   provider_line="- Orchestrator: ${provider} (requested: ${requested_provider})"
@@ -458,6 +477,11 @@ dispatch_args=(
 dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
 dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
 dispatch_args+=(-f handoff_target="kernel")
+dispatch_args+=(-f intake_source="${intake_source}")
+dispatch_args+=(-f requested_execution_mode="${mode}")
+dispatch_args+=(-f implement_request="${wants_implement}")
+dispatch_args+=(-f implement_confirmed="${confirm_implement}")
+dispatch_args+=(-f vote_command="${IS_VOTE_COMMAND}")
 trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -n "${trust_subject}" ]]; then
   dispatch_args+=(-f trust_subject="${trust_subject}")
@@ -483,6 +507,11 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --repo "${GITHUB_REPOSITORY}"
     --issue-number "${ISSUE_NUMBER}"
     --dispatch-nonce "${dispatch_nonce}"
+    --requested-execution-mode "${mode}"
+    --implement-request "${wants_implement}"
+    --implement-confirmed "${confirm_implement}"
+    --vote-command "${IS_VOTE_COMMAND}"
+    --intake-source "${intake_source}"
   )
   if [[ -n "${trust_subject}" ]]; then
     bridge_args+=(--trust-subject "${trust_subject}")

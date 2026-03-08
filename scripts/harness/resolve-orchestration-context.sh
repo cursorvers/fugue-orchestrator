@@ -48,6 +48,31 @@ normalize_multi_agent_mode() {
   esac
 }
 
+extract_mode_from_body() {
+  local b="$1"
+  local mode=""
+  mode="$(extract_body_section "${b}" "execution[[:space:]]+mode" "##")"
+  if [[ -z "${mode}" ]]; then
+    mode="$(extract_body_section "${b}" "execution[[:space:]]+mode" "###")"
+  fi
+  if [[ -z "${mode}" ]]; then
+    mode="$(extract_body_section "${b}" "mode" "##")"
+  fi
+  if [[ -z "${mode}" ]]; then
+    mode="$(extract_body_section "${b}" "mode" "###")"
+  fi
+  if [[ "${mode}" != "implement" && "${mode}" != "review" ]]; then
+    mode="$(echo "${b}" | sed -nE 's/^[[:space:]]*execution[[:space:]_-]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+  fi
+  if [[ "${mode}" != "implement" && "${mode}" != "review" ]]; then
+    mode="$(echo "${b}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
+  fi
+  if [[ "${mode}" != "implement" && "${mode}" != "review" ]]; then
+    mode=""
+  fi
+  printf '%s' "${mode}"
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT_DIR}/scripts/lib/common-utils.sh"
 DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
@@ -88,11 +113,41 @@ handoff_target="$(echo "${HANDOFF_TARGET_INPUT:-kernel}" | tr '[:upper:]' '[:low
 if [[ "${handoff_target}" != "kernel" && "${handoff_target}" != "fugue-bridge" ]]; then
   handoff_target="kernel"
 fi
+intake_source="$(echo "${INTAKE_SOURCE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${intake_source}" in
+  ""|github-issue-label|github-vote-comment|github-issue-handoff|workflow-dispatch|github-recovery-console|railway-public-edge) ;;
+  *) intake_source="" ;;
+esac
 vote_instruction=""
 vote_instruction_b64="$(echo "${VOTE_INSTRUCTION_B64_INPUT:-}" | tr -d '\n\r[:space:]')"
 if [[ -n "${vote_instruction_b64}" ]]; then
   vote_instruction="$(printf '%s' "${vote_instruction_b64}" | base64 --decode 2>/dev/null || true)"
   vote_instruction="$(printf '%s' "${vote_instruction}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+fi
+requested_execution_mode_input="$(echo "${REQUESTED_EXECUTION_MODE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${requested_execution_mode_input}" != "review" && "${requested_execution_mode_input}" != "implement" ]]; then
+  requested_execution_mode_input=""
+fi
+implement_request_input="$(echo "${IMPLEMENT_REQUEST_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${implement_request_input}" != "true" && "${implement_request_input}" != "false" ]]; then
+  implement_request_input=""
+fi
+implement_confirmed_input="$(echo "${IMPLEMENT_CONFIRMED_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${implement_confirmed_input}" != "true" && "${implement_confirmed_input}" != "false" ]]; then
+  implement_confirmed_input=""
+fi
+vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${vote_command}" != "true" ]]; then
+  vote_command="false"
+fi
+if [[ -z "${intake_source}" ]]; then
+  if [[ "${vote_command}" == "true" ]]; then
+    intake_source="github-vote-comment"
+  elif [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
+    intake_source="workflow-dispatch"
+  else
+    intake_source="github-issue-label"
+  fi
 fi
 owner="${GITHUB_REPOSITORY%%/*}"
 
@@ -112,6 +167,12 @@ if [[ "${has_fugue}" != "true" || "${has_tutti}" != "true" ]]; then
 fi
 has_implement="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
 has_implement_confirmed="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement-confirmed") != null)')"
+if [[ -n "${implement_request_input}" ]]; then
+  has_implement="${implement_request_input}"
+fi
+if [[ -n "${implement_confirmed_input}" ]]; then
+  has_implement_confirmed="${implement_confirmed_input}"
+fi
 ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
   ci_execution_engine="subscription"
@@ -145,17 +206,13 @@ if [[ "${ci_execution_engine}" == "subscription" ]]; then
   fi
 fi
 labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
-body_mode="$(extract_body_section "${body}" "mode" "##")"
-if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
-  body_mode="$(extract_body_section "${body}" "execution[[:space:]]+mode" "###")"
-fi
-if [[ "${body_mode}" != "implement" && "${body_mode}" != "review" ]]; then
-  body_mode="$(echo "${body}" | sed -nE 's/^[[:space:]]*mode[[:space:]]*:[[:space:]]*(implement|review)[[:space:]]*$/\1/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
-fi
+body_mode="$(extract_mode_from_body "${body}")"
 # Explicit review mode in issue body always wins over stale labels.
-if [[ "${body_mode}" == "review" ]]; then
+if [[ "${requested_execution_mode_input}" == "review" || "${body_mode}" == "review" ]]; then
   has_implement="false"
   has_implement_confirmed="false"
+elif [[ "${requested_execution_mode_input}" == "implement" || "${body_mode}" == "implement" ]]; then
+  has_implement="true"
 fi
 label_main_provider="$(echo "${issue_json}" | jq -r '
   [ .labels[]? | .name ] as $labels
@@ -882,6 +939,7 @@ fi
   echo "translation_skip_reason=${translation_skip_reason}"
   echo "translation_event=${translation_event}"
   echo "handoff_target=${handoff_target}"
+  echo "intake_source=${intake_source}"
   echo "orchestration_profile=${orchestration_profile}"
   echo "preflight_cycles=${preflight_cycles}"
   echo "multi_agent_mode_override=${multi_agent_mode_override}"
@@ -914,6 +972,7 @@ fi
   echo "subscription_offline_policy=${subscription_offline_policy}"
   echo "trust_subject=${trust_subject}"
   echo "allow_processing_rerun=${allow_processing_rerun}"
+  echo "vote_command=${vote_command}"
   echo "vote_instruction<<EOF"
   echo "${vote_instruction}"
   echo "EOF"

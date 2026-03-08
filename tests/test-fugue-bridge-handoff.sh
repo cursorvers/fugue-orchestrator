@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HANDOFF_SCRIPT="${SCRIPT_DIR}/scripts/harness/fugue-bridge-handoff.sh"
-TMP_ROOT="/Users/masayuki/Dev/tmp"
+TMP_ROOT="${TMPDIR:-/tmp}"
 mkdir -p "${TMP_ROOT}"
 TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/fugue-bridge-handoff.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"' EXIT
@@ -20,6 +20,11 @@ dry_run_cmd="$(
     --dispatch-nonce "nonce-dry-run" \
     --trust-subject "masayuki" \
     --vote-instruction-b64 "dm90ZQ==" \
+    --requested-execution-mode "review" \
+    --implement-request "false" \
+    --implement-confirmed "false" \
+    --vote-command "true" \
+    --intake-source "github-vote-comment" \
     --allow-processing-rerun \
     --dry-run
 )"
@@ -33,6 +38,11 @@ for expected in \
   "handoff_target=fugue-bridge" \
   "trust_subject=masayuki" \
   "vote_instruction_b64=dm90ZQ==" \
+  "requested_execution_mode=review" \
+  "implement_request=false" \
+  "implement_confirmed=false" \
+  "vote_command=true" \
+  "intake_source=github-vote-comment" \
   "allow_processing_rerun=true"
 do
   if [[ "${dry_run_cmd}" != *"${expected}"* ]]; then
@@ -58,7 +68,12 @@ runtime_output="$(
   bash "${HANDOFF_SCRIPT}" \
     --repo "cursorvers/fugue-orchestrator" \
     --issue-number "654" \
-    --dispatch-nonce "nonce-runtime"
+    --dispatch-nonce "nonce-runtime" \
+    --requested-execution-mode "implement" \
+    --implement-request "true" \
+    --implement-confirmed "true" \
+    --vote-command "true" \
+    --intake-source "github-vote-comment"
 )"
 
 if [[ "${runtime_output}" != *"handoff_target=fugue-bridge"* ]]; then
@@ -79,7 +94,12 @@ for expected in \
   "--repo cursorvers/fugue-orchestrator" \
   "-f issue_number=654" \
   "-f dispatch_nonce=nonce-runtime" \
-  "-f handoff_target=fugue-bridge"
+  "-f handoff_target=fugue-bridge" \
+  "-f requested_execution_mode=implement" \
+  "-f implement_request=true" \
+  "-f implement_confirmed=true" \
+  "-f vote_command=true" \
+  "-f intake_source=github-vote-comment"
 do
   if [[ "${logged_cmd}" != *"${expected}"* ]]; then
     echo "FAIL: runtime invocation missing '${expected}'" >&2
@@ -99,12 +119,28 @@ grep -q 'handoff_target: "\${{ needs.ctx.outputs.handoff_target }}"' "${CALLER_W
   echo "FAIL: caller workflow missing handoff_target passthrough" >&2
   exit 1
 }
+grep -q 'vote_command: "\${{ needs.ctx.outputs.vote_command }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing vote_command passthrough" >&2
+  exit 1
+}
+grep -q 'intake_source: "\${{ needs.ctx.outputs.intake_source }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing intake_source passthrough" >&2
+  exit 1
+}
 grep -q 'legacy_bridge_active="true"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow missing legacy bridge activation path" >&2
   exit 1
 }
 grep -q 'multi_agent_mode_source="legacy-bridge"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow missing legacy bridge topology source marker" >&2
+  exit 1
+}
+grep -q 'echo "vote_command=${vote_command}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing vote_command output emission" >&2
+  exit 1
+}
+grep -q 'echo "intake_source=${intake_source}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing intake_source output emission" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"

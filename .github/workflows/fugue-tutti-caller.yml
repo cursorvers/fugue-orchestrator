@@ -29,6 +29,26 @@ on:
         required: false
         type: string
         default: ""
+      requested_execution_mode:
+        description: "Resolved handoff mode snapshot (review|implement)"
+        required: false
+        type: string
+        default: ""
+      implement_request:
+        description: "Resolved implementation intent snapshot"
+        required: false
+        type: string
+        default: ""
+      implement_confirmed:
+        description: "Resolved implementation confirmation snapshot"
+        required: false
+        type: string
+        default: ""
+      vote_command:
+        description: "True when the handoff originated from `/vote`"
+        required: false
+        type: string
+        default: "false"
       dispatch_nonce:
         description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
         required: false
@@ -39,6 +59,11 @@ on:
         required: false
         type: string
         default: "kernel"
+      intake_source:
+        description: "Intake source marker for audit/policy"
+        required: false
+        type: string
+        default: ""
       execution_mode_override:
         description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
@@ -119,6 +144,8 @@ jobs:
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       handoff_target: ${{ steps.ctx.outputs.handoff_target }}
+      intake_source: ${{ steps.ctx.outputs.intake_source }}
+      vote_command: ${{ steps.ctx.outputs.vote_command }}
       workspace_hint_applied: ${{ steps.ctx.outputs.workspace_hint_applied }}
       workspace_action_hint: ${{ steps.ctx.outputs.workspace_action_hint }}
       workspace_domain_hint: ${{ steps.ctx.outputs.workspace_domain_hint }}
@@ -140,7 +167,12 @@ jobs:
           ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
+          REQUESTED_EXECUTION_MODE_INPUT: ${{ github.event.inputs.requested_execution_mode || '' }}
+          IMPLEMENT_REQUEST_INPUT: ${{ github.event.inputs.implement_request || '' }}
+          IMPLEMENT_CONFIRMED_INPUT: ${{ github.event.inputs.implement_confirmed || '' }}
+          VOTE_COMMAND_INPUT: ${{ github.event.inputs.vote_command || 'false' }}
           HANDOFF_TARGET_INPUT: ${{ github.event.inputs.handoff_target || 'kernel' }}
+          INTAKE_SOURCE_INPUT: ${{ github.event.inputs.intake_source || '' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -487,6 +519,7 @@ jobs:
       claude_teams_member_cap: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '3' || needs.ctx.outputs.claude_teams_member_cap }}"
       claude_teams_max_invocations: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '1' || needs.ctx.outputs.claude_teams_max_invocations }}"
       handoff_target: "${{ needs.ctx.outputs.handoff_target }}"
+      intake_source: "${{ needs.ctx.outputs.intake_source }}"
       canary_dispatch_owned: "${{ needs.ctx.outputs.canary_dispatch_owned }}"
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
@@ -496,6 +529,7 @@ jobs:
       trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
       allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
       extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
+      vote_command: "${{ needs.ctx.outputs.vote_command }}"
       dispatch_nonce: "${{ github.event.inputs.dispatch_nonce || github.run_id }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
