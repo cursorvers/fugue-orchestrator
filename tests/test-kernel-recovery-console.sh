@@ -44,12 +44,73 @@ grep -q 'gh workflow run fugue-caller.yml' "${ROOT_DIR}/.github/workflows/fugue-
   echo "FAIL: watchdog should dispatch fugue-caller.yml for pending issues" >&2
   exit 1
 }
+grep -q 'actions/workflows/fugue-caller.yml/runs' "${ROOT_DIR}/.github/workflows/fugue-watchdog.yml" || {
+  echo "FAIL: watchdog should measure caller staleness from fugue-caller.yml" >&2
+  exit 1
+}
 grep -q '### `mobile-progress`' "${RUNBOOK}" || {
   echo "FAIL: recovery runbook missing mobile-progress section" >&2
   exit 1
 }
 grep -q 'kernel-mobile-progress' "${RUNBOOK}" || {
   echo "FAIL: recovery runbook should describe automatic mobile progress publishing" >&2
+  exit 1
+}
+
+TMP_ROOT="/Users/masayuki/Dev/tmp"
+mkdir -p "${TMP_ROOT}"
+TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/kernel-recovery-console.XXXXXX")"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+FAKE_BIN="${TMP_DIR}/bin"
+mkdir -p "${FAKE_BIN}"
+FAKE_GH_LOG="${TMP_DIR}/gh.log"
+FAKE_SUMMARY="${TMP_DIR}/summary.md"
+cat > "${FAKE_BIN}/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${FAKE_GH_LOG}"
+
+if [[ "${1:-}" == "api" ]]; then
+  case "${2:-}" in
+    repos/cursorvers/fugue-orchestrator/issues/123)
+      printf '%s\n' '{"labels":[{"name":"fugue-task"},{"name":"tutti"}]}'
+      exit 0
+      ;;
+    repos/cursorvers/fugue-orchestrator/actions/runs\?per_page=100)
+      if grep -q 'workflow run fugue-caller.yml' "${FAKE_GH_LOG}"; then
+        printf '%s\n' '{"workflow_runs":[{"id":456,"event":"workflow_dispatch","path":".github/workflows/fugue-caller.yml","html_url":"https://github.com/cursorvers/fugue-orchestrator/actions/runs/456","created_at":"2026-03-08T00:00:00Z","display_title":"fugue-caller","name":"fugue-caller"}]}'
+      else
+        printf '%s\n' '{"workflow_runs":[]}'
+      fi
+      exit 0
+      ;;
+  esac
+fi
+
+exit 0
+EOF
+chmod +x "${FAKE_BIN}/gh"
+
+PATH="${FAKE_BIN}:${PATH}" \
+FAKE_GH_LOG="${FAKE_GH_LOG}" \
+GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
+GITHUB_STEP_SUMMARY="${FAKE_SUMMARY}" \
+RECOVERY_MODE="reroute-issue" \
+RECOVERY_ISSUE_NUMBER="123" \
+RECOVERY_TRUST_SUBJECT="masayuki" \
+bash "${SCRIPT}" >/dev/null
+
+grep -q 'workflow run fugue-caller.yml' "${FAKE_GH_LOG}" || {
+  echo "FAIL: reroute-issue runtime should dispatch fugue-caller.yml" >&2
+  exit 1
+}
+grep -q -- '-f trigger_event_name=issues' "${FAKE_GH_LOG}" || {
+  echo "FAIL: reroute-issue runtime should replay explicit issues trigger for tutti reroute" >&2
+  exit 1
+}
+grep -q -- '-f trigger_label_name=tutti' "${FAKE_GH_LOG}" || {
+  echo "FAIL: reroute-issue runtime should replay explicit tutti label trigger" >&2
   exit 1
 }
 
