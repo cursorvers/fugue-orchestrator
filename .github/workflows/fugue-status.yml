@@ -116,7 +116,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.ctx.outputs.issue_number }}
         run: |
-          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Status report is restricted to trusted repo collaborators (write/maintain/admin). Current permission: `${{ steps.trust.outputs.permission }}`."
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Status report is restricted to trusted repo collaborators (write/maintain/admin). Current permission: '${{ steps.trust.outputs.permission }}'."
 
       - name: Generate and post status report
         if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted == 'true' }}
@@ -347,8 +347,7 @@ jobs:
             local label="$2"
             local run_json
             run_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 4 || echo '{}')"
-            local status concl url created
-            status="$(echo "${run_json}" | jq -r '.workflow_runs[0].status // "unknown"')"
+            local concl url created
             concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // ""')"
             url="$(echo "${run_json}" | jq -r '.workflow_runs[0].html_url // ""')"
             created="$(echo "${run_json}" | jq -r '.workflow_runs[0].created_at // ""')"
@@ -408,7 +407,8 @@ jobs:
 
           **Latest runs**
           $(wf_line "fugue-tutti-caller.yml" "mainframe")
-          $(wf_line "fugue-task-router.yml" "router")
+          $(wf_line "fugue-caller.yml" "caller")
+          $(wf_line "fugue-task-router.yml" "router-internal")
           $(wf_line "fugue-watchdog.yml" "watchdog")
           $(wf_line "googleworkspace-feed-sync.yml" "gws-shared-feed")
           $(wf_line "googleworkspace-personal-feed-sync.yml" "gws-personal-feed")

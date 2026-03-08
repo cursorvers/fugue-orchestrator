@@ -32,6 +32,21 @@ on:
         required: false
         type: string
         default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for downstream dispatches (hold|continuity)"
+        required: false
+        type: string
+        default: ""
+      handoff_target:
+        description: "Optional sovereign handoff target override (kernel|fugue-bridge)"
+        required: false
+        type: string
+        default: ""
       execution_mode_override:
         description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
@@ -46,42 +61,6 @@ on:
         required: false
       XAI_API_KEY:
         required: false
-  workflow_dispatch:
-    inputs:
-      issue_number:
-        description: "Issue number to process"
-        required: true
-        type: string
-      trigger_event_name:
-        description: "Original upstream event name (issues|issue_comment|workflow_dispatch)"
-        required: false
-        type: string
-        default: "workflow_dispatch"
-      trigger_label_name:
-        description: "Original label name for issues:labeled triggers"
-        required: false
-        type: string
-        default: ""
-      comment_body:
-        description: "Original issue_comment body"
-        required: false
-        type: string
-        default: ""
-      comment_author:
-        description: "Original issue_comment author login"
-        required: false
-        type: string
-        default: ""
-      trust_subject:
-        description: "Original triggering actor login used for trust checks"
-        required: false
-        type: string
-        default: ""
-      execution_mode_override:
-        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
-        required: false
-        default: "auto"
-        type: string
 
 permissions:
   issues: write
@@ -90,13 +69,12 @@ permissions:
 
 jobs:
   route:
-    # Ignore bot-driven issue label churn (processing/proj labels), but still allow
-    # watchdog-triggered workflow_dispatch to run as github-actions[bot].
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' || github.actor != 'github-actions[bot]' }}
+    # This workflow is internal-only; caller owns all external trigger shaping.
+    if: ${{ github.event_name == 'workflow_call' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: fugue-task-${{ github.repository }}-${{ github.event.issue.number || inputs.issue_number || github.event.inputs.issue_number || github.run_id }}
+      group: fugue-task-${{ github.repository }}-${{ inputs.issue_number || github.run_id }}
       cancel-in-progress: false
 
     steps:
@@ -134,22 +112,15 @@ jobs:
             gh_retry "${attempts}" gh api "${endpoint}"
           }
 
-          TRIGGER_EVENT_NAME="${{ inputs.trigger_event_name || github.event.inputs.trigger_event_name || '' }}"
+          TRIGGER_EVENT_NAME="${{ inputs.trigger_event_name || '' }}"
           if [[ -z "${TRIGGER_EVENT_NAME}" ]]; then
             TRIGGER_EVENT_NAME="${GITHUB_EVENT_NAME}"
           fi
-          TRIGGER_LABEL_NAME="$(printf '%s' "${{ inputs.trigger_label_name || github.event.inputs.trigger_label_name || '' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          COMMENT_BODY="${{ inputs.comment_body || github.event.inputs.comment_body || '' }}"
-          COMMENT_AUTHOR="${{ inputs.comment_author || github.event.inputs.comment_author || '' }}"
-          TRUST_SUBJECT_INPUT="$(printf '%s' "${{ inputs.trust_subject || github.event.inputs.trust_subject || '' }}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
-            COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
-            COMMENT_AUTHOR="$(jq -r '.comment.user.login // ""' "${GITHUB_EVENT_PATH}")"
-            TRIGGER_EVENT_NAME="issue_comment"
-          elif [[ "${GITHUB_EVENT_NAME}" == "issues" ]]; then
-            TRIGGER_EVENT_NAME="issues"
-            TRIGGER_LABEL_NAME="$(jq -r '.label.name // ""' "${GITHUB_EVENT_PATH}" | tr '[:upper:]' '[:lower:]')"
-          fi
+          TRIGGER_LABEL_NAME="$(printf '%s' "${{ inputs.trigger_label_name || '' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          COMMENT_BODY="${{ inputs.comment_body || '' }}"
+          COMMENT_AUTHOR="${{ inputs.comment_author || '' }}"
+          TRUST_SUBJECT_INPUT="$(printf '%s' "${{ inputs.trust_subject || '' }}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          ALLOW_PROCESSING_RERUN_INPUT="$(printf '%s' "${{ inputs.allow_processing_rerun || 'false' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 
           IS_VOTE_COMMAND="false"
           VOTE_INSTRUCTION=""
@@ -160,16 +131,8 @@ jobs:
             VOTE_INSTRUCTION="$(printf '%s' "${VOTE_INSTRUCTION}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           fi
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
-            ISSUE_NUMBER="${{ inputs.issue_number }}"
-            issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
-            issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
-          else
-            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
-            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
-          fi
+          ISSUE_NUMBER="${{ inputs.issue_number }}"
+          issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
@@ -206,6 +169,10 @@ jobs:
           if [[ "${TRIGGER_EVENT_NAME}" == "issues" && "${TRIGGER_LABEL_NAME}" == "tutti" ]]; then
             EXPLICIT_TUTTI_TRIGGER="true"
           fi
+          allow_processing_rerun="false"
+          if [[ "${ALLOW_PROCESSING_RERUN_INPUT}" == "true" ]]; then
+            allow_processing_rerun="true"
+          fi
 
           SHOULD_RUN="true"
           SKIP_REASON=""
@@ -221,7 +188,7 @@ jobs:
           elif [[ "${HAS_TUTTI}" == "true" && "${IS_VOTE_COMMAND}" != "true" && "${EXPLICIT_TUTTI_TRIGGER}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="handled-by-tutti"
-          elif [[ "${HAS_PROCESSING}" == "true" && "${IS_VOTE_COMMAND}" != "true" ]]; then
+          elif [[ "${HAS_PROCESSING}" == "true" && "${IS_VOTE_COMMAND}" != "true" && "${allow_processing_rerun}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="already-processing"
           fi
@@ -253,6 +220,7 @@ jobs:
             echo "has_fugue=${HAS_FUGUE}"
             echo "has_tutti=${HAS_TUTTI}"
             echo "has_processing=${HAS_PROCESSING}"
+            echo "allow_processing_rerun=${allow_processing_rerun}"
             echo "has_gha24=${HAS_GHA24}"
             echo "explicit_tutti_trigger=${EXPLICIT_TUTTI_TRIGGER}"
             echo "should_run=${SHOULD_RUN}"
@@ -379,7 +347,10 @@ jobs:
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
           CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
-          EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || github.event.inputs.execution_mode_override || 'auto' }}
+          ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
+          HANDOFF_TARGET_INPUT: ${{ inputs.handoff_target || '' }}
+          EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || 'auto' }}
         run: bash scripts/harness/route-task-handoff.sh
 
       - name: Detect post-handoff routing state
@@ -461,7 +432,7 @@ jobs:
         env:
           GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
           FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
-          EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || github.event.inputs.execution_mode_override || 'auto' }}
+          EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || 'auto' }}
         run: |
           set -euo pipefail
 

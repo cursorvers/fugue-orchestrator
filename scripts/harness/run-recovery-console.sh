@@ -184,6 +184,7 @@ summarize_status() {
   for workflow_name in \
     "fugue-orchestrator-canary.yml" \
     "fugue-watchdog.yml" \
+    "fugue-caller.yml" \
     "fugue-task-router.yml" \
     "fugue-tutti-caller.yml"
   do
@@ -302,22 +303,37 @@ reroute_issue() {
   append_summary "- offline policy override: \`${offline_policy}\`"
   append_summary ""
 
-  if [[ "${has_tutti}" == "true" || "${has_processing}" == "true" ]]; then
+  if [[ "${has_tutti}" == "true" ]]; then
     dispatch_workflow \
-      "fugue-tutti-caller.yml" \
+      "fugue-caller.yml" \
+      -f issue_number="${issue_number}" \
+      -f trigger_event_name="issues" \
+      -f trigger_label_name="tutti" \
+      -f trust_subject="${trust_subject}" \
+      -f allow_processing_rerun=true \
+      -f subscription_offline_policy_override="${offline_policy}" \
+      -f handoff_target="${handoff_target}"
+    return 0
+  fi
+
+  if [[ "${has_processing}" == "true" ]]; then
+    dispatch_workflow \
+      "fugue-caller.yml" \
       -f issue_number="${issue_number}" \
       -f trust_subject="${trust_subject}" \
       -f allow_processing_rerun=true \
       -f subscription_offline_policy_override="${offline_policy}" \
-      -f handoff_target="${handoff_target}" \
-      -f dispatch_nonce="${dispatch_nonce}"
+      -f handoff_target="${handoff_target}"
     return 0
   fi
 
   if [[ "${has_fugue}" == "true" ]]; then
     dispatch_workflow \
-      "fugue-task-router.yml" \
-      -f issue_number="${issue_number}"
+      "fugue-caller.yml" \
+      -f issue_number="${issue_number}" \
+      -f trust_subject="${trust_subject}" \
+      -f subscription_offline_policy_override="${offline_policy}" \
+      -f handoff_target="${handoff_target}"
     return 0
   fi
 

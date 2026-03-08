@@ -10,6 +10,7 @@ dispatch_nonce=""
 trust_subject=""
 vote_instruction_b64=""
 allow_processing_rerun="false"
+subscription_offline_policy_override=""
 requested_execution_mode=""
 implement_request=""
 implement_confirmed=""
@@ -30,6 +31,8 @@ Options:
   --trust-subject <login>          Optional trusted actor login
   --vote-instruction-b64 <value>   Optional base64-encoded /vote instruction
   --allow-processing-rerun         Allow rerun while processing label exists
+  --subscription-offline-policy-override <v>
+                                   Optional offline policy override (hold|continuity)
   --requested-execution-mode <v>   Resolved handoff mode (review|implement)
   --implement-request <bool>       Resolved implementation intent snapshot
   --implement-confirmed <bool>     Resolved implementation confirmation snapshot
@@ -65,6 +68,10 @@ while [[ $# -gt 0 ]]; do
     --allow-processing-rerun)
       allow_processing_rerun="true"
       shift 1
+      ;;
+    --subscription-offline-policy-override)
+      subscription_offline_policy_override="${2:-}"
+      shift 2
       ;;
     --requested-execution-mode)
       requested_execution_mode="${2:-}"
@@ -136,6 +143,10 @@ if [[ -n "${vote_instruction_b64}" ]]; then
 fi
 if [[ "${allow_processing_rerun}" == "true" ]]; then
   dispatch_cmd+=(-f allow_processing_rerun="true")
+fi
+subscription_offline_policy_override="$(printf '%s' "${subscription_offline_policy_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+  dispatch_cmd+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
 fi
 requested_execution_mode="$(printf '%s' "${requested_execution_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${requested_execution_mode}" == "review" || "${requested_execution_mode}" == "implement" ]]; then

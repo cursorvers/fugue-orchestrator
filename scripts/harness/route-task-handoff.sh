@@ -22,6 +22,18 @@ title="${ISSUE_TITLE}"
 body="${ISSUE_BODY}"
 comment="${COMMENT_BODY}"
 vote_instruction="$(printf '%s' "${VOTE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+allow_processing_rerun_input="$(printf '%s' "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${allow_processing_rerun_input}" != "true" ]]; then
+  allow_processing_rerun_input="false"
+fi
+subscription_offline_policy_override="$(printf '%s' "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${subscription_offline_policy_override}" != "hold" && "${subscription_offline_policy_override}" != "continuity" ]]; then
+  subscription_offline_policy_override=""
+fi
+handoff_target_input="$(printf '%s' "${HANDOFF_TARGET_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${handoff_target_input}" != "kernel" && "${handoff_target_input}" != "fugue-bridge" ]]; then
+  handoff_target_input=""
+fi
 execution_mode_override="$(printf '%s' "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 case "${execution_mode_override}" in
   auto|primary|backup-safe|backup-heavy) ;;
@@ -210,12 +222,14 @@ if [[ "${body_handoff_target}" != "kernel" && "${body_handoff_target}" != "fugue
   body_handoff_target="$(echo "${body}" | sed -nE 's/^[[:space:]]*(handoff[[:space:]_-]*target|sovereign[[:space:]_-]*adapter)[[:space:]]*:[[:space:]]*(kernel|fugue-bridge)[[:space:]]*$/\2/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
 fi
 handoff_target="${handoff_target_default}"
-if [[ "${body_handoff_target}" == "kernel" || "${body_handoff_target}" == "fugue-bridge" ]]; then
+if [[ -n "${handoff_target_input}" ]]; then
+  handoff_target="${handoff_target_input}"
+elif [[ "${body_handoff_target}" == "kernel" || "${body_handoff_target}" == "fugue-bridge" ]]; then
   handoff_target="${body_handoff_target}"
 fi
-if echo "${text}" | grep -Eqi '#fugue-bridge|rollback to fugue|legacy fugue'; then
+if [[ -z "${handoff_target_input}" ]] && echo "${text}" | grep -Eqi '#fugue-bridge|rollback to fugue|legacy fugue'; then
   handoff_target="fugue-bridge"
-elif echo "${text}" | grep -Eqi '#kernel'; then
+elif [[ -z "${handoff_target_input}" ]] && echo "${text}" | grep -Eqi '#kernel'; then
   handoff_target="kernel"
 fi
 
@@ -477,7 +491,7 @@ dispatch_args=(
 )
 dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
 dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
-dispatch_args+=(-f handoff_target="kernel")
+dispatch_args+=(-f handoff_target="${handoff_target}")
 dispatch_args+=(-f requested_execution_mode="${mode}")
 dispatch_args+=(-f implement_request="${wants_implement}")
 dispatch_args+=(-f implement_confirmed="${confirm_implement}")
@@ -489,8 +503,11 @@ fi
 if [[ -n "${vote_instruction_b64}" ]]; then
   dispatch_args+=(-f vote_instruction_b64="${vote_instruction_b64}")
 fi
-if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+if [[ "${IS_VOTE_COMMAND}" == "true" || "${allow_processing_rerun_input}" == "true" ]]; then
   dispatch_args+=(-f allow_processing_rerun="true")
+fi
+if [[ -n "${subscription_offline_policy_override}" ]]; then
+  dispatch_args+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
 fi
 if [[ "${execution_mode_override}" != "auto" ]]; then
   dispatch_args+=(-f execution_mode_override="${execution_mode_override}")
@@ -522,8 +539,11 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
   if [[ -n "${vote_instruction_b64}" ]]; then
     bridge_args+=(--vote-instruction-b64 "${vote_instruction_b64}")
   fi
-  if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+  if [[ "${IS_VOTE_COMMAND}" == "true" || "${allow_processing_rerun_input}" == "true" ]]; then
     bridge_args+=(--allow-processing-rerun)
+  fi
+  if [[ -n "${subscription_offline_policy_override}" ]]; then
+    bridge_args+=(--subscription-offline-policy-override "${subscription_offline_policy_override}")
   fi
   bash "${bridge_handoff_script}" "${bridge_args[@]}" >/dev/null
 else

@@ -73,8 +73,20 @@ if head -n 8 "${CALLER_WORKFLOW}" | grep -q 'opened'; then
   echo "FAIL: fugue-caller should not auto-start from opened issues" >&2
   exit 1
 fi
-grep -Fq "trigger_label_name: \${{ github.event.label.name || '' }}" "${CALLER_WORKFLOW}" || {
-  echo "FAIL: fugue-caller should pass the triggering label into task router" >&2
+grep -Fq "trigger_label_name: \${{ github.event.inputs.trigger_label_name || github.event.label.name || '' }}" "${CALLER_WORKFLOW}" || {
+  echo "FAIL: fugue-caller should pass the triggering label or explicit replay override into task router" >&2
+  exit 1
+}
+grep -Fq "allow_processing_rerun: \${{ github.event.inputs.allow_processing_rerun || 'false' }}" "${CALLER_WORKFLOW}" || {
+  echo "FAIL: fugue-caller should pass allow_processing_rerun into task router" >&2
+  exit 1
+}
+grep -Fq "subscription_offline_policy_override: \${{ github.event.inputs.subscription_offline_policy_override || '' }}" "${CALLER_WORKFLOW}" || {
+  echo "FAIL: fugue-caller should pass offline policy override into task router" >&2
+  exit 1
+}
+grep -Fq "handoff_target: \${{ github.event.inputs.handoff_target || '' }}" "${CALLER_WORKFLOW}" || {
+  echo "FAIL: fugue-caller should pass handoff_target override into task router" >&2
   exit 1
 }
 grep -Fq "comment_body: \${{ github.event.comment.body || '' }}" "${CALLER_WORKFLOW}" || {
@@ -89,10 +101,22 @@ if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  issue_comment:'; then
   echo "FAIL: fugue-task-router should no longer expose direct issue_comment triggers" >&2
   exit 1
 fi
+if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  workflow_dispatch:'; then
+  echo "FAIL: fugue-task-router should not be directly workflow_dispatch invokable" >&2
+  exit 1
+fi
 grep -q 'EXPLICIT_TUTTI_TRIGGER="true"' "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should recognize manual tutti label as an explicit trigger" >&2
   exit 1
 }
+grep -q 'ALLOW_PROCESSING_RERUN_INPUT' "${TASK_ROUTER_WORKFLOW}" || {
+  echo "FAIL: task router should accept allow_processing_rerun from caller" >&2
+  exit 1
+}
+if grep -q 'github\.event\.inputs' "${TASK_ROUTER_WORKFLOW}"; then
+  echo "FAIL: task router should rely on workflow_call inputs, not direct workflow_dispatch payloads" >&2
+  exit 1
+fi
 if sed -n '1,40p' "${CANARY_WORKFLOW%orchestrator-canary.yml}tutti-caller.yml" | grep -q '^  issues:'; then
   echo "FAIL: fugue-tutti-caller should be explicit-dispatch only" >&2
   exit 1
