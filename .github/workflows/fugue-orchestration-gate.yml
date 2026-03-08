@@ -9,6 +9,7 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
       - 'scripts/check-agent-matrix-parity.sh'
@@ -16,6 +17,8 @@ on:
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
+      - 'tests/test-canary-trust-policy.sh'
+      - 'tests/test-kernel-canary-plan.sh'
   push:
     branches:
       - main
@@ -26,6 +29,7 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
       - 'scripts/check-agent-matrix-parity.sh'
@@ -33,6 +37,8 @@ on:
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
+      - 'tests/test-canary-trust-policy.sh'
+      - 'tests/test-kernel-canary-plan.sh'
   workflow_dispatch:
     inputs:
       run_canary_lite:
@@ -57,6 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/lib/canary-trust-policy.sh
           bash -n scripts/lib/execution-profile-policy.sh
           bash -n scripts/lib/orchestrator-policy.sh
           bash -n scripts/local/run-local-orchestration.sh
@@ -64,6 +71,14 @@ jobs:
           bash -n scripts/sim-orchestrator-switch.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
+          bash -n tests/test-canary-trust-policy.sh
+          bash -n tests/test-kernel-canary-plan.sh
+
+      - name: Canary trust tests
+        run: |
+          set -euo pipefail
+          bash tests/test-canary-trust-policy.sh
+          bash tests/test-kernel-canary-plan.sh
 
       - name: Workflow YAML parse checks
         run: |

@@ -158,8 +158,8 @@ grep -q 'CANARY_DISPATCH_OWNED: \${{ steps.ctx.outputs.canary_dispatch_owned }}'
   echo "FAIL: router trust step should receive canary dispatch ownership env" >&2
   exit 1
 }
-grep -q 'PERM="canary-bypass"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should bypass collaborator permission for canary-owned dispatches" >&2
+grep -q 'bash scripts/lib/canary-trust-policy.sh' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should delegate trust decisions to canary-trust-policy.sh" >&2
   exit 1
 }
 grep -Fq 'echo "canary_dispatch_owned=${canary_dispatch_owned}"' "${ROUTER_WORKFLOW}" || {
@@ -168,6 +168,10 @@ grep -Fq 'echo "canary_dispatch_owned=${canary_dispatch_owned}"' "${ROUTER_WORKF
 }
 grep -Fq 'canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router prepare job should expose canary dispatch ownership output" >&2
+  exit 1
+}
+grep -q 'group: fugue-orchestrator-canary-' "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow should define a concurrency group to suppress duplicate runs" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"
