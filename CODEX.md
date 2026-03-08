@@ -7,8 +7,9 @@ Primary policy source:
 1. `AGENTS.md`
 2. `docs/requirements-gpt54-codex-kernel.md`
 3. `docs/kernel-preimplementation-readiness.md`
-4. `docs/kernel-codex-import-strategy.md`
-5. `docs/kernel-fugue-migration-audit.md`
+4. `docs/kernel-unattended-runtime-substrate.md`
+5. `docs/kernel-codex-import-strategy.md`
+6. `docs/kernel-fugue-migration-audit.md`
 
 If a file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
@@ -29,6 +30,20 @@ If a file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - Codex decides `ok_to_execute`.
 - Claude may participate only as executor, adapter, or council lane.
 
+## Runtime Boundary
+
+- Kernel should absorb `Symphony`-like unattended runtime primitives, not replace Kernel control-plane doctrine with Symphony.
+- Accepted runtime primitives include:
+  - daemon scheduler / poll loop
+  - per-issue isolated workspace lifecycle
+  - retry / reconciliation / restart recovery
+  - repo-owned workflow contract for future runs
+- Rejected ownership transfer includes:
+  - control-plane sovereignty
+  - council math
+  - `ok_to_execute`
+  - provider-neutral adapter contract
+
 ## Slash Prompt Contract
 
 - The supported entrypoint for Kernel work in this repository is a fresh Codex session started at the repository root and then `/kernel`.
@@ -36,10 +51,10 @@ If a file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - Do not rely on `~/.codex/prompts/kernel.md` alone for repository work; treat the global prompt as convenience only.
 - Hot reload is not guaranteed. After changing `.codex/prompts/kernel.md`, start a new Codex session before assuming the update is active.
 - If `/kernel` is not recognized, restart Codex from this repository root and retry before doing manual fallback work.
-- `/kernel` bootstrap must launch at least 3 active subagent lanes before the first acknowledgement.
-- The normal operating target is 6 concurrent lanes across multiple LLM models or model profiles when the environment supports it.
+- `/kernel` bootstrap must launch at least 6 active subagent lanes before the first acknowledgement.
+- The minimum operating target is 6 or more concurrent lanes across multiple LLM models or model profiles.
 - The first valid acknowledgement must include a `Lane manifest:` section describing currently active lanes, not planned lanes.
-- The first valid acknowledgement must also include `Bootstrap target: 6 lanes (minimum 3).`
+- The first valid acknowledgement must also include `Bootstrap target: 6+ lanes (minimum 6).`
 - `/vote` and `/v` are local continuation prompts in this repository. They must not post to GitHub or hand off to issue-comment workflows.
 - GitHub `/vote` workflow triggering remains an explicit issue-comment path (`gh issue comment ... --body '/vote'` or `vote-gh ...`), not a Codex slash prompt.
 - Hot reload is not guaranteed for `.codex/prompts/vote.md` and `.codex/prompts/v.md` either. Restart the session after changing them.
@@ -70,11 +85,14 @@ For `/kernel` prompt verification:
 
 - static contract check: `bash tests/test-codex-kernel-prompt.sh`
 - runtime smoke on a fresh session: `RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh`
-- runtime smoke passes only when the acknowledgement includes `Kernel orchestration is active ...`, `Bootstrap target: 6 lanes (minimum 3).`, and a lane manifest with at least 3 active lanes
+- runtime smoke passes only when the acknowledgement includes `Kernel orchestration is active ...`, `Bootstrap target: 6+ lanes (minimum 6).`, and a lane manifest with at least 6 active lanes
 
 For `/vote` prompt verification:
 
 - static contract check: `bash tests/test-codex-vote-prompt.sh`
+- runtime smoke on a fresh session: `RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh`
+- runtime smoke passes only when output includes `Local consensus mode is active.`, `Smoke verification: PASS`, and `Smoke result marker: ...` within `CODEX_VOTE_SMOKE_TIMEOUT_SEC` seconds (default: `90`)
+- CI static enforcement: `.github/workflows/fugue-orchestration-gate.yml` runs `bash tests/test-codex-vote-prompt.sh`
 
 ## Current Intent
 

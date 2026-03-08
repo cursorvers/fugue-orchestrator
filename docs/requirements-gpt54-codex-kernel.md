@@ -171,6 +171,42 @@ Kernel should implement the equivalent of the old `Claude harness`, but under Co
 
 Claude remains outside this core as an executor adapter by default.
 
+## 5.2 Unattended Runtime Substrate
+
+Kernel should implement an unattended runtime substrate under Codex ownership.
+
+This layer may absorb `Symphony`-like runtime primitives, but it must remain subordinate to the
+Kernel sovereign core.
+
+Required substrate responsibilities:
+
+- daemonized intake / refresh loop
+- issue or queue polling with bounded dispatch
+- deterministic claim / idempotency guards across local and CI triggers
+- per-issue isolated workspace lifecycle
+- retry, continuation, and reconciliation scheduling
+- restart-oriented recovery behavior
+- structured status and evidence retention
+
+Allowed future workflow contract scope:
+
+- workspace hooks
+- retry / cadence hints
+- evidence retention and status metadata
+
+Disallowed workflow contract scope:
+
+- council math changes
+- sovereignty changes
+- approval-boundary rewrites
+
+Important boundary:
+
+- the unattended runtime substrate runs approved work
+- the sovereign core still owns classification, topology, council aggregation, and `ok_to_execute`
+- the unattended runtime substrate must not directly mutate issue state, labels, comments, or PR
+  state except through Kernel-approved packets and gates
+
 Initial validation harnesses should include:
 
 - `scripts/sim-orchestrator-switch.sh` for lane and policy simulation

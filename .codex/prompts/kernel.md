@@ -16,26 +16,26 @@ Procedure:
 2. Reframe the current task as a Kernel-orchestrated execution:
    - preserve the current task and context
    - decompose the work into independent lanes before proceeding
-   - launch at least 3 materially distinct subagents immediately before any substantive analysis
-   - the standard bootstrap target is 6 concurrent lanes spanning multiple LLM models or model profiles when available
+   - launch at least 6 materially distinct subagents immediately before any substantive analysis
+   - the bootstrap target is at least 6 concurrent lanes spanning multiple LLM models or model profiles when available
    - keep at least one lane focused on execution or exploration, at least one separate lane focused on verification or review, and at least one separate lane focused on monitoring, risk, or context gathering
    - start parallel excitation immediately for independent lanes
    - reserve the main thread for routing, synthesis, conflict resolution, and final integration
 3. Enforce Kernel rules during execution:
    - parallel first: independent tasks must always run in parallel
    - treat `/kernel` bootstrap itself as non-trivial work, so the multi-agent minimum applies during startup as well
-   - maintain at least 3 materially distinct active lanes for the full duration of non-trivial work, including startup, implementation, verification, and reporting
-   - treat 6 concurrent lanes across multiple LLM models or model profiles as the normal operating shape unless the environment cannot support it
+   - maintain at least 6 materially distinct active lanes for the full duration of non-trivial work, including startup, implementation, verification, and reporting
+   - treat 6 or more concurrent lanes across multiple LLM models or model profiles as the minimum operating shape
    - do not collapse, defer, or silently degrade to single-thread execution
-   - if the environment cannot sustain the 6-lane default, keep at least 3 active lanes and explicitly report degraded bootstrap with the constraint
+   - if the environment cannot sustain 6 active lanes, fail closed instead of degrading below the Kernel minimum
    - if a primary path is inherently serial, create parallel sidecar lanes for verification, monitoring, context gathering, or review instead of running single-lane
    - treat de-parallelization as a policy violation unless the user explicitly revokes Kernel orchestration
 4. Return a short acknowledgement only after the lanes are active.
 5. Include a lane manifest in the acknowledgement:
    - first line: `Kernel orchestration is active for this session.`
-   - second line: `Bootstrap target: 6 lanes (minimum 3).`
+   - second line: `Bootstrap target: 6+ lanes (minimum 6).`
    - third line: `Lane manifest:`
-   - then at least 3 flat bullets in the form `- <lane name>: <role> - <focus>`
+   - then at least 6 flat bullets in the form `- <lane name>: <role> - <focus>`
    - the manifest must describe currently active lanes, not planned lanes
 6. Continue the task. Do not stop after the acknowledgement.
 
@@ -43,7 +43,7 @@ Constraints:
 - Keep output concise and operational.
 - Treat Kernel as parallel orchestration, not a single-agent continuation mode.
 - Do not substitute intentions, plans, or promises for active multi-agent lanes.
-- Prefer multiple LLM models for the 6-lane default whenever the environment supports them.
+- Prefer multiple LLM models for the 6-lane-or-more baseline whenever the environment supports them.
 - Do not post to GitHub or any external service.
 - Do not summarize repository state, CI state, or production state unless asked.
 - Do not ask for confirmation just to start Kernel orchestration.
