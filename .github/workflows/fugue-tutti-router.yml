@@ -202,6 +202,7 @@ jobs:
       issue_body: ${{ steps.ctx.outputs.issue_body }}
       extra_issue_instruction: ${{ steps.ctx.outputs.extra_issue_instruction }}
       author: ${{ steps.ctx.outputs.author }}
+      canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       emergency_continuity_mode: ${{ steps.ctx.outputs.emergency_continuity_mode }}
@@ -367,6 +368,7 @@ jobs:
             echo "${extra_issue_instruction}"
             echo "EOF"
             echo "author=${AUTHOR}"
+            echo "canary_dispatch_owned=${canary_dispatch_owned}"
             echo "trust_subject=${trust_subject}"
             echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
             echo "emergency_continuity_mode=${emergency_continuity_mode}"
