@@ -130,7 +130,7 @@ Required/optional repo variables:
 - `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST` (`true|false`, default `false`; when true, `/vote` requires direct-success on `claude-opus-assist` under `assist=claude` + state=`ok`)
 - `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX` (`true|false`, default `true`; require Claude sub gate on complex tasks only when assist=`claude`: `risk_tier=high` or ambiguity translation-gate=true)
 - `FUGUE_MIN_CONSENSUS_LANES` (integer >=6, default `6`; hard floor for resolved lane count in workflow/local orchestration)
-- `FUGUE_CODEX_MAIN_MODEL` (default `gpt-5-codex`; model for `codex-main-orchestrator` lane)
+- `FUGUE_CODEX_MAIN_MODEL` (default `gpt-5.4`; model for `codex-main-orchestrator` lane)
 - `FUGUE_CODEX_MULTI_AGENT_MODEL` (default `gpt-5.3-codex-spark`; model for non-main codex multi-agent lanes)
 - `FUGUE_API_STRICT_MODE` (`true|false`, default `false`; when false, strict guards are disabled in `harness|api` profiles)
 - `FUGUE_EMERGENCY_CONTINUITY_MODE` (`true|false`, default `false`; when true, only in-flight `processing` issues continue)
