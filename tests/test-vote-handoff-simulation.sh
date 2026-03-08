@@ -78,6 +78,7 @@ run_case() {
   local expected_request="$6"
   local expected_confirm="$7"
   local expect_vote_instruction="$8"
+  local expected_execution_override="${9:-primary}"
   local handoff_out="${TMP_DIR}/${name}-handoff.out"
   local ctx_out="${TMP_DIR}/${name}-ctx.out"
   local dispatch_line=""
@@ -88,6 +89,7 @@ run_case() {
   local vote_instruction_b64=""
   local allow_processing_rerun=""
   local handoff_target=""
+  local execution_mode_override=""
 
   total=$((total + 1))
   : > "${FAKE_GH_LOG}"
@@ -148,15 +150,17 @@ run_case() {
   vote_instruction_b64="$(dispatch_value "${dispatch_line}" "vote_instruction_b64" || true)"
   allow_processing_rerun="$(dispatch_value "${dispatch_line}" "allow_processing_rerun" || true)"
   handoff_target="$(dispatch_value "${dispatch_line}" "handoff_target" || true)"
+  execution_mode_override="$(dispatch_value "${dispatch_line}" "execution_mode_override" || true)"
 
   if [[ "${requested_execution_mode}" != "${expected_mode}" || \
         "${implement_request}" != "${expected_request}" || \
         "${implement_confirmed}" != "${expected_confirm}" || \
         "${vote_command}" != "true" || \
         "${allow_processing_rerun}" != "true" || \
-        "${handoff_target}" != "kernel" ]]; then
+        "${handoff_target}" != "kernel" || \
+        "${execution_mode_override}" != "${expected_execution_override}" ]]; then
     echo "FAIL [${name}]: unexpected dispatch snapshot"
-    echo "  mode=${requested_execution_mode} request=${implement_request} confirm=${implement_confirmed} vote=${vote_command} rerun=${allow_processing_rerun} handoff=${handoff_target}"
+    echo "  mode=${requested_execution_mode} request=${implement_request} confirm=${implement_confirmed} vote=${vote_command} rerun=${allow_processing_rerun} handoff=${handoff_target} exec_override=${execution_mode_override}"
     failed=$((failed + 1))
     return
   fi

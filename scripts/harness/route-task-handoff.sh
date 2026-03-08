@@ -39,6 +39,12 @@ case "${execution_mode_override}" in
   auto|primary|backup-safe|backup-heavy) ;;
   *) execution_mode_override="auto" ;;
 esac
+resolved_execution_mode_override="${execution_mode_override}"
+if [[ "${resolved_execution_mode_override}" == "auto" && "${IS_VOTE_COMMAND}" == "true" ]]; then
+  # /vote is an explicit human handoff signal, so do not strand it in
+  # record-only standby. Keep GitHub-hosted consensus moving.
+  resolved_execution_mode_override="primary"
+fi
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
   # Keep structured parsing immune to comment-injected headings.
   text="$(printf '%s\n%s\n' "${title}" "${body}")"
@@ -509,8 +515,8 @@ fi
 if [[ -n "${subscription_offline_policy_override}" ]]; then
   dispatch_args+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
 fi
-if [[ "${execution_mode_override}" != "auto" ]]; then
-  dispatch_args+=(-f execution_mode_override="${execution_mode_override}")
+if [[ "${resolved_execution_mode_override}" != "auto" ]]; then
+  dispatch_args+=(-f execution_mode_override="${resolved_execution_mode_override}")
 fi
 
 bridge_handoff_script="scripts/harness/fugue-bridge-handoff.sh"
@@ -531,7 +537,7 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --implement-request "${wants_implement}"
     --implement-confirmed "${confirm_implement}"
     --vote-command "${IS_VOTE_COMMAND}"
-    --execution-mode-override "${execution_mode_override}"
+    --execution-mode-override "${resolved_execution_mode_override}"
   )
   if [[ -n "${trust_subject}" ]]; then
     bridge_args+=(--trust-subject "${trust_subject}")

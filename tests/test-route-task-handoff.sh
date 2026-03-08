@@ -41,6 +41,7 @@ assert_case() {
   local expected_confirm="$6"
   local expect_implement_label="$7"
   local execution_mode_override="${8:-auto}"
+  local expected_dispatch_override="${9:-${execution_mode_override}}"
   local out_file="${TMP_DIR}/${name}.out"
   local actual_mode=""
   local workflow_line=""
@@ -103,8 +104,14 @@ assert_case() {
     fi
   done
 
-  if [[ "${execution_mode_override}" != "auto" && "${workflow_line}" != *"-f execution_mode_override=${execution_mode_override}"* ]]; then
-    echo "FAIL [${name}]: workflow dispatch missing execution_mode_override=${execution_mode_override}"
+  if [[ "${expected_dispatch_override}" == "auto" ]]; then
+    if [[ "${workflow_line}" == *"-f execution_mode_override="* ]]; then
+      echo "FAIL [${name}]: workflow dispatch should not include execution_mode_override"
+      failed=$((failed + 1))
+      return
+    fi
+  elif [[ "${workflow_line}" != *"-f execution_mode_override=${expected_dispatch_override}"* ]]; then
+    echo "FAIL [${name}]: workflow dispatch missing execution_mode_override=${expected_dispatch_override}"
     failed=$((failed + 1))
     return
   fi
@@ -146,10 +153,10 @@ assert_case() {
 echo "=== route-task-handoff.sh unit tests ==="
 echo ""
 
-assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true"
-assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false"
-assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false"
-assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy"
+assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true" "auto" "primary"
+assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false" "auto" "primary"
+assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false" "auto" "primary"
+assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy" "backup-heavy"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="
