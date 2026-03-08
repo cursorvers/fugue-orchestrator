@@ -340,10 +340,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          current_state="${CURRENT_FAILOVER_STATE}"
           online_count=0
           runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
           if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
-            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == $label))] | length')"
+            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any((.labels // [])[]; .name == $label))] | length')"
           fi
           # shellcheck source=../scripts/lib/resolve-primary-heartbeat-state.sh
           eval "$(
