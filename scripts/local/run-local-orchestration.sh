@@ -256,8 +256,8 @@ if [[ "${GLM_SUBAGENT_MODE}" != "off" && "${GLM_SUBAGENT_MODE}" != "paired" && "
   echo "Error: --glm-mode must be off|paired|symphony." >&2
   exit 2
 fi
-if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
-  echo "Error: --max-parallel must be a positive integer." >&2
+if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 2 )); then
+  echo "Error: --max-parallel must be an integer >= 2." >&2
   exit 2
 fi
 if ! [[ "${MIN_CONSENSUS_LANES}" =~ ^[0-9]+$ ]] || (( MIN_CONSENSUS_LANES < 6 )); then
@@ -268,8 +268,8 @@ if [[ "${LINKED_MODE}" != "smoke" && "${LINKED_MODE}" != "execute" ]]; then
   echo "Error: --linked-mode must be smoke|execute." >&2
   exit 2
 fi
-if ! [[ "${LINKED_MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( LINKED_MAX_PARALLEL < 1 )); then
-  echo "Error: --linked-max-parallel must be a positive integer." >&2
+if ! [[ "${LINKED_MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( LINKED_MAX_PARALLEL < 2 )); then
+  echo "Error: --linked-max-parallel must be an integer >= 2." >&2
   exit 2
 fi
 
@@ -279,9 +279,11 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${ROOT_DIR}/scripts/lib/workspace-root-policy.sh"
 if [[ "${OUT_DIR}" != /* ]]; then
   OUT_DIR="${ROOT_DIR}/${OUT_DIR}"
 fi
+OUT_DIR="$(fugue_resolve_workspace_dir "${ROOT_DIR}" "${OUT_DIR}" "out dir")"
 SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
 HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
 MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
@@ -381,6 +383,15 @@ pulse_primary_heartbeat() {
     echo "Warning: failed to publish primary heartbeat (${hb_state})." >&2
 }
 
+primary_heartbeat_busy="false"
+restore_primary_heartbeat() {
+  if [[ "${primary_heartbeat_busy}" != "true" ]]; then
+    return 0
+  fi
+  pulse_primary_heartbeat "online"
+}
+trap restore_primary_heartbeat EXIT
+
 ISSUE_TITLE=""
 ISSUE_BODY=""
 ISSUE_URL=""
@@ -444,6 +455,7 @@ TMP_DIR="${RUN_DIR}/tmp"
 mkdir -p "${LANE_DIR}" "${TMP_DIR}"
 
 pulse_primary_heartbeat "busy"
+primary_heartbeat_busy="true"
 
 workspace_hint_json="$("${ORCHESTRATOR_NL_HINTS}" \
   --title "${ISSUE_TITLE}" \
@@ -1085,6 +1097,7 @@ if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then
   gh issue comment "${ISSUE_NUMBER}" --repo "${REPO}" --body-file "${summary_md}" >/dev/null
 fi
 
+primary_heartbeat_busy="false"
 pulse_primary_heartbeat "online"
 
 echo "Local orchestration completed."
