@@ -408,7 +408,6 @@ jobs:
           **Latest runs**
           $(wf_line "fugue-tutti-caller.yml" "mainframe")
           $(wf_line "fugue-caller.yml" "caller")
-          $(wf_line "fugue-task-router.yml" "router-internal")
           $(wf_line "fugue-watchdog.yml" "watchdog")
           $(wf_line "googleworkspace-feed-sync.yml" "gws-shared-feed")
           $(wf_line "googleworkspace-personal-feed-sync.yml" "gws-personal-feed")
