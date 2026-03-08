@@ -258,7 +258,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/fugue-task-router.yml/runs?status=success&per_page=1")"
+          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/fugue-caller.yml/runs?status=success&per_page=1")"
           LAST_TIME="$(echo "${RUNS_JSON}" | jq -r '.workflow_runs[0].created_at // empty')"
 
           if [[ -z "${LAST_TIME}" ]]; then
@@ -665,7 +665,7 @@ jobs:
             echo "pending_json=${PENDING_JSON}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Trigger task-router for unprocessed issues
+      - name: Trigger caller for unprocessed issues
         if: ${{ steps.find.outputs.pending_count != '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -676,8 +676,8 @@ jobs:
 
           echo "Found unprocessed issues: ${PENDING_JSON}"
           for ISSUE_NUM in $(echo "${PENDING_JSON}" | jq -r '.[]'); do
-            echo "Triggering router for issue #${ISSUE_NUM}"
-            cmd=(gh workflow run fugue-task-router.yml --repo "${GITHUB_REPOSITORY}" -f issue_number="${ISSUE_NUM}")
+            echo "Triggering caller for issue #${ISSUE_NUM}"
+            cmd=(gh workflow run fugue-caller.yml --repo "${GITHUB_REPOSITORY}" -f issue_number="${ISSUE_NUM}")
             if [[ -n "${EXECUTION_MODE_OVERRIDE:-}" && "${EXECUTION_MODE_OVERRIDE}" != "auto" ]]; then
               cmd+=(-f execution_mode_override="${EXECUTION_MODE_OVERRIDE}")
             fi
