@@ -47,6 +47,14 @@ Main Orchestrator（統合・報告）
 - **サブエージェント最小化**: Haiku/Sonnet サブエージェントは Claude レートリミットを消費するため、ファイル探索のみに限定。
 - **二重評価**: 成果物はユーザーに報告する前に自動レビューを通過。
 
+## `/kernel` 運用契約
+
+- この repo で Kernel orchestration を始める正式な入口は、repo root で新規に開いた Codex セッションから `/kernel` を実行することです。
+- この repo の SSOT は [`.codex/prompts/kernel.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/kernel.md) です。
+- `~/.codex/prompts/kernel.md` は補助扱いであり、この repo の実行契約は repo-local prompt を基準にします。
+- prompt の hot reload は保証しません。`.codex/prompts/kernel.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
+- `/kernel` が plain text として扱われた場合は、repo root で新規セッションを起動し直してから再実行してください。
+
 ## ファイル構成
 
 ```
@@ -95,6 +103,10 @@ cp AGENTS.md ~/.claude/AGENTS.md
 cp CLAUDE.md ~/.claude/CLAUDE.md
 cp CODEX.md ~/.claude/CODEX.md
 cp -r rules/ ~/.claude/rules/
+
+# 2.5 Kernel prompt を有効化した新規セッションを開始
+codex -C /Users/masayuki/Dev/fugue-orchestrator
+# セッション開始後に /kernel を入力
 
 # 3A. サブスク専用（推奨: 従量APIなし）
 # - Codex / Claude CLI に事前ログインして実行
@@ -209,6 +221,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
+# NOTE: plain issue の `opened` は intake-only です。mainframe 実行開始点は `/vote`、明示的な `tutti` label、または `workflow_dispatch` に限定します。
 # NOTE: 通常経路では実装実行に `implement` + `implement-confirmed` が必要です。`/vote` 経由は review-only 明示がない限り `implement-confirmed` を自動付与します。
 # NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
@@ -250,6 +263,12 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `gpt-5-codex` との厳密差分検証が必要な場合のみ `FUGUE_SIM_CODEX_SPARK_ONLY=false` を指定してください。
 # NOTE: lane構成のSSOTは `scripts/lib/build-agent-matrix.sh` です。
 # NOTE: ドリフト検知は `./scripts/check-agent-matrix-parity.sh` で実行できます。
+
+# /kernel prompt 契約の静的検証
+bash tests/test-codex-kernel-prompt.sh
+
+# /kernel prompt の fresh-session smoke test（Codex CLI ログイン済み環境）
+RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
 # CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
