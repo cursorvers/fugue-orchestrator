@@ -340,14 +340,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          gha_execution_mode="${GHA_EXECUTION_MODE}"
           current_state="${CURRENT_FAILOVER_STATE}"
+          failover_state="${CURRENT_FAILOVER_STATE}"
+          failover_reason="unresolved"
+          backup_router_execution_mode="auto"
+          heartbeat_status="unknown"
+          heartbeat_age_minutes="999999"
           online_count=0
           runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
           if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
-            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any((.labels // [])[]; .name == $label))] | length')"
+            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[]? | objects | select(.status == "online") | select(any((.labels // [])[]?; .name == $label))] | length' 2>/dev/null || printf '0')"
           fi
           # shellcheck source=../scripts/lib/resolve-primary-heartbeat-state.sh
-          eval "$(
+          resolver_env="$(
             scripts/lib/resolve-primary-heartbeat-state.sh \
               --gha-execution-mode "${GHA_EXECUTION_MODE}" \
               --current-state "${CURRENT_FAILOVER_STATE}" \
@@ -361,6 +367,7 @@ jobs:
               --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
               --format env
           )"
+          eval "${resolver_env}"
 
           can_manage_variables="true"
           if [[ -n "${OPS_TOKEN:-}" ]]; then
