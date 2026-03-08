@@ -23,12 +23,24 @@ grep -q "CANARY_VERIFY_ROLLBACK" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing rollback verification env" >&2
   exit 1
 }
+grep -q "CANARY_EXECUTION_MODE_OVERRIDE: .*'primary'" "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow must default execution override to primary" >&2
+  exit 1
+}
 grep -q "LEGACY_MAIN_ORCHESTRATOR_PROVIDER" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing legacy main provider env" >&2
   exit 1
 }
 grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script missing GitHub variable hydration helper" >&2
+  exit 1
+}
+grep -q 'FUGUE_CANARY_EXECUTION_MODE_OVERRIDE' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing execution override hydration" >&2
+  exit 1
+}
+grep -q 'execution_mode_override="\${canary_execution_mode_override}"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script must pass execution_mode_override into tutti dispatch" >&2
   exit 1
 }
 grep -q "needs-human|needs-review|processing" "${CANARY_SCRIPT}" || {
