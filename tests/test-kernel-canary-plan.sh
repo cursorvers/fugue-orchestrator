@@ -162,6 +162,14 @@ grep -q 'PERM="canary-bypass"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should bypass collaborator permission for canary-owned dispatches" >&2
   exit 1
 }
+grep -Fq 'echo "canary_dispatch_owned=${canary_dispatch_owned}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router ctx step should emit canary dispatch ownership output" >&2
+  exit 1
+}
+grep -Fq 'canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router prepare job should expose canary dispatch ownership output" >&2
+  exit 1
+}
 echo "PASS [workflow-wiring]"
 
 plan_output="$(
