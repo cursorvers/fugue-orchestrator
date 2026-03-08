@@ -32,6 +32,21 @@ on:
         required: false
         type: string
         default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for downstream dispatches (hold|continuity)"
+        required: false
+        type: string
+        default: ""
+      handoff_target:
+        description: "Optional sovereign handoff target override (kernel|fugue-bridge)"
+        required: false
+        type: string
+        default: ""
       execution_mode_override:
         description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
@@ -74,6 +89,21 @@ on:
         default: ""
       trust_subject:
         description: "Original triggering actor login used for trust checks"
+        required: false
+        type: string
+        default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for downstream dispatches (hold|continuity)"
+        required: false
+        type: string
+        default: ""
+      handoff_target:
+        description: "Optional sovereign handoff target override (kernel|fugue-bridge)"
         required: false
         type: string
         default: ""
@@ -142,6 +172,7 @@ jobs:
           COMMENT_BODY="${{ inputs.comment_body || github.event.inputs.comment_body || '' }}"
           COMMENT_AUTHOR="${{ inputs.comment_author || github.event.inputs.comment_author || '' }}"
           TRUST_SUBJECT_INPUT="$(printf '%s' "${{ inputs.trust_subject || github.event.inputs.trust_subject || '' }}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          ALLOW_PROCESSING_RERUN_INPUT="$(printf '%s' "${{ inputs.allow_processing_rerun || github.event.inputs.allow_processing_rerun || 'false' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
             COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
             COMMENT_AUTHOR="$(jq -r '.comment.user.login // ""' "${GITHUB_EVENT_PATH}")"
@@ -206,6 +237,10 @@ jobs:
           if [[ "${TRIGGER_EVENT_NAME}" == "issues" && "${TRIGGER_LABEL_NAME}" == "tutti" ]]; then
             EXPLICIT_TUTTI_TRIGGER="true"
           fi
+          allow_processing_rerun="false"
+          if [[ "${ALLOW_PROCESSING_RERUN_INPUT}" == "true" ]]; then
+            allow_processing_rerun="true"
+          fi
 
           SHOULD_RUN="true"
           SKIP_REASON=""
@@ -221,7 +256,7 @@ jobs:
           elif [[ "${HAS_TUTTI}" == "true" && "${IS_VOTE_COMMAND}" != "true" && "${EXPLICIT_TUTTI_TRIGGER}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="handled-by-tutti"
-          elif [[ "${HAS_PROCESSING}" == "true" && "${IS_VOTE_COMMAND}" != "true" ]]; then
+          elif [[ "${HAS_PROCESSING}" == "true" && "${IS_VOTE_COMMAND}" != "true" && "${allow_processing_rerun}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="already-processing"
           fi
@@ -253,6 +288,7 @@ jobs:
             echo "has_fugue=${HAS_FUGUE}"
             echo "has_tutti=${HAS_TUTTI}"
             echo "has_processing=${HAS_PROCESSING}"
+            echo "allow_processing_rerun=${allow_processing_rerun}"
             echo "has_gha24=${HAS_GHA24}"
             echo "explicit_tutti_trigger=${EXPLICIT_TUTTI_TRIGGER}"
             echo "should_run=${SHOULD_RUN}"
@@ -379,6 +415,9 @@ jobs:
           CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
           CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
           CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
+          ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || github.event.inputs.allow_processing_rerun || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || github.event.inputs.subscription_offline_policy_override || '' }}
+          HANDOFF_TARGET_INPUT: ${{ inputs.handoff_target || github.event.inputs.handoff_target || '' }}
           EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || github.event.inputs.execution_mode_override || 'auto' }}
         run: bash scripts/harness/route-task-handoff.sh
 

@@ -31,6 +31,19 @@ grep -q 'gh issue comment "${status_issue}"' "${SCRIPT}" || {
   echo "FAIL: mobile-progress should post into the status issue" >&2
   exit 1
 }
+REROUTE_BLOCK="$(sed -n '/reroute_issue()/,/^}/p' "${SCRIPT}")"
+printf '%s' "${REROUTE_BLOCK}" | grep -q '"fugue-caller.yml"' || {
+  echo "FAIL: reroute-issue should dispatch fugue-caller.yml" >&2
+  exit 1
+}
+if printf '%s' "${REROUTE_BLOCK}" | grep -q '"fugue-task-router.yml"'; then
+  echo "FAIL: reroute-issue should not dispatch fugue-task-router.yml directly" >&2
+  exit 1
+fi
+grep -q 'gh workflow run fugue-caller.yml' "${ROOT_DIR}/.github/workflows/fugue-watchdog.yml" || {
+  echo "FAIL: watchdog should dispatch fugue-caller.yml for pending issues" >&2
+  exit 1
+}
 grep -q '### `mobile-progress`' "${RUNBOOK}" || {
   echo "FAIL: recovery runbook missing mobile-progress section" >&2
   exit 1

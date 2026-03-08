@@ -20,6 +20,7 @@ dry_run_cmd="$(
     --dispatch-nonce "nonce-dry-run" \
     --trust-subject "masayuki" \
     --vote-instruction-b64 "dm90ZQ==" \
+    --subscription-offline-policy-override "continuity" \
     --requested-execution-mode "review" \
     --implement-request "false" \
     --implement-confirmed "false" \
@@ -38,6 +39,7 @@ for expected in \
   "handoff_target=fugue-bridge" \
   "trust_subject=masayuki" \
   "vote_instruction_b64=dm90ZQ==" \
+  "subscription_offline_policy_override=continuity" \
   "requested_execution_mode=review" \
   "implement_request=false" \
   "implement_confirmed=false" \
