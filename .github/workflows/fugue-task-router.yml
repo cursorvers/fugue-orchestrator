@@ -69,8 +69,6 @@ permissions:
 
 jobs:
   route:
-    # This workflow is internal-only; caller owns all external trigger shaping.
-    if: ${{ github.event_name == 'workflow_call' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:

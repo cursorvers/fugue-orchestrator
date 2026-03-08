@@ -185,7 +185,6 @@ summarize_status() {
     "fugue-orchestrator-canary.yml" \
     "fugue-watchdog.yml" \
     "fugue-caller.yml" \
-    "fugue-task-router.yml" \
     "fugue-tutti-caller.yml"
   do
     run_json="$(latest_workflow_run_json "${workflow_name}")"
