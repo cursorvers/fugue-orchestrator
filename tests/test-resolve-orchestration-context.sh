@@ -49,6 +49,12 @@ JSON
 JSON
       exit 0
       ;;
+    repos/cursorvers/fugue-orchestrator/issues/128)
+      cat <<'JSON'
+{"title":"[canary-lite] regular claude-main request 20260309061800","body":"## Canary\nAutomated orchestration canary.\n","url":"https://github.com/cursorvers/fugue-orchestrator/issues/128","labels":[{"name":"fugue-task"}]}
+JSON
+      exit 0
+      ;;
     *)
       echo "{}"
       exit 0
@@ -139,6 +145,12 @@ assert_output "workflow-dispatch-intake-source" "127" "intake_source" "workflow-
   "ISSUE_NUMBER_FROM_DISPATCH=127"
 assert_output "explicit-intake-source" "127" "intake_source" "railway-public-edge" \
   "INTAKE_SOURCE_INPUT=railway-public-edge"
+assert_output "canary-trust-subject-preserved" "128" "trust_subject" "app/github-actions" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=128" \
+  "CANARY_DISPATCH_RUN_ID_INPUT=22840953864" \
+  "TRUST_SUBJECT_INPUT=app/github-actions"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

@@ -60,6 +60,14 @@ assert_field "canary-bypass" "permission" "canary-bypass" \
   --issue-body $'## Canary\nAutomated orchestration canary.\n' \
   --issue-author "github-actions"
 
+assert_field "canary-bypass-app-github-actions" "permission" "canary-bypass" \
+  --permission none \
+  --vote-command false \
+  --canary-dispatch-owned true \
+  --issue-title "[canary-lite] regular claude-main request 20260308231024" \
+  --issue-body $'## Canary\nAutomated orchestration canary.\n' \
+  --issue-author "app/github-actions"
+
 assert_field "canary-spoof-rejected" "trusted" "false" \
   --permission none \
   --vote-command false \
