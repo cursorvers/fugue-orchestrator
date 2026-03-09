@@ -3,9 +3,9 @@ set -euo pipefail
 
 MODE="smoke"
 RUN_DIR=""
-WEBHOOK_URL="${DISCORD_NOTIFY_WEBHOOK_URL:-${DISCORD_WEBHOOK_URL:-${DISCORD_SYSTEM_WEBHOOK:-}}}"
 REQUIRED_ON_EXECUTE="${DISCORD_NOTIFY_REQUIRED_ON_EXECUTE:-true}"
 SMOKE_SEND="${DISCORD_NOTIFY_SMOKE_SEND:-false}"
+ALLOW_SYSTEM_WEBHOOK="${DISCORD_NOTIFY_ALLOW_SYSTEM_WEBHOOK:-false}"
 
 usage() {
   cat <<'EOF'
@@ -19,7 +19,9 @@ Options:
 Environment:
   DISCORD_NOTIFY_WEBHOOK_URL  Discord webhook URL (preferred)
   DISCORD_WEBHOOK_URL         Fallback webhook URL
-  DISCORD_SYSTEM_WEBHOOK      Legacy fallback webhook URL
+  DISCORD_SYSTEM_WEBHOOK      System-alert-only webhook URL (blocked by default here)
+  DISCORD_NOTIFY_ALLOW_SYSTEM_WEBHOOK=true|false
+                             If true, allow fallback to DISCORD_SYSTEM_WEBHOOK.
   DISCORD_NOTIFY_REQUIRED_ON_EXECUTE=true|false
                              If true (default), execute mode fails when webhook is missing.
   DISCORD_NOTIFY_SMOKE_SEND=true|false
@@ -65,10 +67,17 @@ to_bool() {
 
 REQUIRED_ON_EXECUTE="$(to_bool "${REQUIRED_ON_EXECUTE}")"
 SMOKE_SEND="$(to_bool "${SMOKE_SEND}")"
+ALLOW_SYSTEM_WEBHOOK="$(to_bool "${ALLOW_SYSTEM_WEBHOOK}")"
+
+WEBHOOK_URL="${DISCORD_NOTIFY_WEBHOOK_URL:-${DISCORD_WEBHOOK_URL:-}}"
+if [[ -z "${WEBHOOK_URL}" && "${ALLOW_SYSTEM_WEBHOOK}" == "true" ]]; then
+  WEBHOOK_URL="${DISCORD_SYSTEM_WEBHOOK:-}"
+fi
 
 if [[ -z "${WEBHOOK_URL}" ]]; then
   if [[ "${MODE}" == "execute" && "${REQUIRED_ON_EXECUTE}" == "true" ]]; then
-    echo "discord-notify: webhook is required in execute mode (set DISCORD_NOTIFY_WEBHOOK_URL or DISCORD_WEBHOOK_URL or DISCORD_SYSTEM_WEBHOOK)." >&2
+    echo "discord-notify: webhook is required in execute mode (set DISCORD_NOTIFY_WEBHOOK_URL or DISCORD_WEBHOOK_URL)." >&2
+    echo "discord-notify: DISCORD_SYSTEM_WEBHOOK is reserved for system alerts unless DISCORD_NOTIFY_ALLOW_SYSTEM_WEBHOOK=true." >&2
     exit 1
   fi
   echo "discord-notify: webhook is not configured; skipping (${MODE})."

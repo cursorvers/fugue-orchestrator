@@ -17,6 +17,8 @@ LINE_NOTIFY_API_URL="${LINE_NOTIFY_API_URL:-https://notify-api.line.me/api/notif
 LINE_NOTIFY_REQUIRED_ON_EXECUTE="${LINE_NOTIFY_REQUIRED_ON_EXECUTE:-true}"
 LINE_NOTIFY_SMOKE_SEND="${LINE_NOTIFY_SMOKE_SEND:-false}"
 LINE_NOTIFY_MESSAGE="${LINE_NOTIFY_MESSAGE:-}"
+LINE_NOTIFY_PURPOSE="${LINE_NOTIFY_PURPOSE:-}"
+LINE_NOTIFY_ALLOWED_PURPOSES="${LINE_NOTIFY_ALLOWED_PURPOSES:-user-facing,user-notification,content-broadcast,member-communication,customer-notification,marketing-broadcast}"
 LINE_NOTIFY_GUARD_ENABLED="${LINE_NOTIFY_GUARD_ENABLED:-true}"
 LINE_NOTIFY_GUARD_FILE="${LINE_NOTIFY_GUARD_FILE:-${ROOT_DIR}/.fugue/state/line-notify-guard.json}"
 LINE_NOTIFY_PREFER_PUSH="${LINE_NOTIFY_PREFER_PUSH:-false}"
@@ -55,6 +57,8 @@ Environment:
   LINE_NOTIFY_SMOKE_SEND=true|false
                                If true, smoke mode also sends a test message.
   LINE_NOTIFY_MESSAGE             Optional custom text payload. If unset, default FUGUE message is used.
+  LINE_NOTIFY_PURPOSE             Required for execute/send mode. Must be a non-system purpose.
+  LINE_NOTIFY_ALLOWED_PURPOSES    Comma-separated allowlist for execute/send mode.
   LINE_NOTIFY_GUARD_ENABLED=true|false
                                   Suppress duplicate payloads and recent repeated failures (default: true).
   LINE_NOTIFY_GUARD_FILE          Guard state file path (default: <repo>/.fugue/state/line-notify-guard.json).
@@ -139,6 +143,31 @@ hash_text() {
   printf '%s' "${input}" | cksum | awk '{print $1}'
 }
 
+normalize_token() {
+  printf '%s' "${1:-}" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+    | tr ' _' '--' \
+    | sed -E 's/-+/-/g'
+}
+
+csv_contains_token() {
+  local csv="${1:-}"
+  local needle
+  needle="$(normalize_token "${2:-}")"
+  if [[ -z "${needle}" ]]; then
+    return 1
+  fi
+  local item
+  IFS=',' read -r -a items <<<"${csv}"
+  for item in "${items[@]}"; do
+    if [[ "$(normalize_token "${item}")" == "${needle}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 write_meta() {
   local status="${1:-unknown}"
   shift || true
@@ -179,6 +208,7 @@ save_guard_json() {
 
 LINE_NOTIFY_REQUIRED_ON_EXECUTE="$(to_bool "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}")"
 LINE_NOTIFY_SMOKE_SEND="$(to_bool "${LINE_NOTIFY_SMOKE_SEND}")"
+LINE_NOTIFY_PURPOSE="$(normalize_token "${LINE_NOTIFY_PURPOSE}")"
 LINE_NOTIFY_GUARD_ENABLED="$(to_bool "${LINE_NOTIFY_GUARD_ENABLED}")"
 LINE_NOTIFY_PREFER_PUSH="$(to_bool "${LINE_NOTIFY_PREFER_PUSH}")"
 LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK="$(to_bool "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}")"
@@ -198,6 +228,29 @@ if (( LINE_NOTIFY_RETRY_BASE_SECONDS < 1 )); then
 fi
 if (( LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS < LINE_NOTIFY_RETRY_BASE_SECONDS )); then
   LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="${LINE_NOTIFY_RETRY_BASE_SECONDS}"
+fi
+
+if [[ "${MODE}" == "execute" || "${LINE_NOTIFY_SMOKE_SEND}" == "true" ]]; then
+  if [[ -z "${LINE_NOTIFY_PURPOSE}" ]]; then
+    echo "line-notify: LINE_NOTIFY_PURPOSE is required for execute/send mode." >&2
+    echo "line-notify: system logs, watchdog alerts, audit trails, and ops alerts must never be routed to LINE." >&2
+    write_meta "error-missing-purpose" "sent=false"
+    exit 1
+  fi
+
+  if csv_contains_token "system-log,system,ops-alert,operational-alert,audit-log,audit,incident-alert,watchdog-alert,watchdog" "${LINE_NOTIFY_PURPOSE}"; then
+    echo "line-notify: purpose '${LINE_NOTIFY_PURPOSE}' is prohibited." >&2
+    echo "line-notify: system logs, watchdog alerts, audit trails, and ops alerts must never be routed to LINE." >&2
+    write_meta "error-prohibited-purpose" "sent=false" "purpose=${LINE_NOTIFY_PURPOSE}"
+    exit 1
+  fi
+
+  if ! csv_contains_token "${LINE_NOTIFY_ALLOWED_PURPOSES}" "${LINE_NOTIFY_PURPOSE}"; then
+    echo "line-notify: purpose '${LINE_NOTIFY_PURPOSE}' is not in LINE_NOTIFY_ALLOWED_PURPOSES." >&2
+    echo "line-notify: LINE is reserved for explicit user-facing communication only." >&2
+    write_meta "error-disallowed-purpose" "sent=false" "purpose=${LINE_NOTIFY_PURPOSE}"
+    exit 1
+  fi
 fi
 
 transport="none"
