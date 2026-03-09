@@ -103,7 +103,13 @@ if printf '%s\n%s\n' "${title}" "${body}" | grep -Eiq '^\[canary|^\[canary-lite|
 fi
 trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -n "${trust_subject}" ]]; then
-  trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+  case "${trust_subject}" in
+    "github-actions[bot]"|"github-actions"|"app/github-actions")
+      ;;
+    *)
+      trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+      ;;
+  esac
 fi
 canary_dispatch_run_id="$(printf '%s' "${CANARY_DISPATCH_RUN_ID_INPUT:-}" | tr -cd '0-9')"
 allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"

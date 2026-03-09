@@ -34,6 +34,19 @@ normalize_bool() {
   fi
 }
 
+normalize_canary_actor() {
+  local actor
+  actor="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  case "${actor}" in
+    "github-actions[bot]"|"github-actions"|"app/github-actions")
+      printf 'github-actions\n'
+      ;;
+    *)
+      printf '%s\n' "${actor}"
+      ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --permission)
@@ -78,7 +91,7 @@ done
 permission="$(printf '%s' "${permission:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 vote_command="$(normalize_bool "${vote_command}")"
 canary_dispatch_owned="$(normalize_bool "${canary_dispatch_owned}")"
-issue_author="$(printf '%s' "${issue_author:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+issue_author="$(normalize_canary_actor "${issue_author:-}")"
 
 title_matches="false"
 body_matches="false"
@@ -94,7 +107,7 @@ fi
 if printf '%s' "${issue_body}" | grep -Eqi '^##[[:space:]]+Canary$|Automated orchestration canary\.'; then
   body_matches="true"
 fi
-if [[ "${issue_author}" == "github-actions" || "${issue_author}" == "github-actions[bot]" ]]; then
+if [[ "${issue_author}" == "github-actions" ]]; then
   author_matches="true"
 fi
 if [[ "${title_matches}" == "true" && "${body_matches}" == "true" && "${author_matches}" == "true" ]]; then

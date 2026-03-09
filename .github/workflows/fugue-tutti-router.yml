@@ -281,7 +281,13 @@ jobs:
           fi
           trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -n "${trust_subject}" ]]; then
-            trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+            case "${trust_subject}" in
+              "github-actions[bot]"|"github-actions"|"app/github-actions")
+                ;;
+              *)
+                trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
+                ;;
+            esac
           fi
           extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -445,9 +451,24 @@ jobs:
           fi
           PERM="none"
 
+          normalize_canary_actor() {
+            local actor
+            actor="$(printf '%s' "${1:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            case "${actor}" in
+              "github-actions[bot]"|"github-actions"|"app/github-actions")
+                printf 'github-actions\n'
+                ;;
+              *)
+                printf '%s\n' "${actor}"
+                ;;
+            esac
+          }
+
           canary_dispatch_owned="$(printf '%s' "${CANARY_DISPATCH_OWNED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           author="$(printf '%s' "${AUTHOR:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          trust_subject_normalized="$(normalize_canary_actor "${trust_subject}")"
+          author_normalized="$(normalize_canary_actor "${author}")"
           issue_title="$(printf '%s' "${ISSUE_TITLE:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           issue_body="${ISSUE_BODY:-}"
           canary_dispatch_run_id="$(printf '%s' "${CANARY_DISPATCH_RUN_ID:-}" | tr -cd '0-9')"
@@ -458,8 +479,8 @@ jobs:
           if [[ "${canary_dispatch_owned}" == "true" \
             && "${GITHUB_EVENT_NAME}" == "workflow_call" \
             && -n "${canary_dispatch_run_id}" \
-            && "${trust_subject}" == "github-actions[bot]" \
-            && "${author}" == "github-actions[bot]" \
+            && "${trust_subject_normalized}" == "github-actions" \
+            && "${author_normalized}" == "github-actions" \
             && "${canary_issue_marker}" == "true" ]]; then
             run_endpoint="repos/${GITHUB_REPOSITORY}/actions/runs/${canary_dispatch_run_id}"
             run_json="$(gh_api_retry "${run_endpoint}" 4 || echo '{}')"

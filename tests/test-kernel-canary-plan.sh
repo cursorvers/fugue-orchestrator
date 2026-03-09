@@ -141,12 +141,20 @@ grep -q '"\${GITHUB_EVENT_NAME}" == "workflow_call"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should restrict canary bypass to workflow_call provenance" >&2
   exit 1
 }
-grep -q '"\${trust_subject}" == "github-actions\[bot\]"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should restrict canary bypass to github-actions bot subject" >&2
+grep -q 'normalize_canary_actor()' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should normalize GitHub Actions actor aliases" >&2
   exit 1
 }
-grep -q '"\${author}" == "github-actions\[bot\]"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should restrict canary bypass to bot-authored canary issues" >&2
+grep -q '"app/github-actions"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should allow app/github-actions canary authors" >&2
+  exit 1
+}
+grep -q '"\${trust_subject_normalized}" == "github-actions"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to normalized GitHub Actions subject" >&2
+  exit 1
+}
+grep -q '"\${author_normalized}" == "github-actions"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to normalized GitHub Actions author" >&2
   exit 1
 }
 grep -q 'actions/runs/\${canary_dispatch_run_id}' "${ROUTER_WORKFLOW}" || {
