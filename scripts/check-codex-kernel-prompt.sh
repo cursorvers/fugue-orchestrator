@@ -79,18 +79,28 @@ assert_contains "${README_FILE}" "Bootstrap target: 6+ lanes (minimum 6)." "READ
 assert_contains "${GATE_FILE}" "'.codex/prompts/k.md'" "gate watches /k alias prompt"
 
 if [[ "${RUN_CODEX_KERNEL_SMOKE:-0}" == "1" ]]; then
-  smoke_output="$(codex exec -C "${ROOT_DIR}" "/kernel" 2>&1 || true)"
-  lane_manifest_count="$(printf '%s\n' "${smoke_output}" | grep -Ec '^- .+: .+ - .+$' || true)"
-  if grep -Eq 'Kernel orchestration is active (in|for) this session\.' <<<"${smoke_output}" \
-    && grep -Fq 'Bootstrap target: 6+ lanes (minimum 6).' <<<"${smoke_output}" \
-    && grep -Fq 'Lane manifest:' <<<"${smoke_output}" \
-    && [[ "${lane_manifest_count}" -ge 6 ]]; then
-    echo "[PASS] runtime smoke: /kernel acknowledged in fresh session" >&2
-  else
-    echo "[FAIL] runtime smoke: /kernel acknowledgement missing" >&2
-    printf '%s\n' "${smoke_output}" >&2
-    failures=$((failures + 1))
-  fi
+  run_smoke_check() {
+    local command_text="$1"
+    local label="$2"
+    local smoke_output=""
+    local lane_manifest_count=0
+
+    smoke_output="$(codex exec -C "${ROOT_DIR}" "${command_text}" 2>&1 || true)"
+    lane_manifest_count="$(printf '%s\n' "${smoke_output}" | grep -Ec '^- .+: .+ - .+$' || true)"
+    if grep -Eq 'Kernel orchestration is active (in|for) this session\.' <<<"${smoke_output}" \
+      && grep -Fq 'Bootstrap target: 6+ lanes (minimum 6).' <<<"${smoke_output}" \
+      && grep -Fq 'Lane manifest:' <<<"${smoke_output}" \
+      && [[ "${lane_manifest_count}" -ge 6 ]]; then
+      echo "[PASS] runtime smoke: ${label} acknowledged in fresh session" >&2
+    else
+      echo "[FAIL] runtime smoke: ${label} acknowledgement missing" >&2
+      printf '%s\n' "${smoke_output}" >&2
+      failures=$((failures + 1))
+    fi
+  }
+
+  run_smoke_check "/kernel" "/kernel"
+  run_smoke_check "/k" "/k"
 fi
 
 if (( failures > 0 )); then
