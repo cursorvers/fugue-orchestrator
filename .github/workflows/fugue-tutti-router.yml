@@ -601,8 +601,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          HAS_COPILOT_CLI: ${{ (steps.copilot.outputs.available == 'true' && 'true') || (secrets.FUGUE_COPILOT_TOKEN != '' && 'true') || vars.FUGUE_HAS_COPILOT_CLI || '' }}
           COPILOT_CLI_BIN: ${{ steps.copilot.outputs.bin || 'copilot' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.FUGUE_COPILOT_TOKEN || secrets.TARGET_REPO_PAT || secrets.FUGUE_OPS_PAT || github.token }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -1470,7 +1471,7 @@ jobs:
           EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
           MIN_CONSENSUS_LANES: ${{ vars.FUGUE_MIN_CONSENSUS_LANES || '6' }}
           HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
-          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available }}
+          HAS_COPILOT_CLI: ${{ (steps.copilot.outputs.available == 'true' && 'true') || (secrets.FUGUE_COPILOT_TOKEN != '' && 'true') || vars.FUGUE_HAS_COPILOT_CLI || '' }}
           HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}

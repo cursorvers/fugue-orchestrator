@@ -60,6 +60,10 @@ if [[ "${REQUIRE_ALLOW_ALL_TOOLS:-false}" == "true" && "${args}" != *"--allow-al
   echo "missing allow-all-tools" >&2
   exit 95
 fi
+if [[ "${REQUIRE_GH_TOKEN:-false}" == "true" && -z "${GH_TOKEN:-}" ]]; then
+  echo "missing gh token" >&2
+  exit 96
+fi
 printf '%s\n' '{"risk":"LOW","approve":true,"findings":[],"recommendation":"ok","rationale":"copilot-compatible"}'
 EOF
   chmod +x "${TMP_DIR}/copilot"
@@ -231,6 +235,8 @@ test_ci_claude_copilot_mode() {
       PATH="${TMP_DIR}:${BASE_TEST_PATH}" \
       COPILOT_CLI_BIN="${TMP_DIR}/copilot" \
       HAS_COPILOT_CLI="true" \
+      COPILOT_GITHUB_TOKEN="dummy-token" \
+      REQUIRE_GH_TOKEN="true" \
       REQUIRE_ALLOW_ALL_TOOLS="true" \
       PROVIDER="claude" \
       MODEL="claude-sonnet-4-0" \
@@ -258,6 +264,8 @@ test_ci_claude_copilot_mode_allow_tools_opt_in() {
       PATH="${TMP_DIR}:${BASE_TEST_PATH}" \
       COPILOT_CLI_BIN="${TMP_DIR}/copilot" \
       HAS_COPILOT_CLI="true" \
+      COPILOT_GITHUB_TOKEN="dummy-token" \
+      REQUIRE_GH_TOKEN="true" \
       COPILOT_ALLOW_ALL_TOOLS="true" \
       REQUIRE_ALLOW_ALL_TOOLS="true" \
       PROVIDER="claude" \

@@ -93,6 +93,7 @@ normalize_optional_bool() {
 }
 
 copilot_runner_bin="${COPILOT_CLI_BIN:-copilot}"
+copilot_runner_token="${COPILOT_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
 copilot_runner_available="false"
 copilot_cli_override="$(normalize_optional_bool "${HAS_COPILOT_CLI:-${FUGUE_HAS_COPILOT_CLI:-}}" || true)"
 if [[ -n "${copilot_cli_override}" ]]; then
@@ -463,7 +464,9 @@ Claude Teams bounded mode is active. Work as a narrow collaboration executor and
   fi
 
   set +e
-  run_with_timeout 180 "${copilot_cmd[@]}" >"${out_file}" 2>"${err_file}"
+  GH_TOKEN="${copilot_runner_token}" \
+  GITHUB_TOKEN="${copilot_runner_token}" \
+    run_with_timeout 180 "${copilot_cmd[@]}" >"${out_file}" 2>"${err_file}"
   local rc=$?
   set -e
 
