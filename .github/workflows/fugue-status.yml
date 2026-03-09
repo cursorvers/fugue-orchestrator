@@ -116,7 +116,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.ctx.outputs.issue_number }}
         run: |
-          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Status report is restricted to trusted repo collaborators (write/maintain/admin). Current permission: `${{ steps.trust.outputs.permission }}`."
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Status report is restricted to trusted repo collaborators (write/maintain/admin). Current permission: '${{ steps.trust.outputs.permission }}'."
 
       - name: Generate and post status report
         if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted == 'true' }}
@@ -195,7 +195,7 @@ jobs:
           ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
           subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "continuity")"
           subscription_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
-          codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5-codex")"
+          codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.4")"
           codex_multi_agent_model="$(gh variable get FUGUE_CODEX_MULTI_AGENT_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex-spark")"
           multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "standard")"
           glm_subagent_mode="$(gh variable get FUGUE_GLM_SUBAGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "paired")"
@@ -258,7 +258,7 @@ jobs:
             subscription_runner_label="fugue-subscription"
           fi
           if [[ -z "${codex_main_model}" ]]; then
-            codex_main_model="gpt-5-codex"
+            codex_main_model="gpt-5.4"
           fi
           if [[ -z "${codex_multi_agent_model}" ]]; then
             codex_multi_agent_model="gpt-5.3-codex-spark"
@@ -347,8 +347,7 @@ jobs:
             local label="$2"
             local run_json
             run_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 4 || echo '{}')"
-            local status concl url created
-            status="$(echo "${run_json}" | jq -r '.workflow_runs[0].status // "unknown"')"
+            local concl url created
             concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // ""')"
             url="$(echo "${run_json}" | jq -r '.workflow_runs[0].html_url // ""')"
             created="$(echo "${run_json}" | jq -r '.workflow_runs[0].created_at // ""')"
@@ -408,8 +407,10 @@ jobs:
 
           **Latest runs**
           $(wf_line "fugue-tutti-caller.yml" "mainframe")
-          $(wf_line "fugue-task-router.yml" "router")
+          $(wf_line "fugue-caller.yml" "caller")
           $(wf_line "fugue-watchdog.yml" "watchdog")
+          $(wf_line "googleworkspace-feed-sync.yml" "gws-shared-feed")
+          $(wf_line "googleworkspace-personal-feed-sync.yml" "gws-personal-feed")
 
           **Top open issues**
           ${top}

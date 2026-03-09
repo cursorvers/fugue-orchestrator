@@ -11,10 +11,12 @@ trust_subject=""
 vote_instruction_b64=""
 allow_processing_rerun="false"
 requested_execution_mode=""
+subscription_offline_policy_override=""
 implement_request=""
 implement_confirmed=""
 vote_command="false"
 intake_source=""
+execution_mode_override="auto"
 dry_run="false"
 workflow_file="fugue-tutti-caller.yml"
 
@@ -31,10 +33,13 @@ Options:
   --vote-instruction-b64 <value>   Optional base64-encoded /vote instruction
   --allow-processing-rerun         Allow rerun while processing label exists
   --requested-execution-mode <v>   Resolved handoff mode (review|implement)
+  --subscription-offline-policy-override <v>
+                                   Optional offline policy override (hold|continuity)
   --implement-request <bool>       Resolved implementation intent snapshot
   --implement-confirmed <bool>     Resolved implementation confirmation snapshot
   --vote-command <bool>            True when the handoff originated from `/vote`
   --intake-source <value>          Intake source marker for audit/policy
+  --execution-mode-override <v>    Execution policy override (auto|primary|backup-safe|backup-heavy)
   --dry-run                        Print the resolved gh command without executing it
   -h, --help                       Show help
 EOF
@@ -70,6 +75,10 @@ while [[ $# -gt 0 ]]; do
       requested_execution_mode="${2:-}"
       shift 2
       ;;
+    --subscription-offline-policy-override)
+      subscription_offline_policy_override="${2:-}"
+      shift 2
+      ;;
     --implement-request)
       implement_request="${2:-}"
       shift 2
@@ -84,6 +93,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --intake-source)
       intake_source="${2:-}"
+      shift 2
+      ;;
+    --execution-mode-override)
+      execution_mode_override="${2:-}"
       shift 2
       ;;
     --dry-run)
@@ -141,6 +154,10 @@ requested_execution_mode="$(printf '%s' "${requested_execution_mode}" | tr '[:up
 if [[ "${requested_execution_mode}" == "review" || "${requested_execution_mode}" == "implement" ]]; then
   dispatch_cmd+=(-f requested_execution_mode="${requested_execution_mode}")
 fi
+subscription_offline_policy_override="$(printf '%s' "${subscription_offline_policy_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+  dispatch_cmd+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
+fi
 implement_request="$(printf '%s' "${implement_request}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${implement_request}" == "true" || "${implement_request}" == "false" ]]; then
   dispatch_cmd+=(-f implement_request="${implement_request}")
@@ -159,6 +176,14 @@ case "${intake_source}" in
     dispatch_cmd+=(-f intake_source="${intake_source}")
     ;;
 esac
+execution_mode_override="$(printf '%s' "${execution_mode_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${execution_mode_override}" in
+  auto|primary|backup-safe|backup-heavy) ;;
+  *) execution_mode_override="auto" ;;
+esac
+if [[ "${execution_mode_override}" != "auto" ]]; then
+  dispatch_cmd+=(-f execution_mode_override="${execution_mode_override}")
+fi
 
 if [[ "${dry_run}" == "true" ]]; then
   printf '%q ' "${dispatch_cmd[@]}"

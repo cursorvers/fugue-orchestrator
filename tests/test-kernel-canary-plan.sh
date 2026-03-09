@@ -168,7 +168,9 @@ fi
 echo "PASS [workflow-wiring]"
 
 plan_output="$(
-  CANARY_PLAN_ONLY=true \
+  (
+    cd "${ROOT_DIR}"
+    CANARY_PLAN_ONLY=true \
   CANARY_PLAN_ONLINE_COUNT=1 \
   GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
   CLAUDE_RATE_LIMIT_STATE="ok" \
@@ -196,9 +198,10 @@ plan_output="$(
   CANARY_LABEL_WAIT_SLEEP_SEC="1" \
   CANARY_WAIT_FAST_ATTEMPTS="1" \
   CANARY_WAIT_FAST_SLEEP_SEC="1" \
-  CANARY_WAIT_SLOW_ATTEMPTS="0" \
-  CANARY_WAIT_SLOW_SLEEP_SEC="1" \
-  bash "${CANARY_SCRIPT}"
+    CANARY_WAIT_SLOW_ATTEMPTS="0" \
+    CANARY_WAIT_SLOW_SLEEP_SEC="1" \
+    bash "${CANARY_SCRIPT}"
+  )
 )"
 
 case_count="$(printf '%s\n' "${plan_output}" | jq -s 'length')"

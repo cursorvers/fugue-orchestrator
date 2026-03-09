@@ -92,6 +92,21 @@ on:
         required: false
         type: string
         default: ""
+      workspace_feed_status:
+        description: "Latest scheduled Google Workspace feed ingest status"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_profiles:
+        description: "Comma-separated scheduled Google Workspace feed profiles used for context"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_summary:
+        description: "Bounded summary derived from scheduled Google Workspace feeds"
+        required: false
+        type: string
+        default: ""
       workspace_readonly_environment:
         description: "Protected GitHub Environment used for readonly Google Workspace CI preflight"
         required: false
@@ -103,6 +118,8 @@ on:
       TARGET_REPO_PAT:
         required: false
       GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:
+        required: false
+      GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON:
         required: false
 
 permissions:
@@ -270,51 +287,6 @@ jobs:
       can_run: ${{ steps.guard.outputs.can_run }}
       skip_reason: ${{ steps.guard.outputs.skip_reason }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Resolve live failover state
-        id: live_failover
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CURRENT_FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
-          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
-          RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
-          PRIMARY_HEARTBEAT_AT: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_AT || '' }}
-          PRIMARY_HEARTBEAT_TTL_MINUTES: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_TTL_MINUTES || '8' }}
-          PRIMARY_HEARTBEAT_GRACE_MULTIPLIER: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_GRACE_MULTIPLIER || '3' }}
-        run: |
-          set -euo pipefail
-
-          online_count=0
-          runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
-          if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
-            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == $label))] | length')"
-          fi
-
-          eval "$(
-            scripts/lib/resolve-primary-heartbeat-state.sh \
-              --gha-execution-mode "${GHA_EXECUTION_MODE}" \
-              --current-state "${CURRENT_FAILOVER_STATE}" \
-              --runner-online-count "${online_count}" \
-              --pending-count 0 \
-              --mainframe-pending-count 1 \
-              --router-stale false \
-              --mainframe-stale false \
-              --heartbeat-at "${PRIMARY_HEARTBEAT_AT}" \
-              --heartbeat-ttl-minutes "${PRIMARY_HEARTBEAT_TTL_MINUTES}" \
-              --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
-              --format env
-          )"
-
-          {
-            echo "failover_state=${failover_state}"
-            echo "failover_reason=${failover_reason}"
-            echo "heartbeat_status=${heartbeat_status}"
-          } >> "${GITHUB_OUTPUT}"
-
       - name: Guard implementation credentials
         id: guard
         env:
@@ -323,47 +295,17 @@ jobs:
           TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
-          EXECUTION_MODE: ${{ inputs.execution_mode }}
-          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
-          FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
         run: |
           set -euo pipefail
 
           can_run="true"
           skip_reason=""
 
-          execution_mode="$(echo "${EXECUTION_MODE:-primary}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          case "${execution_mode}" in
-            primary|backup-safe|backup-heavy|record-only) ;;
-            *) execution_mode="primary" ;;
-          esac
-
-          gha_mode="$(echo "${GHA_EXECUTION_MODE:-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${gha_mode}" != "record-only" ]]; then
-            gha_mode="full"
-          fi
-
-          failover_state="$(echo "${FAILOVER_STATE:-healthy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          case "${failover_state}" in
-            healthy|degraded|offline|recovered) ;;
-            *) failover_state="healthy" ;;
-          esac
-
-          if [[ "${execution_mode}" == "backup-safe" ]]; then
-            can_run="false"
-            skip_reason="backup-safe-review-only"
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Codex implementation skipped: backup-safe mode is review-only. Use backup-heavy or primary mode for implementation."
-          elif [[ "${gha_mode}" == "record-only" && "${execution_mode}" == "primary" && "${failover_state}" != "degraded" && "${failover_state}" != "offline" ]]; then
-            can_run="false"
-            skip_reason="record-only-primary-active"
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Codex implementation skipped: GHA is in record-only mode while the primary executor is considered available (\`${failover_state}\`)."
-          fi
-
-          if [[ "${can_run}" == "true" && -z "${OPENAI_API_KEY:-}" ]]; then
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
             can_run="false"
             skip_reason="missing-openai-api-key"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Escalating to humans."
-          elif [[ "${can_run}" == "true" && "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
+          elif [[ "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
             can_run="false"
             skip_reason="missing-target-repo-pat"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret \`TARGET_REPO_PAT\`. Escalating to humans."
@@ -427,6 +369,7 @@ jobs:
           REPORT_PATH: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-googleworkspace.md
           ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
           GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
+          GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON }}
         run: bash scripts/harness/googleworkspace-preflight-enrich.sh
 
       - name: Upload Google Workspace preflight artifact
@@ -694,6 +637,9 @@ jobs:
           WORKSPACE_REPORT_PATH: ${{ needs.workspace-preflight.outputs.workspace_report_path }}
           WORKSPACE_SUMMARY: ${{ needs.workspace-preflight.outputs.workspace_summary }}
           WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
+          WORKSPACE_FEED_STATUS: ${{ inputs.workspace_feed_status }}
+          WORKSPACE_FEED_PROFILES: ${{ inputs.workspace_feed_profiles }}
+          WORKSPACE_FEED_SUMMARY: ${{ inputs.workspace_feed_summary }}
         run: bash scripts/harness/codex-execute-validate.sh
 
       - name: Commit changes

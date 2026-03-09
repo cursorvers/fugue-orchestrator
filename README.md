@@ -47,29 +47,6 @@ Main Orchestrator（統合・報告）
 - **サブエージェント最小化**: Haiku/Sonnet サブエージェントは Claude レートリミットを消費するため、ファイル探索のみに限定。
 - **二重評価**: 成果物はユーザーに報告する前に自動レビューを通過。
 
-## `/kernel` 運用契約
-
-- この repo で Kernel orchestration を始める正式な入口は、repo root で新規に開いた Codex セッションから `/kernel` を実行することです。
-- chat 欄から 1語で起動したい場合の local alias は `/k` です。`/k` は `/kernel` と同じ Kernel bootstrap 契約に従います。
-- ローカルでの推奨実行経路は `kernel` または `codex-prompt-launch kernel` で、どちらも guard 前提が満たされる限り `codex-kernel-guard launch` を経由する adapter として扱います。
-- ローカル実行契約の authority は shell wrapper ではなく `codex-kernel-guard launch` です。shell alias や launcher はその adapter に留めます。
-- この repo の SSOT は [`.codex/prompts/kernel.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/kernel.md) です。
-- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/k.md) です。
-- `~/.codex/prompts/kernel.md` は補助扱いであり、この repo の実行契約は repo-local prompt を基準にします。
-- prompt の hot reload は保証しません。`.codex/prompts/kernel.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
-- `/kernel` が plain text として扱われた場合は、repo root で新規セッションを起動し直してから再実行してください。
-- bare `/kernel` は Codex chat UI の upstream 実装に依存するため、この repo のローカル SLO/保証経路には含めません。
-- `/kernel` の bootstrap は acknowledgement より先に最低 6 本の active lane を起動している必要があります。
-- 通常運用では複数 LLM モデルまたは model profile をまたいだ 6 列以上の並列を最低形とします。
-- 最初の有効な応答には `Bootstrap target: 6+ lanes (minimum 6).` と `Lane manifest:`、および現在アクティブな lane を最低 6 本列挙した行が必要です。
-
-## `/vote` 運用契約
-
-- この repo で Codex の `/vote` はローカル継続用の slash prompt です。現在のタスクをそのまま継続し、GitHub への投稿は行いません。
-- この repo の `/vote` / `/v` の SSOT は [`.codex/prompts/vote.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/vote.md) と [`.codex/prompts/v.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/v.md) です。
-- GitHub Actions 側の `/vote` workflow を起動したい場合は、slash prompt ではなく `gh issue comment ... --body '/vote'` または `vote-gh ...` を使ってください。
-- prompt の hot reload は保証しません。`.codex/prompts/vote.md` / `.codex/prompts/v.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
-
 ## ファイル構成
 
 ```
@@ -118,10 +95,6 @@ cp AGENTS.md ~/.claude/AGENTS.md
 cp CLAUDE.md ~/.claude/CLAUDE.md
 cp CODEX.md ~/.claude/CODEX.md
 cp -r rules/ ~/.claude/rules/
-
-# 2.5 Kernel prompt を有効化した新規セッションを開始
-codex -C /Users/masayuki/Dev/fugue-orchestrator
-# セッション開始後に /kernel を入力
 
 # 3A. サブスク専用（推奨: 従量APIなし）
 # - Codex / Claude CLI に事前ログインして実行
@@ -236,9 +209,10 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
 # NOTE: 自然文/モバイル経路はデフォルト `review`。`implement` は明示指定時のみ付与されます。
-# NOTE: plain issue の `opened` は intake-only です。mainframe 実行開始点は `/vote`、明示的な `tutti` label、または `workflow_dispatch` に限定します。
+# NOTE: plain issue の `opened` は intake-only です。mainframe 実行開始点は `/vote`、明示的な `tutti` label、または `workflow_dispatch` に限定します。`issues:labeled` では `tutti` 以外の label churn は caller 入口で無視します。
 # NOTE: 通常経路では実装実行に `implement` + `implement-confirmed` が必要です。`/vote` 経由は review-only 明示がない限り `implement-confirmed` を自動付与します。
-# NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。
+# NOTE: `/vote` は `fugue-task` ラベル未付与 issue でも mainframe handoff を強制し、合議実行を開始します。ただし trust bypass は使わず、router 側の trusted 判定を通る経路だけが実行を継続します。
+# NOTE: `FUGUE_GHA_EXECUTION_MODE=record-only` のとき、GitHub mainframe は handoff/audit 記録のみ行い、Tutti / implementation lane は走りません。強制的に GitHub-hosted 実行へ切り替える場合は `fugue-tutti-caller.yml` を `execution_mode_override=primary` または `backup-heavy` 付きで直接 dispatch します。
 # NOTE: 明示モード指定がない場合、/vote の multi-agent mode はタスク複雑度ヒューリスティックで自動調整されます（軽量=standard寄り）。
 # NOTE: `risk-tier (low|medium|high)` を算出し、preflight/dialogue最小値と review fan-out を調整します。
 # NOTE: local 実行でも `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX=true`（既定）により assist=claude かつ high-risk（または `FUGUE_LOCAL_AMBIGUITY_SIGNAL=true`）時に claude-opus-assist 成功が必須になります。
@@ -278,21 +252,6 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `gpt-5-codex` との厳密差分検証が必要な場合のみ `FUGUE_SIM_CODEX_SPARK_ONLY=false` を指定してください。
 # NOTE: lane構成のSSOTは `scripts/lib/build-agent-matrix.sh` です。
 # NOTE: ドリフト検知は `./scripts/check-agent-matrix-parity.sh` で実行できます。
-
-# /kernel prompt 契約の静的検証
-bash tests/test-codex-kernel-prompt.sh
-
-# /kernel prompt の fresh-session smoke test（Codex CLI ログイン済み環境）
-RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh
-# 合格条件: acknowledgement + bootstrap target + lane manifest + 6 本以上の active lane
-
-# /vote prompt 契約の静的検証
-bash tests/test-codex-vote-prompt.sh
-# NOTE: 同チェックは CI の `fugue-orchestration-gate` でも自動実行されます。
-
-# /vote prompt の fresh-session smoke test（Codex CLI ログイン済み環境）
-RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh
-# 合格条件: 出力に `Local consensus mode is active.` + `Smoke verification: PASS` + `Smoke result marker: ...` を含み、既定90秒以内に完了
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
 # CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
@@ -513,3 +472,21 @@ MIT
 ## クレジット
 
 FUGUE 哲学に基づく: 分散自律 x 統合収束
+
+## Kernel Contract Notes
+
+- repo root で新規に開いた Codex セッションから `/kernel`
+- chat 欄から 1語で起動したい場合の local alias は `/k`
+- ローカルでの推奨実行経路は `kernel` または `codex-prompt-launch kernel`
+- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki/Dev/tmp/fugue-pr424/.codex/prompts/k.md)
+- ローカル実行契約の authority は shell wrapper ではなく `codex-kernel-guard launch`
+- hot reload は保証しません
+- bare `/kernel` は Codex chat UI の upstream 実装に依存
+- RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh
+- 最低 6 本の active lane
+- 6 列以上の並列を最低形
+- Lane manifest:
+- Bootstrap target: 6+ lanes (minimum 6).
+- Codex の `/vote` はローカル継続用の slash prompt
+- vote-gh
+- RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh

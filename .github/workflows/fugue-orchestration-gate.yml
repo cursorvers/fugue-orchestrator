@@ -11,8 +11,10 @@ on:
       - '.github/workflows/fugue-task-router.yml'
       - '.github/workflows/kernel-decision-journal.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/run-canary.sh'
       - 'scripts/lib/resolve-primary-heartbeat-state.sh'
       - 'scripts/lib/watchdog-alert-policy.sh'
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
@@ -36,6 +38,8 @@ on:
       - 'tests/test-watchdog-reconcile-workflow.sh'
       - 'tests/test-route-task-handoff.sh'
       - 'tests/test-resolve-orchestration-context.sh'
+      - 'tests/test-canary-trust-policy.sh'
+      - 'tests/test-kernel-canary-plan.sh'
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
       - 'tests/test-primary-heartbeat-state.sh'
@@ -64,8 +68,10 @@ on:
       - '.github/workflows/fugue-task-router.yml'
       - '.github/workflows/kernel-decision-journal.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/run-canary.sh'
       - 'scripts/lib/resolve-primary-heartbeat-state.sh'
       - 'scripts/lib/watchdog-alert-policy.sh'
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
@@ -89,6 +95,8 @@ on:
       - 'tests/test-watchdog-reconcile-workflow.sh'
       - 'tests/test-route-task-handoff.sh'
       - 'tests/test-resolve-orchestration-context.sh'
+      - 'tests/test-canary-trust-policy.sh'
+      - 'tests/test-kernel-canary-plan.sh'
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
       - 'tests/test-primary-heartbeat-state.sh'
@@ -152,6 +160,8 @@ jobs:
           bash -n tests/test-watchdog-reconcile-claim-policy.sh
           bash -n tests/test-watchdog-reconcile-workflow.sh
           bash -n tests/test-workspace-root-policy.sh
+          bash -n tests/test-canary-trust-policy.sh
+          bash -n tests/test-kernel-canary-plan.sh
 
       - name: Kernel prompt static contract
         run: |
@@ -179,6 +189,12 @@ jobs:
           bash tests/test-watchdog-reconcile-claim-policy.sh
           bash tests/test-watchdog-reconcile-workflow.sh
           bash tests/test-workspace-root-policy.sh
+
+      - name: Canary trust tests
+        run: |
+          set -euo pipefail
+          bash tests/test-canary-trust-policy.sh
+          bash tests/test-kernel-canary-plan.sh
 
       - name: Workflow YAML parse checks
         run: |

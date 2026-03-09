@@ -82,6 +82,9 @@ critic_report="${CRITIC_REPORT_PATH:-.fugue/pre-implement/issue-${ISSUE_NUMBER}-
 workspace_report="${WORKSPACE_REPORT_PATH:-}"
 workspace_summary="$(printf '%s' "${WORKSPACE_SUMMARY:-}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
 workspace_preflight_status="$(echo "${WORKSPACE_PREFLIGHT_STATUS:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+workspace_feed_status="$(echo "${WORKSPACE_FEED_STATUS:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+workspace_feed_profiles="$(printf '%s' "${WORKSPACE_FEED_PROFILES:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+workspace_feed_summary="$(printf '%s' "${WORKSPACE_FEED_SUMMARY:-}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
 title_text="$(printf '%s\n' "${ISSUE_TITLE}" | tr '[:upper:]' '[:lower:]')"
 goal_text="$(printf '%s\n' "${ISSUE_BODY}" | awk '
   BEGIN { capture=0 }
@@ -107,6 +110,17 @@ if [[ -n "${workspace_report}" || -n "${workspace_summary}" || -n "${workspace_p
 - Workspace report path: ${workspace_report:-none}
 - Workspace summary: ${workspace_summary:-none}
 - Use Workspace evidence only to enrich context, coordination, and stakeholder-facing artifacts.
+EOF
+)"
+fi
+if [[ -n "${workspace_feed_status}" || -n "${workspace_feed_summary}" || -n "${workspace_feed_profiles}" ]]; then
+  workspace_instruction="${workspace_instruction}$(cat <<EOF
+
+## Google Workspace scheduled feed evidence
+- Scheduled feed status: ${workspace_feed_status:-none}
+- Scheduled feed profiles: ${workspace_feed_profiles:-none}
+- Scheduled feed summary: ${workspace_feed_summary:-none}
+- Use scheduled feed evidence only when it reduces repeated lookups; ignore it if it conflicts with fresher issue or preflight context.
 EOF
 )"
 fi

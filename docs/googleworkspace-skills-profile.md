@@ -199,6 +199,10 @@ Current repo-side Kernel integration helpers:
 - `scripts/harness/googleworkspace-preflight-enrich.sh`
   - produces a bounded readonly Workspace artifact for CI preflight
   - degrades to `skipped` when no Workspace credentials are available
+- `scripts/harness/googleworkspace-scheduled-extract.sh`
+  - generates TTL-bound readonly Workspace feed manifests for scheduled use
+- `scripts/harness/googleworkspace-feed-ingest.sh`
+  - collapses only fresh feed manifests into one bounded context artifact
 
 ## CI Secret Contract
 
@@ -210,6 +214,9 @@ Recommended environment:
 - `workspace-readonly`
   - configure required reviewers or approval rules
   - expose `GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON` only in this environment
+- `workspace-personal-readonly`
+  - environment-scoped, no per-run reviewer gate
+  - expose `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` for personal mailbox feeds
 
 Secret:
 
@@ -218,12 +225,27 @@ Secret:
   - intended only for readonly preflight actions
   - consumed by `scripts/harness/googleworkspace-preflight-enrich.sh`
   - not passed through the caller workflow as a reusable-workflow secret
+- `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON`
+  - optional `authorized_user` JSON payload for mailbox helpers such as
+    `gmail-triage` and `weekly-digest`
+  - generate it with:
+    ```bash
+    gws auth export --unmasked > credentials.json
+    ```
+  - note: masked `gws auth export` output is not valid for CI use
+  - consumed only inside the protected readonly preflight job
 
 Protection model:
 
 - first guard: readonly service-account scope only
 - second guard: protected `Environment` approval before the preflight job can
   read the secret
+- scheduled personal mailbox feeds use a separate environment-scoped secret and
+  do not share the protected approval path used by issue preflight
+- shared scheduled feeds receive only the service-account secret
+- personal scheduled feeds receive only the user OAuth export secret
+- mailbox helpers prefer `GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON` when present
+  and otherwise degrade gracefully under service-account mode
 
 If the environment secret is absent, the CI workflow does not fail. It emits a
 `skipped` Workspace artifact instead and continues with the normal Codex path.
@@ -243,6 +265,22 @@ Current CI path:
   - `.fugue/pre-implement/issue-<n>-googleworkspace.md`
 - raw readonly evidence lands at:
   - `.fugue/pre-implement/googleworkspace-run/googleworkspace/`
+- scheduled feed sync prototype:
+  - `scripts/harness/googleworkspace-fetch-feed-artifacts.sh`
+  - `config/integrations/googleworkspace-feed-policy.json`
+  - `scripts/harness/resolve-googleworkspace-feed-matrix.sh`
+  - `scripts/harness/googleworkspace-scheduled-extract.sh`
+  - `scripts/harness/googleworkspace-feed-ingest.sh`
+  - `.github/workflows/googleworkspace-feed-sync.yml`
+  - `.github/workflows/googleworkspace-personal-feed-sync.yml`
+  - `scripts/local/googleworkspace-feed-sync-local.sh`
+  - `scripts/harness/resolve-orchestration-context.sh` can fetch the latest
+    feed artifacts and emit `workspace_feed_*` outputs
+  - `scripts/harness/codex-execute-validate.sh` injects only feed summaries,
+    never raw payloads, into Codex execution prompts
+  - `scripts/local/run-local-orchestration.sh` writes
+    `googleworkspace-feed-context.json` into each run directory
+  - `fugue-status` reports the latest feed workflow runs in status comments
 
 ## Safety Rules
 

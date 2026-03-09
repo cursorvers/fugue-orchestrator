@@ -107,7 +107,7 @@ Auditability:
 - `FUGUE_REQUIRE_BASELINE_TRIO=true` enforces baseline trio success (`codex` + `claude` + `glm`) before execution approval (default enabled).
 - Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
 - Codex lane model split:
-  - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.3-codex`)
+- `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.4`)
   - `FUGUE_CODEX_MULTI_AGENT_MODEL` for non-main codex lanes (default `gpt-5.3-codex-spark`)
 - GLM baseline model: `glm-5.0`.
 - `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=true` (default) keeps GLM baseline voters active even when `FUGUE_CI_EXECUTION_ENGINE=subscription` (hybrid: codex/claude via CLI, GLM via API).
@@ -203,7 +203,7 @@ scripts/sim-orchestrator-switch.sh
 
 Simulation common rule:
 - `FUGUE_SIM_CODEX_SPARK_ONLY=true` (default) forces simulation to run `codex-main` and codex multi-agent lanes on `gpt-5.3-codex-spark` for faster turnaround.
-- Set `FUGUE_SIM_CODEX_SPARK_ONLY=false` only when main-model parity testing against `gpt-5-codex` is explicitly required.
+- Set `FUGUE_SIM_CODEX_SPARK_ONLY=false` only when main-model parity testing against `gpt-5.4` is explicitly required.
 
 Use live rehearsal only when needed and clean up synthetic issues after verification.
 

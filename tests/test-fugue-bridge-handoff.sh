@@ -21,10 +21,12 @@ dry_run_cmd="$(
     --trust-subject "masayuki" \
     --vote-instruction-b64 "dm90ZQ==" \
     --requested-execution-mode "review" \
+    --subscription-offline-policy-override "continuity" \
     --implement-request "false" \
     --implement-confirmed "false" \
     --vote-command "true" \
     --intake-source "github-vote-comment" \
+    --execution-mode-override "backup-heavy" \
     --allow-processing-rerun \
     --dry-run
 )"
@@ -39,10 +41,12 @@ for expected in \
   "trust_subject=masayuki" \
   "vote_instruction_b64=dm90ZQ==" \
   "requested_execution_mode=review" \
+  "subscription_offline_policy_override=continuity" \
   "implement_request=false" \
   "implement_confirmed=false" \
   "vote_command=true" \
   "intake_source=github-vote-comment" \
+  "execution_mode_override=backup-heavy" \
   "allow_processing_rerun=true"
 do
   if [[ "${dry_run_cmd}" != *"${expected}"* ]]; then
@@ -73,7 +77,8 @@ runtime_output="$(
     --implement-request "true" \
     --implement-confirmed "true" \
     --vote-command "true" \
-    --intake-source "github-vote-comment"
+    --intake-source "github-vote-comment" \
+    --execution-mode-override "primary"
 )"
 
 if [[ "${runtime_output}" != *"handoff_target=fugue-bridge"* ]]; then
@@ -99,7 +104,8 @@ for expected in \
   "-f implement_request=true" \
   "-f implement_confirmed=true" \
   "-f vote_command=true" \
-  "-f intake_source=github-vote-comment"
+  "-f intake_source=github-vote-comment" \
+  "-f execution_mode_override=primary"
 do
   if [[ "${logged_cmd}" != *"${expected}"* ]]; then
     echo "FAIL: runtime invocation missing '${expected}'" >&2
@@ -125,6 +131,10 @@ grep -q 'vote_command: "\${{ needs.ctx.outputs.vote_command }}"' "${CALLER_WORKF
 }
 grep -q 'intake_source: "\${{ needs.ctx.outputs.intake_source }}"' "${CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing intake_source passthrough" >&2
+  exit 1
+}
+grep -q 'execution_mode: "\${{ needs.execution-policy.outputs.codex_execution_mode }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing execution mode passthrough for implementation" >&2
   exit 1
 }
 grep -q 'legacy_bridge_active="true"' "${ROUTER_WORKFLOW}" || {

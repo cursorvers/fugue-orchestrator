@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/harness/route-task-handoff.sh"
-TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT="/Users/masayuki/Dev/tmp"
 mkdir -p "${TMP_ROOT}"
 TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/route-task-handoff.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"; rm -f "${ROOT_DIR}/handoff-comment.md"' EXIT
@@ -40,6 +40,8 @@ assert_case() {
   local expected_request="$5"
   local expected_confirm="$6"
   local expect_implement_label="$7"
+  local execution_mode_override="${8:-auto}"
+  local expected_dispatch_override="${9:-${execution_mode_override}}"
   local out_file="${TMP_DIR}/${name}.out"
   local actual_mode=""
   local workflow_line=""
@@ -65,6 +67,7 @@ assert_case() {
       COMMENT_BODY="/vote" \
       IS_VOTE_COMMAND="true" \
       VOTE_INSTRUCTION="${vote_instruction}" \
+      EXECUTION_MODE_OVERRIDE_INPUT="${execution_mode_override}" \
       TRUST_SUBJECT="masayuki" \
       DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
       DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
@@ -126,6 +129,24 @@ assert_case() {
     fi
   fi
 
+  if [[ "${expected_dispatch_override}" == "auto" ]]; then
+    if [[ "${workflow_line}" == *"-f execution_mode_override="* ]]; then
+      echo "FAIL [${name}]: workflow dispatch should not include execution_mode_override"
+      failed=$((failed + 1))
+      return
+    fi
+  elif [[ "${workflow_line}" != *"-f execution_mode_override=${expected_dispatch_override}"* ]]; then
+    echo "FAIL [${name}]: workflow dispatch missing execution_mode_override=${expected_dispatch_override}"
+    failed=$((failed + 1))
+    return
+  fi
+
+  if ! grep -Fq 'GitHub-hosted Tutti consensus starts now and continues development from the current issue state.' "${ROOT_DIR}/handoff-comment.md"; then
+    echo "FAIL [${name}]: handoff comment missing continuation UX note"
+    failed=$((failed + 1))
+    return
+  fi
+
   echo "PASS [${name}]"
   passed=$((passed + 1))
 }
@@ -133,9 +154,10 @@ assert_case() {
 echo "=== route-task-handoff.sh unit tests ==="
 echo ""
 
-assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true"
-assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false"
-assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false"
+assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true" "auto" "primary"
+assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false" "auto" "primary"
+assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false" "auto" "primary"
+assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy" "backup-heavy"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

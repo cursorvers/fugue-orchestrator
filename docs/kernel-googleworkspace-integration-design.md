@@ -201,12 +201,34 @@ Current implemented baseline:
   - converts readonly Workspace hints into a bounded CI artifact
   - returns `ok`, `partial`, or `skipped`
   - degrades to `skipped` when CI credentials are unavailable
+- `scripts/harness/googleworkspace-scheduled-extract.sh`
+  - turns scheduled readonly profiles into cached Workspace feed manifests
+- `scripts/harness/googleworkspace-feed-ingest.sh`
+  - rehydrates only fresh feed manifests into a bounded context envelope
+- `scripts/harness/googleworkspace-fetch-feed-artifacts.sh`
+  - fetches the latest successful shared and personal feed artifacts from GitHub Actions
+- `scripts/harness/resolve-googleworkspace-feed-matrix.sh`
+  - resolves shared vs personal feed profiles into workflow matrices
+- `scripts/harness/resolve-orchestration-context.sh`
+  - can rehydrate scheduled feed evidence into `workspace_feed_*` outputs for CI
+- `scripts/local/googleworkspace-feed-sync-local.sh`
+  - remains an operator fallback when local-only replay is needed
+- `scripts/local/run-local-orchestration.sh`
+  - stores `googleworkspace-feed-context.json` in each local run directory
+- `scripts/harness/codex-execute-validate.sh`
+  - injects only scheduled feed summaries into Codex instructions as bounded peripheral evidence
 - `.github/workflows/fugue-tutti-caller.yml`
   - forwards `workspace_*` hints into the reusable Codex implementation workflow
 - `.github/workflows/fugue-codex-implement.yml`
   - runs readonly Workspace preflight in a dedicated protected-environment job
   - uploads Workspace artifact and raw evidence alongside existing protocol logs
   - keeps Workspace credentials out of the main implementation job
+- `.github/workflows/googleworkspace-feed-sync.yml`
+  - runs low-frequency shared readonly feed sync profiles on schedule or manual dispatch
+- `.github/workflows/googleworkspace-personal-feed-sync.yml`
+  - runs always-on personal readonly mailbox feeds in a dedicated environment
+- `.github/workflows/fugue-status.yml`
+  - reports the latest shared and personal Google Workspace feed runs in status comments
 
 Kernel admission rules:
 
@@ -228,7 +250,8 @@ Kernel admission rules:
 ### 2. Morning Operator Brief
 
 1. Scheduler invokes `standup-report`.
-2. If user OAuth is available, also run `gmail-triage` or `weekly-digest`.
+2. If protected readonly user OAuth export is available, also run
+   `gmail-triage` or `weekly-digest` in the personal readonly environment.
 3. Kernel emits one digest artifact and does not mutate state elsewhere.
 
 ### 3. Stakeholder Delivery
@@ -246,16 +269,11 @@ Kernel admission rules:
 - allowing unattended write actions in the default loop
 - forcing session-backed MCP adapters into this same shape
 
-## Next Implementation Steps
+## Remaining Follow-Ups
 
-1. Add a `Kernel` evidence writer that stores summarized Workspace envelopes
-   under a dedicated run directory.
-2. Add intent-to-action routing in the intake classifier for meeting, inbox,
-   document, and reporting signals.
-3. Add optional read helpers for `drive search`, `docs read`, and `sheets read`
+1. Add optional read helpers for `drive search`, `docs read`, and `sheets read`
    to reduce fallback raw API usage.
-4. Add an approval receipt log for Workspace write actions.
-5. Keep CI Workspace auth limited to optional readonly service-account secrets;
-   do not run unattended write actions in reusable workflows.
-6. Require a protected GitHub `Environment` such as `workspace-readonly` before
-   CI can access readonly Workspace credentials.
+2. Add an approval receipt log for Workspace write actions.
+3. Tune phase-specific reinjection rules so only the minimum fresh feed summary
+   returns to each prompt.
+4. Expand live smoke coverage when new scheduled feed profiles are introduced.

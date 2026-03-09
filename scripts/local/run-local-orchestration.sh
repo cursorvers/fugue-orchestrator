@@ -294,6 +294,8 @@ LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
 PRIMARY_HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/local/pulse-primary-heartbeat.sh"
+GOOGLEWORKSPACE_FEED_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-feed-policy.json"
+GOOGLEWORKSPACE_FEED_INGEST="${ROOT_DIR}/scripts/harness/googleworkspace-feed-ingest.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
   exit 2

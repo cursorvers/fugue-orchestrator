@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "out_root": ".fugue/feeds/googleworkspace",
+  "profiles": {
+    "morning-brief-shared": {
+      "title": "Morning shared operator brief",
+      "phase": "scheduled-operator-loop",
+      "enabled_by_default": true,
+      "execution_target": "github-actions",
+      "workflow_target": "shared",
+      "github_environment": "workspace-readonly",
+      "schedule_mode": "daily-weekday",
+      "recommended_cron_utc": "0 21 * * 0-4",
+      "actions": [
+        "standup-report"
+      ],
+      "domains": [
+        "calendar"
+      ],
+      "reason": [
+        "standup-context"
+      ],
+      "ttl_minutes": 360,
+      "auth_mode": "service-account-readonly",
+      "summary_purpose": "Start-of-day shared calendar digest for Kernel/FUGUE."
+    },
+    "pre-meeting-scan": {
+      "title": "Upcoming meeting scan",
+      "phase": "scheduled-operator-loop",
+      "enabled_by_default": false,
+      "execution_target": "dispatch-only",
+      "workflow_target": "manual",
+      "schedule_mode": "dispatch-only",
+      "recommended_cron_utc": "",
+      "actions": [
+        "meeting-prep"
+      ],
+      "domains": [
+        "calendar",
+        "drive",
+        "docs"
+      ],
+      "reason": [
+        "meeting-context",
+        "document-context"
+      ],
+      "ttl_minutes": 45,
+      "auth_mode": "user-oauth-readonly",
+      "summary_purpose": "Short-lived next-meeting context."
+    },
+    "morning-brief-personal": {
+      "title": "Morning personal mailbox brief",
+      "phase": "scheduled-operator-loop",
+      "enabled_by_default": true,
+      "execution_target": "github-actions",
+      "workflow_target": "personal",
+      "github_environment": "workspace-personal-readonly",
+      "schedule_mode": "daily-weekday",
+      "recommended_cron_utc": "5 21 * * 0-4",
+      "actions": [
+        "gmail-triage"
+      ],
+      "domains": [
+        "gmail"
+      ],
+      "reason": [
+        "mail-context"
+      ],
+      "ttl_minutes": 360,
+      "auth_mode": "user-oauth-readonly",
+      "summary_purpose": "Start-of-day personal unread mailbox summary."
+    },
+    "weekly-digest-personal": {
+      "title": "Weekly personal workspace digest",
+      "phase": "scheduled-operator-loop",
+      "enabled_by_default": true,
+      "execution_target": "github-actions",
+      "workflow_target": "personal",
+      "github_environment": "workspace-personal-readonly",
+      "schedule_mode": "weekly",
+      "recommended_cron_utc": "15 21 * * 0",
+      "actions": [
+        "weekly-digest"
+      ],
+      "domains": [
+        "calendar",
+        "gmail"
+      ],
+      "reason": [
+        "digest-context"
+      ],
+      "ttl_minutes": 10080,
+      "auth_mode": "user-oauth-readonly",
+      "summary_purpose": "Weekly operator digest."
+    }
+  }
+}

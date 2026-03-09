@@ -22,6 +22,27 @@ title="${ISSUE_TITLE}"
 body="${ISSUE_BODY}"
 comment="${COMMENT_BODY}"
 vote_instruction="$(printf '%s' "${VOTE_INSTRUCTION:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+allow_processing_rerun_input="$(printf '%s' "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${allow_processing_rerun_input}" != "true" ]]; then
+  allow_processing_rerun_input="false"
+fi
+subscription_offline_policy_override="$(printf '%s' "${SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${subscription_offline_policy_override}" != "hold" && "${subscription_offline_policy_override}" != "continuity" ]]; then
+  subscription_offline_policy_override=""
+fi
+handoff_target_input="$(printf '%s' "${HANDOFF_TARGET_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${handoff_target_input}" != "kernel" && "${handoff_target_input}" != "fugue-bridge" ]]; then
+  handoff_target_input=""
+fi
+execution_mode_override="$(printf '%s' "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${execution_mode_override}" in
+  auto|primary|backup-safe|backup-heavy) ;;
+  *) execution_mode_override="auto" ;;
+esac
+resolved_execution_mode_override="${execution_mode_override}"
+if [[ "${resolved_execution_mode_override}" == "auto" && "${IS_VOTE_COMMAND}" == "true" ]]; then
+  resolved_execution_mode_override="primary"
+fi
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
   # Keep structured parsing immune to comment-injected headings.
   text="$(printf '%s\n%s\n' "${title}" "${body}")"
@@ -464,7 +485,7 @@ ${confirmation_line}
 ${fallback_block}
 ${confirm_note}
 
-Next: Tutti runs and posts the vote/audit comment. Implementation execution requires \`implement\`; \`/vote\` auto-attaches \`implement-confirmed\` unless review-only is explicit.
+Next: GitHub-hosted Tutti consensus starts now and continues development from the current issue state. You do not need to restate prior context; the current issue thread and labels are carried forward into the vote/execution flow.
 EOF
 gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file handoff-comment.md
 
@@ -476,7 +497,7 @@ dispatch_args=(
 )
 dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
 dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
-dispatch_args+=(-f handoff_target="kernel")
+dispatch_args+=(-f handoff_target="${handoff_target}")
 dispatch_args+=(-f intake_source="${intake_source}")
 dispatch_args+=(-f requested_execution_mode="${mode}")
 dispatch_args+=(-f implement_request="${wants_implement}")
@@ -489,8 +510,14 @@ fi
 if [[ -n "${vote_instruction_b64}" ]]; then
   dispatch_args+=(-f vote_instruction_b64="${vote_instruction_b64}")
 fi
-if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+if [[ "${IS_VOTE_COMMAND}" == "true" || "${allow_processing_rerun_input}" == "true" ]]; then
   dispatch_args+=(-f allow_processing_rerun="true")
+fi
+if [[ -n "${subscription_offline_policy_override}" ]]; then
+  dispatch_args+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
+fi
+if [[ "${resolved_execution_mode_override}" != "auto" ]]; then
+  dispatch_args+=(-f execution_mode_override="${resolved_execution_mode_override}")
 fi
 
 bridge_handoff_script="scripts/harness/fugue-bridge-handoff.sh"
@@ -512,6 +539,7 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --implement-confirmed "${confirm_implement}"
     --vote-command "${IS_VOTE_COMMAND}"
     --intake-source "${intake_source}"
+    --execution-mode-override "${resolved_execution_mode_override}"
   )
   if [[ -n "${trust_subject}" ]]; then
     bridge_args+=(--trust-subject "${trust_subject}")
@@ -519,8 +547,11 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
   if [[ -n "${vote_instruction_b64}" ]]; then
     bridge_args+=(--vote-instruction-b64 "${vote_instruction_b64}")
   fi
-  if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+  if [[ "${IS_VOTE_COMMAND}" == "true" || "${allow_processing_rerun_input}" == "true" ]]; then
     bridge_args+=(--allow-processing-rerun)
+  fi
+  if [[ -n "${subscription_offline_policy_override}" ]]; then
+    bridge_args+=(--subscription-offline-policy-override "${subscription_offline_policy_override}")
   fi
   bash "${bridge_handoff_script}" "${bridge_args[@]}" >/dev/null
 else
