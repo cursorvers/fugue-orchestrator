@@ -428,6 +428,9 @@ jobs:
             PERM="$(echo "${perm_json}" | jq -r '.permission')"
           fi
 
+          # Reusable workflow jobs do not automatically have repo files available.
+          # Keep fallback-safe defaults so a missing or broken policy script does not
+          # degrade into an opaque unbound-variable failure.
           permission="${PERM}"
           trusted="false"
           trust_reason="permission-${PERM}"
