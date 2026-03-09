@@ -580,6 +580,14 @@ jobs:
           ref: v7
           path: .fugue-orchestrator
 
+      - name: Provision Copilot CLI capability
+        id: copilot
+        if: ${{ matrix.provider == 'claude' }}
+        env:
+          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.FUGUE_COPILOT_TOKEN || secrets.TARGET_REPO_PAT || secrets.FUGUE_OPS_PAT || github.token }}
+        run: bash scripts/harness/ensure-copilot-cli.sh
+
       - name: Call agent engine
         id: call
         env:
@@ -593,7 +601,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          COPILOT_CLI_BIN: ${{ steps.copilot.outputs.bin || 'copilot' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -1416,6 +1425,13 @@ jobs:
           ref: ${{ steps.orch_ref.outputs.ref }}
           path: .fugue-orchestrator
 
+      - name: Provision Copilot CLI capability
+        id: copilot
+        env:
+          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.FUGUE_COPILOT_TOKEN || secrets.TARGET_REPO_PAT || secrets.FUGUE_OPS_PAT || github.token }}
+        run: bash scripts/harness/ensure-copilot-cli.sh
+
       - name: Resolve orchestrator profile and lane matrix
         id: resolve
         env:
@@ -1454,7 +1470,7 @@ jobs:
           EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
           MIN_CONSENSUS_LANES: ${{ vars.FUGUE_MIN_CONSENSUS_LANES || '6' }}
           HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
-          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available }}
           HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}

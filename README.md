@@ -151,6 +151,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_ALLOW_GLM_IN_SUBSCRIPTION    --body true    -R <owner/repo> # trueでsubscriptionでもGLM baseline voter(+design時Gemini)を許可
 # gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
 # gh variable set FUGUE_HAS_COPILOT_CLI            --body true    -R <owner/repo> # GitHub continuity/harness で Copilot CLI を使う時に明示
+# gh secret set   FUGUE_COPILOT_TOKEN                           -R <owner/repo> # Copilot Requests 権限つき token を優先利用（無ければ TARGET_REPO_PAT/FUGUE_OPS_PAT/github.token を順に試行）
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
 # gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body continuity -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
 # gh variable set FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE --body continuity -R <owner/repo> # inherit|hold|continuity (canary専用: runner不在時の扱い)

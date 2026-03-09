@@ -57,9 +57,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Provision Copilot CLI capability
+        id: copilot
+        env:
+          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.FUGUE_COPILOT_TOKEN || secrets.TARGET_REPO_PAT || secrets.FUGUE_OPS_PAT || github.token }}
+        run: bash scripts/harness/ensure-copilot-cli.sh
+
       - name: Run canary (mode-aware)
         env:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
+          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available }}
         run: bash scripts/harness/run-canary.sh
