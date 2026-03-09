@@ -135,10 +135,14 @@ if [[ -n "${copilot_bin_path}" && -n "${copilot_token}" ]]; then
   probe_output="$(run_with_timeout "${copilot_probe_timeout}" "${copilot_bin_path}" -p "${copilot_probe_prompt}" --allow-all-tools 2>/tmp/fugue-copilot-probe.err)"
   probe_rc=$?
   set -e
-  if [[ "${probe_rc}" -eq 0 && "$(printf '%s' "${probe_output}" | tr '[:upper:]' '[:lower:]')" == *"ok"* ]]; then
+  if [[ "${probe_rc}" -eq 0 ]]; then
     available="true"
-    probe_ok="true"
-    reason="probe-ok"
+    if [[ "$(printf '%s' "${probe_output}" | tr '[:upper:]' '[:lower:]')" == *"ok"* ]]; then
+      probe_ok="true"
+      reason="probe-ok"
+    else
+      reason="probe-exit0"
+    fi
   else
     reason="probe-failed"
   fi

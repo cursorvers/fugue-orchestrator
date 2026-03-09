@@ -45,6 +45,10 @@ if [[ "${mode}" == "allow-all-required" ]]; then
   printf 'OK\n'
   exit 0
 fi
+if [[ "${mode}" == "noncanonical-success" ]]; then
+  printf 'All set.\n'
+  exit 0
+fi
 printf 'auth failed\n' >&2
 exit 1
 EOF
@@ -67,6 +71,11 @@ assert_eq "token-type-default" "token_type=unknown" "$(printf '%s\n' "${case_out
 case_output="$(run_case allow-all allow-all-required github_pat_example)"
 assert_eq "available-allow-all" "available=true" "$(printf '%s\n' "${case_output}" | grep '^available=')"
 assert_eq "reason-allow-all" "reason=probe-ok" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
+
+case_output="$(run_case noncanonical noncanonical-success github_pat_example)"
+assert_eq "available-noncanonical" "available=true" "$(printf '%s\n' "${case_output}" | grep '^available=')"
+assert_eq "probe-noncanonical" "probe_ok=false" "$(printf '%s\n' "${case_output}" | grep '^probe_ok=')"
+assert_eq "reason-noncanonical" "reason=probe-exit0" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
 
 case_output="$(run_case fail fail)"
 assert_eq "available-fail" "available=false" "$(printf '%s\n' "${case_output}" | grep '^available=')"
