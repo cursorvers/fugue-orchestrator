@@ -20,6 +20,7 @@ on:
       - 'scripts/local/run-linked-systems.sh'
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-workflow-checkout-order.sh'
   push:
     branches:
       - main
@@ -41,6 +42,7 @@ on:
       - 'scripts/local/run-linked-systems.sh'
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-workflow-checkout-order.sh'
   workflow_dispatch:
     inputs:
       run_canary_lite:
@@ -76,12 +78,14 @@ jobs:
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n tests/test-canary-trust-policy.sh
           bash -n tests/test-kernel-canary-plan.sh
+          bash -n tests/test-workflow-checkout-order.sh
 
       - name: Canary trust tests
         run: |
           set -euo pipefail
           bash tests/test-canary-trust-policy.sh
           bash tests/test-kernel-canary-plan.sh
+          bash tests/test-workflow-checkout-order.sh
 
       - name: Workflow YAML parse checks
         run: |
