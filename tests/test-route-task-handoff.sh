@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/harness/route-task-handoff.sh"
 TMP_ROOT="/Users/masayuki/Dev/tmp"
+if [[ ! -d "${TMP_ROOT}" ]]; then
+  TMP_ROOT="${TMPDIR:-/tmp}"
+fi
 mkdir -p "${TMP_ROOT}"
 TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/route-task-handoff.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"; rm -f "${ROOT_DIR}/handoff-comment.md"' EXIT
