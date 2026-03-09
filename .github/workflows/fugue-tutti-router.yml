@@ -77,6 +77,11 @@ on:
         required: false
         type: string
         default: "false"
+      canary_dispatch_run_id:
+        description: "Originating canary workflow run id for verified canary dispatches"
+        required: false
+        type: string
+        default: ""
       ambiguity_translation_gate:
         description: "true when caller ambiguity/translation gate requested Claude sub attention"
         required: false
@@ -403,8 +408,14 @@ jobs:
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          TRUST_SUBJECT: ${{ steps.ctx.outputs.trust_subject }}
+          AUTHOR: ${{ steps.ctx.outputs.author }}
+          ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
+          ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
           VOTE_COMMAND: ${{ steps.ctx.outputs.vote_command }}
           CANARY_DISPATCH_OWNED: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+          CANARY_DISPATCH_RUN_ID: ${{ inputs.canary_dispatch_run_id || '' }}
         run: |
           set -euo pipefail
           gh_api_retry() {
@@ -435,8 +446,31 @@ jobs:
           PERM="none"
 
           canary_dispatch_owned="$(printf '%s' "${CANARY_DISPATCH_OWNED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${canary_dispatch_owned}" == "true" ]]; then
-            PERM="canary-bypass"
+          trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          author="$(printf '%s' "${AUTHOR:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          issue_title="$(printf '%s' "${ISSUE_TITLE:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          issue_body="${ISSUE_BODY:-}"
+          canary_dispatch_run_id="$(printf '%s' "${CANARY_DISPATCH_RUN_ID:-}" | tr -cd '0-9')"
+          canary_issue_marker="false"
+          if printf '%s\n%s\n' "${issue_title}" "${issue_body}" | grep -Eq '(^## Canary$|Automated orchestration canary\.)'; then
+            canary_issue_marker="true"
+          fi
+          if [[ "${canary_dispatch_owned}" == "true" \
+            && "${GITHUB_EVENT_NAME}" == "workflow_call" \
+            && -n "${canary_dispatch_run_id}" \
+            && "${trust_subject}" == "github-actions[bot]" \
+            && "${author}" == "github-actions[bot]" \
+            && "${canary_issue_marker}" == "true" ]]; then
+            run_endpoint="repos/${GITHUB_REPOSITORY}/actions/runs/${canary_dispatch_run_id}"
+            run_json="$(gh_api_retry "${run_endpoint}" 4 || echo '{}')"
+            run_path="$(echo "${run_json}" | jq -r '.path // ""')"
+            run_event="$(echo "${run_json}" | jq -r '.event // ""')"
+            run_repo="$(echo "${run_json}" | jq -r '.head_repository.full_name // ""')"
+            if [[ "${run_path}" == ".github/workflows/fugue-orchestrator-canary.yml" \
+              && ( "${run_event}" == "schedule" || "${run_event}" == "workflow_dispatch" ) \
+              && "${run_repo}" == "${GITHUB_REPOSITORY}" ]]; then
+              PERM="canary-verified"
+            fi
           else
             perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission"
             perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
@@ -446,7 +480,7 @@ jobs:
           fi
 
           TRUSTED="false"
-          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" || "${PERM}" == "canary-bypass" ]]; then
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" || "${PERM}" == "canary-verified" ]]; then
             TRUSTED="true"
           fi
           if [[ "${VOTE_COMMAND}" == "true" ]]; then

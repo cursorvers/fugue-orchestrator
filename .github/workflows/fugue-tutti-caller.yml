@@ -14,6 +14,11 @@ on:
         required: false
         type: string
         default: ""
+      canary_dispatch_run_id:
+        description: "Originating canary workflow run id for verified canary dispatches"
+        required: false
+        type: string
+        default: ""
       allow_processing_rerun:
         description: "Allow rerun while processing label is present"
         required: false
@@ -92,6 +97,7 @@ jobs:
       skip_reason: ${{ steps.ctx.outputs.skip_reason }}
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+      canary_dispatch_run_id: ${{ steps.ctx.outputs.canary_dispatch_run_id }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       has_implement_confirmed: ${{ steps.ctx.outputs.has_implement_confirmed }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
@@ -164,6 +170,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
           TRUST_SUBJECT_INPUT: ${{ github.event.inputs.trust_subject || '' }}
+          CANARY_DISPATCH_RUN_ID_INPUT: ${{ github.event.inputs.canary_dispatch_run_id || '' }}
           ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
@@ -521,6 +528,7 @@ jobs:
       handoff_target: "${{ needs.ctx.outputs.handoff_target }}"
       intake_source: "${{ needs.ctx.outputs.intake_source }}"
       canary_dispatch_owned: "${{ needs.ctx.outputs.canary_dispatch_owned }}"
+      canary_dispatch_run_id: "${{ needs.ctx.outputs.canary_dispatch_run_id }}"
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
       ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"

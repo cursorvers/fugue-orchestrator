@@ -7,6 +7,7 @@ CANARY_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-orchestrator-canary.yml"
 ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml"
 TASK_ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-task-router.yml"
 CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-caller.yml"
+TUTTI_CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-caller.yml"
 RESOLVE_CONTEXT_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
 
@@ -96,6 +97,18 @@ grep -q 'canary_dispatch_owned: "\${{ needs.ctx.outputs.canary_dispatch_owned }}
   echo "FAIL: caller workflow should pass canary dispatch ownership into router" >&2
   exit 1
 }
+grep -Fq 'canary_dispatch_run_id: ${{ steps.ctx.outputs.canary_dispatch_run_id }}' "${TUTTI_CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing canary dispatch run id ctx output wiring" >&2
+  exit 1
+}
+grep -Fq 'canary_dispatch_run_id: "${{ needs.ctx.outputs.canary_dispatch_run_id }}"' "${TUTTI_CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing canary dispatch run id router wiring" >&2
+  exit 1
+}
+grep -q 'canary_dispatch_run_id="\${GITHUB_RUN_ID}"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should pass originating canary run id into caller dispatch" >&2
+  exit 1
+}
 grep -q 'if \[\[ "\${canary_dispatch_owned}" == "true" \]\]; then' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow should trust explicit caller-owned canary dispatch input" >&2
   exit 1
@@ -104,8 +117,48 @@ grep -q 'CANARY_DISPATCH_OWNED: \${{ steps.ctx.outputs.canary_dispatch_owned }}'
   echo "FAIL: router trust step should receive canary dispatch ownership env" >&2
   exit 1
 }
-grep -q 'PERM="canary-bypass"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should bypass collaborator permission for canary-owned dispatches" >&2
+grep -q 'CANARY_DISPATCH_RUN_ID: \${{ inputs.canary_dispatch_run_id || '\'''\'' }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive canary dispatch run id env" >&2
+  exit 1
+}
+grep -q 'GITHUB_EVENT_NAME: \${{ github.event_name }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should inspect event provenance for canary bypass" >&2
+  exit 1
+}
+grep -q 'TRUST_SUBJECT: \${{ steps.ctx.outputs.trust_subject }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive trust subject for canary provenance" >&2
+  exit 1
+}
+grep -q 'AUTHOR: \${{ steps.ctx.outputs.author }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive issue author for canary provenance" >&2
+  exit 1
+}
+grep -q 'canary_issue_marker="true"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should require canary issue markers before bypass" >&2
+  exit 1
+}
+grep -q '"\${GITHUB_EVENT_NAME}" == "workflow_call"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to workflow_call provenance" >&2
+  exit 1
+}
+grep -q '"\${trust_subject}" == "github-actions\[bot\]"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to github-actions bot subject" >&2
+  exit 1
+}
+grep -q '"\${author}" == "github-actions\[bot\]"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to bot-authored canary issues" >&2
+  exit 1
+}
+grep -q 'actions/runs/\${canary_dispatch_run_id}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should verify the originating canary workflow run" >&2
+  exit 1
+}
+grep -q '".github/workflows/fugue-orchestrator-canary.yml"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should pin canary verification to the canary workflow path" >&2
+  exit 1
+}
+grep -q 'PERM="canary-verified"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should grant only verified canary trust" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"
