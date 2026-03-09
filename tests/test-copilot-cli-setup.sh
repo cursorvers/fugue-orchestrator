@@ -31,7 +31,17 @@ run_case() {
   mkdir -p "${fake_bin}"
   cat > "${fake_bin}/copilot" <<EOF
 #!/usr/bin/env bash
+set -euo pipefail
+args="\$*"
 if [[ "${mode}" == "ok" ]]; then
+  printf 'OK\n'
+  exit 0
+fi
+if [[ "${mode}" == "allow-all-required" ]]; then
+  if [[ "\${args}" != *"--allow-all-tools"* ]]; then
+    echo "missing allow-all-tools" >&2
+    exit 2
+  fi
   printf 'OK\n'
   exit 0
 fi
@@ -52,10 +62,20 @@ EOF
 case_output="$(run_case ok ok)"
 assert_eq "available-ok" "available=true" "$(printf '%s\n' "${case_output}" | grep '^available=')"
 assert_eq "probe-ok" "probe_ok=true" "$(printf '%s\n' "${case_output}" | grep '^probe_ok=')"
+assert_eq "token-type-default" "token_type=unknown" "$(printf '%s\n' "${case_output}" | grep '^token_type=')"
+
+case_output="$(run_case allow-all allow-all-required github_pat_example)"
+assert_eq "available-allow-all" "available=true" "$(printf '%s\n' "${case_output}" | grep '^available=')"
+assert_eq "reason-allow-all" "reason=probe-ok" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
 
 case_output="$(run_case fail fail)"
 assert_eq "available-fail" "available=false" "$(printf '%s\n' "${case_output}" | grep '^available=')"
 assert_eq "reason-fail" "reason=probe-failed" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
+
+case_output="$(run_case classic fail ghp_example)"
+assert_eq "available-classic" "available=false" "$(printf '%s\n' "${case_output}" | grep '^available=')"
+assert_eq "reason-classic" "reason=unsupported-token-type" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
+assert_eq "token-type-classic" "token_type=classic_pat" "$(printf '%s\n' "${case_output}" | grep '^token_type=')"
 
 case_output="$(run_case no-token ok "")"
 assert_eq "available-no-token" "available=false" "$(printf '%s\n' "${case_output}" | grep '^available=')"

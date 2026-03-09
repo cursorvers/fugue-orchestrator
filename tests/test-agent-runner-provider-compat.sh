@@ -231,7 +231,7 @@ test_ci_claude_copilot_mode() {
       PATH="${TMP_DIR}:${BASE_TEST_PATH}" \
       COPILOT_CLI_BIN="${TMP_DIR}/copilot" \
       HAS_COPILOT_CLI="true" \
-      REQUIRE_NO_ALLOW_ALL_TOOLS="true" \
+      REQUIRE_ALLOW_ALL_TOOLS="true" \
       PROVIDER="claude" \
       MODEL="claude-sonnet-4-0" \
       API_URL="https://api.anthropic.com/v1/messages" \

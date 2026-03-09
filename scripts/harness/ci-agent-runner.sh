@@ -100,9 +100,9 @@ if [[ -n "${copilot_cli_override}" ]]; then
 elif command -v "${copilot_runner_bin}" >/dev/null 2>&1; then
   copilot_runner_available="true"
 fi
-copilot_allow_all_tools="$(normalize_optional_bool "${COPILOT_ALLOW_ALL_TOOLS:-false}" || true)"
+copilot_allow_all_tools="$(normalize_optional_bool "${COPILOT_ALLOW_ALL_TOOLS:-true}" || true)"
 if [[ -z "${copilot_allow_all_tools}" ]]; then
-  copilot_allow_all_tools="false"
+  copilot_allow_all_tools="true"
 fi
 
 recursive_enabled_raw="${FUGUE_CODEX_RECURSIVE_DELEGATION:-false}"
