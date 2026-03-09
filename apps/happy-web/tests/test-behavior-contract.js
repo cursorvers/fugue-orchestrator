@@ -194,6 +194,52 @@ async function main() {
   }
 
   {
+    global.window = { localStorage: createMemoryStorage() };
+    global.navigator = { onLine: false };
+
+    const crowAdapter = createCrowAdapter();
+    const intakeAdapter = createIntakeAdapter();
+    const stateAdapter = createStateAdapter({
+      crowAdapter,
+      config: {
+        remoteEnabled: false,
+        issueUrl: "https://example.com/issues/queue-full",
+      },
+      intakeAdapter,
+    });
+
+    for (let index = 0; index < 32; index += 1) {
+      const queuedPacket = intakeAdapter.buildPacket({
+        input: `queued-${index}`,
+        tags: ["build"],
+        urgency: "normal",
+      });
+      intakeAdapter.enqueuePacket(queuedPacket);
+    }
+
+    const overflowPacket = intakeAdapter.buildPacket({
+      input: "overflow request",
+      tags: ["build"],
+      urgency: "today",
+    });
+    const overflowState = stateAdapter.submitPrompt(overflowPacket);
+
+    assert(intakeAdapter.listQueue().length === 32, "queue-full guard should preserve queued items");
+    assert(
+      !overflowState.tasks.some((task) => task.id === overflowPacket.client_task_id),
+      "queue-full guard should not fabricate an optimistic task"
+    );
+    assert(
+      overflowState.alerts.some(
+        (alert) =>
+          alert.title === "Local queue is full" &&
+          alert.detail.includes("could not save the request locally")
+      ),
+      "queue-full guard should surface a degraded alert"
+    );
+  }
+
+  {
     const storage = createMemoryStorage();
     global.window = { localStorage: storage };
     global.navigator = { onLine: true };
@@ -303,7 +349,7 @@ async function main() {
           const detailCursor = parsed.searchParams.get("cursor") || "";
           remote.detailCalls.push({ taskId, cursor: detailCursor });
           return {
-            next_cursor: "detail-cursor-should-not-persist",
+            cursor: "detail-cursor-should-not-persist",
             events: [
               {
                 id: `evt-detail-running-${taskId}`,

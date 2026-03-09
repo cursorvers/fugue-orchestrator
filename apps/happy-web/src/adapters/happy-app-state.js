@@ -365,6 +365,8 @@ export function createStateAdapter({ crowAdapter, config, endpointClient, intake
           detailCursorByTaskId.delete(taskId);
         } else if (typeof payload?.next_cursor === "string") {
           detailCursorByTaskId.set(taskId, payload.next_cursor);
+        } else if (typeof payload?.cursor === "string") {
+          detailCursorByTaskId.set(taskId, payload.cursor);
         }
         const {
           next_cursor: _ignoredNextCursor,
@@ -424,7 +426,20 @@ export function createStateAdapter({ crowAdapter, config, endpointClient, intake
       return commit();
     }
 
-    const queueItem = intakeAdapter?.enqueueRecoveryAction?.({ action, scope, taskId });
+    let queueItem = null;
+    try {
+      queueItem = intakeAdapter?.enqueueRecoveryAction?.({ action, scope, taskId });
+    } catch (error) {
+      appendAndCommit({
+        type: EVENT_TYPES.alertAdded,
+        severity: "degraded",
+        title: "Local queue is full",
+        detail: `${action} could not be queued: ${error.message}`,
+        at: nowIso(),
+        dedupe_key: `recover-queue-full:${dedupeSlot}`,
+      });
+      return getState();
+    }
     appendAndCommit({
       type: EVENT_TYPES.recoverRequested,
       task_id: taskId,
@@ -472,7 +487,20 @@ export function createStateAdapter({ crowAdapter, config, endpointClient, intake
       const taskId = packet.client_task_id || packet.idempotency_key || makeId("task");
       const title = taskTitleFromPacket(packet);
 
-      const queueItem = intakeAdapter?.enqueuePacket?.(packet);
+      let queueItem = null;
+      try {
+        queueItem = intakeAdapter?.enqueuePacket?.(packet);
+      } catch (error) {
+        appendAndCommit({
+          type: EVENT_TYPES.alertAdded,
+          severity: "degraded",
+          title: "Local queue is full",
+          detail: `Kernel orchestration could not save the request locally: ${error.message}`,
+          at: packet.client_timestamp || nowIso(),
+          dedupe_key: `queue-full:${packet.idempotency_key}`,
+        });
+        return getState();
+      }
       appendEvent({
         type: EVENT_TYPES.promptRecorded,
         prompt: packet.body,

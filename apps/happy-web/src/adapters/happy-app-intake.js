@@ -2,6 +2,7 @@ import { QUEUE_KINDS, isQueueKind, recoveryDedupeSlot } from "../domain/happy-ev
 
 const STORAGE_KEY = "happy-web-intake-queue-v1";
 const MAX_QUEUE_ITEMS = 32;
+const QUEUE_FULL_ERROR = `Local queue is full (${MAX_QUEUE_ITEMS} items). Retry after sync completes.`;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -84,6 +85,12 @@ export function createIntakeAdapter() {
     return listQueue();
   }
 
+  function ensureQueueCapacity() {
+    if (queue.length >= MAX_QUEUE_ITEMS) {
+      throw new Error(QUEUE_FULL_ERROR);
+    }
+  }
+
   function buildPacket({ input, tags = [], urgency = "normal" }) {
     const clientTaskId = makeId("task");
     return {
@@ -146,6 +153,7 @@ export function createIntakeAdapter() {
     const dedupeSlot = `intake:${packet.idempotency_key}`;
     const existing = findActiveByDedupeSlot(dedupeSlot);
     if (existing) return clone(existing);
+    ensureQueueCapacity();
 
     const queueItem = normalizeQueueItem({
       queue_id: makeId("queue"),
@@ -157,7 +165,7 @@ export function createIntakeAdapter() {
       enqueued_at: packet.client_timestamp || new Date().toISOString(),
     });
 
-    queue = [queueItem, ...queue].slice(0, MAX_QUEUE_ITEMS);
+    queue = [queueItem, ...queue];
     commitQueue();
     return clone(queueItem);
   }
@@ -166,6 +174,7 @@ export function createIntakeAdapter() {
     const dedupeSlot = recoveryDedupeSlot(action, taskId);
     const existing = findActiveByDedupeSlot(dedupeSlot);
     if (existing) return clone(existing);
+    ensureQueueCapacity();
 
     const recoveryId = dedupeSlot;
     const queueItem = normalizeQueueItem({
@@ -183,7 +192,7 @@ export function createIntakeAdapter() {
       enqueued_at: new Date().toISOString(),
     });
 
-    queue = [queueItem, ...queue].slice(0, MAX_QUEUE_ITEMS);
+    queue = [queueItem, ...queue];
     commitQueue();
     return clone(queueItem);
   }
