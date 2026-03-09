@@ -162,8 +162,28 @@ grep -q 'bash scripts/lib/canary-trust-policy.sh' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should delegate trust decisions to canary-trust-policy.sh" >&2
   exit 1
 }
+awk '
+  /- name: Checkout repository/ { seen_checkout=1 }
+  /- name: Check author trust/ { if (!seen_checkout) exit 1; found_trust=1 }
+  END { if (!found_trust) exit 1 }
+' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router prepare job must checkout the repository before invoking canary-trust-policy.sh" >&2
+  exit 1
+}
 grep -Fq 'echo "permission=${permission}"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should export policy-computed permission" >&2
+  exit 1
+}
+grep -Fq 'permission="${PERM}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should initialize fallback-safe permission before policy eval" >&2
+  exit 1
+}
+grep -Fq 'trusted="false"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should initialize fallback-safe trusted flag before policy eval" >&2
+  exit 1
+}
+grep -Fq 'trust_reason="permission-${PERM}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should initialize fallback-safe trust reason before policy eval" >&2
   exit 1
 }
 grep -Fq 'echo "trusted=${trusted}"' "${ROUTER_WORKFLOW}" || {
