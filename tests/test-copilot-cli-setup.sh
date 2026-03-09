@@ -26,6 +26,7 @@ run_case() {
   local name="$1"
   local mode="$2"
   local token="${3-token}"
+  local fail_open="${4-false}"
   local fake_bin="${TMP_DIR}/${name}/bin"
   local out_file="${TMP_DIR}/${name}/out.env"
   mkdir -p "${fake_bin}"
@@ -59,6 +60,7 @@ EOF
     GITHUB_OUTPUT="${out_file}" \
     COPILOT_INSTALL_MODE="never" \
     COPILOT_GITHUB_TOKEN="${token}" \
+    COPILOT_PROBE_FAIL_OPEN="${fail_open}" \
     bash "${SCRIPT}"
   cat "${out_file}"
 }
@@ -80,6 +82,11 @@ assert_eq "reason-noncanonical" "reason=probe-exit0" "$(printf '%s\n' "${case_ou
 case_output="$(run_case fail fail)"
 assert_eq "available-fail" "available=false" "$(printf '%s\n' "${case_output}" | grep '^available=')"
 assert_eq "reason-fail" "reason=probe-failed" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
+
+case_output="$(run_case fail-open fail github_pat_example true)"
+assert_eq "available-fail-open" "available=true" "$(printf '%s\n' "${case_output}" | grep '^available=')"
+assert_eq "probe-fail-open" "probe_ok=false" "$(printf '%s\n' "${case_output}" | grep '^probe_ok=')"
+assert_eq "reason-fail-open" "reason=probe-failed-soft" "$(printf '%s\n' "${case_output}" | grep '^reason=')"
 
 case_output="$(run_case classic fail ghp_example)"
 assert_eq "available-classic" "available=false" "$(printf '%s\n' "${case_output}" | grep '^available=')"

@@ -62,6 +62,7 @@ copilot_install_mode="$(echo "${COPILOT_INSTALL_MODE:-auto}" | tr '[:upper:]' '[
 copilot_prefix="${COPILOT_NPM_PREFIX:-${HOME}/.local}"
 copilot_probe_prompt="${COPILOT_PROBE_PROMPT:-Return ONLY OK}"
 copilot_probe_timeout="${COPILOT_PROBE_TIMEOUT_SEC:-45}"
+copilot_probe_fail_open="$(normalize_optional_bool "${COPILOT_PROBE_FAIL_OPEN:-false}" || true)"
 copilot_available_override="$(normalize_optional_bool "${HAS_COPILOT_CLI:-${FUGUE_HAS_COPILOT_CLI:-}}" || true)"
 
 installed="false"
@@ -143,6 +144,9 @@ if [[ -n "${copilot_bin_path}" && -n "${copilot_token}" ]]; then
     else
       reason="probe-exit0"
     fi
+  elif [[ "${copilot_probe_fail_open}" == "true" ]]; then
+    available="true"
+    reason="probe-failed-soft"
   else
     reason="probe-failed"
   fi

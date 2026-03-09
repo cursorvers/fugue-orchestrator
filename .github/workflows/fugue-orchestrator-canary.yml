@@ -62,6 +62,7 @@ jobs:
         env:
           HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.FUGUE_COPILOT_TOKEN || secrets.TARGET_REPO_PAT || secrets.FUGUE_OPS_PAT || github.token }}
+          COPILOT_PROBE_FAIL_OPEN: 'true'
         run: bash scripts/harness/ensure-copilot-cli.sh
 
       - name: Run canary (mode-aware)
