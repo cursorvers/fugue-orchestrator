@@ -12,6 +12,7 @@ on:
       - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/run-canary.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/sim-orchestrator-switch.sh'
@@ -32,6 +33,7 @@ on:
       - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/run-canary.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/sim-orchestrator-switch.sh'
@@ -66,6 +68,7 @@ jobs:
           bash -n scripts/lib/canary-trust-policy.sh
           bash -n scripts/lib/execution-profile-policy.sh
           bash -n scripts/lib/orchestrator-policy.sh
+          bash -n scripts/harness/run-canary.sh
           bash -n scripts/local/run-local-orchestration.sh
           bash -n scripts/local/run-linked-systems.sh
           bash -n scripts/sim-orchestrator-switch.sh
