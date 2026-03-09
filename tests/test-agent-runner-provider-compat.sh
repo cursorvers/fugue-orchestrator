@@ -69,6 +69,28 @@ EOF
   chmod +x "${TMP_DIR}/copilot"
 }
 
+make_fake_npx() {
+  cat > "${TMP_DIR}/npx" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+if [[ "${args}" != *"@github/copilot"* ]]; then
+  echo "missing copilot package" >&2
+  exit 97
+fi
+if [[ "${REQUIRE_GH_TOKEN:-false}" == "true" && -z "${GH_TOKEN:-}" ]]; then
+  echo "missing gh token" >&2
+  exit 98
+fi
+if [[ "${REQUIRE_ALLOW_ALL_TOOLS:-false}" == "true" && "${args}" != *"--allow-all-tools"* ]]; then
+  echo "missing allow-all-tools" >&2
+  exit 99
+fi
+printf '%s\n' '{"risk":"LOW","approve":true,"findings":[],"recommendation":"ok","rationale":"copilot-via-npx"}'
+EOF
+  chmod +x "${TMP_DIR}/npx"
+}
+
 make_fake_curl() {
   cat > "${TMP_DIR}/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -284,6 +306,35 @@ test_ci_claude_copilot_mode_allow_tools_opt_in() {
   assert_json_field "${result}" '.skipped' 'false'
 }
 
+test_ci_claude_copilot_npx_fallback() {
+  make_fake_npx
+  local work_dir="${TMP_DIR}/ci-copilot-npx"
+  mkdir -p "${work_dir}"
+  (
+    cd "${work_dir}"
+    env \
+      PATH="${TMP_DIR}:${BASE_TEST_PATH}" \
+      COPILOT_CLI_BIN="copilot" \
+      HAS_COPILOT_CLI="true" \
+      COPILOT_GITHUB_TOKEN="github_pat_example" \
+      REQUIRE_GH_TOKEN="true" \
+      REQUIRE_ALLOW_ALL_TOOLS="true" \
+      PROVIDER="claude" \
+      MODEL="claude-sonnet-4-0" \
+      API_URL="https://api.anthropic.com/v1/messages" \
+      AGENT_NAME="claude-main-orchestrator" \
+      AGENT_ROLE="orchestrator" \
+      ISSUE_TITLE="compat" \
+      ISSUE_BODY="check" \
+      STRICT_OPUS_ASSIST_DIRECT="false" \
+      bash "${CI_RUNNER}" >/dev/null
+  )
+  local result="${work_dir}/agent-claude-main-orchestrator.json"
+  assert_json_field "${result}" '.http_code' 'cli:0'
+  assert_json_field "${result}" '.execution_route' 'claude-via-copilot-cli'
+  assert_json_field "${result}" '.skipped' 'false'
+}
+
 test_ci_claude_opus_strict_rejects_copilot() {
   make_fake_copilot
   local work_dir="${TMP_DIR}/ci-copilot-strict"
@@ -349,6 +400,7 @@ run_test "subscription-glm-fallback" test_subscription_glm_fallback
 run_test "ci-claude-api-model" test_ci_claude_api_model
 run_test "ci-claude-copilot-mode" test_ci_claude_copilot_mode
 run_test "ci-claude-copilot-allow-tools-opt-in" test_ci_claude_copilot_mode_allow_tools_opt_in
+run_test "ci-claude-copilot-npx-fallback" test_ci_claude_copilot_npx_fallback
 run_test "ci-claude-opus-strict-rejects-copilot" test_ci_claude_opus_strict_rejects_copilot
 run_test "ci-claude-copilot-unsupported-token-falls-back" test_ci_claude_copilot_unsupported_token_falls_back
 

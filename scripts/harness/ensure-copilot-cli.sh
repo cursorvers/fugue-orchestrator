@@ -58,6 +58,7 @@ write_output() {
 
 copilot_bin_name="${COPILOT_CLI_BIN:-copilot}"
 copilot_npm_package="${COPILOT_NPM_PACKAGE:-@github/copilot}"
+copilot_npx_package="${COPILOT_NPX_PACKAGE:-${copilot_npm_package}}"
 copilot_install_mode="$(echo "${COPILOT_INSTALL_MODE:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 copilot_prefix="${COPILOT_NPM_PREFIX:-${HOME}/.local}"
 copilot_probe_prompt="${COPILOT_PROBE_PROMPT:-Return ONLY OK}"
@@ -117,6 +118,20 @@ if [[ -z "${copilot_bin_path}" ]] && command -v "${copilot_bin_name}" >/dev/null
   copilot_bin_path="$(command -v "${copilot_bin_name}")"
 fi
 
+run_probe() {
+  local probe_output_var="$1"
+  local probe_rc_var="$2"
+  shift 2
+  local captured_output=""
+  local captured_rc=0
+  set +e
+  captured_output="$(run_with_timeout "${copilot_probe_timeout}" "$@" 2>/tmp/fugue-copilot-probe.err)"
+  captured_rc=$?
+  set -e
+  printf -v "${probe_output_var}" '%s' "${captured_output}"
+  printf -v "${probe_rc_var}" '%s' "${captured_rc}"
+}
+
 if [[ -n "${copilot_bin_path}" && -n "${copilot_token}" ]]; then
   if [[ "${token_type}" == "classic_pat" || "${token_type}" == "app_installation" ]]; then
     reason="unsupported-token-type"
@@ -132,10 +147,8 @@ if [[ -n "${copilot_bin_path}" && -n "${copilot_token}" ]]; then
   export GH_TOKEN="${copilot_token}"
   export GITHUB_TOKEN="${copilot_token}"
   probe_output=""
-  set +e
-  probe_output="$(run_with_timeout "${copilot_probe_timeout}" "${copilot_bin_path}" -p "${copilot_probe_prompt}" --allow-all-tools 2>/tmp/fugue-copilot-probe.err)"
-  probe_rc=$?
-  set -e
+  probe_rc=0
+  run_probe probe_output probe_rc "${copilot_bin_path}" -p "${copilot_probe_prompt}" --allow-all-tools
   if [[ "${probe_rc}" -eq 0 ]]; then
     available="true"
     if [[ "$(printf '%s' "${probe_output}" | tr '[:upper:]' '[:lower:]')" == *"ok"* ]]; then
@@ -149,6 +162,32 @@ if [[ -n "${copilot_bin_path}" && -n "${copilot_token}" ]]; then
     reason="probe-failed-soft"
   else
     reason="probe-failed"
+  fi
+elif [[ -z "${copilot_bin_path}" && -n "${copilot_token}" ]] && command -v npx >/dev/null 2>&1; then
+  if [[ "${token_type}" == "classic_pat" || "${token_type}" == "app_installation" ]]; then
+    reason="unsupported-token-type"
+  else
+    export GH_TOKEN="${copilot_token}"
+    export GITHUB_TOKEN="${copilot_token}"
+    probe_output=""
+    probe_rc=0
+    run_probe probe_output probe_rc npx --yes "${copilot_npx_package}" -p "${copilot_probe_prompt}" --allow-all-tools
+    if [[ "${probe_rc}" -eq 0 ]]; then
+      available="true"
+      copilot_bin_path="npx:${copilot_npx_package}"
+      if [[ "$(printf '%s' "${probe_output}" | tr '[:upper:]' '[:lower:]')" == *"ok"* ]]; then
+        probe_ok="true"
+        reason="probe-ok"
+      else
+        reason="probe-exit0"
+      fi
+    elif [[ "${copilot_probe_fail_open}" == "true" ]]; then
+      available="true"
+      copilot_bin_path="npx:${copilot_npx_package}"
+      reason="probe-failed-soft"
+    else
+      reason="probe-failed"
+    fi
   fi
 elif [[ -n "${copilot_bin_path}" && -z "${copilot_token}" ]]; then
   reason="missing-token"

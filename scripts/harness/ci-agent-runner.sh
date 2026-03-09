@@ -106,6 +106,7 @@ detect_token_type() {
 }
 
 copilot_runner_bin="${COPILOT_CLI_BIN:-copilot}"
+copilot_npx_package="${COPILOT_NPX_PACKAGE:-@github/copilot}"
 copilot_runner_token="${COPILOT_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
 copilot_runner_token_type="$(detect_token_type "${copilot_runner_token}")"
 copilot_runner_available="false"
@@ -495,7 +496,17 @@ Claude Teams bounded mode is active. Work as a narrow collaboration executor and
   fi
 
   local -a copilot_cmd
-  copilot_cmd=("${copilot_runner_bin}" -p "${prompt}")
+  if [[ "${copilot_runner_bin}" == npx:* ]]; then
+    copilot_cmd=(npx --yes "${copilot_runner_bin#npx:}" -p "${prompt}")
+  elif command -v "${copilot_runner_bin}" >/dev/null 2>&1; then
+    copilot_cmd=("${copilot_runner_bin}" -p "${prompt}")
+  elif command -v npx >/dev/null 2>&1; then
+    copilot_cmd=(npx --yes "${copilot_npx_package}" -p "${prompt}")
+  else
+    copilot_failure_note="Copilot CLI launcher is unavailable."
+    append_attempt "copilot-cli" "${requested_model}" "launcher-unavailable"
+    return 1
+  fi
   if [[ "${copilot_allow_all_tools}" == "true" ]]; then
     copilot_cmd+=(--allow-all-tools)
   fi
