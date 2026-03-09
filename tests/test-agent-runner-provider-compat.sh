@@ -294,6 +294,7 @@ test_ci_claude_opus_strict_rejects_copilot() {
       PATH="${TMP_DIR}:${BASE_TEST_PATH}" \
       COPILOT_CLI_BIN="${TMP_DIR}/copilot" \
       HAS_COPILOT_CLI="true" \
+      COPILOT_GITHUB_TOKEN="dummy-token" \
       PROVIDER="claude" \
       MODEL="claude-sonnet-4-0" \
       API_URL="https://api.anthropic.com/v1/messages" \
@@ -309,6 +310,37 @@ test_ci_claude_opus_strict_rejects_copilot() {
   fi
 }
 
+test_ci_claude_copilot_unsupported_token_falls_back() {
+  make_fake_copilot
+  make_fake_curl
+  local work_dir="${TMP_DIR}/ci-copilot-unsupported-token"
+  mkdir -p "${work_dir}"
+  (
+    cd "${work_dir}"
+    env \
+      PATH="${TMP_DIR}:${BASE_TEST_PATH}" \
+      COPILOT_CLI_BIN="${TMP_DIR}/copilot" \
+      HAS_COPILOT_CLI="true" \
+      COPILOT_GITHUB_TOKEN="ghp_classic_token" \
+      PROVIDER="claude" \
+      MODEL="claude-sonnet-4-0" \
+      API_URL="https://api.anthropic.com/v1/messages" \
+      ANTHROPIC_API_KEY="dummy" \
+      AGENT_NAME="claude-main-orchestrator" \
+      AGENT_ROLE="orchestrator" \
+      ISSUE_TITLE="compat" \
+      ISSUE_BODY="check" \
+      STRICT_OPUS_ASSIST_DIRECT="false" \
+      bash "${CI_RUNNER}" >/dev/null
+  )
+  local result="${work_dir}/agent-claude-main-orchestrator.json"
+  assert_json_field "${result}" '.http_code' '200'
+  assert_json_field "${result}" '.execution_route' 'claude-direct'
+  assert_json_field "${result}" '.skipped' 'false'
+  assert_json_field "${result}" '.copilot_failure' 'Copilot CLI token type is unsupported (classic_pat).'
+  jq -e '.model_attempts | contains("copilot-cli:claude-sonnet-4-0:unsupported-token-type") and contains("claude:claude-sonnet-4-0:200")' "${result}" >/dev/null
+}
+
 echo "=== agent runner provider compatibility tests ==="
 echo ""
 
@@ -318,6 +350,7 @@ run_test "ci-claude-api-model" test_ci_claude_api_model
 run_test "ci-claude-copilot-mode" test_ci_claude_copilot_mode
 run_test "ci-claude-copilot-allow-tools-opt-in" test_ci_claude_copilot_mode_allow_tools_opt_in
 run_test "ci-claude-opus-strict-rejects-copilot" test_ci_claude_opus_strict_rejects_copilot
+run_test "ci-claude-copilot-unsupported-token-falls-back" test_ci_claude_copilot_unsupported_token_falls_back
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

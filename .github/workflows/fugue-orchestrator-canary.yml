@@ -69,5 +69,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
-          HAS_COPILOT_CLI: ${{ (steps.copilot.outputs.available == 'true' && 'true') || (secrets.FUGUE_COPILOT_TOKEN != '' && 'true') || vars.FUGUE_HAS_COPILOT_CLI || '' }}
+          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || vars.FUGUE_HAS_COPILOT_CLI || '' }}
         run: bash scripts/harness/run-canary.sh

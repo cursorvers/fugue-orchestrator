@@ -92,8 +92,22 @@ normalize_optional_bool() {
   return 0
 }
 
+detect_token_type() {
+  local token="${1:-}"
+  case "${token}" in
+    gho_*) printf 'oauth' ;;
+    github_pat_*) printf 'fine_grained_pat' ;;
+    ghu_*) printf 'user_to_server' ;;
+    ghs_*) printf 'app_installation' ;;
+    ghp_*) printf 'classic_pat' ;;
+    '') printf 'none' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
 copilot_runner_bin="${COPILOT_CLI_BIN:-copilot}"
 copilot_runner_token="${COPILOT_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
+copilot_runner_token_type="$(detect_token_type "${copilot_runner_token}")"
 copilot_runner_available="false"
 copilot_cli_override="$(normalize_optional_bool "${HAS_COPILOT_CLI:-${FUGUE_HAS_COPILOT_CLI:-}}" || true)"
 if [[ -n "${copilot_cli_override}" ]]; then
@@ -366,6 +380,7 @@ effective_api_url="${API_URL}"
 http_code=""
 content=""
 attempt_trace=""
+copilot_failure_note=""
 
 append_attempt() {
   local provider="$1"
@@ -439,6 +454,17 @@ extract_response_error_message() {
   ' "${file_path}" 2>/dev/null | head -n1
 }
 
+extract_copilot_error_message() {
+  local file_path="${1:-copilot-response.stderr}"
+  if [[ ! -s "${file_path}" ]]; then
+    return 0
+  fi
+  sed -E 's/\x1b\[[0-9;]*m//g' "${file_path}" \
+    | tr '\r' '\n' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+    | awk 'NF { print; exit }'
+}
+
 execute_copilot_claude() {
   local requested_model="$1"
   local out_file="copilot-response.txt"
@@ -457,6 +483,17 @@ Return ONLY valid JSON."
 Claude Teams bounded mode is active. Work as a narrow collaboration executor and return handoff-ready JSON only."
   fi
 
+  if [[ -z "${copilot_runner_token}" ]]; then
+    copilot_failure_note="Copilot CLI authentication token is missing."
+    append_attempt "copilot-cli" "${requested_model}" "missing-token"
+    return 1
+  fi
+  if [[ "${copilot_runner_token_type}" == "classic_pat" || "${copilot_runner_token_type}" == "app_installation" ]]; then
+    copilot_failure_note="Copilot CLI token type is unsupported (${copilot_runner_token_type})."
+    append_attempt "copilot-cli" "${requested_model}" "unsupported-token-type"
+    return 1
+  fi
+
   local -a copilot_cmd
   copilot_cmd=("${copilot_runner_bin}" -p "${prompt}")
   if [[ "${copilot_allow_all_tools}" == "true" ]]; then
@@ -472,15 +509,21 @@ Claude Teams bounded mode is active. Work as a narrow collaboration executor and
 
   append_attempt "copilot-cli" "${requested_model}" "exit${rc}"
   if [[ "${rc}" -ne 0 || ! -s "${out_file}" ]]; then
+    copilot_failure_note="$(extract_copilot_error_message "${err_file}")"
+    if [[ -z "${copilot_failure_note}" ]]; then
+      copilot_failure_note="Copilot CLI failed with exit code ${rc}."
+    fi
     return 1
   fi
   if ! parsed_output="$(extract_json_object "$(cat "${out_file}")")"; then
     append_attempt "copilot-cli" "${requested_model}" "parse-failed"
+    copilot_failure_note="Copilot CLI returned non-JSON output."
     return 1
   fi
 
   parsed="${parsed_output}"
   content="$(cat "${out_file}")"
+  copilot_failure_note=""
   chosen_model="${requested_model}"
   effective_provider="claude"
   effective_api_url="copilot-cli"
@@ -707,6 +750,9 @@ elif [[ "${PROVIDER}" == "claude" && "${provider_success}" != "true" ]]; then
   else
     optional_error_note="Claude API error (HTTP ${http_code})"
   fi
+  if [[ -n "${copilot_failure_note}" ]]; then
+    optional_error_note="${optional_error_note}; Copilot CLI preflight failed: ${copilot_failure_note}"
+  fi
 fi
 
 # Fail-closed guards for critical orchestration lanes.
@@ -811,6 +857,7 @@ result="$(jq -n \
   --arg skipped "${skipped_flag}" \
   --arg execution_route "${execution_route}" \
   --arg model_attempts "${attempt_trace}" \
+  --arg copilot_failure "${copilot_failure_note}" \
   --arg delegation_mode "$( [[ "${recursive_active}" == "true" ]] && echo "recursive" || echo "flat" )" \
   --arg delegation_depth "$( [[ "${recursive_active}" == "true" ]] && echo "${recursive_depth}" || echo "1" )" \
   --arg delegation_reason "${recursive_reason}" \
@@ -825,6 +872,7 @@ result="$(jq -n \
     http_code:$http_code,
     skipped:($skipped == "true"),
     model_attempts:$model_attempts,
+    copilot_failure:(if $copilot_failure == "" then null else $copilot_failure end),
     delegation_mode:$delegation_mode,
     delegation_depth:($delegation_depth|tonumber),
     delegation_reason:$delegation_reason,

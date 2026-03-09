@@ -129,6 +129,22 @@ grep -q '"\${copilot_cli_available}" != "true" && "\${copilot_cli_available}" !=
   echo "FAIL: router workflow must respect explicit HAS_COPILOT_CLI=false without auto-upgrading from local binary detection" >&2
   exit 1
 }
+if grep -q "secrets.FUGUE_COPILOT_TOKEN != ''" "${ROUTER_WORKFLOW}"; then
+  echo "FAIL: router workflow must not treat Copilot secret presence as equivalent to proven capability" >&2
+  exit 1
+fi
+if grep -q "secrets.FUGUE_COPILOT_TOKEN != ''" "${CANARY_WORKFLOW}"; then
+  echo "FAIL: canary workflow must not treat Copilot secret presence as equivalent to proven capability" >&2
+  exit 1
+fi
+grep -q 'HAS_COPILOT_CLI: .*steps.copilot.outputs.available' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow must wire HAS_COPILOT_CLI from provisioning output" >&2
+  exit 1
+}
+grep -q 'HAS_COPILOT_CLI: .*steps.copilot.outputs.available' "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow must wire HAS_COPILOT_CLI from provisioning output" >&2
+  exit 1
+}
 grep -q 'GITHUB_EVENT_NAME: \${{ github.event_name }}' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should inspect event provenance for canary bypass" >&2
   exit 1
