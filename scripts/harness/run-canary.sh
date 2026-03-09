@@ -524,6 +524,9 @@ create_issue() {
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
+  if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
+    run_cmd+=(-f canary_dispatch_run_id="${GITHUB_RUN_ID}")
+  fi
   if [[ -n "${GITHUB_ACTOR:-}" ]]; then
     run_cmd+=(-f trust_subject="${GITHUB_ACTOR}")
   fi

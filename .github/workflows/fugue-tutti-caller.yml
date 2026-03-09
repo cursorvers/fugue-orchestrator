@@ -1,6 +1,8 @@
 name: Fugue Mainframe (Tutti + Optional Codex Implement)
 
 on:
+  issues:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -9,6 +11,11 @@ on:
         type: string
       trust_subject:
         description: "Optional trusted actor login for permission checks"
+        required: false
+        type: string
+        default: ""
+      canary_dispatch_run_id:
+        description: "Originating canary workflow run id for verified canary dispatches"
         required: false
         type: string
         default: ""
@@ -57,6 +64,11 @@ on:
         required: false
         type: string
         default: "kernel"
+      intake_source:
+        description: "Intake source marker for audit/policy"
+        required: false
+        type: string
+        default: ""
       execution_mode_override:
         description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
         required: false
@@ -70,11 +82,14 @@ permissions:
   actions: read
 
 concurrency:
-  group: fugue-mainframe-${{ github.repository }}-${{ github.event.inputs.issue_number || github.run_id }}-dispatch-${{ github.event.inputs.dispatch_nonce || github.run_id }}
-  cancel-in-progress: false
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}-${{ github.event_name == 'issues' && format('label-{0}', github.event.label.name) || format('dispatch-{0}', github.event.inputs.dispatch_nonce || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'issues' }}
 
 jobs:
   ctx:
+    # For issues:labeled, only run when the label event is `tutti`.
+    # For workflow_dispatch, treat the dispatch itself as the trigger.
+    if: ${{ github.event_name != 'issues' || github.event.label.name == 'tutti' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -82,6 +97,7 @@ jobs:
       skip_reason: ${{ steps.ctx.outputs.skip_reason }}
       issue_number: ${{ steps.ctx.outputs.issue_number }}
       canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+      canary_dispatch_run_id: ${{ steps.ctx.outputs.canary_dispatch_run_id }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       has_implement_confirmed: ${{ steps.ctx.outputs.has_implement_confirmed }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
@@ -134,6 +150,7 @@ jobs:
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       handoff_target: ${{ steps.ctx.outputs.handoff_target }}
+      intake_source: ${{ steps.ctx.outputs.intake_source }}
       vote_command: ${{ steps.ctx.outputs.vote_command }}
       workspace_hint_applied: ${{ steps.ctx.outputs.workspace_hint_applied }}
       workspace_action_hint: ${{ steps.ctx.outputs.workspace_action_hint }}
@@ -153,6 +170,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
           TRUST_SUBJECT_INPUT: ${{ github.event.inputs.trust_subject || '' }}
+          CANARY_DISPATCH_RUN_ID_INPUT: ${{ github.event.inputs.canary_dispatch_run_id || '' }}
           ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
           VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
@@ -161,6 +179,7 @@ jobs:
           IMPLEMENT_CONFIRMED_INPUT: ${{ github.event.inputs.implement_confirmed || '' }}
           VOTE_COMMAND_INPUT: ${{ github.event.inputs.vote_command || 'false' }}
           HANDOFF_TARGET_INPUT: ${{ github.event.inputs.handoff_target || 'kernel' }}
+          INTAKE_SOURCE_INPUT: ${{ github.event.inputs.intake_source || '' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -280,7 +299,7 @@ jobs:
           if [[ "${CLAUDE_TEAMS_ALLOWED}" == "true" ]]; then
             claude_teams_note=" claude_teams=enabled(\`${CLAUDE_TEAMS_REASON}\`)."
           fi
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`. Consensus is now running from the current issue state; prior development context carries forward automatically.${claude_teams_note}${budget_guard_note}${nl_note}"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${claude_teams_note}${budget_guard_note}${nl_note}"
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
@@ -483,25 +502,6 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --body "Primary executor is unavailable. Automatic GitHub backup-safe mode is observation-only and will not run Tutti or implementation lanes. Restore the primary executor or dispatch backup-heavy manually to continue on GitHub-hosted infrastructure."
 
-  record-only-note:
-    if: >-
-      needs.ctx.outputs.should_run == 'true' &&
-      needs.execution-policy.outputs.effective_mode == 'record-only'
-    needs: [ctx, execution-policy]
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    steps:
-      - name: Post record-only observation note
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
-          SKIP_REASON: ${{ needs.execution-policy.outputs.skip_reason }}
-        run: |
-          set -euo pipefail
-          gh issue comment "${ISSUE_NUMBER}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --body "GitHub mainframe dispatch resolved to \`record-only\` (\`${SKIP_REASON}\`). No Tutti or implementation lanes ran on GitHub; this issue remains a handoff/audit record while the primary executor stays authoritative. To force GitHub-hosted execution from this state, dispatch \`fugue-tutti-caller.yml\` directly with \`execution_mode_override=primary\`."
-
   # Review mode: Tutti consensus (6+ parallel lanes baseline)
   tutti:
     if: >-
@@ -526,7 +526,9 @@ jobs:
       claude_teams_member_cap: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '3' || needs.ctx.outputs.claude_teams_member_cap }}"
       claude_teams_max_invocations: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '1' || needs.ctx.outputs.claude_teams_max_invocations }}"
       handoff_target: "${{ needs.ctx.outputs.handoff_target }}"
+      intake_source: "${{ needs.ctx.outputs.intake_source }}"
       canary_dispatch_owned: "${{ needs.ctx.outputs.canary_dispatch_owned }}"
+      canary_dispatch_run_id: "${{ needs.ctx.outputs.canary_dispatch_run_id }}"
       risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
       ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
       ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"

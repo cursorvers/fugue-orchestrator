@@ -80,6 +80,30 @@ Every sovereign adapter must preserve:
 
 If an adapter cannot preserve these invariants, it is not a valid sovereign adapter.
 
+## Unattended Runtime Boundary
+
+`Kernel` may run on top of a separate unattended runtime substrate.
+
+That substrate may own:
+
+- scheduler cadence
+- claim / idempotency bookkeeping
+- work claiming
+- retry / reconciliation
+- per-issue workspace lifecycle
+- status surfaces and recovery metadata
+
+That substrate must not redefine:
+
+- protocol packet semantics
+- council aggregation
+- `ok_to_execute`
+- human approval boundaries
+- tracker or PR state mutation policy
+
+Runtime metadata may enrich the trace, but it is not a substitute for the sovereign adapter
+interface.
+
 ## Default And Optional Adapters
 
 ### Default

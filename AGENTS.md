@@ -1,7 +1,18 @@
 # AGENTS.md - FUGUE Orchestration SSOT
 
-This file is the single source of truth for orchestration behavior in this repository.
+This file is the single source of truth for the active FUGUE and GitHub workflow orchestration
+behavior in this repository.
 Adapter files such as `CLAUDE.md` must stay thin and reference this file.
+
+Important scope boundary:
+
+- `AGENTS.md` governs the currently active FUGUE runtime, GitHub workflows, and hybrid conductor
+  behavior.
+- `docs/requirements-gpt54-codex-kernel.md` and related `docs/kernel-*` files govern the future
+  Kernel sovereign path and `/kernel` design work.
+- If the task is about the current production GitHub workflow path, `AGENTS.md` is authoritative.
+- If the task is explicitly about `Kernel` design or implementation, Kernel docs define the target
+  state and may intentionally differ from active FUGUE defaults.
 
 ## 1. Context Loading Policy
 
@@ -13,6 +24,9 @@ Adapter files such as `CLAUDE.md` must stay thin and reference this file.
 ## 2. Control Plane Contract
 
 - Main orchestrator is provider-agnostic by design.
+- Active FUGUE runtime default is `claude` main with `codex` execution provider.
+- Future `Kernel` runtime target remains `codex`-first single-sovereign; do not treat the active
+  FUGUE default as a Kernel doctrine.
 - Operational default is `claude` (main conductor), with `codex` as execution provider.
 - **Hybrid Conductor Mode**: When `FUGUE_EXECUTION_PROVIDER` differs from main orchestrator:
   - Main orchestrator (Claude) handles routing, MCP operations, and Tutti signal.
@@ -145,8 +159,15 @@ Auditability:
 
 - Issue intake and natural-language handoff:
   - `.github/workflows/fugue-task-router.yml`
-  - Default behavior: `fugue-task` issues auto-handoff to mainframe unless manual opt-out markers are present.
+  - Default behavior: `fugue-task` issues auto-handoff into the intake/mainframe review path unless
+    manual opt-out markers are present.
   - Natural-language default mode is review-first; implement must be explicit and confirmed.
+- Start-signal arbitration:
+  - plain GitHub issue creation is intake, not execution authority
+  - trusted execution start signals are `/vote`, explicit `tutti`, or `workflow_dispatch`
+  - intake/mainframe review routing must not be interpreted as implicit approval to execute
+  - future unattended runtime work must poll only already-authorized / already-claimed work, not
+    bypass this start-signal contract
 - Mainframe orchestration gate:
   - `.github/workflows/fugue-tutti-caller.yml`
 - Tutti quorum integration:

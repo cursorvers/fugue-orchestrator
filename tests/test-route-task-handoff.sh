@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/harness/route-task-handoff.sh"
 TMP_ROOT="/Users/masayuki/Dev/tmp"
+if [[ ! -d "${TMP_ROOT}" ]]; then
+  TMP_ROOT="${TMPDIR:-/tmp}"
+fi
 mkdir -p "${TMP_ROOT}"
 TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/route-task-handoff.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"; rm -f "${ROOT_DIR}/handoff-comment.md"' EXIT
@@ -67,6 +70,7 @@ assert_case() {
       COMMENT_BODY="/vote" \
       IS_VOTE_COMMAND="true" \
       VOTE_INSTRUCTION="${vote_instruction}" \
+      EXECUTION_MODE_OVERRIDE_INPUT="${execution_mode_override}" \
       TRUST_SUBJECT="masayuki" \
       DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
       DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
@@ -74,7 +78,6 @@ assert_case() {
       CLAUDE_MAIN_ASSIST_POLICY="codex" \
       CLAUDE_ROLE_POLICY="flex" \
       CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
-      EXECUTION_MODE_OVERRIDE_INPUT="${execution_mode_override}" \
       bash "${SCRIPT}" >/dev/null 2>"${TMP_DIR}/${name}.stderr"
   ); then
     echo "FAIL [${name}]: script exited with error"
@@ -91,6 +94,7 @@ assert_case() {
 
   workflow_line="$(grep 'workflow run fugue-tutti-caller.yml' "${FAKE_GH_LOG}" | tail -n1 || true)"
   for expected in \
+    "-f intake_source=" \
     "-f requested_execution_mode=${expected_mode}" \
     "-f implement_request=${expected_request}" \
     "-f implement_confirmed=${expected_confirm}" \
@@ -103,24 +107,6 @@ assert_case() {
       return
     fi
   done
-
-  if [[ "${expected_dispatch_override}" == "auto" ]]; then
-    if [[ "${workflow_line}" == *"-f execution_mode_override="* ]]; then
-      echo "FAIL [${name}]: workflow dispatch should not include execution_mode_override"
-      failed=$((failed + 1))
-      return
-    fi
-  elif [[ "${workflow_line}" != *"-f execution_mode_override=${expected_dispatch_override}"* ]]; then
-    echo "FAIL [${name}]: workflow dispatch missing execution_mode_override=${expected_dispatch_override}"
-    failed=$((failed + 1))
-    return
-  fi
-
-  if ! grep -Fq 'GitHub-hosted Tutti consensus starts now and continues development from the current issue state.' "${ROOT_DIR}/handoff-comment.md"; then
-    echo "FAIL [${name}]: handoff comment missing continuation UX note"
-    failed=$((failed + 1))
-    return
-  fi
 
   if [[ "${expect_implement_label}" == "true" ]]; then
     if ! grep -Eq -- '--add-label implement([[:space:]]|$)' "${FAKE_GH_LOG}"; then
@@ -144,6 +130,24 @@ assert_case() {
       failed=$((failed + 1))
       return
     fi
+  fi
+
+  if [[ "${expected_dispatch_override}" == "auto" ]]; then
+    if [[ "${workflow_line}" == *"-f execution_mode_override="* ]]; then
+      echo "FAIL [${name}]: workflow dispatch should not include execution_mode_override"
+      failed=$((failed + 1))
+      return
+    fi
+  elif [[ "${workflow_line}" != *"-f execution_mode_override=${expected_dispatch_override}"* ]]; then
+    echo "FAIL [${name}]: workflow dispatch missing execution_mode_override=${expected_dispatch_override}"
+    failed=$((failed + 1))
+    return
+  fi
+
+  if ! grep -Fq 'GitHub-hosted Tutti consensus starts now and continues development from the current issue state.' "${ROOT_DIR}/handoff-comment.md"; then
+    echo "FAIL [${name}]: handoff comment missing continuation UX note"
+    failed=$((failed + 1))
+    return
   fi
 
   echo "PASS [${name}]"

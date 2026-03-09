@@ -96,6 +96,9 @@ Validated in the current workspace:
 4. Sovereign adapter runtime promotion is incomplete:
    - `claude-sovereign-compat` remains contract-ready rather than production-promoted
    - Claude-session-only MCP surfaces still need first-class non-Claude adapters if Kernel is to own them directly
+5. Unattended runtime substrate implementation is not yet promoted:
+   - daemon scheduler / reconciliation / per-issue workspace behavior is now a fixed design target
+   - production runtime state, receipts, and recovery surfaces still need implementation
 
 ## Implementation Entry Criteria
 
@@ -114,3 +117,4 @@ That condition is now substantially met.
 5. Promote `scripts/sim-kernel-peripherals.sh` from analysis tool to required preflight for Kernel rollout work.
 6. Define `codex-sovereign` and `claude-sovereign-compat` against the same adapter interface before any future provider re-switch.
 7. Keep `fugue-bridge` as the only allowed live rollback path before claiming runtime-perfect reversibility.
+8. Implement the unattended runtime substrate as an execution layer under the sovereign core, not as a replacement for it.

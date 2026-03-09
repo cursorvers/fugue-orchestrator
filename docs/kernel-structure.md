@@ -29,6 +29,15 @@ It keeps FUGUE's governance model, but centralizes sovereignty in the `gpt-5.4` 
 │ - evidence + trace generation                                       │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
+                               v
+┌─────────────────────────────────────────────────────────────────────┐
+│ Kernel Unattended Runtime Substrate                                 │
+│ - scheduler / claim / reconcile                                     │
+│ - workspace lifecycle                                               │
+│ - retry / continuation                                              │
+│ - status + recovery surfaces                                        │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
              ┌─────────────────┼──────────────────┐
              │                 │                  │
              v                 v                  v
@@ -79,16 +88,17 @@ flowchart TD
     I --> C[gpt-5.4 Kernel Core]
     C --> R[Risk + Task Size Classifier]
     R --> T[Adaptive Topology Router]
+    T --> S[Unattended Runtime Substrate]
 
-    T --> P1[codex-spark architect]
-    T --> P2[codex-spark implementer]
-    T --> P3[codex-spark critic]
-    T --> P4[codex-spark verifier]
+    S --> P1[codex-spark architect]
+    S --> P2[codex-spark implementer]
+    S --> P3[codex-spark critic]
+    S --> P4[codex-spark verifier]
 
-    T --> V1[Claude council / executor]
-    T --> V2[GLM reviewer]
-    T --> V3[Gemini UI reviewer]
-    T --> V4[xAI realtime reviewer]
+    S --> V1[Claude council / executor]
+    S --> V2[GLM reviewer]
+    S --> V3[Gemini UI reviewer]
+    S --> V4[xAI realtime reviewer]
 
     P1 --> A[Council Aggregation]
     P2 --> A
@@ -105,7 +115,7 @@ flowchart TD
     E --> M[MCP adapters]
     E --> L[Linked systems bus]
     E --> W[Cloudflare / local-agent]
-    E --> S[Specialists / Manus]
+    E --> SP[Specialists / Manus]
 
     G --> F[fugue-bridge]
     F --> LF[Legacy FUGUE]
@@ -117,6 +127,9 @@ flowchart TD
   - Normalizes entry points so GitHub, Cockpit, and webhook flows all reach the same Kernel packet contract.
 - `Kernel Sovereign Core`
   - The only place that may decide lane topology, approve execution, and emit the final state transition.
+- `Kernel Unattended Runtime Substrate`
+  - Owns claim/reconcile/workspace/retry mechanics, but must not rewrite governance or create a
+    second start-signal path.
 - `Proposal Lanes`
   - Speed-focused exploration and implementation candidates, mainly Codex Multiagent and codex-spark.
 - `Council Lanes`
@@ -130,3 +143,4 @@ flowchart TD
 
 - [Kernel Recovery Runbook](/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-recovery-runbook.md)
 - [Kernel Mini/MBP Operations Topology](/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-mini-mbp-ops-topology.md)
+- [Kernel Tailscale / Railway Integration Design](/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-tailscale-railway-integration-design.md)

@@ -67,11 +67,21 @@ on:
         required: false
         type: string
         default: "kernel"
+      intake_source:
+        description: "Intake source marker for audit/policy"
+        required: false
+        type: string
+        default: ""
       canary_dispatch_owned:
         description: "True when the caller resolved this workflow_call as a canary-owned dispatch"
         required: false
         type: string
         default: "false"
+      canary_dispatch_run_id:
+        description: "Originating canary workflow run id for verified canary dispatches"
+        required: false
+        type: string
+        default: ""
       ambiguity_translation_gate:
         description: "true when caller ambiguity/translation gate requested Claude sub attention"
         required: false
@@ -202,8 +212,8 @@ jobs:
       issue_body: ${{ steps.ctx.outputs.issue_body }}
       extra_issue_instruction: ${{ steps.ctx.outputs.extra_issue_instruction }}
       author: ${{ steps.ctx.outputs.author }}
-      canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
+      intake_source: ${{ steps.ctx.outputs.intake_source }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       emergency_continuity_mode: ${{ steps.ctx.outputs.emergency_continuity_mode }}
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
@@ -223,6 +233,7 @@ jobs:
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           EXTRA_ISSUE_INSTRUCTION_INPUT: ${{ inputs.extra_issue_instruction || '' }}
           VOTE_COMMAND_INPUT: ${{ inputs.vote_command || 'false' }}
+          INTAKE_SOURCE_INPUT: ${{ inputs.intake_source || '' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
@@ -280,6 +291,18 @@ jobs:
           vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${vote_command}" != "true" ]]; then
             vote_command="false"
+          fi
+          intake_source="$(echo "${INTAKE_SOURCE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${intake_source}" in
+            ""|github-issue-label|github-vote-comment|github-issue-handoff|workflow-dispatch|github-recovery-console|railway-public-edge) ;;
+            *) intake_source="" ;;
+          esac
+          if [[ -z "${intake_source}" ]]; then
+            if [[ "${vote_command}" == "true" ]]; then
+              intake_source="github-vote-comment"
+            else
+              intake_source="workflow-dispatch"
+            fi
           fi
           AUTHOR="$(echo "${issue_json}" | jq -r '.user.login // ""')"
           HAS_FUGUE="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("fugue-task") != null')"
@@ -368,7 +391,6 @@ jobs:
             echo "${extra_issue_instruction}"
             echo "EOF"
             echo "author=${AUTHOR}"
-            echo "canary_dispatch_owned=${canary_dispatch_owned}"
             echo "trust_subject=${trust_subject}"
             echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
             echo "emergency_continuity_mode=${emergency_continuity_mode}"
@@ -376,24 +398,24 @@ jobs:
             echo "subscription_runner_label=${subscription_runner_label}"
             echo "allow_processing_rerun=${allow_processing_rerun}"
             echo "vote_command=${vote_command}"
+            echo "intake_source=${intake_source}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
-
-      - name: Checkout repository
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
-        uses: actions/checkout@v4
 
       - name: Check author trust
         id: trust
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          VOTE_COMMAND: ${{ steps.ctx.outputs.vote_command }}
-          CANARY_DISPATCH_OWNED: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          TRUST_SUBJECT: ${{ steps.ctx.outputs.trust_subject }}
+          AUTHOR: ${{ steps.ctx.outputs.author }}
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
-          ISSUE_AUTHOR: ${{ steps.ctx.outputs.author }}
+          VOTE_COMMAND: ${{ steps.ctx.outputs.vote_command }}
+          CANARY_DISPATCH_OWNED: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+          CANARY_DISPATCH_RUN_ID: ${{ inputs.canary_dispatch_run_id || '' }}
         run: |
           set -euo pipefail
           gh_api_retry() {
@@ -422,32 +444,48 @@ jobs:
             TRUST_SUBJECT="${{ steps.ctx.outputs.author }}"
           fi
           PERM="none"
-          perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission"
-          perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
-          if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
-            PERM="$(echo "${perm_json}" | jq -r '.permission')"
+
+          canary_dispatch_owned="$(printf '%s' "${CANARY_DISPATCH_OWNED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          author="$(printf '%s' "${AUTHOR:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          issue_title="$(printf '%s' "${ISSUE_TITLE:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          issue_body="${ISSUE_BODY:-}"
+          canary_dispatch_run_id="$(printf '%s' "${CANARY_DISPATCH_RUN_ID:-}" | tr -cd '0-9')"
+          canary_issue_marker="false"
+          if printf '%s\n%s\n' "${issue_title}" "${issue_body}" | grep -Eq '(^## Canary$|Automated orchestration canary\.)'; then
+            canary_issue_marker="true"
+          fi
+          if [[ "${canary_dispatch_owned}" == "true" \
+            && "${GITHUB_EVENT_NAME}" == "workflow_call" \
+            && -n "${canary_dispatch_run_id}" \
+            && "${trust_subject}" == "github-actions[bot]" \
+            && "${author}" == "github-actions[bot]" \
+            && "${canary_issue_marker}" == "true" ]]; then
+            run_endpoint="repos/${GITHUB_REPOSITORY}/actions/runs/${canary_dispatch_run_id}"
+            run_json="$(gh_api_retry "${run_endpoint}" 4 || echo '{}')"
+            run_path="$(echo "${run_json}" | jq -r '.path // ""')"
+            run_event="$(echo "${run_json}" | jq -r '.event // ""')"
+            run_repo="$(echo "${run_json}" | jq -r '.head_repository.full_name // ""')"
+            if [[ "${run_path}" == ".github/workflows/fugue-orchestrator-canary.yml" \
+              && ( "${run_event}" == "schedule" || "${run_event}" == "workflow_dispatch" ) \
+              && "${run_repo}" == "${GITHUB_REPOSITORY}" ]]; then
+              PERM="canary-verified"
+            fi
+          else
+            perm_endpoint="repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission"
+            perm_json="$(gh_api_retry "${perm_endpoint}" 4 || echo '{}')"
+            if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
+              PERM="$(echo "${perm_json}" | jq -r '.permission')"
+            fi
           fi
 
-          # Reusable workflow jobs do not automatically have repo files available.
-          # Keep fallback-safe defaults so a missing or broken policy script does not
-          # degrade into an opaque unbound-variable failure.
-          permission="${PERM}"
-          trusted="false"
-          trust_reason="permission-${PERM}"
-          eval "$(
-            bash scripts/lib/canary-trust-policy.sh \
-              --permission "${PERM}" \
-              --vote-command "${VOTE_COMMAND}" \
-              --canary-dispatch-owned "${CANARY_DISPATCH_OWNED}" \
-              --issue-title "${ISSUE_TITLE}" \
-              --issue-body "${ISSUE_BODY}" \
-              --issue-author "${ISSUE_AUTHOR}"
-          )"
-
+          TRUSTED="false"
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" || "${PERM}" == "canary-verified" ]]; then
+            TRUSTED="true"
+          fi
           {
-            echo "permission=${permission}"
-            echo "trusted=${trusted}"
-            echo "trust_reason=${trust_reason}"
+            echo "permission=${PERM}"
+            echo "trusted=${TRUSTED}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Add processing label

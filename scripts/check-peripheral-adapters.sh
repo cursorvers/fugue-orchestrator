@@ -63,6 +63,50 @@ if [[ -n "${enum_failures}" ]]; then
 fi
 pass "adapter enums valid"
 
+ingress_failures="$(jq -r '
+  def valid_ingress_surface: IN("public-web","public-webhook","private-admin-ui","service-private");
+  def valid_ingress_auth: IN("webhook-signature","tailscale-auth","session-auth","service-to-service");
+  .adapters[]
+  | . as $a
+  | (((has("ingress_surface")) or (has("ingress_auth")) or (has("accepts_signed_payload")) or (has("routing_domain")) or (has("dedupe_strategy")) or (has("fail_closed")))) as $has_ingress
+  | (((.authority == "gateway") or (.authority == "ui-boundary" and .protected_interface == true))) as $ingress_required
+  | select(
+      (($has_ingress) and (
+        ((.ingress_surface // "") == "") or
+        ((.ingress_auth // "") == "") or
+        ((has("accepts_signed_payload") | not)) or
+        ((.routing_domain // "") == "") or
+        ((.ingress_surface | valid_ingress_surface) | not) or
+        ((.ingress_auth | valid_ingress_auth) | not) or
+        (.accepts_signed_payload | type != "boolean") or
+        (.routing_domain | type != "string") or
+        ((.routing_domain | test("^[a-z0-9][a-z0-9-]*$")) | not) or
+        ((has("fail_closed")) and (.fail_closed | type != "boolean")) or
+        ((has("dedupe_strategy")) and (.dedupe_strategy | type != "string")) or
+        (.ingress_auth == "webhook-signature" and .accepts_signed_payload != true) or
+        (.ingress_auth == "tailscale-auth" and (.ingress_surface | IN("private-admin-ui","service-private") | not)) or
+        ((.ingress_surface | IN("public-web","public-webhook")) and .ingress_auth == "tailscale-auth")
+      ))
+      or
+      (($ingress_required) and (
+        ((.ingress_surface // "") == "") or
+        ((.ingress_auth // "") == "") or
+        ((has("accepts_signed_payload") | not)) or
+        ((.routing_domain // "") == "")
+      ))
+      or
+      ((.authority == "gateway") and (
+        (.fail_closed != true) or
+        ((.dedupe_strategy // "") == "")
+      ))
+    )
+  | .id
+' "${MANIFEST}")"
+if [[ -n "${ingress_failures}" ]]; then
+  fail "adapter entries with invalid ingress contract values: ${ingress_failures}"
+fi
+pass "adapter ingress contracts valid"
+
 while IFS= read -r row; do
   id="$(echo "${row}" | jq -r '.id')"
   scope="$(echo "${row}" | jq -r '.scope')"

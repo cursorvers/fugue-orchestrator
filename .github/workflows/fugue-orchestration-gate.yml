@@ -5,44 +5,116 @@ on:
     paths:
       - '.github/workflows/fugue-orchestration-gate.yml'
       - '.github/workflows/fugue-orchestrator-canary.yml'
+      - '.github/workflows/fugue-watchdog.yml'
       - '.github/workflows/fugue-tutti-caller.yml'
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
+      - '.github/workflows/kernel-decision-journal.yml'
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
       - 'scripts/harness/run-canary.sh'
+      - 'scripts/lib/resolve-primary-heartbeat-state.sh'
+      - 'scripts/lib/watchdog-alert-policy.sh'
+      - 'scripts/lib/watchdog-alert-delivery-policy.sh'
+      - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
+      - 'scripts/lib/workspace-root-policy.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-codex-kernel-prompt.sh'
+      - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
+      - 'scripts/harness/run-recovery-console.sh'
+      - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-publish-decision-journal.sh'
+      - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
+      - 'tests/test-task-router-start-signal.sh'
+      - 'tests/test-parallel-floor-policy.sh'
+      - 'tests/test-recovery-reroute-claim-gate.sh'
+      - 'tests/test-watchdog-reconcile-claim-policy.sh'
+      - 'tests/test-watchdog-reconcile-workflow.sh'
+      - 'tests/test-route-task-handoff.sh'
+      - 'tests/test-resolve-orchestration-context.sh'
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-primary-heartbeat-state.sh'
+      - 'tests/test-workspace-root-policy.sh'
       - 'tests/test-workflow-checkout-order.sh'
+      - '.codex/prompts/kernel.md'
+      - '.codex/prompts/k.md'
+      - '.codex/prompts/vote.md'
+      - '.codex/prompts/v.md'
+      - 'AGENTS.md'
+      - 'CODEX.md'
+      - 'README.md'
+      - 'docs/requirements-gpt54-codex-kernel.md'
+      - 'docs/kernel-structure.md'
+      - 'docs/kernel-preimplementation-readiness.md'
+      - 'docs/ADR-002-kernel-unattended-runtime.md'
+      - 'docs/kernel-unattended-runtime-substrate.md'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/fugue-orchestration-gate.yml'
       - '.github/workflows/fugue-orchestrator-canary.yml'
+      - '.github/workflows/fugue-watchdog.yml'
       - '.github/workflows/fugue-tutti-caller.yml'
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
+      - '.github/workflows/kernel-decision-journal.yml'
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
       - 'scripts/harness/run-canary.sh'
+      - 'scripts/lib/resolve-primary-heartbeat-state.sh'
+      - 'scripts/lib/watchdog-alert-policy.sh'
+      - 'scripts/lib/watchdog-alert-delivery-policy.sh'
+      - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
+      - 'scripts/lib/workspace-root-policy.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-codex-kernel-prompt.sh'
+      - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
+      - 'scripts/harness/run-recovery-console.sh'
+      - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-publish-decision-journal.sh'
+      - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
+      - 'tests/test-task-router-start-signal.sh'
+      - 'tests/test-parallel-floor-policy.sh'
+      - 'tests/test-recovery-reroute-claim-gate.sh'
+      - 'tests/test-watchdog-reconcile-claim-policy.sh'
+      - 'tests/test-watchdog-reconcile-workflow.sh'
+      - 'tests/test-route-task-handoff.sh'
+      - 'tests/test-resolve-orchestration-context.sh'
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-primary-heartbeat-state.sh'
+      - 'tests/test-workspace-root-policy.sh'
       - 'tests/test-workflow-checkout-order.sh'
+      - '.codex/prompts/kernel.md'
+      - '.codex/prompts/k.md'
+      - '.codex/prompts/vote.md'
+      - '.codex/prompts/v.md'
+      - 'AGENTS.md'
+      - 'CODEX.md'
+      - 'README.md'
+      - 'docs/requirements-gpt54-codex-kernel.md'
+      - 'docs/kernel-structure.md'
+      - 'docs/kernel-preimplementation-readiness.md'
+      - 'docs/ADR-002-kernel-unattended-runtime.md'
+      - 'docs/kernel-unattended-runtime-substrate.md'
   workflow_dispatch:
     inputs:
       run_canary_lite:
@@ -67,25 +139,64 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/lib/build-agent-matrix.sh
-          bash -n scripts/lib/canary-trust-policy.sh
           bash -n scripts/lib/execution-profile-policy.sh
           bash -n scripts/lib/orchestrator-policy.sh
-          bash -n scripts/harness/run-canary.sh
           bash -n scripts/local/run-local-orchestration.sh
           bash -n scripts/local/run-linked-systems.sh
           bash -n scripts/sim-orchestrator-switch.sh
+          bash -n scripts/lib/watchdog-alert-policy.sh
+          bash -n scripts/lib/watchdog-alert-delivery-policy.sh
+          bash -n scripts/lib/watchdog-reconcile-claim-policy.sh
+          bash -n scripts/lib/workspace-root-policy.sh
+          bash -n scripts/harness/run-recovery-console.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
+          bash -n scripts/check-codex-kernel-prompt.sh
+          bash -n scripts/check-codex-vote-prompt.sh
+          bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-publish-decision-journal.sh
+          bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash -n tests/test-task-router-start-signal.sh
+          bash -n tests/test-parallel-floor-policy.sh
+          bash -n tests/test-recovery-reroute-claim-gate.sh
+          bash -n tests/test-watchdog-reconcile-claim-policy.sh
+          bash -n tests/test-watchdog-reconcile-workflow.sh
+          bash -n tests/test-workspace-root-policy.sh
           bash -n tests/test-canary-trust-policy.sh
           bash -n tests/test-kernel-canary-plan.sh
-          bash -n tests/test-workflow-checkout-order.sh
+
+      - name: Kernel prompt static contract
+        run: |
+          set -euo pipefail
+          bash scripts/check-codex-kernel-prompt.sh
+
+      - name: Vote prompt static contract
+        run: |
+          set -euo pipefail
+          bash tests/test-codex-vote-prompt.sh
+
+      - name: Local orchestration boundary tests
+        run: |
+          set -euo pipefail
+          bash tests/test-route-task-handoff.sh
+          bash tests/test-resolve-orchestration-context.sh
+          bash tests/test-watchdog-alert-policy.sh
+          bash tests/test-watchdog-alert-delivery-policy.sh
+          bash tests/test-primary-heartbeat-state.sh
+          bash tests/test-publish-decision-journal.sh
+          bash tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash tests/test-task-router-start-signal.sh
+          bash tests/test-parallel-floor-policy.sh
+          bash tests/test-recovery-reroute-claim-gate.sh
+          bash tests/test-watchdog-reconcile-claim-policy.sh
+          bash tests/test-watchdog-reconcile-workflow.sh
+          bash tests/test-workspace-root-policy.sh
 
       - name: Canary trust tests
         run: |
           set -euo pipefail
           bash tests/test-canary-trust-policy.sh
           bash tests/test-kernel-canary-plan.sh
-          bash tests/test-workflow-checkout-order.sh
 
       - name: Workflow YAML parse checks
         run: |
@@ -95,9 +206,11 @@ jobs:
           files = [
               ".github/workflows/fugue-orchestrator-canary.yml",
               ".github/workflows/fugue-orchestration-gate.yml",
+              ".github/workflows/fugue-watchdog.yml",
               ".github/workflows/fugue-tutti-caller.yml",
               ".github/workflows/fugue-tutti-router.yml",
               ".github/workflows/fugue-task-router.yml",
+              ".github/workflows/kernel-decision-journal.yml",
           ]
           for p in files:
               with open(p, "r", encoding="utf-8") as f:

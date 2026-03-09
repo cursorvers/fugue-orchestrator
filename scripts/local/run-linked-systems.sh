@@ -83,8 +83,8 @@ if [[ "${MODE}" != "smoke" && "${MODE}" != "execute" ]]; then
   echo "Error: --mode must be smoke|execute." >&2
   exit 2
 fi
-if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
-  echo "Error: --max-parallel must be a positive integer." >&2
+if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 2 )); then
+  echo "Error: --max-parallel must be an integer >= 2." >&2
   exit 2
 fi
 include_budgeted="$(echo "${INCLUDE_BUDGETED}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -102,12 +102,14 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${ROOT_DIR}/scripts/lib/workspace-root-policy.sh"
 manifest_file="${ROOT_DIR}/${MANIFEST_PATH}"
 [[ -f "${manifest_file}" ]] || { echo "Error: manifest not found: ${manifest_file}" >&2; exit 2; }
 
 if [[ "${OUT_DIR}" != /* ]]; then
   OUT_DIR="${ROOT_DIR}/${OUT_DIR}"
 fi
+OUT_DIR="$(fugue_resolve_workspace_dir "${ROOT_DIR}" "${OUT_DIR}" "out dir")"
 
 issue_json="$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" --json number,title,body,url)"
 ISSUE_TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"

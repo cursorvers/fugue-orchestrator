@@ -251,6 +251,8 @@ if [[ "${format}" == "json" ]]; then
     }'
 else
   cat <<EOF
+gha_execution_mode=${gha_execution_mode}
+current_state=${current_state}
 failover_state=${failover_state}
 failover_reason=${failover_reason}
 backup_router_execution_mode=${backup_router_execution_mode}

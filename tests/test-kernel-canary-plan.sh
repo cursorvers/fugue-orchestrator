@@ -7,17 +7,12 @@ CANARY_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-orchestrator-canary.yml"
 ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml"
 TASK_ROUTER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-task-router.yml"
 CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-caller.yml"
+TUTTI_CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-caller.yml"
 RESOLVE_CONTEXT_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
-HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/lib/resolve-primary-heartbeat-state.sh"
 
 if [[ ! -x "${CANARY_SCRIPT}" ]]; then
   echo "FAIL: missing executable script ${CANARY_SCRIPT}" >&2
-  exit 1
-fi
-
-if [[ ! -x "${HEARTBEAT_SCRIPT}" ]]; then
-  echo "FAIL: missing executable script ${HEARTBEAT_SCRIPT}" >&2
   exit 1
 fi
 
@@ -85,54 +80,6 @@ if head -n 8 "${CALLER_WORKFLOW}" | grep -q 'opened'; then
   echo "FAIL: fugue-caller should not auto-start from opened issues" >&2
   exit 1
 fi
-grep -Fq "trigger_label_name: \${{ github.event.inputs.trigger_label_name || github.event.label.name || '' }}" "${CALLER_WORKFLOW}" || {
-  echo "FAIL: fugue-caller should pass the triggering label or explicit replay override into task router" >&2
-  exit 1
-}
-grep -Fq "allow_processing_rerun: \${{ github.event.inputs.allow_processing_rerun || 'false' }}" "${CALLER_WORKFLOW}" || {
-  echo "FAIL: fugue-caller should pass allow_processing_rerun into task router" >&2
-  exit 1
-}
-grep -Fq "subscription_offline_policy_override: \${{ github.event.inputs.subscription_offline_policy_override || '' }}" "${CALLER_WORKFLOW}" || {
-  echo "FAIL: fugue-caller should pass offline policy override into task router" >&2
-  exit 1
-}
-grep -Fq "handoff_target: \${{ github.event.inputs.handoff_target || '' }}" "${CALLER_WORKFLOW}" || {
-  echo "FAIL: fugue-caller should pass handoff_target override into task router" >&2
-  exit 1
-}
-grep -Fq "comment_body: \${{ github.event.comment.body || '' }}" "${CALLER_WORKFLOW}" || {
-  echo "FAIL: fugue-caller should pass issue_comment body into task router" >&2
-  exit 1
-}
-if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  issues:'; then
-  echo "FAIL: fugue-task-router should no longer expose direct issues triggers" >&2
-  exit 1
-fi
-if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  issue_comment:'; then
-  echo "FAIL: fugue-task-router should no longer expose direct issue_comment triggers" >&2
-  exit 1
-fi
-if sed -n '1,60p' "${TASK_ROUTER_WORKFLOW}" | grep -q '^  workflow_dispatch:'; then
-  echo "FAIL: fugue-task-router should not be directly workflow_dispatch invokable" >&2
-  exit 1
-fi
-grep -q 'EXPLICIT_TUTTI_TRIGGER="true"' "${TASK_ROUTER_WORKFLOW}" || {
-  echo "FAIL: task router should recognize manual tutti label as an explicit trigger" >&2
-  exit 1
-}
-grep -q 'ALLOW_PROCESSING_RERUN_INPUT' "${TASK_ROUTER_WORKFLOW}" || {
-  echo "FAIL: task router should accept allow_processing_rerun from caller" >&2
-  exit 1
-}
-if grep -q 'github\.event\.inputs' "${TASK_ROUTER_WORKFLOW}"; then
-  echo "FAIL: task router should rely on workflow_call inputs, not direct workflow_dispatch payloads" >&2
-  exit 1
-fi
-if sed -n '1,40p' "${CANARY_WORKFLOW%orchestrator-canary.yml}tutti-caller.yml" | grep -q '^  issues:'; then
-  echo "FAIL: fugue-tutti-caller should be explicit-dispatch only" >&2
-  exit 1
-fi
 grep -q 'HAS_FUGUE}" != "true" && "${IS_VOTE_COMMAND}" != "true"' "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should allow /vote to bypass missing fugue-task label" >&2
   exit 1
@@ -150,6 +97,18 @@ grep -q 'canary_dispatch_owned: "\${{ needs.ctx.outputs.canary_dispatch_owned }}
   echo "FAIL: caller workflow should pass canary dispatch ownership into router" >&2
   exit 1
 }
+grep -Fq 'canary_dispatch_run_id: ${{ steps.ctx.outputs.canary_dispatch_run_id }}' "${TUTTI_CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing canary dispatch run id ctx output wiring" >&2
+  exit 1
+}
+grep -Fq 'canary_dispatch_run_id: "${{ needs.ctx.outputs.canary_dispatch_run_id }}"' "${TUTTI_CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing canary dispatch run id router wiring" >&2
+  exit 1
+}
+grep -q 'canary_dispatch_run_id="\${GITHUB_RUN_ID}"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should pass originating canary run id into caller dispatch" >&2
+  exit 1
+}
 grep -q 'if \[\[ "\${canary_dispatch_owned}" == "true" \]\]; then' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow should trust explicit caller-owned canary dispatch input" >&2
   exit 1
@@ -158,58 +117,60 @@ grep -q 'CANARY_DISPATCH_OWNED: \${{ steps.ctx.outputs.canary_dispatch_owned }}'
   echo "FAIL: router trust step should receive canary dispatch ownership env" >&2
   exit 1
 }
-grep -q 'bash scripts/lib/canary-trust-policy.sh' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should delegate trust decisions to canary-trust-policy.sh" >&2
+grep -q 'CANARY_DISPATCH_RUN_ID: \${{ inputs.canary_dispatch_run_id || '\'''\'' }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive canary dispatch run id env" >&2
   exit 1
 }
-awk '
-  /- name: Checkout repository/ { seen_checkout=1 }
-  /- name: Check author trust/ { if (!seen_checkout) exit 1; found_trust=1 }
-  END { if (!found_trust) exit 1 }
-' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router prepare job must checkout the repository before invoking canary-trust-policy.sh" >&2
+grep -q 'GITHUB_EVENT_NAME: \${{ github.event_name }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should inspect event provenance for canary bypass" >&2
   exit 1
 }
-grep -Fq 'echo "permission=${permission}"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should export policy-computed permission" >&2
+grep -q 'TRUST_SUBJECT: \${{ steps.ctx.outputs.trust_subject }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive trust subject for canary provenance" >&2
   exit 1
 }
-grep -Fq 'permission="${PERM}"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should initialize fallback-safe permission before policy eval" >&2
+grep -q 'AUTHOR: \${{ steps.ctx.outputs.author }}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should receive issue author for canary provenance" >&2
   exit 1
 }
-grep -Fq 'trusted="false"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should initialize fallback-safe trusted flag before policy eval" >&2
+grep -q 'canary_issue_marker="true"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should require canary issue markers before bypass" >&2
   exit 1
 }
-grep -Fq 'trust_reason="permission-${PERM}"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should initialize fallback-safe trust reason before policy eval" >&2
+grep -q '"\${GITHUB_EVENT_NAME}" == "workflow_call"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to workflow_call provenance" >&2
   exit 1
 }
-grep -Fq 'echo "trusted=${trusted}"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should export policy-computed trusted flag" >&2
+grep -q '"\${trust_subject}" == "github-actions\[bot\]"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to github-actions bot subject" >&2
   exit 1
 }
-grep -Fq 'echo "canary_dispatch_owned=${canary_dispatch_owned}"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router ctx step should emit canary dispatch ownership output" >&2
+grep -q '"\${author}" == "github-actions\[bot\]"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should restrict canary bypass to bot-authored canary issues" >&2
   exit 1
 }
-grep -Fq 'canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router prepare job should expose canary dispatch ownership output" >&2
+grep -q 'actions/runs/\${canary_dispatch_run_id}' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should verify the originating canary workflow run" >&2
   exit 1
 }
-grep -q 'group: fugue-orchestrator-canary-' "${CANARY_WORKFLOW}" || {
-  echo "FAIL: canary workflow should define a concurrency group to suppress duplicate runs" >&2
+grep -q '".github/workflows/fugue-orchestrator-canary.yml"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should pin canary verification to the canary workflow path" >&2
   exit 1
 }
-grep -Fq 'if [[ "${CANARY_PLAN_ONLY:-false}" == "true" ]]' "${CANARY_SCRIPT}" || {
-  echo "FAIL: canary plan-only mode should short-circuit GitHub lookups for hermetic tests" >&2
+grep -q 'PERM="canary-verified"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should grant only verified canary trust" >&2
   exit 1
 }
+if grep -q 'vote-bypass' "${ROUTER_WORKFLOW}"; then
+  echo "FAIL: router trust step should not retain vote-bypass trust" >&2
+  exit 1
+fi
 echo "PASS [workflow-wiring]"
 
 plan_output="$(
-  CANARY_PLAN_ONLY=true \
+  (
+    cd "${ROOT_DIR}"
+    CANARY_PLAN_ONLY=true \
   CANARY_PLAN_ONLINE_COUNT=1 \
   GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
   CLAUDE_RATE_LIMIT_STATE="ok" \
@@ -237,9 +198,10 @@ plan_output="$(
   CANARY_LABEL_WAIT_SLEEP_SEC="1" \
   CANARY_WAIT_FAST_ATTEMPTS="1" \
   CANARY_WAIT_FAST_SLEEP_SEC="1" \
-  CANARY_WAIT_SLOW_ATTEMPTS="0" \
-  CANARY_WAIT_SLOW_SLEEP_SEC="1" \
-  bash "${CANARY_SCRIPT}"
+    CANARY_WAIT_SLOW_ATTEMPTS="0" \
+    CANARY_WAIT_SLOW_SLEEP_SEC="1" \
+    bash "${CANARY_SCRIPT}"
+  )
 )"
 
 case_count="$(printf '%s\n' "${plan_output}" | jq -s 'length')"

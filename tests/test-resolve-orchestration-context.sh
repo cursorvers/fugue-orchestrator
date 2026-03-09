@@ -131,6 +131,14 @@ assert_output "handoff-confirm-override" "127" "has_implement_confirmed" "true" 
   "IMPLEMENT_CONFIRMED_INPUT=true"
 assert_output "vote-command-output" "127" "vote_command" "true" \
   "VOTE_COMMAND_INPUT=true"
+assert_output "vote-intake-source-derived" "127" "intake_source" "github-vote-comment" \
+  "VOTE_COMMAND_INPUT=true"
+assert_output "workflow-dispatch-intake-source" "127" "intake_source" "workflow-dispatch" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=127"
+assert_output "explicit-intake-source" "127" "intake_source" "railway-public-edge" \
+  "INTAKE_SOURCE_INPUT=railway-public-edge"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

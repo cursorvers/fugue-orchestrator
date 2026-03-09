@@ -41,8 +41,6 @@ case "${execution_mode_override}" in
 esac
 resolved_execution_mode_override="${execution_mode_override}"
 if [[ "${resolved_execution_mode_override}" == "auto" && "${IS_VOTE_COMMAND}" == "true" ]]; then
-  # /vote is an explicit human handoff signal, so do not strand it in
-  # record-only standby. Keep GitHub-hosted consensus moving.
   resolved_execution_mode_override="primary"
 fi
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
@@ -228,14 +226,12 @@ if [[ "${body_handoff_target}" != "kernel" && "${body_handoff_target}" != "fugue
   body_handoff_target="$(echo "${body}" | sed -nE 's/^[[:space:]]*(handoff[[:space:]_-]*target|sovereign[[:space:]_-]*adapter)[[:space:]]*:[[:space:]]*(kernel|fugue-bridge)[[:space:]]*$/\2/ip' | head -n1 | tr '[:upper:]' '[:lower:]')"
 fi
 handoff_target="${handoff_target_default}"
-if [[ -n "${handoff_target_input}" ]]; then
-  handoff_target="${handoff_target_input}"
-elif [[ "${body_handoff_target}" == "kernel" || "${body_handoff_target}" == "fugue-bridge" ]]; then
+if [[ "${body_handoff_target}" == "kernel" || "${body_handoff_target}" == "fugue-bridge" ]]; then
   handoff_target="${body_handoff_target}"
 fi
-if [[ -z "${handoff_target_input}" ]] && echo "${text}" | grep -Eqi '#fugue-bridge|rollback to fugue|legacy fugue'; then
+if echo "${text}" | grep -Eqi '#fugue-bridge|rollback to fugue|legacy fugue'; then
   handoff_target="fugue-bridge"
-elif [[ -z "${handoff_target_input}" ]] && echo "${text}" | grep -Eqi '#kernel'; then
+elif echo "${text}" | grep -Eqi '#kernel'; then
   handoff_target="kernel"
 fi
 
@@ -448,6 +444,10 @@ if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
     vote_instruction_line="- Vote instruction: none (command only)"
   fi
 fi
+intake_source="github-issue-handoff"
+if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
+  intake_source="github-vote-comment"
+fi
 provider_line="- Orchestrator: ${provider}"
 if [[ -n "${main_fallback_note}" ]]; then
   provider_line="- Orchestrator: ${provider} (requested: ${requested_provider})"
@@ -498,6 +498,7 @@ dispatch_args=(
 dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
 dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
 dispatch_args+=(-f handoff_target="${handoff_target}")
+dispatch_args+=(-f intake_source="${intake_source}")
 dispatch_args+=(-f requested_execution_mode="${mode}")
 dispatch_args+=(-f implement_request="${wants_implement}")
 dispatch_args+=(-f implement_confirmed="${confirm_implement}")
@@ -537,6 +538,7 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --implement-request "${wants_implement}"
     --implement-confirmed "${confirm_implement}"
     --vote-command "${IS_VOTE_COMMAND}"
+    --intake-source "${intake_source}"
     --execution-mode-override "${resolved_execution_mode_override}"
   )
   if [[ -n "${trust_subject}" ]]; then

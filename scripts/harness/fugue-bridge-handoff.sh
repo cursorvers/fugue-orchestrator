@@ -10,11 +10,12 @@ dispatch_nonce=""
 trust_subject=""
 vote_instruction_b64=""
 allow_processing_rerun="false"
-subscription_offline_policy_override=""
 requested_execution_mode=""
+subscription_offline_policy_override=""
 implement_request=""
 implement_confirmed=""
 vote_command="false"
+intake_source=""
 execution_mode_override="auto"
 dry_run="false"
 workflow_file="fugue-tutti-caller.yml"
@@ -31,12 +32,13 @@ Options:
   --trust-subject <login>          Optional trusted actor login
   --vote-instruction-b64 <value>   Optional base64-encoded /vote instruction
   --allow-processing-rerun         Allow rerun while processing label exists
+  --requested-execution-mode <v>   Resolved handoff mode (review|implement)
   --subscription-offline-policy-override <v>
                                    Optional offline policy override (hold|continuity)
-  --requested-execution-mode <v>   Resolved handoff mode (review|implement)
   --implement-request <bool>       Resolved implementation intent snapshot
   --implement-confirmed <bool>     Resolved implementation confirmation snapshot
   --vote-command <bool>            True when the handoff originated from `/vote`
+  --intake-source <value>          Intake source marker for audit/policy
   --execution-mode-override <v>    Execution policy override (auto|primary|backup-safe|backup-heavy)
   --dry-run                        Print the resolved gh command without executing it
   -h, --help                       Show help
@@ -69,12 +71,12 @@ while [[ $# -gt 0 ]]; do
       allow_processing_rerun="true"
       shift 1
       ;;
-    --subscription-offline-policy-override)
-      subscription_offline_policy_override="${2:-}"
-      shift 2
-      ;;
     --requested-execution-mode)
       requested_execution_mode="${2:-}"
+      shift 2
+      ;;
+    --subscription-offline-policy-override)
+      subscription_offline_policy_override="${2:-}"
       shift 2
       ;;
     --implement-request)
@@ -87,6 +89,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vote-command)
       vote_command="${2:-}"
+      shift 2
+      ;;
+    --intake-source)
+      intake_source="${2:-}"
       shift 2
       ;;
     --execution-mode-override)
@@ -144,13 +150,13 @@ fi
 if [[ "${allow_processing_rerun}" == "true" ]]; then
   dispatch_cmd+=(-f allow_processing_rerun="true")
 fi
-subscription_offline_policy_override="$(printf '%s' "${subscription_offline_policy_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
-  dispatch_cmd+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
-fi
 requested_execution_mode="$(printf '%s' "${requested_execution_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${requested_execution_mode}" == "review" || "${requested_execution_mode}" == "implement" ]]; then
   dispatch_cmd+=(-f requested_execution_mode="${requested_execution_mode}")
+fi
+subscription_offline_policy_override="$(printf '%s' "${subscription_offline_policy_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${subscription_offline_policy_override}" == "hold" || "${subscription_offline_policy_override}" == "continuity" ]]; then
+  dispatch_cmd+=(-f subscription_offline_policy_override="${subscription_offline_policy_override}")
 fi
 implement_request="$(printf '%s' "${implement_request}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${implement_request}" == "true" || "${implement_request}" == "false" ]]; then
@@ -164,6 +170,12 @@ vote_command="$(printf '%s' "${vote_command}" | tr '[:upper:]' '[:lower:]' | sed
 if [[ "${vote_command}" == "true" ]]; then
   dispatch_cmd+=(-f vote_command="true")
 fi
+intake_source="$(printf '%s' "${intake_source}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${intake_source}" in
+  github-issue-label|github-vote-comment|github-issue-handoff|workflow-dispatch|github-recovery-console|railway-public-edge)
+    dispatch_cmd+=(-f intake_source="${intake_source}")
+    ;;
+esac
 execution_mode_override="$(printf '%s' "${execution_mode_override}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 case "${execution_mode_override}" in
   auto|primary|backup-safe|backup-heavy) ;;

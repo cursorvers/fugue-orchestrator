@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HANDOFF_SCRIPT="${ROOT_DIR}/scripts/harness/route-task-handoff.sh"
 CTX_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 TMP_ROOT="/Users/masayuki/Dev/tmp"
+if [[ ! -d "${TMP_ROOT}" ]]; then
+  TMP_ROOT="${TMPDIR:-/tmp}"
+fi
 mkdir -p "${TMP_ROOT}"
 TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/vote-handoff-sim.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"; rm -f "${ROOT_DIR}/handoff-comment.md"' EXIT

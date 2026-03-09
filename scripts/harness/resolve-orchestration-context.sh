@@ -105,6 +105,7 @@ trust_subject="$(printf '%s' "${TRUST_SUBJECT_INPUT:-}" | sed -E 's/^[[:space:]]
 if [[ -n "${trust_subject}" ]]; then
   trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
 fi
+canary_dispatch_run_id="$(printf '%s' "${CANARY_DISPATCH_RUN_ID_INPUT:-}" | tr -cd '0-9')"
 allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${allow_processing_rerun}" != "true" ]]; then
   allow_processing_rerun="false"
@@ -113,6 +114,11 @@ handoff_target="$(echo "${HANDOFF_TARGET_INPUT:-kernel}" | tr '[:upper:]' '[:low
 if [[ "${handoff_target}" != "kernel" && "${handoff_target}" != "fugue-bridge" ]]; then
   handoff_target="kernel"
 fi
+intake_source="$(echo "${INTAKE_SOURCE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${intake_source}" in
+  ""|github-issue-label|github-vote-comment|github-issue-handoff|workflow-dispatch|github-recovery-console|railway-public-edge) ;;
+  *) intake_source="" ;;
+esac
 vote_instruction=""
 vote_instruction_b64="$(echo "${VOTE_INSTRUCTION_B64_INPUT:-}" | tr -d '\n\r[:space:]')"
 if [[ -n "${vote_instruction_b64}" ]]; then
@@ -134,6 +140,15 @@ fi
 vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${vote_command}" != "true" ]]; then
   vote_command="false"
+fi
+if [[ -z "${intake_source}" ]]; then
+  if [[ "${vote_command}" == "true" ]]; then
+    intake_source="github-vote-comment"
+  elif [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
+    intake_source="workflow-dispatch"
+  else
+    intake_source="github-issue-label"
+  fi
 fi
 owner="${GITHUB_REPOSITORY%%/*}"
 
@@ -863,7 +878,7 @@ fi
 should_run="true"
 skip_reason=""
 canary_dispatch_owned="false"
-if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${is_canary_issue}" == "true" ]]; then
+if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${is_canary_issue}" == "true" && -n "${canary_dispatch_run_id}" ]]; then
   canary_dispatch_owned="true"
 fi
 if [[ "${has_fugue}" != "true" || ( "${has_tutti}" != "true" && "${canary_dispatch_owned}" != "true" ) ]]; then
@@ -877,6 +892,7 @@ fi
 {
   echo "issue_number=${ISSUE_NUMBER}"
   echo "canary_dispatch_owned=${canary_dispatch_owned}"
+  echo "canary_dispatch_run_id=${canary_dispatch_run_id}"
   echo "has_implement_request=${has_implement}"
   echo "has_implement_confirmed=${has_implement_confirmed}"
   echo "self_hosted_online_count=${self_hosted_online_count}"
@@ -925,6 +941,7 @@ fi
   echo "translation_skip_reason=${translation_skip_reason}"
   echo "translation_event=${translation_event}"
   echo "handoff_target=${handoff_target}"
+  echo "intake_source=${intake_source}"
   echo "orchestration_profile=${orchestration_profile}"
   echo "preflight_cycles=${preflight_cycles}"
   echo "multi_agent_mode_override=${multi_agent_mode_override}"

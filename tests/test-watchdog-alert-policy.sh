@@ -98,7 +98,7 @@ assert_field "mainframe-stale-persisted-same-bucket-suppress" "should_alert" "fa
   --mainframe-minutes 191 \
   --mainframe-pending-count 3
 
-assert_field "mainframe-stale-persisted-repeat-fire" "should_alert" "true" \
+assert_field "mainframe-stale-persisted-repeat-fire" "should_alert" "false" \
   --event-name schedule \
   --persist-state true \
   --previous-state-json "$(state_with_bucket "mainframe-stale" "stale:180:360:0")" \
@@ -122,7 +122,7 @@ assert_field "router-stale-persisted-same-bucket-suppress" "should_alert" "false
   --router-minutes 191 \
   --pending-count 3
 
-assert_field "router-stale-persisted-repeat-fire" "should_alert" "true" \
+assert_field "router-stale-persisted-repeat-fire" "should_alert" "false" \
   --event-name schedule \
   --persist-state true \
   --previous-state-json "$(state_with_bucket "router-stale" "stale:180:360:0")" \
@@ -158,7 +158,7 @@ assert_field "missing-mainframe-persisted-same-bucket-suppress" "should_alert" "
   --mainframe-minutes 999999 \
   --mainframe-pending-count 3
 
-assert_field "missing-mainframe-persisted-next-bucket-fire" "should_alert" "true" \
+assert_field "missing-mainframe-persisted-next-bucket-fire" "should_alert" "false" \
   --event-name schedule \
   --persist-state true \
   --previous-state-json "$(state_with_bucket "mainframe-stale" "wall:360:1")" \
@@ -191,6 +191,15 @@ assert_field "multi-reason-state-carries-both-reasons" "due_reasons_csv" "connec
   --router-hours 3 \
   --router-minutes 191 \
   --pending-count 3
+
+assert_field "inactive-reasons-are-pruned-for-recovery" "state_update_required" "true" \
+  --event-name schedule \
+  --persist-state true \
+  --previous-state-json "$(jq -cn '{reason_buckets:{"mainframe-stale":"active","connectivity":"active"}}')" \
+  --now-epoch 11400 \
+  --openai-ok true \
+  --zai-ok true \
+  --pending-count 0
 
 assert_field "workflow-dispatch-without-force-suppressed" "should_alert" "false" \
   --event-name workflow_dispatch \

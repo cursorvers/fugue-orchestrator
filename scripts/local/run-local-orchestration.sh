@@ -29,6 +29,10 @@ ISSUE_BODY_FILE="${ISSUE_BODY_FILE:-${FUGUE_LOCAL_ISSUE_BODY_FILE:-}}"
 ISSUE_URL_INPUT="${ISSUE_URL_INPUT:-${FUGUE_LOCAL_ISSUE_URL:-}}"
 ISSUE_LABELS_CSV_INPUT="${ISSUE_LABELS_CSV_INPUT:-${FUGUE_LOCAL_ISSUE_LABELS_CSV:-}}"
 FORCE_MANUAL_CONTEXT="${FORCE_MANUAL_CONTEXT:-${FUGUE_LOCAL_FORCE_MANUAL_CONTEXT:-false}}"
+PRIMARY_HEARTBEAT_MODE="${PRIMARY_HEARTBEAT_MODE:-${FUGUE_PRIMARY_HEARTBEAT_MODE:-auto}}"
+PRIMARY_HEARTBEAT_REPO="${PRIMARY_HEARTBEAT_REPO:-${FUGUE_PRIMARY_HEARTBEAT_REPO:-${REPO}}}"
+PRIMARY_HEARTBEAT_SOURCE="${PRIMARY_HEARTBEAT_SOURCE:-${FUGUE_PRIMARY_HEARTBEAT_SOURCE:-local-orchestration}}"
+PRIMARY_HEARTBEAT_NODE="${PRIMARY_HEARTBEAT_NODE:-${FUGUE_PRIMARY_HEARTBEAT_NODE:-}}"
 
 usage() {
   cat <<'EOF'
@@ -92,6 +96,12 @@ Environment:
                          true|false (default: false; when true, skip GitHub issue fetch entirely)
   FUGUE_CLAUDE_SESSION_HANDOFF
                          true|false (default: true; persist claude lane session IDs for resume/handoff)
+  FUGUE_PRIMARY_HEARTBEAT_MODE
+                         auto|true|false (default: auto; pulse GitHub heartbeat when gh is available)
+  FUGUE_PRIMARY_HEARTBEAT_REPO
+                         Repo receiving heartbeat updates (default: same repo as --repo)
+  FUGUE_PRIMARY_HEARTBEAT_SOURCE
+                         Heartbeat source label (default: local-orchestration)
 EOF
 }
 
@@ -246,8 +256,8 @@ if [[ "${GLM_SUBAGENT_MODE}" != "off" && "${GLM_SUBAGENT_MODE}" != "paired" && "
   echo "Error: --glm-mode must be off|paired|symphony." >&2
   exit 2
 fi
-if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 1 )); then
-  echo "Error: --max-parallel must be a positive integer." >&2
+if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( MAX_PARALLEL < 2 )); then
+  echo "Error: --max-parallel must be an integer >= 2." >&2
   exit 2
 fi
 if ! [[ "${MIN_CONSENSUS_LANES}" =~ ^[0-9]+$ ]] || (( MIN_CONSENSUS_LANES < 6 )); then
@@ -258,8 +268,8 @@ if [[ "${LINKED_MODE}" != "smoke" && "${LINKED_MODE}" != "execute" ]]; then
   echo "Error: --linked-mode must be smoke|execute." >&2
   exit 2
 fi
-if ! [[ "${LINKED_MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( LINKED_MAX_PARALLEL < 1 )); then
-  echo "Error: --linked-max-parallel must be a positive integer." >&2
+if ! [[ "${LINKED_MAX_PARALLEL}" =~ ^[0-9]+$ ]] || (( LINKED_MAX_PARALLEL < 2 )); then
+  echo "Error: --linked-max-parallel must be an integer >= 2." >&2
   exit 2
 fi
 
@@ -269,9 +279,11 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${ROOT_DIR}/scripts/lib/workspace-root-policy.sh"
 if [[ "${OUT_DIR}" != /* ]]; then
   OUT_DIR="${ROOT_DIR}/${OUT_DIR}"
 fi
+OUT_DIR="$(fugue_resolve_workspace_dir "${ROOT_DIR}" "${OUT_DIR}" "out dir")"
 SUBSCRIPTION_RUNNER="${ROOT_DIR}/scripts/harness/subscription-agent-runner.sh"
 HARNESS_RUNNER="${ROOT_DIR}/scripts/harness/ci-agent-runner.sh"
 MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
@@ -281,6 +293,7 @@ CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+PRIMARY_HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/local/pulse-primary-heartbeat.sh"
 GOOGLEWORKSPACE_FEED_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-feed-policy.json"
 GOOGLEWORKSPACE_FEED_INGEST="${ROOT_DIR}/scripts/harness/googleworkspace-feed-ingest.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
@@ -305,14 +318,6 @@ if [[ ! -x "${ORCHESTRATOR_NL_HINTS}" ]]; then
 fi
 if [[ ! -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   echo "Error: Google Workspace Kernel policy missing: ${GOOGLEWORKSPACE_KERNEL_POLICY}" >&2
-  exit 2
-fi
-if [[ ! -f "${GOOGLEWORKSPACE_FEED_POLICY}" ]]; then
-  echo "Error: Google Workspace feed policy missing: ${GOOGLEWORKSPACE_FEED_POLICY}" >&2
-  exit 2
-fi
-if [[ ! -x "${GOOGLEWORKSPACE_FEED_INGEST}" ]]; then
-  echo "Error: Google Workspace feed ingest script missing or not executable: ${GOOGLEWORKSPACE_FEED_INGEST}" >&2
   exit 2
 fi
 if [[ "${WITH_LINKED_SYSTEMS}" == "true" && ! -x "${LINKED_RUNNER}" ]]; then
@@ -347,6 +352,47 @@ if [[ "${WITH_LINKED_SYSTEMS}" == "true" && "${gh_available}" != "true" ]]; then
   echo "Error: --with-linked-systems requires gh command." >&2
   exit 2
 fi
+
+primary_heartbeat_mode="$(echo "${PRIMARY_HEARTBEAT_MODE:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${primary_heartbeat_mode}" in
+  auto|true|false) ;;
+  *) primary_heartbeat_mode="auto" ;;
+esac
+primary_heartbeat_enabled="false"
+if [[ "${primary_heartbeat_mode}" == "true" ]]; then
+  primary_heartbeat_enabled="true"
+elif [[ "${primary_heartbeat_mode}" == "auto" && "${gh_available}" == "true" && -x "${PRIMARY_HEARTBEAT_SCRIPT}" ]]; then
+  primary_heartbeat_enabled="true"
+fi
+if [[ -z "${PRIMARY_HEARTBEAT_NODE}" ]]; then
+  PRIMARY_HEARTBEAT_NODE="$(hostname -s 2>/dev/null || hostname || echo unknown)"
+fi
+
+pulse_primary_heartbeat() {
+  local hb_state="${1:-online}"
+  if [[ "${primary_heartbeat_enabled}" != "true" ]]; then
+    return 0
+  fi
+  if [[ ! -x "${PRIMARY_HEARTBEAT_SCRIPT}" ]]; then
+    echo "Warning: heartbeat script missing; skipping pulse." >&2
+    return 0
+  fi
+  "${PRIMARY_HEARTBEAT_SCRIPT}" \
+    --repo "${PRIMARY_HEARTBEAT_REPO}" \
+    --state "${hb_state}" \
+    --source "${PRIMARY_HEARTBEAT_SOURCE}" \
+    --node "${PRIMARY_HEARTBEAT_NODE}" >/dev/null 2>&1 || \
+    echo "Warning: failed to publish primary heartbeat (${hb_state})." >&2
+}
+
+primary_heartbeat_busy="false"
+restore_primary_heartbeat() {
+  if [[ "${primary_heartbeat_busy}" != "true" ]]; then
+    return 0
+  fi
+  pulse_primary_heartbeat "online"
+}
+trap restore_primary_heartbeat EXIT
 
 ISSUE_TITLE=""
 ISSUE_BODY=""
@@ -410,6 +456,9 @@ LANE_DIR="${RUN_DIR}/lanes"
 TMP_DIR="${RUN_DIR}/tmp"
 mkdir -p "${LANE_DIR}" "${TMP_DIR}"
 
+pulse_primary_heartbeat "busy"
+primary_heartbeat_busy="true"
+
 workspace_hint_json="$("${ORCHESTRATOR_NL_HINTS}" \
   --title "${ISSUE_TITLE}" \
   --body "${ISSUE_BODY}" \
@@ -419,10 +468,6 @@ workspace_hint_applied="$(echo "${workspace_hint_json}" | jq -r '.workspace_hint
 workspace_action_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_action_hint // ""')"
 workspace_domain_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_domain_hint // ""')"
 workspace_reason="$(echo "${workspace_hint_json}" | jq -r '.workspace_reason // ""')"
-workspace_feed_context_file="${RUN_DIR}/googleworkspace-feed-context.json"
-workspace_feed_status="skipped"
-workspace_feed_summary=""
-workspace_feed_profiles=""
 jq -cn \
   --argjson hints "${workspace_hint_json}" \
   --slurpfile policy "${GOOGLEWORKSPACE_KERNEL_POLICY}" \
@@ -451,31 +496,6 @@ jq -cn \
        ),
        policy_file: "config/integrations/googleworkspace-kernel-policy.json"
      }' > "${workspace_context_file}"
-
-if [[ "${workspace_hint_applied}" == "true" ]]; then
-  feed_out_root="${GOOGLEWORKSPACE_FEED_OUT_ROOT:-${ROOT_DIR}/.fugue/feeds/googleworkspace}"
-  if [[ -d "${feed_out_root}" ]]; then
-    workspace_feed_output_file="$(mktemp)"
-    if env \
-      WORKSPACE_ACTIONS="${workspace_action_hint}" \
-      WORKSPACE_REASON="${workspace_reason}" \
-      GOOGLEWORKSPACE_FEED_POLICY_FILE="${GOOGLEWORKSPACE_FEED_POLICY}" \
-      OUT_ROOT="${feed_out_root}" \
-      OUT_FILE="${workspace_feed_context_file}" \
-      GITHUB_OUTPUT="${workspace_feed_output_file}" \
-      bash "${GOOGLEWORKSPACE_FEED_INGEST}" >/dev/null 2>&1
-    then
-      workspace_feed_status="$(grep -E '^feed_ingest_status=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
-      workspace_feed_profiles="$(grep -E '^feed_active_profiles=' "${workspace_feed_output_file}" | head -n1 | cut -d= -f2- || true)"
-      workspace_feed_summary="$(awk '
-        $0 == "feed_summary<<EOF" { capture = 1; next }
-        capture && $0 == "EOF" { exit }
-        capture { print }
-      ' "${workspace_feed_output_file}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
-    fi
-    rm -f "${workspace_feed_output_file}"
-  fi
-fi
 
 strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}"
 strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}"
@@ -1034,11 +1054,7 @@ jq -n \
     workspace_action_hint:$workspace_action_hint,
     workspace_domain_hint:$workspace_domain_hint,
     workspace_reason:$workspace_reason,
-    workspace_context_file:$workspace_context_file,
-    workspace_feed_status:$workspace_feed_status,
-    workspace_feed_summary:$workspace_feed_summary,
-    workspace_feed_profiles:$workspace_feed_profiles,
-    workspace_feed_context_file:$workspace_feed_context_file
+    workspace_context_file:$workspace_context_file
   }' > "${integrated_json}"
 
 summary_md="${RUN_DIR}/summary.md"
@@ -1075,10 +1091,6 @@ cat > "${summary_md}" <<EOF
 - workspace action hint: ${workspace_action_hint}
 - workspace domain hint: ${workspace_domain_hint}
 - workspace context file: ${workspace_context_file}
-- workspace feed status: ${workspace_feed_status}
-- workspace feed profiles: ${workspace_feed_profiles}
-- workspace feed summary: ${workspace_feed_summary}
-- workspace feed context file: ${workspace_feed_context_file}
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}
 EOF
@@ -1086,6 +1098,9 @@ EOF
 if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then
   gh issue comment "${ISSUE_NUMBER}" --repo "${REPO}" --body-file "${summary_md}" >/dev/null
 fi
+
+primary_heartbeat_busy="false"
+pulse_primary_heartbeat "online"
 
 echo "Local orchestration completed."
 echo "Run directory: ${RUN_DIR}"

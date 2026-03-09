@@ -634,6 +634,9 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Find unprocessed fugue-task issues
         id: find
         env:
@@ -665,22 +668,97 @@ jobs:
             echo "pending_json=${PENDING_JSON}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Trigger caller for unprocessed issues
-        if: ${{ steps.find.outputs.pending_count != '0' }}
+      - name: Plan reconcile dispatch claims
+        id: claims
         env:
           GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           PENDING_JSON: ${{ steps.find.outputs.pending_json }}
+        run: |
+          set -euo pipefail
+
+          reconcile_claim_state='{}'
+          reconcile_claim_persist="false"
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+          if gh variable list --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            reconcile_claim_persist="true"
+            reconcile_claim_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/FUGUE_RECONCILE_CLAIM_STATE" --jq '.value' 2>/dev/null || printf '{}')"
+          fi
+
+          eval "$(
+            bash scripts/lib/watchdog-reconcile-claim-policy.sh \
+              --pending-json "${PENDING_JSON}" \
+              --previous-state-json "${reconcile_claim_state}" \
+              --persist-state "${reconcile_claim_persist}" \
+              --now-epoch "$(date +%s)" \
+              --ttl-seconds 1800 \
+              --format env
+          )"
+
+          {
+            echo "dispatch_issue_numbers_json=${dispatch_issue_numbers_json}"
+            echo "dispatch_count=${dispatch_count}"
+            echo "state_update_required=${state_update_required}"
+            echo "persist_state=${persist_state}"
+            echo "next_state_json=${next_state_json}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Trigger caller for claimable issues
+        id: dispatch
+        if: ${{ steps.claims.outputs.dispatch_count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PENDING_JSON: ${{ steps.claims.outputs.dispatch_issue_numbers_json }}
           EXECUTION_MODE_OVERRIDE: ${{ needs.health.outputs.backup_router_execution_mode }}
         run: |
           set -euo pipefail
 
           echo "Found unprocessed issues: ${PENDING_JSON}"
+          failed_issue_numbers_json='[]'
+          succeeded_issue_numbers_json='[]'
           for ISSUE_NUM in $(echo "${PENDING_JSON}" | jq -r '.[]'); do
             echo "Triggering caller for issue #${ISSUE_NUM}"
             cmd=(gh workflow run fugue-caller.yml --repo "${GITHUB_REPOSITORY}" -f issue_number="${ISSUE_NUM}")
             if [[ -n "${EXECUTION_MODE_OVERRIDE:-}" && "${EXECUTION_MODE_OVERRIDE}" != "auto" ]]; then
               cmd+=(-f execution_mode_override="${EXECUTION_MODE_OVERRIDE}")
             fi
-            "${cmd[@]}"
+            if "${cmd[@]}"; then
+              succeeded_issue_numbers_json="$(printf '%s' "${succeeded_issue_numbers_json}" | jq -c --argjson n "${ISSUE_NUM}" '. + [$n]')"
+            else
+              failed_issue_numbers_json="$(printf '%s' "${failed_issue_numbers_json}" | jq -c --argjson n "${ISSUE_NUM}" '. + [$n]')"
+            fi
             sleep 2
           done
+
+          {
+            echo "failed_issue_numbers_json=${failed_issue_numbers_json}"
+            echo "succeeded_issue_numbers_json=${succeeded_issue_numbers_json}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Persist reconcile claim state
+        if: ${{ steps.claims.outputs.persist_state == 'true' && steps.claims.outputs.state_update_required == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          NEXT_STATE_JSON: ${{ steps.claims.outputs.next_state_json }}
+          FAILED_ISSUE_NUMBERS_JSON: ${{ steps.dispatch.outputs.failed_issue_numbers_json || '[]' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+
+          persist_json="$(jq -cn \
+            --argjson state "${NEXT_STATE_JSON}" \
+            --argjson failed "${FAILED_ISSUE_NUMBERS_JSON}" '
+              reduce $failed[] as $issue ($state; .claims |= (del(.[($issue|tostring)])))
+            ')"
+
+          gh variable set FUGUE_RECONCILE_CLAIM_STATE \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${persist_json}" >/dev/null
