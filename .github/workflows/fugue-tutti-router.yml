@@ -380,6 +380,10 @@ jobs:
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout repository
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        uses: actions/checkout@v4
+
       - name: Check author trust
         id: trust
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
@@ -424,6 +428,9 @@ jobs:
             PERM="$(echo "${perm_json}" | jq -r '.permission')"
           fi
 
+          permission="${PERM}"
+          trusted="false"
+          trust_reason="permission-${PERM}"
           eval "$(
             bash scripts/lib/canary-trust-policy.sh \
               --permission "${PERM}" \
