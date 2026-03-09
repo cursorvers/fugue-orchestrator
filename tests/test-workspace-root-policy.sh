@@ -8,7 +8,14 @@ passed=0
 failed=0
 default_roots="$(fugue_default_workspace_roots "${ROOT_DIR}")"
 default_tmp_root="$(printf '%s' "${default_roots}" | cut -d: -f2)"
+approved_tmp_root="${default_tmp_root}"
 rejected_parent="/tmp/fugue-root-policy-rejected-$$"
+
+if ! mkdir -p "${approved_tmp_root}" 2>/dev/null; then
+  approved_tmp_root="${ROOT_DIR}/.fugue/dev-tmp-root"
+  export FUGUE_APPROVED_WORKSPACE_ROOTS="${ROOT_DIR}/.fugue:${approved_tmp_root}"
+  mkdir -p "${approved_tmp_root}"
+fi
 
 assert_case() {
   local name="$1"
@@ -62,7 +69,7 @@ echo ""
 rm -rf "${rejected_parent}"
 
 assert_case "repo-fugue-root-allowed" "${ROOT_DIR}/.fugue/local-run/test-case" "ok"
-assert_case "dev-tmp-root-allowed" "${default_tmp_root}/fugue-root-policy/test-case" "ok"
+assert_case "dev-tmp-root-allowed" "${approved_tmp_root}/fugue-root-policy/test-case" "ok"
 assert_case "tmp-root-rejected" "${rejected_parent}/test-case" "error" "true"
 
 echo ""
