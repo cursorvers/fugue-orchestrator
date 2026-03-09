@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT="/Users/masayuki/Dev/fugue-orchestrator/scripts/harness/publish-decision-journal.sh"
-WORKFLOW="/Users/masayuki/Dev/fugue-orchestrator/.github/workflows/kernel-decision-journal.yml"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="${ROOT_DIR}/scripts/harness/publish-decision-journal.sh"
+WORKFLOW="${ROOT_DIR}/.github/workflows/kernel-decision-journal.yml"
 
 bash -n "${SCRIPT}"
 grep -Fq 'Kernel Decision Journal' "${SCRIPT}"
