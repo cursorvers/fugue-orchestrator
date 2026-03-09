@@ -77,6 +77,14 @@ gh_var_default() {
   local fallback="$4"
   local resolved="${env_value}"
 
+  if [[ "${CANARY_PLAN_ONLY:-false}" == "true" ]]; then
+    if [[ -n "${resolved}" ]]; then
+      printf '%s\n' "${resolved}"
+    else
+      printf '%s\n' "${fallback}"
+    fi
+    return 0
+  fi
   if [[ -n "${resolved}" ]]; then
     printf '%s\n' "${resolved}"
     return 0
@@ -96,6 +104,14 @@ gh_secret_present_default() {
   local env_value="${2:-}"
   local secret_name="$3"
 
+  if [[ "${CANARY_PLAN_ONLY:-false}" == "true" ]]; then
+    if [[ -n "${env_value}" ]]; then
+      printf '%s\n' "${env_value}"
+    else
+      printf 'false\n'
+    fi
+    return 0
+  fi
   if [[ -n "${env_value}" ]]; then
     printf '%s\n' "${env_value}"
     return 0

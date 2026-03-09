@@ -435,8 +435,8 @@ jobs:
           )"
 
           {
-            echo "permission=${PERM}"
-            echo "trusted=${TRUSTED}"
+            echo "permission=${permission}"
+            echo "trusted=${trusted}"
             echo "trust_reason=${trust_reason}"
           } >> "${GITHUB_OUTPUT}"
 

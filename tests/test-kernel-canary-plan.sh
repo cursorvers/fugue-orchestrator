@@ -162,6 +162,14 @@ grep -q 'bash scripts/lib/canary-trust-policy.sh' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should delegate trust decisions to canary-trust-policy.sh" >&2
   exit 1
 }
+grep -Fq 'echo "permission=${permission}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should export policy-computed permission" >&2
+  exit 1
+}
+grep -Fq 'echo "trusted=${trusted}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router trust step should export policy-computed trusted flag" >&2
+  exit 1
+}
 grep -Fq 'echo "canary_dispatch_owned=${canary_dispatch_owned}"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router ctx step should emit canary dispatch ownership output" >&2
   exit 1
@@ -172,6 +180,10 @@ grep -Fq 'canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}'
 }
 grep -q 'group: fugue-orchestrator-canary-' "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow should define a concurrency group to suppress duplicate runs" >&2
+  exit 1
+}
+grep -Fq 'if [[ "${CANARY_PLAN_ONLY:-false}" == "true" ]]' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary plan-only mode should short-circuit GitHub lookups for hermetic tests" >&2
   exit 1
 }
 echo "PASS [workflow-wiring]"
