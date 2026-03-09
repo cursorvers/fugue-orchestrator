@@ -134,6 +134,13 @@ verify_rollback_case="false"
 plan_only="$(normalize_bool "${CANARY_PLAN_ONLY:-false}")"
 primary_handoff_target="kernel"
 rollback_handoff_target="fugue-bridge"
+canary_workflow_ref="$(printf '%s' "${CANARY_WORKFLOW_REF:-${GITHUB_REF_NAME:-}}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${canary_workflow_ref}" ]] && command -v git >/dev/null 2>&1; then
+  canary_workflow_ref="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+if [[ "${canary_workflow_ref}" == "HEAD" ]]; then
+  canary_workflow_ref=""
+fi
 
 claude_state="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_RATE_LIMIT_STATE:-}" "FUGUE_CLAUDE_RATE_LIMIT_STATE" "ok")")"
 canary_mode="$(lower_trim "${CANARY_MODE_INPUT:-full}")"
@@ -516,6 +523,9 @@ create_issue() {
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
+  if [[ -n "${canary_workflow_ref}" ]]; then
+    run_cmd+=(--ref "${canary_workflow_ref}")
+  fi
   if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
     run_cmd+=(-f canary_dispatch_run_id="${GITHUB_RUN_ID}")
   fi
