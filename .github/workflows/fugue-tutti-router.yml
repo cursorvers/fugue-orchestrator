@@ -593,6 +593,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -635,9 +636,9 @@ jobs:
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
             ci_execution_engine="subscription"
           fi
-          if [[ "${ci_execution_engine}" == "harness" ]]; then
+          if [[ "${ci_execution_engine}" == "harness" || "${ci_execution_engine}" == "api" ]]; then
             if [[ ! -x "${harness_dir}/ci-agent-runner.sh" ]]; then
-              echo "harness execution engine is enabled, but scripts/harness/ci-agent-runner.sh is missing or not executable." >&2
+              echo "${ci_execution_engine} execution engine is enabled, but scripts/harness/ci-agent-runner.sh is missing or not executable." >&2
               exit 1
             fi
             bash "${harness_dir}/ci-agent-runner.sh"
@@ -1453,6 +1454,7 @@ jobs:
           EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
           MIN_CONSENSUS_LANES: ${{ vars.FUGUE_MIN_CONSENSUS_LANES || '6' }}
           HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_COPILOT_CLI: ${{ vars.FUGUE_HAS_COPILOT_CLI || '' }}
           HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
@@ -1591,6 +1593,13 @@ jobs:
               self_hosted_online="true"
             fi
           fi
+          copilot_cli_available="$(echo "${HAS_COPILOT_CLI:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${copilot_cli_available}" != "true" && "${copilot_cli_available}" != "false" ]]; then
+            copilot_cli_available="false"
+            if command -v copilot >/dev/null 2>&1; then
+              copilot_cli_available="true"
+            fi
+          fi
           assist_before_execution_profile="${assist_provider}"
           eval "$(
             bash "${orchestrator_lib_dir}/execution-profile-policy.sh" \
@@ -1603,6 +1612,7 @@ jobs:
               --strict-main-requested "${strict_main_requested}" \
               --strict-opus-requested "${strict_opus_requested}" \
               --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+              --copilot-cli-available "${copilot_cli_available}" \
               --codex-api-available "${HAS_OPENAI_API_KEY}" \
               --subscription-offline-policy "${subscription_offline_policy}" \
               --api-strict-mode "${api_strict_mode}" \

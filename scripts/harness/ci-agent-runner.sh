@@ -46,7 +46,7 @@ recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-4.7}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 # shellcheck source=../lib/safe-eval-policy.sh
@@ -67,15 +67,42 @@ if [[ -x "${model_policy_script}" ]]; then
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
     --xai-model "${raw_xai_model}" \
     --format env
-  claude_opus_model="${claude_model}"
+  claude_opus_model="${claude_api_model}"
   xai_latest_model="${xai_model}"
 else
-  claude_opus_model="claude-sonnet-4-6"
+  claude_opus_model="claude-sonnet-4-0"
   codex_main_model="gpt-5.4"
   codex_multi_agent_model="gpt-5.3-codex-spark"
-  glm_model="glm-5.0"
+  glm_model="glm-4.7"
   xai_latest_model="grok-4"
   gemini_fallback_model="gemini-3-flash"
+fi
+
+normalize_optional_bool() {
+  local raw="${1:-}"
+  raw="$(echo "${raw}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ -z "${raw}" ]]; then
+    return 1
+  fi
+  if [[ "${raw}" == "true" || "${raw}" == "1" || "${raw}" == "yes" || "${raw}" == "on" ]]; then
+    printf 'true'
+    return 0
+  fi
+  printf 'false'
+  return 0
+}
+
+copilot_runner_bin="${COPILOT_CLI_BIN:-copilot}"
+copilot_runner_available="false"
+copilot_cli_override="$(normalize_optional_bool "${HAS_COPILOT_CLI:-${FUGUE_HAS_COPILOT_CLI:-}}" || true)"
+if [[ -n "${copilot_cli_override}" ]]; then
+  copilot_runner_available="${copilot_cli_override}"
+elif command -v "${copilot_runner_bin}" >/dev/null 2>&1; then
+  copilot_runner_available="true"
+fi
+copilot_allow_all_tools="$(normalize_optional_bool "${COPILOT_ALLOW_ALL_TOOLS:-false}" || true)"
+if [[ -z "${copilot_allow_all_tools}" ]]; then
+  copilot_allow_all_tools="false"
 fi
 
 recursive_enabled_raw="${FUGUE_CODEX_RECURSIVE_DELEGATION:-false}"
@@ -190,7 +217,7 @@ if [[ "${PROVIDER}" == "xai" && -z "${XAI_API_KEY:-}" ]]; then
   exit 0
 fi
 
-if [[ "${PROVIDER}" == "claude" && "${claude_assist_execution_policy}" == "proxy" ]]; then
+if [[ "${PROVIDER}" == "claude" && "${claude_assist_execution_policy}" == "proxy" && "${copilot_runner_available}" != "true" ]]; then
   if [[ -n "${OPENAI_API_KEY:-}" ]]; then
     PROVIDER="codex"
     API_URL="https://api.openai.com/v1/chat/completions"
@@ -229,7 +256,7 @@ if [[ "${PROVIDER}" == "claude" && "${claude_assist_execution_policy}" == "proxy
   fi
 fi
 
-if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "${PROVIDER}" == "claude" && -z "${ANTHROPIC_API_KEY:-}" && "${copilot_runner_available}" != "true" ]]; then
   if [[ "${claude_assist_execution_policy}" == "hybrid" && -n "${OPENAI_API_KEY:-}" ]]; then
     PROVIDER="codex"
     API_URL="https://api.openai.com/v1/chat/completions"
@@ -349,6 +376,116 @@ append_attempt() {
   attempt_trace="${attempt_trace}${provider}:${model}:${code}"
 }
 
+append_unique_candidate() {
+  local candidate="$1"
+  [[ -n "${candidate}" ]] || return 0
+  local existing
+  for existing in "${candidates[@]:-}"; do
+    if [[ "${existing}" == "${candidate}" ]]; then
+      return 0
+    fi
+  done
+  candidates+=("${candidate}")
+}
+
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_sec}" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "${timeout_sec}" "$@"
+  else
+    "$@"
+  fi
+}
+
+extract_json_object() {
+  local raw="$1"
+  local extracted normalized
+  extracted="$(jq -Rn --arg s "${raw}" '
+    ($s | gsub("\r"; "") | gsub("^\\s+|\\s+$"; "")) as $t |
+    if ($t | test("```json"; "i")) then
+      (($t | split("```json") | .[1] // $t) | split("```") | .[0]) | gsub("^\\s+|\\s+$"; "")
+    elif ($t | test("```"; "i")) then
+      (($t | split("```") | .[1] // $t) | split("```") | .[0]) | gsub("^\\s+|\\s+$"; "")
+    else
+      $t
+    end
+  ')"
+  normalized="$(echo "${extracted}" | jq -c '
+    if type == "string" then (fromjson? // .) else . end
+  ' 2>/dev/null || true)"
+  if [[ -n "${normalized}" ]] && echo "${normalized}" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo "${normalized}"
+    return 0
+  fi
+  return 1
+}
+
+extract_response_error_message() {
+  local file_path="${1:-response.json}"
+  if [[ ! -s "${file_path}" ]]; then
+    return 0
+  fi
+  jq -r '
+    .error.message
+    // .error.error.message
+    // .error.details
+    // .message
+    // (if (.error | type) == "string" then .error else empty end)
+    // empty
+  ' "${file_path}" 2>/dev/null | head -n1
+}
+
+execute_copilot_claude() {
+  local requested_model="$1"
+  local out_file="copilot-response.txt"
+  local err_file="copilot-response.stderr"
+  local prompt parsed_output
+  prompt="SYSTEM:
+${sys_prompt}
+
+USER:
+${user_prompt}
+
+Return ONLY valid JSON."
+  if [[ "${AGENT_NAME:-}" == "claude-teams-executor" || "${AGENT_ROLE:-}" == "teams-executor" ]]; then
+    prompt="${prompt}
+
+Claude Teams bounded mode is active. Work as a narrow collaboration executor and return handoff-ready JSON only."
+  fi
+
+  local -a copilot_cmd
+  copilot_cmd=("${copilot_runner_bin}" -p "${prompt}")
+  if [[ "${copilot_allow_all_tools}" == "true" ]]; then
+    copilot_cmd+=(--allow-all-tools)
+  fi
+
+  set +e
+  run_with_timeout 180 "${copilot_cmd[@]}" >"${out_file}" 2>"${err_file}"
+  local rc=$?
+  set -e
+
+  append_attempt "copilot-cli" "${requested_model}" "exit${rc}"
+  if [[ "${rc}" -ne 0 || ! -s "${out_file}" ]]; then
+    return 1
+  fi
+  if ! parsed_output="$(extract_json_object "$(cat "${out_file}")")"; then
+    append_attempt "copilot-cli" "${requested_model}" "parse-failed"
+    return 1
+  fi
+
+  parsed="${parsed_output}"
+  content="$(cat "${out_file}")"
+  chosen_model="${requested_model}"
+  effective_provider="claude"
+  effective_api_url="copilot-cli"
+  http_code="cli:0"
+  append_attempt "copilot-cli" "${requested_model}" "ok"
+  return 0
+}
+
 if [[ "${PROVIDER}" == "codex" ]]; then
   candidates=("${MODEL}" "${codex_main_model}" "${codex_multi_agent_model}" "gpt-5.4" "gpt-5-codex" "gpt-5" "gpt-4.1")
   for m in "${candidates[@]}"; do
@@ -373,7 +510,12 @@ if [[ "${PROVIDER}" == "codex" ]]; then
   if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
     effective_provider="glm"
     effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
-    glm_fallback_candidates=("${glm_model}" "glm-4.5")
+    glm_fallback_candidates=()
+    candidates=()
+    append_unique_candidate "${glm_model}"
+    append_unique_candidate "glm-4.6"
+    append_unique_candidate "glm-4.5"
+    glm_fallback_candidates=("${candidates[@]}")
     for gm in "${glm_fallback_candidates[@]}"; do
       chosen_model="${gm}"
       fallback_req="$(jq -n \
@@ -413,7 +555,13 @@ elif [[ "${PROVIDER}" == "xai" ]]; then
     fi
   done
 elif [[ "${PROVIDER}" == "claude" ]]; then
-  candidates=("${MODEL}" "${claude_opus_model}")
+  candidates=()
+  append_unique_candidate "${MODEL}"
+  append_unique_candidate "${claude_opus_model}"
+  if [[ "${copilot_runner_available}" == "true" ]]; then
+    execute_copilot_claude "${MODEL}" || true
+  fi
+  if [[ "${http_code}" != "cli:0" ]]; then
   for m in "${candidates[@]}"; do
     chosen_model="${m}"
     req="$(jq -n \
@@ -433,9 +581,14 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
       break
     fi
   done
+  fi
 else
   if [[ "${PROVIDER}" == "glm" ]]; then
-    candidates=("${MODEL}" "${glm_model}" "glm-4.5")
+    candidates=()
+    append_unique_candidate "${MODEL}"
+    append_unique_candidate "${glm_model}"
+    append_unique_candidate "glm-4.6"
+    append_unique_candidate "glm-4.5"
     for m in "${candidates[@]}"; do
       chosen_model="${m}"
       req="$(jq -n \
@@ -491,7 +644,9 @@ else
   fi
 fi
 
-if [[ "${PROVIDER}" == "gemini" ]]; then
+if [[ "${http_code}" == "cli:0" && "${effective_api_url}" == "copilot-cli" ]]; then
+  :
+elif [[ "${PROVIDER}" == "gemini" ]]; then
   content="$(jq -r '.candidates[0].content.parts[0].text // ""' response.json 2>/dev/null || echo "")"
 elif [[ "${PROVIDER}" == "claude" ]]; then
   content="$(jq -r '[.content[]? | select(.type=="text") | .text] | join("\n") // ""' response.json 2>/dev/null || echo "")"
@@ -500,16 +655,34 @@ else
 fi
 
 skipped_flag="false"
-if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" || "${PROVIDER}" == "claude" ) && "${http_code}" != "200" ]]; then
+provider_success="false"
+if [[ "${PROVIDER}" == "claude" ]]; then
+  if [[ "${http_code}" == "200" || "${http_code}" == "cli:0" ]]; then
+    provider_success="true"
+  fi
+elif [[ "${http_code}" == "200" ]]; then
+  provider_success="true"
+fi
+if [[ ( "${PROVIDER}" == "gemini" || "${PROVIDER}" == "xai" || "${PROVIDER}" == "claude" || "${PROVIDER}" == "glm" ) && "${provider_success}" != "true" ]]; then
   skipped_flag="true"
 fi
 
 optional_error_note=""
 optional_provider_label=""
-if [[ "${PROVIDER}" == "gemini" && "${http_code}" != "200" ]]; then
+error_message="$(extract_response_error_message response.json)"
+if [[ "${PROVIDER}" == "glm" && "${http_code}" != "200" ]]; then
+  optional_provider_label="GLM"
+  if [[ -n "${error_message}" ]]; then
+    optional_error_note="GLM API error (HTTP ${http_code}): ${error_message}"
+  else
+    optional_error_note="GLM API error (HTTP ${http_code})"
+  fi
+elif [[ "${PROVIDER}" == "gemini" && "${http_code}" != "200" ]]; then
   optional_provider_label="Gemini"
   if [[ "${http_code}" == "429" ]]; then
     optional_error_note="Gemini API rate limited (HTTP 429)"
+  elif [[ -n "${error_message}" ]]; then
+    optional_error_note="Gemini API error (HTTP ${http_code}): ${error_message}"
   else
     optional_error_note="Gemini API error (HTTP ${http_code})"
   fi
@@ -517,13 +690,17 @@ elif [[ "${PROVIDER}" == "xai" && "${http_code}" != "200" ]]; then
   optional_provider_label="xAI"
   if [[ "${http_code}" == "429" ]]; then
     optional_error_note="xAI API rate limited (HTTP 429)"
+  elif [[ -n "${error_message}" ]]; then
+    optional_error_note="xAI API error (HTTP ${http_code}): ${error_message}"
   else
     optional_error_note="xAI API error (HTTP ${http_code})"
   fi
-elif [[ "${PROVIDER}" == "claude" && "${http_code}" != "200" ]]; then
+elif [[ "${PROVIDER}" == "claude" && "${provider_success}" != "true" ]]; then
   optional_provider_label="Claude"
   if [[ "${http_code}" == "429" ]]; then
     optional_error_note="Claude API rate limited (HTTP 429)"
+  elif [[ -n "${error_message}" ]]; then
+    optional_error_note="Claude API error (HTTP ${http_code}): ${error_message}"
   else
     optional_error_note="Claude API error (HTTP ${http_code})"
   fi
@@ -540,9 +717,9 @@ if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-o
   fi
 fi
 if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
-  if [[ "${effective_provider}" != "claude" || "${chosen_model}" != "${claude_opus_model}" || "${http_code}" != "200" || "${CLAUDE_PROXY_MODE}" == "true" ]]; then
-    echo "Strict guard violation: claude-opus-assist must execute directly with provider=claude model=${claude_opus_model} (http=200, no proxy)." >&2
-    echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code} proxy=${CLAUDE_PROXY_MODE}" >&2
+  if [[ "${effective_provider}" != "claude" || "${chosen_model}" != "${claude_opus_model}" || "${http_code}" != "200" || "${CLAUDE_PROXY_MODE}" == "true" || "${effective_api_url}" == "copilot-cli" ]]; then
+    echo "Strict guard violation: claude-opus-assist must execute directly with provider=claude model=${claude_opus_model} (http=200, no proxy/copilot)." >&2
+    echo "Observed provider=${effective_provider} model=${chosen_model} http=${http_code} proxy=${CLAUDE_PROXY_MODE} api_url=${effective_api_url}" >&2
     echo "Attempt trace=${attempt_trace}" >&2
     exit 43
   fi
@@ -606,6 +783,9 @@ if [[ "${ORIGINAL_PROVIDER}" == "claude" ]]; then
 fi
 if [[ "${CLAUDE_PROXY_MODE}" == "true" ]]; then
   execution_route="claude-via-codex-proxy"
+fi
+if [[ "${effective_api_url}" == "copilot-cli" ]]; then
+  execution_route="claude-via-copilot-cli"
 fi
 if [[ "${ORIGINAL_PROVIDER}" == "codex" && "${recursive_active}" == "true" ]]; then
   if [[ "${effective_provider}" == "codex" ]]; then

@@ -83,8 +83,14 @@ assert_model "default-codex-multi" \
 assert_model "default-claude" \
   "claude_model" "claude-sonnet-4-6"
 
+assert_model "default-claude-cli" \
+  "claude_cli_model" "claude-sonnet-4-6"
+
+assert_model "default-claude-api" \
+  "claude_api_model" "claude-sonnet-4-0"
+
 assert_model "default-glm" \
-  "glm_model" "glm-5.0"
+  "glm_model" "glm-4.7"
 
 assert_model "default-gemini" \
   "gemini_model" "gemini-3.1-pro"
@@ -116,13 +122,17 @@ assert_model "claude-sonnet-valid" \
   "claude_model" "claude-sonnet-4-6" \
   --claude-model "claude-sonnet-4-6"
 
+assert_model "claude-api-valid" \
+  "claude_api_model" "claude-sonnet-4-0" \
+  --claude-model "claude-sonnet-4-0"
+
 assert_model "glm-4.5-valid" \
   "glm_model" "glm-4.5" \
   --glm-model "glm-4.5"
 
-assert_model "glm-5.0-valid" \
-  "glm_model" "glm-5.0" \
-  --glm-model "glm-5.0"
+assert_model "glm-4.7-valid" \
+  "glm_model" "glm-4.7" \
+  --glm-model "glm-4.7"
 
 assert_model "gemini-flash-valid" \
   "gemini_model" "gemini-3-flash" \
@@ -142,7 +152,7 @@ assert_model "invalid-claude" \
   --claude-model "claude-opus-4-6"
 
 assert_model "invalid-glm" \
-  "glm_model" "glm-5.0" \
+  "glm_model" "glm-4.7" \
   --glm-model "glm-3-turbo"
 
 assert_model "invalid-gemini" \
@@ -160,11 +170,14 @@ assert_model "adjusted-true" \
 
 assert_model "adjusted-false-all-valid" \
   "model_policy_adjusted" "false" \
-  --codex-multi-agent-model "gpt-5.3-codex-spark" --glm-model "glm-5.0"
+  --codex-multi-agent-model "gpt-5.3-codex-spark" --glm-model "glm-4.7"
 
 # --- Group 5: JSON format ---
 assert_json "json-codex-main" \
   ".codex_main_model" "gpt-5.4"
+
+assert_json "json-claude-api" \
+  ".claude_api_model" "claude-sonnet-4-0"
 
 assert_json "json-adjusted-false" \
   ".adjusted" "false"

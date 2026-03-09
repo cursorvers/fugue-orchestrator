@@ -36,7 +36,7 @@ recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_glm_model="$(echo "${GLM_MODEL:-glm-4.7}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-3.1-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 # shellcheck source=../lib/safe-eval-policy.sh
@@ -51,12 +51,12 @@ if [[ -x "${model_policy_script}" ]]; then
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
     --xai-model "grok-4" \
     --format env
-  claude_opus_model="${claude_model}"
+  claude_opus_model="${claude_cli_model}"
 else
   claude_opus_model="claude-sonnet-4-6"
   codex_main_model="gpt-5.4"
   codex_multi_agent_model="gpt-5.3-codex-spark"
-  glm_model="glm-5.0"
+  glm_model="glm-4.7"
   gemini_model="gemini-3.1-pro"
   gemini_fallback_model="gemini-3-flash"
 fi
@@ -121,6 +121,32 @@ append_attempt() {
     attempt_trace="${attempt_trace};"
   fi
   attempt_trace="${attempt_trace}${provider}:${model}:${status}"
+}
+
+append_unique_candidate() {
+  local candidate="$1"
+  [[ -n "${candidate}" ]] || return 0
+  local existing
+  for existing in "${candidates[@]:-}"; do
+    if [[ "${existing}" == "${candidate}" ]]; then
+      return 0
+    fi
+  done
+  candidates+=("${candidate}")
+}
+
+claude_help_cache=""
+detect_claude_permission_flag() {
+  if [[ -z "${claude_help_cache}" ]]; then
+    claude_help_cache="$(claude --help 2>&1 || true)"
+  fi
+  if echo "${claude_help_cache}" | grep -q -- '--dangerously-skip-permissions'; then
+    echo "dangerously-skip-permissions"
+  elif echo "${claude_help_cache}" | grep -q -- '--permission-mode'; then
+    echo "permission-mode"
+  else
+    echo ""
+  fi
 }
 
 extract_json_object() {
@@ -329,6 +355,7 @@ execute_claude_model() {
   local err_file="${tmp_dir}/claude-${model}-stderr.log"
   local configured_session_id
   local teams_mode="false"
+  local permission_flag=""
   local -a claude_cmd
   local prompt
   if [[ "${AGENT_NAME:-}" == "claude-teams-executor" || "${AGENT_ROLE:-}" == "teams-executor" ]]; then
@@ -345,13 +372,18 @@ Return ONLY valid JSON."
 Claude Teams bounded mode is active. Work as a narrow collaboration executor and return handoff-ready JSON only."
   fi
   configured_session_id="$(echo "${CLAUDE_SESSION_ID:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  permission_flag="$(detect_claude_permission_flag)"
   claude_cmd=(
     claude
     --print
     --output-format json
-    --permission-mode bypassPermissions
     --model "${model}"
   )
+  if [[ "${permission_flag}" == "dangerously-skip-permissions" ]]; then
+    claude_cmd+=("--dangerously-skip-permissions")
+  elif [[ "${permission_flag}" == "permission-mode" ]]; then
+    claude_cmd+=("--permission-mode" "bypassPermissions")
+  fi
   if [[ -n "${configured_session_id}" ]]; then
     claude_cmd+=(
       --session-id "${configured_session_id}"
@@ -573,12 +605,9 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
       "claude executable was not found in PATH" \
       "claude-cli-unavailable"
   fi
-  candidates=("${MODEL}")
-  if [[ -z "${MODEL}" ]]; then
-    candidates=("${claude_opus_model}")
-  elif [[ "${MODEL}" != "${claude_opus_model}" ]]; then
-    candidates+=("${claude_opus_model}")
-  fi
+  candidates=()
+  append_unique_candidate "${MODEL}"
+  append_unique_candidate "${claude_opus_model}"
   ok="false"
   for m in "${candidates[@]}"; do
     if execute_claude_model "${m}"; then
@@ -607,12 +636,11 @@ elif [[ "${PROVIDER}" == "glm" ]]; then
       "GLM API credential was not configured" \
       "glm-api-key-missing"
   fi
-  candidates=("${MODEL}")
-  if [[ -z "${MODEL}" ]]; then
-    candidates=("${glm_model}")
-  elif [[ "${MODEL}" != "${glm_model}" ]]; then
-    candidates+=("${glm_model}")
-  fi
+  candidates=()
+  append_unique_candidate "${MODEL}"
+  append_unique_candidate "${glm_model}"
+  append_unique_candidate "glm-4.6"
+  append_unique_candidate "glm-4.5"
   ok="false"
   for m in "${candidates[@]}"; do
     if execute_glm_model "${m}"; then

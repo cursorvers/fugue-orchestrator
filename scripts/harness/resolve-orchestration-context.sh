@@ -80,7 +80,7 @@ DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-cl
 CLAUDE_MAIN_ASSIST_POLICY="${CLAUDE_MAIN_ASSIST_POLICY:-codex}"
 CLAUDE_DEGRADED_ASSIST_POLICY="${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}"
 CLAUDE_ROLE_POLICY="${CLAUDE_ROLE_POLICY:-flex}"
-CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-sonnet-4-6}"
+CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-sonnet-4-0}"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
 
 ISSUE_NUMBER=""
@@ -443,8 +443,8 @@ if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
     "${ROOT_DIR}/scripts/lib/model-policy.sh" \
       --codex-main-model "${CODEX_MAIN_MODEL}" \
       --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
-      --claude-model "claude-sonnet-4-6" \
-      --glm-model "glm-5.0" \
+      --claude-model "${CLAUDE_TRANSLATOR_MODEL}" \
+      --glm-model "${FUGUE_GLM_MODEL:-glm-4.7}" \
       --gemini-model "gemini-3.1-pro" \
       --gemini-fallback-model "gemini-3-flash" \
       --xai-model "grok-4" \
@@ -452,6 +452,7 @@ if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
   )"
   CODEX_MAIN_MODEL="${codex_main_model}"
   CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
+  CLAUDE_TRANSLATOR_MODEL="${claude_api_model}"
 elif ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
   CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
 fi

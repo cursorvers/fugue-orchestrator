@@ -65,14 +65,14 @@ if [[ -x "${model_policy_script}" ]]; then
     --codex-main-model "${codex_main_model_default}" \
     --codex-multi-agent-model "${codex_multi_agent_model_default}" \
     --claude-model "${claude_opus_model_default}" \
-    --glm-model "${FUGUE_GLM_MODEL:-glm-5.0}" \
+    --glm-model "${FUGUE_GLM_MODEL:-glm-4.7}" \
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "gemini-3-flash" \
     --xai-model "grok-4" \
     --format env
   codex_main_model_default="${codex_main_model}"
   codex_multi_agent_model_default="${codex_multi_agent_model}"
-  claude_opus_model_default="${claude_model}"
+  claude_opus_model_default="${claude_cli_model}"
 fi
 # Simulation common rule: keep simulation iterations fast by using codex-spark only
 # unless explicitly disabled.
@@ -85,6 +85,10 @@ claude_sonnet6_model_default="${claude_opus_model_default}"
 sim_claude_direct_available="$(echo "${FUGUE_SIM_CLAUDE_DIRECT_AVAILABLE:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${sim_claude_direct_available}" != "true" ]]; then
   sim_claude_direct_available="false"
+fi
+sim_copilot_cli_available="$(echo "${FUGUE_SIM_COPILOT_CLI_AVAILABLE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${sim_copilot_cli_available}" != "true" ]]; then
+  sim_copilot_cli_available="false"
 fi
 sim_codex_api_available="$(echo "${FUGUE_SIM_CODEX_API_AVAILABLE:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${sim_codex_api_available}" != "true" ]]; then
@@ -172,6 +176,7 @@ run_case() {
       --strict-main-requested "${strict_main_requested}" \
       --strict-opus-requested "${strict_opus_requested}" \
       --claude-direct-available "${sim_claude_direct_available}" \
+      --copilot-cli-available "${sim_copilot_cli_available}" \
       --codex-api-available "${sim_codex_api_available}" \
       --subscription-offline-policy "${subscription_offline_policy}" \
       --api-strict-mode "${api_strict_mode}" \

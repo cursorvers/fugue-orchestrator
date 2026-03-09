@@ -504,7 +504,7 @@ safe_eval_policy "${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --claude-model "${claude_opus_model}" \
-  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" \
+  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-4.7}}" \
   --gemini-model "gemini-3.1-pro" \
   --gemini-fallback-model "gemini-3-flash" \
   --xai-model "grok-4" \
@@ -512,7 +512,7 @@ safe_eval_policy "${MODEL_POLICY}" \
 CODEX_MAIN_MODEL="${codex_main_model}"
 CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
 GLM_MODEL="${glm_model}"
-claude_opus_model="${claude_model}"
+claude_opus_model="${claude_cli_model}"
 subscription_timeout="${FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}"
 claude_assist_policy="${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-hybrid}"
 claude_rate_limit_state="$(echo "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"

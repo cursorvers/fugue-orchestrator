@@ -13,7 +13,7 @@ set -euo pipefail
 #   CI_EXECUTION_ENGINE, SUBSCRIPTION_OFFLINE_POLICY,
 #   CANARY_OFFLINE_POLICY_OVERRIDE, EMERGENCY_CONTINUITY_MODE,
 #   SUBSCRIPTION_RUNNER_LABEL, EMERGENCY_ASSIST_POLICY,
-#   API_STRICT_MODE, HAS_ANTHROPIC_API_KEY, HAS_OPENAI_API_KEY,
+#   API_STRICT_MODE, HAS_ANTHROPIC_API_KEY, HAS_COPILOT_CLI, HAS_OPENAI_API_KEY,
 #   DEFAULT_MAIN_ORCHESTRATOR_PROVIDER, EXECUTION_PROVIDER_DEFAULT,
 #   CANARY_ALTERNATE_PROVIDER, CANARY_PRIMARY_HANDOFF_TARGET,
 #   CANARY_VERIFY_ROLLBACK, LEGACY_MAIN_ORCHESTRATOR_PROVIDER,
@@ -233,7 +233,12 @@ if [[ "${legacy_assist_provider}" != "claude" && "${legacy_assist_provider}" != 
   legacy_assist_provider="claude"
 fi
 legacy_force_claude="$(normalize_bool "$(gh_var_default "${repo}" "${LEGACY_FORCE_CLAUDE:-}" "FUGUE_LEGACY_FORCE_CLAUDE" "true")")"
+default_has_copilot_cli="false"
+if command -v copilot >/dev/null 2>&1; then
+  default_has_copilot_cli="true"
+fi
 HAS_ANTHROPIC_API_KEY="$(gh_secret_present_default "${repo}" "${HAS_ANTHROPIC_API_KEY:-}" "ANTHROPIC_API_KEY")"
+HAS_COPILOT_CLI="$(normalize_bool "$(gh_var_default "${repo}" "${HAS_COPILOT_CLI:-}" "FUGUE_HAS_COPILOT_CLI" "${default_has_copilot_cli}")")"
 HAS_OPENAI_API_KEY="$(gh_secret_present_default "${repo}" "${HAS_OPENAI_API_KEY:-}" "OPENAI_API_KEY")"
 
 # --- Token resolution ---
@@ -310,6 +315,7 @@ eval "$(
     --strict-main-requested "true" \
     --strict-opus-requested "true" \
     --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+    --copilot-cli-available "${HAS_COPILOT_CLI}" \
     --codex-api-available "${HAS_OPENAI_API_KEY}" \
     --subscription-offline-policy "${subscription_offline_policy}" \
     --api-strict-mode "${API_STRICT_MODE:-false}" \
@@ -350,6 +356,7 @@ eval "$(
     --strict-main-requested "true" \
     --strict-opus-requested "true" \
     --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+    --copilot-cli-available "${HAS_COPILOT_CLI}" \
     --codex-api-available "${HAS_OPENAI_API_KEY}" \
     --subscription-offline-policy "${subscription_offline_policy}" \
     --api-strict-mode "${API_STRICT_MODE:-false}" \
@@ -399,6 +406,7 @@ if [[ "${verify_rollback_case}" == "true" ]]; then
       --strict-main-requested "true" \
       --strict-opus-requested "true" \
       --claude-direct-available "${HAS_ANTHROPIC_API_KEY}" \
+      --copilot-cli-available "${HAS_COPILOT_CLI}" \
       --codex-api-available "${HAS_OPENAI_API_KEY}" \
       --subscription-offline-policy "${subscription_offline_policy}" \
       --api-strict-mode "${API_STRICT_MODE:-false}" \

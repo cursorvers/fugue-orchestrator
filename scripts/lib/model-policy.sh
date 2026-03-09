@@ -7,6 +7,8 @@ set -euo pipefail
 codex_main_model=""
 codex_multi_agent_model=""
 claude_model=""
+claude_cli_model=""
+claude_api_model=""
 glm_model=""
 gemini_model=""
 gemini_fallback_model=""
@@ -75,8 +77,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 LATEST_CODEX_MAIN="gpt-5.4"
 FALLBACK_CODEX_MAIN="gpt-5-codex"
 LATEST_CODEX_MULTI_DEFAULT="gpt-5.3-codex-spark"
-LATEST_CLAUDE_DEFAULT="claude-sonnet-4-6"
-LATEST_GLM_DEFAULT="glm-5.0"
+LATEST_CLAUDE_CLI_DEFAULT="claude-sonnet-4-6"
+LATEST_CLAUDE_API_DEFAULT="claude-sonnet-4-0"
+LATEST_GLM_DEFAULT="glm-4.7"
 LATEST_GEMINI_PRIMARY="gemini-3.1-pro"
 LATEST_GEMINI_FALLBACK="gemini-3-flash"
 LATEST_XAI_DEFAULT="grok-4"
@@ -91,7 +94,8 @@ xai_raw="$(lower_trim "${xai_model}")"
 
 normalized_codex_main="${LATEST_CODEX_MAIN}"
 normalized_codex_multi="${LATEST_CODEX_MULTI_DEFAULT}"
-normalized_claude="${LATEST_CLAUDE_DEFAULT}"
+normalized_claude_cli="${LATEST_CLAUDE_CLI_DEFAULT}"
+normalized_claude_api="${LATEST_CLAUDE_API_DEFAULT}"
 normalized_glm="${LATEST_GLM_DEFAULT}"
 normalized_gemini="${LATEST_GEMINI_PRIMARY}"
 normalized_gemini_fallback="${LATEST_GEMINI_FALLBACK}"
@@ -118,18 +122,22 @@ if [[ -n "${codex_multi_raw}" ]]; then
   fi
 fi
 
-# Current policy: Claude orchestration lanes stay on Sonnet 4.6.
+# Claude uses different "safe defaults" across execution engines:
+# - CLI/subscription flows keep the Codex-compatible alias in use today.
+# - Direct Anthropic API flows use the official API alias.
 if [[ -n "${claude_raw}" ]]; then
-  if [[ "${claude_raw}" == "claude-sonnet-4-6" ]]; then
-    normalized_claude="${claude_raw}"
+  if [[ "${claude_raw}" == "${LATEST_CLAUDE_CLI_DEFAULT}" ]]; then
+    normalized_claude_cli="${claude_raw}"
+  elif [[ "${claude_raw}" == "${LATEST_CLAUDE_API_DEFAULT}" || "${claude_raw}" =~ ^claude-sonnet-4-[0-9]{8}$ ]]; then
+    normalized_claude_api="${claude_raw}"
   else
     adjusted="true"
-    adjustments+=("claude:${claude_raw}->${LATEST_CLAUDE_DEFAULT}")
+    adjustments+=("claude:${claude_raw}->cli:${LATEST_CLAUDE_CLI_DEFAULT},api:${LATEST_CLAUDE_API_DEFAULT}")
   fi
 fi
 
 if [[ -n "${glm_raw}" ]]; then
-  if [[ "${glm_raw}" == "glm-4.5" || "${glm_raw}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
+  if [[ "${glm_raw}" == "glm-5" || "${glm_raw}" == "glm-4.7" || "${glm_raw}" == "glm-4.7-flash" || "${glm_raw}" == "glm-4.7-flashx" || "${glm_raw}" == "glm-4.6" || "${glm_raw}" == "glm-4.5" || "${glm_raw}" == "glm-4.5-air" ]]; then
     normalized_glm="${glm_raw}"
   else
     adjusted="true"
@@ -173,7 +181,9 @@ if [[ "${format}" == "json" ]]; then
   jq -cn \
     --arg codex_main_model "${normalized_codex_main}" \
     --arg codex_multi_agent_model "${normalized_codex_multi}" \
-    --arg claude_model "${normalized_claude}" \
+    --arg claude_model "${normalized_claude_cli}" \
+    --arg claude_cli_model "${normalized_claude_cli}" \
+    --arg claude_api_model "${normalized_claude_api}" \
     --arg glm_model "${normalized_glm}" \
     --arg gemini_model "${normalized_gemini}" \
     --arg gemini_fallback_model "${normalized_gemini_fallback}" \
@@ -184,6 +194,8 @@ if [[ "${format}" == "json" ]]; then
       codex_main_model:$codex_main_model,
       codex_multi_agent_model:$codex_multi_agent_model,
       claude_model:$claude_model,
+      claude_cli_model:$claude_cli_model,
+      claude_api_model:$claude_api_model,
       glm_model:$glm_model,
       gemini_model:$gemini_model,
       gemini_fallback_model:$gemini_fallback_model,
@@ -196,7 +208,9 @@ fi
 
 printf 'codex_main_model=%q\n' "${normalized_codex_main}"
 printf 'codex_multi_agent_model=%q\n' "${normalized_codex_multi}"
-printf 'claude_model=%q\n' "${normalized_claude}"
+printf 'claude_model=%q\n' "${normalized_claude_cli}"
+printf 'claude_cli_model=%q\n' "${normalized_claude_cli}"
+printf 'claude_api_model=%q\n' "${normalized_claude_api}"
 printf 'glm_model=%q\n' "${normalized_glm}"
 printf 'gemini_model=%q\n' "${normalized_gemini}"
 printf 'gemini_fallback_model=%q\n' "${normalized_gemini_fallback}"

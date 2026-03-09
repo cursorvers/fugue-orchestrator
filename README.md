@@ -62,10 +62,16 @@ Main Orchestrator（統合・報告）
 - `/kernel` の bootstrap は acknowledgement より先に最低 6 本の active lane を起動している必要があります。
 - 通常運用では複数 LLM モデルまたは model profile をまたいだ 6 列以上の並列を最低形とします。
 - 最初の有効な応答には `Bootstrap target: 6+ lanes (minimum 6).` と `Lane manifest:`、および現在アクティブな lane を最低 6 本列挙した行が必要です。
+- bootstrap 中や local 分析中は、便宜的な探索のために approval を要求してはいけません。まず local workspace の証拠を使ってください。
+- network/GitHub/escalated command の approval は、ユーザーが明示的に求めた場合か、その操作なしでは現在タスクを完遂できない場合に限ります。
+- approval prompt を伴う network/GitHub/escalated command を出す前に、同じ TTY に書き続ける active lane は quiesce してください。
+- 背景の Codex activity が同じ terminal に出力中のまま approval prompt を表示してはいけません。
+- lane の quiesce がすぐに成立しない場合は、approval prompt を出さずに `quiescence_timeout` を 1 行で返して fail-close してください。
 
 ## `/vote` 運用契約
 
 - この repo で Codex の `/vote` はローカル継続用の slash prompt です。現在のタスクをそのまま継続し、GitHub への投稿は行いません。
+- `/vote` / `/v` でも approval prompt を伴う操作に入る前は、`/kernel` と同じく lane を quiesce し、無理なら `quiescence_timeout` で fail-close します。
 - この repo の `/vote` / `/v` の SSOT は [`.codex/prompts/vote.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/vote.md) と [`.codex/prompts/v.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/v.md) です。
 - GitHub Actions 側の `/vote` workflow を起動したい場合は、slash prompt ではなく `gh issue comment ... --body '/vote'` または `vote-gh ...` を使ってください。
 - prompt の hot reload は保証しません。`.codex/prompts/vote.md` / `.codex/prompts/v.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
@@ -124,13 +130,14 @@ codex -C /Users/masayuki/Dev/fugue-orchestrator
 # セッション開始後に /kernel を入力
 
 # 3A. サブスク専用（推奨: 従量APIなし）
-# - Codex / Claude CLI に事前ログインして実行
-# - GitHub Actions で使う場合は self-hosted runner が必要（`FUGUE_SUBSCRIPTION_RUNNER_LABEL` 既定: `fugue-subscription`）
+# - local / self-hosted は Codex / Claude CLI に事前ログインして実行
+# - GitHub continuity は Copilot CLI を優先利用（`FUGUE_HAS_COPILOT_CLI=true` で明示可）
+# - GitHub Actions で subscription strict を使う場合は self-hosted runner が必要（`FUGUE_SUBSCRIPTION_RUNNER_LABEL` 既定: `fugue-subscription`）
 
-# 3B. API 実行を使う場合のみキー設定
+# 3B. API 実行を使う場合のみキー設定（Anthropic は secondary fallback）
 export OPENAI_API_KEY="your-openai-key"
 export GLM_API_KEY="your-glm-key"
-export GLM_MODEL="glm-5.0" # optional (default in Tutti lanes is glm-5.0)
+export GLM_MODEL="glm-4.7" # optional (default in Tutti lanes is glm-4.7)
 export GEMINI_API_KEY="your-gemini-key"
 export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
 export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
@@ -143,6 +150,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CI_EXECUTION_ENGINE          --body subscription -R <owner/repo> # harness|api|subscription
 # gh variable set FUGUE_ALLOW_GLM_IN_SUBSCRIPTION    --body true    -R <owner/repo> # trueでsubscriptionでもGLM baseline voter(+design時Gemini)を許可
 # gh variable set FUGUE_SUBSCRIPTION_RUNNER_LABEL    --body fugue-subscription -R <owner/repo> # subscription strictで必須とするrunner label
+# gh variable set FUGUE_HAS_COPILOT_CLI            --body true    -R <owner/repo> # GitHub continuity/harness で Copilot CLI を使う時に明示
 # gh variable set FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC --body 180     -R <owner/repo> # per-lane timeout (seconds)
 # gh variable set FUGUE_SUBSCRIPTION_OFFLINE_POLICY  --body continuity -R <owner/repo> # hold|continuity (subscriptionでrunner不在時)
 # gh variable set FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE --body continuity -R <owner/repo> # inherit|hold|continuity (canary専用: runner不在時の扱い)
@@ -156,7 +164,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5-codex -R <owner/repo> # main orchestrator lane model
 # gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
 # gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body false   -R <owner/repo> # trueで codex-main-orchestrator=gpt-5-codex を厳格要求
-# gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body false   -R <owner/repo> # trueで claude-opus-assist=CLAUDE_OPUS_MODEL を厳格要求
+# gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body false   -R <owner/repo> # trueで claude-opus-assist の direct Claude 実行のみ許可（Copilot/proxy不可）
 # gh variable set FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST --body false   -R <owner/repo> # trueで /vote 時に claude-opus-assist direct success を必須化
 # gh variable set FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX --body true   -R <owner/repo> # trueで assist=claude かつ high-risk/ambiguity タスク時に claude sub gate を必須化
 # gh variable set FUGUE_REQUIRE_BASELINE_TRIO       --body true    -R <owner/repo> # trueで codex+claude+glm の成功参加を必須化

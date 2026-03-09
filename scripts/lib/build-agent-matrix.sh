@@ -18,7 +18,7 @@ codex_multi_agent_model="gpt-5.3-codex-spark"
 claude_opus_model="claude-sonnet-4-6"
 claude_sonnet4_model="claude-sonnet-4-6"
 claude_sonnet6_model="claude-sonnet-4-6"
-glm_model="glm-5.0"
+glm_model="glm-4.7"
 gemini_model="gemini-3.1-pro"
 xai_model="grok-4"
 enable_claude_teams="false"
@@ -87,7 +87,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --glm-model)
-      glm_model="${2:-glm-5.0}"
+      glm_model="${2:-glm-4.7}"
       shift 2
       ;;
     --gemini-model)
@@ -133,7 +133,7 @@ Options:
   --claude-opus-model VALUE         default: claude-sonnet-4-6
   --claude-sonnet4-model VALUE      default: claude-sonnet-4-6
   --claude-sonnet6-model VALUE      default: claude-sonnet-4-6
-  --glm-model VALUE                 default: glm-5.0
+  --glm-model VALUE                 default: glm-4.7
   --gemini-model VALUE              default: gemini-3.1-pro
   --xai-model VALUE                 default: grok-4
   --enable-claude-teams VALUE       true|false
@@ -221,9 +221,15 @@ if [[ -x "${model_policy_script}" ]]; then
     --gemini-model "${gemini_model}" \
     --xai-model "${xai_model}" \
     --format env
-  claude_opus_model="${claude_model}"
-  claude_sonnet4_model="${claude_model}"
-  claude_sonnet6_model="${claude_model}"
+  if [[ "${engine}" == "subscription" ]]; then
+    claude_opus_model="${claude_cli_model}"
+    claude_sonnet4_model="${claude_cli_model}"
+    claude_sonnet6_model="${claude_cli_model}"
+  else
+    claude_opus_model="${claude_api_model}"
+    claude_sonnet4_model="${claude_api_model}"
+    claude_sonnet6_model="${claude_api_model}"
+  fi
 else
   if [[ -z "${codex_main_model}" ]]; then
     codex_main_model="gpt-5.4"
@@ -241,7 +247,7 @@ else
     claude_sonnet6_model="claude-sonnet-4-6"
   fi
   if [[ -z "${glm_model}" ]]; then
-    glm_model="glm-5.0"
+    glm_model="glm-4.7"
   fi
   if [[ -z "${gemini_model}" ]]; then
     gemini_model="gemini-3.1-pro"

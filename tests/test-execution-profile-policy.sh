@@ -97,7 +97,7 @@ assert_field "sub-online-strict-main" "strict_main_effective" "true" \
 # --- Group 2: Subscription offline + continuity ---
 assert_profile "sub-offline-continuity" \
   "api-continuity" "ubuntu-latest" "claude" \
-  --requested-engine subscription --self-hosted-online false --assist-provider claude --claude-state ok
+  --requested-engine subscription --self-hosted-online false --assist-provider claude --claude-state ok --claude-direct-available true
 
 assert_field "sub-offline-continuity-active" "continuity_active" "true" \
   --requested-engine subscription --self-hosted-online false --subscription-offline-policy continuity
@@ -149,11 +149,11 @@ assert_profile "hold-degraded-force" \
 # --- Group 7: API/harness engine ---
 assert_profile "api-standard" \
   "api-standard" "ubuntu-latest" "claude" \
-  --requested-engine api --assist-provider claude --claude-state ok
+  --requested-engine api --assist-provider claude --claude-state ok --claude-direct-available true
 
 assert_profile "harness-standard" \
   "api-standard" "ubuntu-latest" "claude" \
-  --requested-engine harness --assist-provider claude --claude-state ok
+  --requested-engine harness --assist-provider claude --claude-state ok --claude-direct-available true
 
 # --- Group 8: Emergency continuity mode ---
 assert_profile "emergency-continuity" \
@@ -170,6 +170,14 @@ assert_profile "api-claude-unavailable" \
 
 assert_field "api-claude-unavail-reason" "assist_adjustment_reason" "api-capability-assist-claude-unavailable->codex" \
   --requested-engine api --assist-provider claude --claude-state ok --claude-direct-available false --emergency-assist-policy codex
+
+assert_profile "api-copilot-available" \
+  "api-standard" "ubuntu-latest" "claude" \
+  --requested-engine api --assist-provider claude --claude-state ok --claude-direct-available false --copilot-cli-available true --emergency-assist-policy codex
+
+assert_profile "sub-offline-continuity-copilot" \
+  "api-continuity" "ubuntu-latest" "claude" \
+  --requested-engine subscription --self-hosted-online false --assist-provider claude --claude-state ok --claude-direct-available false --copilot-cli-available true --subscription-offline-policy continuity
 
 # --- Group 10: Codex assist bypasses demotion ---
 assert_profile "sub-offline-codex-assist" \

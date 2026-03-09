@@ -121,6 +121,10 @@ grep -q 'CANARY_DISPATCH_RUN_ID: \${{ inputs.canary_dispatch_run_id || '\'''\'' 
   echo "FAIL: router trust step should receive canary dispatch run id env" >&2
   exit 1
 }
+grep -q '"\${copilot_cli_available}" != "true" && "\${copilot_cli_available}" != "false"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow must respect explicit HAS_COPILOT_CLI=false without auto-upgrading from local binary detection" >&2
+  exit 1
+}
 grep -q 'GITHUB_EVENT_NAME: \${{ github.event_name }}' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should inspect event provenance for canary bypass" >&2
   exit 1
@@ -183,6 +187,7 @@ plan_output="$(
   EMERGENCY_ASSIST_POLICY="none" \
   API_STRICT_MODE="false" \
   HAS_ANTHROPIC_API_KEY="true" \
+  HAS_COPILOT_CLI="false" \
   HAS_OPENAI_API_KEY="true" \
   DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
   EXECUTION_PROVIDER_DEFAULT="" \
@@ -240,5 +245,17 @@ rollback_task_size="$(printf '%s\n' "${plan_output}" | jq -r 'select(.case == "r
   exit 1
 }
 echo "PASS [plan-only-cases]"
+continuity_plan_output="$(CANARY_PLAN_ONLY=true CANARY_PLAN_ONLINE_COUNT=0 GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" CLAUDE_RATE_LIMIT_STATE="ok" CLAUDE_ROLE_POLICY="flex" CLAUDE_DEGRADED_ASSIST_POLICY="claude" CLAUDE_MAIN_ASSIST_POLICY="claude" CI_EXECUTION_ENGINE="subscription" SUBSCRIPTION_OFFLINE_POLICY="continuity" CANARY_OFFLINE_POLICY_OVERRIDE="continuity" EMERGENCY_CONTINUITY_MODE="false" SUBSCRIPTION_RUNNER_LABEL="fugue-subscription" EMERGENCY_ASSIST_POLICY="codex" API_STRICT_MODE="false" HAS_ANTHROPIC_API_KEY="false" HAS_COPILOT_CLI="true" HAS_OPENAI_API_KEY="true" DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" EXECUTION_PROVIDER_DEFAULT="" CANARY_ALTERNATE_PROVIDER="claude" CANARY_PRIMARY_HANDOFF_TARGET="kernel" CANARY_VERIFY_ROLLBACK="false" LEGACY_MAIN_ORCHESTRATOR_PROVIDER="claude" LEGACY_ASSIST_ORCHESTRATOR_PROVIDER="claude" LEGACY_FORCE_CLAUDE="true" CANARY_LABEL_WAIT_ATTEMPTS="1" CANARY_LABEL_WAIT_SLEEP_SEC="1" CANARY_WAIT_FAST_ATTEMPTS="1" CANARY_WAIT_FAST_SLEEP_SEC="1" CANARY_WAIT_SLOW_ATTEMPTS="0" CANARY_WAIT_SLOW_SLEEP_SEC="1" bash "${CANARY_SCRIPT}")"
+continuity_regular_assist="$(printf '%s\n' "${continuity_plan_output}" | jq -r 'select(.case == "regular") | .resolved_assist')"
+continuity_regular_profile="$(printf '%s\n' "${continuity_plan_output}" | jq -r 'select(.case == "regular") | .resolved_profile')"
+if [[ "${continuity_regular_assist}" != "claude" ]]; then
+  echo "FAIL: continuity regular case should keep claude assist when Copilot CLI is available, got ${continuity_regular_assist}" >&2
+  exit 1
+fi
+if [[ "${continuity_regular_profile}" != "api-continuity" ]]; then
+  echo "FAIL: continuity regular case should resolve api-continuity profile, got ${continuity_regular_profile}" >&2
+  exit 1
+fi
+echo "PASS [plan-only-continuity-copilot]"
 
-echo "=== Results: 2/2 passed, 0 failed ==="
+echo "=== Results: 3/3 passed, 0 failed ==="
