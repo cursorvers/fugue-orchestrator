@@ -161,6 +161,10 @@ grep -q 'PERM="canary-verified"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should grant only verified canary trust" >&2
   exit 1
 }
+if grep -q 'vote-bypass' "${ROUTER_WORKFLOW}"; then
+  echo "FAIL: router trust step should not retain vote-bypass trust" >&2
+  exit 1
+fi
 echo "PASS [workflow-wiring]"
 
 plan_output="$(

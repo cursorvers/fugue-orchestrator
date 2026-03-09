@@ -16,5 +16,13 @@ grep -Fq "(github.event_name == 'issue_comment' || github.event_name == 'workflo
   echo "FAIL: task router handoff must require a trusted start-signal event" >&2
   exit 1
 }
+grep -Fq "steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted == 'true'" "${WORKFLOW}" || {
+  echo "FAIL: task router project annotation must require trusted context" >&2
+  exit 1
+}
+grep -Fq "&& steps.ctx.outputs.trusted == 'true' }}" "${WORKFLOW}" || {
+  echo "FAIL: task router handoff must require trust after /vote parsing" >&2
+  exit 1
+}
 
 echo "PASS [task-router-start-signal]"

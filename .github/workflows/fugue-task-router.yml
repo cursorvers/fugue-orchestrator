@@ -226,7 +226,7 @@ jobs:
           path: .fugue-orchestrator
 
       - name: Annotate target project (label + title prefix)
-        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.trusted == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
@@ -301,7 +301,7 @@ jobs:
 
       - name: GHA24 mainframe handoff (natural language)
         id: handoff
-        if: ${{ steps.ctx.outputs.should_run == 'true' && (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && (steps.ctx.outputs.trusted == 'true' || steps.ctx.outputs.is_vote_command == 'true') }}
+        if: ${{ steps.ctx.outputs.should_run == 'true' && (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && steps.ctx.outputs.trusted == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
