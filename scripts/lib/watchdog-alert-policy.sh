@@ -268,16 +268,17 @@ due_reasons=()
 
 mark_reason_due() {
   local reason="$1"
-  local bucket_key="$2"
   local state_key last_bucket
 
   active_reasons+=("${reason}")
   if [[ "${persist_state}" == "true" ]]; then
     state_key="$(reason_key "${reason}")"
     last_bucket="$(jq -r --arg key "${state_key}" '.reason_buckets[$key] // ""' <<<"${updated_state_json}")"
-    if [[ "${last_bucket}" != "${bucket_key}" ]]; then
+    if [[ -z "${last_bucket}" ]]; then
       due_reasons+=("${reason}")
-      updated_state_json="$(jq -c --arg key "${state_key}" --arg value "${bucket_key}" '.reason_buckets[$key] = $value' <<<"${updated_state_json}")"
+    fi
+    if [[ "${last_bucket}" != "active" ]]; then
+      updated_state_json="$(jq -c --arg key "${state_key}" --arg value "active" '.reason_buckets[$key] = $value' <<<"${updated_state_json}")"
       state_update_required="true"
     fi
   else
@@ -290,7 +291,7 @@ maybe_mark_periodic_reason() {
   local interval_minutes="$2"
 
   if [[ "${persist_state}" == "true" ]]; then
-    mark_reason_due "${reason}" "$(wall_bucket_key "${interval_minutes}")"
+    mark_reason_due "${reason}"
     return
   fi
 
@@ -316,15 +317,7 @@ maybe_mark_stale_reason() {
   fi
 
   if [[ "${persist_state}" == "true" ]]; then
-    local bucket_key state_key last_bucket
-    bucket_key="$(stale_bucket_key "${minutes}")"
-    state_key="$(reason_key "${reason}")"
-    last_bucket="$(jq -r --arg key "${state_key}" '.reason_buckets[$key] // ""' <<<"${updated_state_json}")"
-    if [[ "${last_bucket}" != "${bucket_key}" ]]; then
-      due_reasons+=("${reason}")
-      updated_state_json="$(jq -c --arg key "${state_key}" --arg value "${bucket_key}" '.reason_buckets[$key] = $value' <<<"${updated_state_json}")"
-      state_update_required="true"
-    fi
+    mark_reason_due "${reason}"
     return
   fi
 
@@ -375,6 +368,21 @@ fi
 should_alert="false"
 if (( ${#due_reasons[@]} > 0 )); then
   should_alert="true"
+fi
+
+if [[ "${persist_state}" == "true" ]]; then
+  if (( ${#active_reasons[@]} > 0 )); then
+    active_reason_keys_json="$(jq -cn '$ARGS.positional' --args "${active_reasons[@]}")"
+  else
+    active_reason_keys_json='[]'
+  fi
+  pruned_state_json="$(jq -c --argjson active_keys "${active_reason_keys_json}" '
+    .reason_buckets |= with_entries(select(.key as $key | ($active_keys | index($key)) != null))
+  ' <<<"${updated_state_json}")"
+  if [[ "${pruned_state_json}" != "${updated_state_json}" ]]; then
+    updated_state_json="${pruned_state_json}"
+    state_update_required="true"
+  fi
 fi
 
 active_reasons_text="none"
