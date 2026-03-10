@@ -60,6 +60,8 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER_WORKFLOW_CALL: ${{ inputs.issue_number || '' }}
+          ISSUE_NUMBER_WORKFLOW_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
         run: |
           set -euo pipefail
 
@@ -90,10 +92,32 @@ jobs:
             gh_retry "${attempts}" gh api "${endpoint}"
           }
 
+          write_multiline_output() {
+            local name="$1"
+            local value="$2"
+            local delim="FUGUE_${name}_$(date +%s)_${RANDOM}_${RANDOM}"
+            {
+              echo "${name}<<${delim}"
+              printf '%s\n' "${value}"
+              echo "${delim}"
+            } >> "${GITHUB_OUTPUT}"
+          }
+
+          normalize_issue_number() {
+            local raw="$1"
+            raw="$(printf '%s' "${raw}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            if [[ "${raw}" =~ ^[0-9]+$ ]]; then
+              printf '%s\n' "${raw}"
+              return 0
+            fi
+            return 1
+          }
+
           COMMENT_BODY=""
           COMMENT_AUTHOR=""
           IS_VOTE_COMMAND="false"
           VOTE_INSTRUCTION=""
+          INVALID_ISSUE_NUMBER="false"
           if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" ]]; then
             COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
             COMMENT_AUTHOR="$(jq -r '.comment.user.login // ""' "${GITHUB_EVENT_PATH}")"
@@ -106,11 +130,21 @@ jobs:
           fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
-            ISSUE_NUMBER="${{ inputs.issue_number }}"
-            issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            if ISSUE_NUMBER="$(normalize_issue_number "${ISSUE_NUMBER_WORKFLOW_CALL:-}")"; then
+              issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            else
+              INVALID_ISSUE_NUMBER="true"
+              ISSUE_NUMBER=""
+              issue_json='{}'
+            fi
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
-            issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            if ISSUE_NUMBER="$(normalize_issue_number "${ISSUE_NUMBER_WORKFLOW_DISPATCH:-}")"; then
+              issue_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+            else
+              INVALID_ISSUE_NUMBER="true"
+              ISSUE_NUMBER=""
+              issue_json='{}'
+            fi
           else
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
@@ -132,9 +166,11 @@ jobs:
             TRUST_SUBJECT="${COMMENT_AUTHOR}"
           fi
           PERM="none"
-          PERM_JSON="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission" 4 2>/dev/null || echo '{}')"
-          if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
-            PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
+          if [[ -n "${TRUST_SUBJECT}" ]]; then
+            PERM_JSON="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/collaborators/${TRUST_SUBJECT}/permission" 4 2>/dev/null || echo '{}')"
+            if echo "${PERM_JSON}" | jq -e '.permission' >/dev/null 2>&1; then
+              PERM="$(echo "${PERM_JSON}" | jq -r '.permission')"
+            fi
           fi
           TRUSTED="false"
           if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
@@ -147,7 +183,10 @@ jobs:
 
           SHOULD_RUN="true"
           SKIP_REASON=""
-          if [[ "${IS_CANARY}" == "true" ]]; then
+          if [[ "${INVALID_ISSUE_NUMBER}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="invalid-issue-number"
+          elif [[ "${IS_CANARY}" == "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="canary-dispatch-owned"
           elif [[ "${GITHUB_EVENT_NAME}" == "issues" ]]; then
@@ -169,20 +208,8 @@ jobs:
 
           {
             echo "issue_number=${ISSUE_NUMBER}"
-            echo "issue_title<<EOF"
-            echo "${TITLE}"
-            echo "EOF"
-            echo "issue_body<<EOF"
-            echo "${BODY}"
-            echo "EOF"
-            echo "comment_body<<EOF"
-            echo "${COMMENT_BODY}"
-            echo "EOF"
             echo "comment_author=${COMMENT_AUTHOR}"
             echo "is_vote_command=${IS_VOTE_COMMAND}"
-            echo "vote_instruction<<EOF"
-            echo "${VOTE_INSTRUCTION}"
-            echo "EOF"
             echo "author=${AUTHOR}"
             echo "trust_subject=${TRUST_SUBJECT}"
             echo "author_association=${AUTHOR_ASSOC}"
@@ -196,6 +223,10 @@ jobs:
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
+          write_multiline_output "issue_title" "${TITLE}"
+          write_multiline_output "issue_body" "${BODY}"
+          write_multiline_output "comment_body" "${COMMENT_BODY}"
+          write_multiline_output "vote_instruction" "${VOTE_INSTRUCTION}"
 
       - name: Skip when not target
         if: ${{ steps.ctx.outputs.should_run != 'true' }}
@@ -577,12 +608,12 @@ jobs:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          ZAI_MODEL: glm-5.0
+          ZAI_MODEL: glm-5
           XAI_MODEL: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_PRIMARY_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
-          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
         run: |
@@ -595,8 +626,8 @@ jobs:
           TITLE="${ISSUE_TITLE}"
           BODY="${ISSUE_BODY}"
           CODEX_MAIN_MODEL="gpt-5-codex"
-          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
-            CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex|gpt-5\.4)$ ]]; then
+            CODEX_MULTI_AGENT_MODEL="gpt-5-codex"
           fi
           if [[ "${GEMINI_PRIMARY_MODEL}" != "gemini-3.1-pro" && "${GEMINI_PRIMARY_MODEL}" != "gemini-3-flash" ]]; then
             GEMINI_PRIMARY_MODEL="gemini-3.1-pro"

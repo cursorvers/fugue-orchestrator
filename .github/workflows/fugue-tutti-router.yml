@@ -228,7 +228,9 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER_INPUT: ${{ inputs.issue_number || '' }}
           TRUST_SUBJECT_INPUT: ${{ inputs.trust_subject || '' }}
+          CANARY_DISPATCH_OWNED_INPUT: ${{ inputs.canary_dispatch_owned || 'false' }}
           ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           EXTRA_ISSUE_INSTRUCTION_INPUT: ${{ inputs.extra_issue_instruction || '' }}
@@ -261,13 +263,39 @@ jobs:
             return 1
           }
 
-          ISSUE_NUMBER="${{ inputs.issue_number }}"
-          if [[ -n "${ISSUE_NUMBER}" ]]; then
+          write_multiline_output() {
+            local name="$1"
+            local value="$2"
+            local delim="FUGUE_${name}_$(date +%s)_${RANDOM}_${RANDOM}"
+            {
+              echo "${name}<<${delim}"
+              printf '%s\n' "${value}"
+              echo "${delim}"
+            } >> "${GITHUB_OUTPUT}"
+          }
+
+          normalize_issue_number() {
+            local raw="$1"
+            raw="$(printf '%s' "${raw}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            if [[ "${raw}" =~ ^[0-9]+$ ]]; then
+              printf '%s\n' "${raw}"
+              return 0
+            fi
+            return 1
+          }
+
+          INVALID_ISSUE_NUMBER="false"
+          issue_endpoint=""
+          if ISSUE_NUMBER="$(normalize_issue_number "${ISSUE_NUMBER_INPUT:-}")"; then
             issue_endpoint="repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}"
             if ! issue_json="$(gh_api_retry "${issue_endpoint}" 5)"; then
               echo "Failed to fetch issue context after retries: ${issue_endpoint}" >&2
               exit 1
             fi
+          elif [[ -n "$(printf '%s' "${ISSUE_NUMBER_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')" ]]; then
+            INVALID_ISSUE_NUMBER="true"
+            ISSUE_NUMBER=""
+            issue_json='{}'
           else
             issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
             ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
@@ -275,7 +303,7 @@ jobs:
 
           TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
           BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
-          canary_dispatch_owned="$(echo "${{ inputs.canary_dispatch_owned || 'false' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          canary_dispatch_owned="$(echo "${CANARY_DISPATCH_OWNED_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${canary_dispatch_owned}" != "true" ]]; then
             canary_dispatch_owned="false"
           fi
@@ -312,7 +340,7 @@ jobs:
           fi
           HAS_PROCESSING="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | index("processing") != null')"
           HAS_IMPLEMENT_REQUEST="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
-          if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
+          if [[ -n "${issue_endpoint}" && ( "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ) ]]; then
             for _label_retry in 1 2 3; do
               sleep "$((2 ** _label_retry))"
               issue_json="$(gh_api_retry "${issue_endpoint}" 4 || echo "${issue_json}")"
@@ -349,7 +377,7 @@ jobs:
             subscription_runner_label="fugue-subscription"
           fi
           self_hosted_online_count="0"
-          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+          if [[ "${INVALID_ISSUE_NUMBER}" != "true" && "${ci_execution_engine}" == "subscription" ]]; then
             runners_endpoint="repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100"
             runners_json="$(gh_api_retry "${runners_endpoint}" 5 || echo '{}')"
             self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
@@ -363,7 +391,10 @@ jobs:
 
           SHOULD_RUN="true"
           SKIP_REASON=""
-          if [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
+          if [[ "${INVALID_ISSUE_NUMBER}" == "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="invalid-issue-number"
+          elif [[ "${HAS_FUGUE}" != "true" || "${HAS_TUTTI}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-required-labels"
           elif [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" && "${emergency_continuity_mode}" != "true" && "${self_hosted_online_count}" == "0" ]]; then
@@ -381,15 +412,6 @@ jobs:
 
           {
             echo "issue_number=${ISSUE_NUMBER}"
-            echo "issue_title<<EOF"
-            echo "${TITLE}"
-            echo "EOF"
-            echo "issue_body<<EOF"
-            echo "${BODY}"
-            echo "EOF"
-            echo "extra_issue_instruction<<EOF"
-            echo "${extra_issue_instruction}"
-            echo "EOF"
             echo "author=${AUTHOR}"
             echo "trust_subject=${trust_subject}"
             echo "has_implement_request=${HAS_IMPLEMENT_REQUEST}"
@@ -402,6 +424,9 @@ jobs:
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
           } >> "${GITHUB_OUTPUT}"
+          write_multiline_output "issue_title" "${TITLE}"
+          write_multiline_output "issue_body" "${BODY}"
+          write_multiline_output "extra_issue_instruction" "${extra_issue_instruction}"
 
       - name: Check author trust
         id: trust
@@ -609,8 +634,8 @@ jobs:
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
-          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
           STRICT_MAIN_CODEX_MODEL: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
@@ -681,12 +706,12 @@ jobs:
             claude_max_plan="false"
           fi
           CODEX_MAIN_MODEL="gpt-5.4"
-          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex)$ ]]; then
-            CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex|gpt-5\.4)$ ]]; then
+            CODEX_MULTI_AGENT_MODEL="gpt-5-codex"
           fi
-          GLM_MODEL="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          GLM_MODEL="$(echo "${GLM_MODEL:-glm-5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${GLM_MODEL}" ]]; then
-            GLM_MODEL="glm-5.0"
+            GLM_MODEL="glm-5"
           fi
           if [[ "${CLAUDE_OPUS_MODEL}" != "claude-sonnet-4-6" ]]; then
             CLAUDE_OPUS_MODEL="claude-sonnet-4-6"
@@ -875,7 +900,7 @@ jobs:
             if [[ "${http_code}" != "200" && -n "${ZAI_API_KEY:-}" ]]; then
               effective_provider="glm"
               effective_api_url="https://api.z.ai/api/coding/paas/v4/chat/completions"
-              glm_fallback_candidates=("${GLM_MODEL}" "glm-4.5")
+              glm_fallback_candidates=("${GLM_MODEL}")
               for gm in "${glm_fallback_candidates[@]}"; do
                 chosen_model="${gm}"
                 fallback_req="$(jq -n \
@@ -934,7 +959,7 @@ jobs:
             done
           else
             if [[ "${PROVIDER}" == "glm" ]]; then
-              candidates=("${MODEL}" "${GLM_MODEL}" "glm-4.5")
+              candidates=("${MODEL}" "${GLM_MODEL}")
               for m in "${candidates[@]}"; do
                 chosen_model="${m}"
                 req="$(jq -n \
@@ -1448,8 +1473,8 @@ jobs:
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
-          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'standard' }}
           GLM_SUBAGENT_MODE: ${{ vars.FUGUE_GLM_SUBAGENT_MODE || 'paired' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -1812,17 +1837,17 @@ jobs:
           eval "$(
             bash "${orchestrator_lib_dir}/model-policy.sh" \
               --codex-main-model "${CODEX_MAIN_MODEL:-gpt-5.4}" \
-              --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" \
+              --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" \
               --claude-model "${CLAUDE_OPUS_MODEL}" \
-              --glm-model "${GLM_MODEL:-glm-5.0}" \
+              --glm-model "${GLM_MODEL:-glm-5}" \
               --gemini-model "${GEMINI_MODEL}" \
               --gemini-fallback-model "gemini-3-flash" \
               --xai-model "${XAI_MODEL}" \
               --format env
           )"
-          glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          glm_model="$(echo "${GLM_MODEL:-glm-5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${glm_model}" ]]; then
-            glm_model="glm-5.0"
+            glm_model="glm-5"
           fi
 
           matrix_args=(

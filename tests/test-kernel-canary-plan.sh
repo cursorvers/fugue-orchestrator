@@ -105,12 +105,84 @@ grep -Fq 'canary_dispatch_run_id: ${{ steps.ctx.outputs.canary_dispatch_run_id }
   echo "FAIL: caller workflow missing canary dispatch run id ctx output wiring" >&2
   exit 1
 }
+grep -q '^run-name:' "${TUTTI_CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing run-name for canary correlation" >&2
+  exit 1
+}
+grep -Fq "format('issue #{0} dispatch {1}'" "${TUTTI_CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow should stamp workflow_dispatch runs with issue-number + nonce run-name for canary correlation" >&2
+  exit 1
+}
 grep -Fq 'canary_dispatch_run_id: "${{ needs.ctx.outputs.canary_dispatch_run_id }}"' "${TUTTI_CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing canary dispatch run id router wiring" >&2
   exit 1
 }
-grep -q 'canary_dispatch_run_id="\${GITHUB_RUN_ID}"' "${CANARY_SCRIPT}" || {
+grep -Fq 'originating_canary_run_id="$(printf '\''%s'\'' "${GITHUB_RUN_ID:-${ts}}" | tr -cd '\''0-9'\'')"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should synthesize a numeric dispatch run id for local and workflow canary executions" >&2
+  exit 1
+}
+grep -Fq 'canary_dispatch_run_id="${originating_canary_run_id}"' "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script should pass originating canary run id into caller dispatch" >&2
+  exit 1
+}
+grep -q 'CANARY_WAIT_RUN_ATTEMPTS' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing workflow-run grace wait controls" >&2
+  exit 1
+}
+grep -q 'actions/workflows/fugue-tutti-caller.yml/runs?event=workflow_dispatch' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should inspect workflow_dispatch runs to map issue dispatches" >&2
+  exit 1
+}
+grep -q 'dispatch_nonce="\${canary_dispatch_nonce}-\${issue_num}"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should derive a per-issue dispatch nonce for workflow run correlation" >&2
+  exit 1
+}
+grep -q 'expected_run_title="\$(expected_dispatch_run_name "\${issue_num}" "\${dispatch_nonce}")"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should match workflow runs by expected run-name, not only by unseen id" >&2
+  exit 1
+}
+grep -q '__RUN_FAILED__' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should surface workflow run failure conclusions distinctly" >&2
+  exit 1
+}
+if grep -Fq 'expected main=`' "${CANARY_SCRIPT}"; then
+  echo "FAIL: canary fail comment should not include backticks that old router workflows may shell-expand" >&2
+  exit 1
+fi
+if grep -Fq 'actual main=`' "${CANARY_SCRIPT}"; then
+  echo "FAIL: canary pass comment should not include backticks that old router workflows may shell-expand" >&2
+  exit 1
+fi
+if grep -Fq 'ISSUE_NUMBER="${{ inputs.issue_number }}"' "${TASK_ROUTER_WORKFLOW}"; then
+  echo "FAIL: task router should not inline workflow inputs directly into shell source" >&2
+  exit 1
+fi
+if grep -Fq 'ISSUE_NUMBER="${{ inputs.issue_number }}"' "${ROUTER_WORKFLOW}"; then
+  echo "FAIL: tutti router should not inline workflow inputs directly into shell source" >&2
+  exit 1
+fi
+if grep -Fq '<<EOF' "${TASK_ROUTER_WORKFLOW}"; then
+  echo "FAIL: task router should not use fixed EOF delimiters for untrusted multiline outputs" >&2
+  exit 1
+fi
+if grep -Fq '<<EOF' "${ROUTER_WORKFLOW}"; then
+  echo "FAIL: tutti router should not use fixed EOF delimiters for untrusted multiline outputs" >&2
+  exit 1
+fi
+grep -q 'invalid-issue-number' "${TASK_ROUTER_WORKFLOW}" || {
+  echo "FAIL: task router should reject malformed issue numbers explicitly" >&2
+  exit 1
+}
+grep -q 'normalize_issue_number' "${TASK_ROUTER_WORKFLOW}" || {
+  echo "FAIL: task router should validate issue numbers before routing" >&2
+  exit 1
+}
+grep -q 'invalid-issue-number' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: tutti router should reject malformed issue numbers explicitly" >&2
+  exit 1
+}
+grep -q 'normalize_issue_number' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: tutti router should validate issue numbers before routing" >&2
   exit 1
 }
 grep -q 'if \[\[ "\${canary_dispatch_owned}" == "true" \]\]; then' "${ROUTER_WORKFLOW}" || {

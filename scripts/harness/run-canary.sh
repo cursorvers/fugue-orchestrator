@@ -20,7 +20,10 @@ set -euo pipefail
 #   LEGACY_ASSIST_ORCHESTRATOR_PROVIDER, LEGACY_FORCE_CLAUDE,
 #   CANARY_LABEL_WAIT_ATTEMPTS, CANARY_LABEL_WAIT_SLEEP_SEC,
 #   CANARY_WAIT_FAST_ATTEMPTS, CANARY_WAIT_FAST_SLEEP_SEC,
-#   CANARY_WAIT_SLOW_ATTEMPTS, CANARY_WAIT_SLOW_SLEEP_SEC
+#   CANARY_WAIT_SLOW_ATTEMPTS, CANARY_WAIT_SLOW_SLEEP_SEC,
+#   CANARY_WAIT_RUN_ATTEMPTS, CANARY_WAIT_RUN_SLEEP_SEC,
+#   CANARY_WAIT_POST_RUN_ATTEMPTS, CANARY_WAIT_POST_RUN_SLEEP_SEC,
+#   CANARY_DISPATCH_DETECT_ATTEMPTS, CANARY_DISPATCH_DETECT_SLEEP_SEC
 #
 # Optional env vars:
 #   OPS_TOKEN            — preferred over GH_TOKEN for issue operations
@@ -119,12 +122,150 @@ clamp_num() {
   echo "${value}"
 }
 
+urlencode() {
+  jq -rn --arg value "${1:-}" '$value|@uri'
+}
+
+recent_workflow_dispatch_runs_json() {
+  local workflow_ref="${1:-}"
+  local endpoint="repos/${repo}/actions/workflows/fugue-tutti-caller.yml/runs?event=workflow_dispatch&per_page=20"
+  if [[ -n "${workflow_ref}" ]]; then
+    endpoint="${endpoint}&branch=$(urlencode "${workflow_ref}")"
+  fi
+  gh_api_retry "${endpoint}" 4 || echo '{}'
+}
+
+latest_workflow_dispatch_run_ids() {
+  local workflow_ref="${1:-}"
+  recent_workflow_dispatch_runs_json "${workflow_ref}" \
+    | jq -r '.workflow_runs[]?.id // empty' 2>/dev/null || true
+}
+
+expected_dispatch_run_name() {
+  local issue_num="$1"
+  local dispatch_nonce="$2"
+  printf 'issue #%s dispatch %s\n' "${issue_num}" "${dispatch_nonce}"
+}
+
+await_new_workflow_dispatch_run() {
+  local workflow_ref="${1:-}"
+  local baseline_ids="${2:-}"
+  local expected_title="${3:-}"
+  local created_after="${4:-}"
+  local actor_login="${5:-}"
+  local max_attempts="${canary_dispatch_detect_attempts}"
+  local sleep_sec="${canary_dispatch_detect_sleep_sec}"
+  local attempt=1
+  local runs_json matched_ids run_id matched_count
+  while (( attempt <= max_attempts )); do
+    runs_json="$(recent_workflow_dispatch_runs_json "${workflow_ref}")"
+    matched_ids="$(printf '%s\n' "${runs_json}" | jq -r --arg title "${expected_title}" '
+      [
+        .workflow_runs[]?
+        | select(($title == "") or ((.display_title // .name // "") == $title))
+        | .id
+      ][]? // empty
+    ' 2>/dev/null || true)"
+    if [[ -z "${matched_ids}" ]]; then
+      matched_ids="$(printf '%s\n' "${runs_json}" | jq -r \
+        --arg created_after "${created_after}" \
+        --arg actor_login "${actor_login}" '
+        [
+          .workflow_runs[]?
+          | select(($created_after == "") or ((.created_at // "") >= $created_after))
+          | select(($actor_login == "") or ((.actor.login // "") == $actor_login))
+          | .id
+        ][]? // empty
+      ' 2>/dev/null || true)"
+    fi
+    matched_count="$(printf '%s\n' "${matched_ids}" | sed '/^$/d' | wc -l | tr -d ' ')"
+    if [[ "${matched_count}" != "1" ]]; then
+      matched_ids=""
+    fi
+    while IFS= read -r run_id; do
+      [[ -n "${run_id}" ]] || continue
+      if ! grep -Fxq "${run_id}" <<< "${baseline_ids}"; then
+        printf '%s\n' "${run_id}"
+        return 0
+      fi
+    done <<< "${matched_ids}"
+    if (( attempt == max_attempts )); then
+      break
+    fi
+    sleep "${sleep_sec}"
+    attempt="$((attempt + 1))"
+  done
+  return 1
+}
+
+dispatch_run_status_payload() {
+  local dispatch_run_id="${1:-}"
+  local run_json run_status run_conclusion run_url
+  run_json="$(gh_api_retry "repos/${repo}/actions/runs/${dispatch_run_id}" 4 || echo '{}')"
+  run_status="$(echo "${run_json}" | jq -r '.status // ""' 2>/dev/null || true)"
+  run_conclusion="$(echo "${run_json}" | jq -r '.conclusion // ""' 2>/dev/null || true)"
+  run_url="$(echo "${run_json}" | jq -r '.html_url // ""' 2>/dev/null || true)"
+  printf '%s|%s|%s\n' "${run_status}" "${run_conclusion}" "${run_url}"
+}
+
+emit_failed_run_result() {
+  local run_conclusion="$1"
+  local run_url="$2"
+  printf '__RUN_FAILED__|%s|%s\n' "${run_conclusion:-unknown}" "${run_url:-}"
+}
+
+canary_comment_body() {
+  local verdict="$1"
+  local case_name="$2"
+  local expected_main="$3"
+  local expected_assist="$4"
+  local expected_profile="$5"
+  local expected_runner="$6"
+  local expected_handoff_target="$7"
+  local expected_mode_source="$8"
+  local expected_task_size_tier="$9"
+  local actual_main="${10}"
+  local actual_assist="${11}"
+  local actual_profile="${12}"
+  local actual_runner="${13}"
+  local actual_lanes="${14}"
+  local actual_handoff_target="${15}"
+  local actual_mode_source="${16}"
+  local actual_task_size_tier="${17}"
+  local reason="${18:-}"
+
+  printf 'Canary %s (%s): expected main=%s, assist=%s, profile=%s, runner=%s, handoff=%s, mode_source=%s, task_size=%s. actual main=%s, assist=%s, profile=%s, runner=%s, handoff=%s, mode_source=%s, task_size=%s, lanes=%s' \
+    "${verdict}" \
+    "${case_name}" \
+    "${expected_main:-n/a}" \
+    "${expected_assist:-n/a}" \
+    "${expected_profile:-n/a}" \
+    "${expected_runner:-n/a}" \
+    "${expected_handoff_target:-n/a}" \
+    "${expected_mode_source:-n/a}" \
+    "${expected_task_size_tier:-n/a}" \
+    "${actual_main:-timeout}" \
+    "${actual_assist:-timeout}" \
+    "${actual_profile:-timeout}" \
+    "${actual_runner:-timeout}" \
+    "${actual_handoff_target:-timeout}" \
+    "${actual_mode_source:-timeout}" \
+    "${actual_task_size_tier:-timeout}" \
+    "${actual_lanes:-timeout}"
+  if [[ -n "${reason}" && "${reason}" != "ok" ]]; then
+    printf '. reason=%s. Investigate router/caller policy.' "${reason}"
+  else
+    printf '.'
+  fi
+}
+
 # --- Input normalization ---
 
 repo="${GITHUB_REPOSITORY}"
 gh_readonly_token="${GH_TOKEN:-}"
 gh_ops_token="${gh_readonly_token:-${OPS_TOKEN:-}}"
 ts="$(date -u +%Y%m%d%H%M%S)"
+originating_canary_run_id="$(printf '%s' "${GITHUB_RUN_ID:-${ts}}" | tr -cd '0-9')"
 failures=0
 online_count=0
 self_hosted_online="false"
@@ -140,6 +281,10 @@ if [[ -z "${canary_workflow_ref}" ]] && command -v git >/dev/null 2>&1; then
 fi
 if [[ "${canary_workflow_ref}" == "HEAD" ]]; then
   canary_workflow_ref=""
+fi
+canary_dispatch_nonce="$(printf '%s' "${CANARY_DISPATCH_NONCE:-canary-${ts}-${RANDOM}}" | sed -E 's/[^A-Za-z0-9_.-]+/-/g; s/^-+//; s/-+$//')"
+if [[ -z "${canary_dispatch_nonce}" ]]; then
+  canary_dispatch_nonce="canary-${ts}"
 fi
 
 claude_state="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_RATE_LIMIT_STATE:-}" "FUGUE_CLAUDE_RATE_LIMIT_STATE" "ok")")"
@@ -210,6 +355,36 @@ if [[ -z "${canary_wait_slow_sleep_sec}" ]]; then
   canary_wait_slow_sleep_sec="20"
 fi
 canary_wait_slow_sleep_sec="$(clamp_num "${canary_wait_slow_sleep_sec}" 1 120)"
+canary_wait_run_attempts="$(echo "${CANARY_WAIT_RUN_ATTEMPTS:-12}" | tr -cd '0-9')"
+if [[ -z "${canary_wait_run_attempts}" ]]; then
+  canary_wait_run_attempts="12"
+fi
+canary_wait_run_attempts="$(clamp_num "${canary_wait_run_attempts}" 0 60)"
+canary_wait_run_sleep_sec="$(echo "${CANARY_WAIT_RUN_SLEEP_SEC:-15}" | tr -cd '0-9')"
+if [[ -z "${canary_wait_run_sleep_sec}" ]]; then
+  canary_wait_run_sleep_sec="15"
+fi
+canary_wait_run_sleep_sec="$(clamp_num "${canary_wait_run_sleep_sec}" 1 120)"
+canary_wait_post_run_attempts="$(echo "${CANARY_WAIT_POST_RUN_ATTEMPTS:-6}" | tr -cd '0-9')"
+if [[ -z "${canary_wait_post_run_attempts}" ]]; then
+  canary_wait_post_run_attempts="6"
+fi
+canary_wait_post_run_attempts="$(clamp_num "${canary_wait_post_run_attempts}" 0 60)"
+canary_wait_post_run_sleep_sec="$(echo "${CANARY_WAIT_POST_RUN_SLEEP_SEC:-10}" | tr -cd '0-9')"
+if [[ -z "${canary_wait_post_run_sleep_sec}" ]]; then
+  canary_wait_post_run_sleep_sec="10"
+fi
+canary_wait_post_run_sleep_sec="$(clamp_num "${canary_wait_post_run_sleep_sec}" 1 120)"
+canary_dispatch_detect_attempts="$(echo "${CANARY_DISPATCH_DETECT_ATTEMPTS:-12}" | tr -cd '0-9')"
+if [[ -z "${canary_dispatch_detect_attempts}" ]]; then
+  canary_dispatch_detect_attempts="12"
+fi
+canary_dispatch_detect_attempts="$(clamp_num "${canary_dispatch_detect_attempts}" 1 60)"
+canary_dispatch_detect_sleep_sec="$(echo "${CANARY_DISPATCH_DETECT_SLEEP_SEC:-5}" | tr -cd '0-9')"
+if [[ -z "${canary_dispatch_detect_sleep_sec}" ]]; then
+  canary_dispatch_detect_sleep_sec="5"
+fi
+canary_dispatch_detect_sleep_sec="$(clamp_num "${canary_dispatch_detect_sleep_sec}" 1 60)"
 
 default_main_provider="$(lower_trim "$(gh_var_default "${repo}" "${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-}" "FUGUE_MAIN_ORCHESTRATOR_PROVIDER" "codex")")"
 if [[ "${default_main_provider}" != "codex" && "${default_main_provider}" != "claude" ]]; then
@@ -496,7 +671,7 @@ create_issue() {
   local orch_provider="${3:-claude}"
   local handoff_target="${4:-kernel}"
   local assist_provider="${5:-claude}"
-  local body
+  local body baseline_dispatch_runs dispatch_run_id dispatch_nonce expected_run_title dispatch_started_at
   body="$(printf '## Canary\nAutomated orchestration canary.\n\n- orchestrator: %s main\n- assist orchestrator provider: %s\n- handoff target: %s\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
     "${orch_provider}" \
     "${assist_provider}" \
@@ -515,6 +690,9 @@ create_issue() {
   echo "Canary: creating issue '${title}'" >&2
   url="$(GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${cmd[@]}")"
   local issue_num="${url##*/}"
+  dispatch_nonce="${canary_dispatch_nonce}-${issue_num}"
+  expected_run_title="$(expected_dispatch_run_name "${issue_num}" "${dispatch_nonce}")"
+  baseline_dispatch_runs="$(latest_workflow_dispatch_run_ids "${canary_workflow_ref}")"
   local dispatch_offline_policy=""
   if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
     dispatch_offline_policy="${canary_offline_policy_override}"
@@ -522,12 +700,13 @@ create_issue() {
   local run_cmd=(gh workflow run fugue-tutti-caller.yml \
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
-    -f handoff_target="${handoff_target}")
+    -f handoff_target="${handoff_target}" \
+    -f dispatch_nonce="${dispatch_nonce}")
   if [[ -n "${canary_workflow_ref}" ]]; then
     run_cmd+=(--ref "${canary_workflow_ref}")
   fi
-  if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
-    run_cmd+=(-f canary_dispatch_run_id="${GITHUB_RUN_ID}")
+  if [[ -n "${originating_canary_run_id}" ]]; then
+    run_cmd+=(-f canary_dispatch_run_id="${originating_canary_run_id}")
   fi
   if [[ -n "${GITHUB_ACTOR:-}" ]]; then
     run_cmd+=(-f trust_subject="${GITHUB_ACTOR}")
@@ -539,21 +718,31 @@ create_issue() {
     run_cmd+=(-f execution_mode_override="${canary_execution_mode_override}")
   fi
   echo "Canary: dispatching tutti caller for issue #${issue_num} handoff=${handoff_target}" >&2
+  dispatch_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
-  echo "${issue_num}"
+  dispatch_run_id="$(await_new_workflow_dispatch_run "${canary_workflow_ref}" "${baseline_dispatch_runs}" "${expected_run_title}" "${dispatch_started_at}" "${GITHUB_ACTOR:-}" || true)"
+  if [[ -n "${dispatch_run_id}" ]]; then
+    echo "Canary: issue #${issue_num} mapped to workflow_dispatch run ${dispatch_run_id}" >&2
+  else
+    echo "Canary: issue #${issue_num} dispatch run id not observed within detection window" >&2
+  fi
+  echo "${issue_num}|${dispatch_run_id}"
 }
 
 # --- Wait for integrated review ---
 
 wait_for_resolved_orchestrators() {
   local issue_num="$1"
+  local dispatch_run_id="${2:-}"
   local phase="fast"
   local max_attempts="${canary_wait_fast_attempts}"
   local sleep_sec="${canary_wait_fast_sleep_sec}"
   local attempt=1
   local comments_json meta_json comment resolved_main resolved_assist resolved_profile
   local resolved_runner resolved_runner_labels resolved_lanes resolved_handoff_target
-  local resolved_mode_source resolved_task_size_tier
+  local resolved_mode_source resolved_task_size_tier run_status_payload run_status
+  local run_conclusion run_url saw_progress_comment="false"
+  local resolved_pair=""
   echo "Canary: waiting for integrated review on issue #${issue_num}" >&2
   while true; do
     comments_json="$(gh_api_retry "repos/${repo}/issues/${issue_num}/comments?per_page=100" 4 || echo '[]')"
@@ -574,11 +763,32 @@ wait_for_resolved_orchestrators() {
       resolved_mode_source="$(echo "${meta_json}" | jq -r '.multi_agent_mode_source // ""' | tr '[:upper:]' '[:lower:]')"
       resolved_task_size_tier="$(echo "${meta_json}" | jq -r '.task_size_tier // ""' | tr '[:upper:]' '[:lower:]')"
       if [[ -n "${resolved_main}" && -n "${resolved_assist}" && -n "${resolved_profile}" ]]; then
-        echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}|${resolved_handoff_target}|${resolved_mode_source}|${resolved_task_size_tier}"
-        return 0
+        resolved_pair="${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}|${resolved_handoff_target}|${resolved_mode_source}|${resolved_task_size_tier}"
+        if [[ -z "${dispatch_run_id}" ]]; then
+          echo "${resolved_pair}"
+          return 0
+        fi
+        run_status_payload="$(dispatch_run_status_payload "${dispatch_run_id}")"
+        run_status="${run_status_payload%%|*}"
+        run_status_payload="${run_status_payload#*|}"
+        run_conclusion="${run_status_payload%%|*}"
+        run_url="${run_status_payload#*|}"
+        if [[ "${run_status}" == "completed" && "${run_conclusion}" != "success" ]]; then
+          emit_failed_run_result "${run_conclusion}" "${run_url}"
+          return 0
+        fi
+        if [[ "${run_status}" == "completed" ]]; then
+          echo "${resolved_pair}"
+          return 0
+        fi
+        saw_progress_comment="true"
+        echo "Canary: integrated review ready for issue #${issue_num}, but workflow run ${dispatch_run_id} is still ${run_status:-unknown}" >&2
       fi
     fi
     comment="$(echo "${comments_json}" | jq -r '[.[].body | select(contains("## Tutti Integrated Review"))] | last // ""')"
+    if echo "${comments_json}" | jq -e '[.[].body | select(contains("Orchestration profile resolved:"))] | length > 0' >/dev/null 2>&1; then
+      saw_progress_comment="true"
+    fi
     if [[ -n "${comment}" ]]; then
       resolved_main="$(printf '%s\n' "${comment}" | sed -n 's/^- main orchestrator resolved: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
       resolved_assist="$(printf '%s\n' "${comment}" | sed -n 's/^- assist orchestrator resolved: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
@@ -590,8 +800,26 @@ wait_for_resolved_orchestrators() {
       resolved_mode_source="$(printf '%s\n' "${comment}" | sed -n 's/^- multi-agent mode source: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
       resolved_task_size_tier="$(printf '%s\n' "${comment}" | sed -n 's/^- task size tier: //p' | head -n1 | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
       if [[ -n "${resolved_main}" && -n "${resolved_assist}" && -n "${resolved_profile}" ]]; then
-        echo "${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}|${resolved_handoff_target}|${resolved_mode_source}|${resolved_task_size_tier}"
-        return 0
+        resolved_pair="${resolved_main}|${resolved_assist}|${resolved_profile}|${resolved_runner}|${resolved_runner_labels}|${resolved_lanes}|${resolved_handoff_target}|${resolved_mode_source}|${resolved_task_size_tier}"
+        if [[ -z "${dispatch_run_id}" ]]; then
+          echo "${resolved_pair}"
+          return 0
+        fi
+        run_status_payload="$(dispatch_run_status_payload "${dispatch_run_id}")"
+        run_status="${run_status_payload%%|*}"
+        run_status_payload="${run_status_payload#*|}"
+        run_conclusion="${run_status_payload%%|*}"
+        run_url="${run_status_payload#*|}"
+        if [[ "${run_status}" == "completed" && "${run_conclusion}" != "success" ]]; then
+          emit_failed_run_result "${run_conclusion}" "${run_url}"
+          return 0
+        fi
+        if [[ "${run_status}" == "completed" ]]; then
+          echo "${resolved_pair}"
+          return 0
+        fi
+        saw_progress_comment="true"
+        echo "Canary: integrated review ready for issue #${issue_num}, but workflow run ${dispatch_run_id} is still ${run_status:-unknown}" >&2
       fi
     fi
     if [[ "${attempt}" -ge "${max_attempts}" ]]; then
@@ -600,6 +828,40 @@ wait_for_resolved_orchestrators() {
         max_attempts="${canary_wait_slow_attempts}"
         sleep_sec="${canary_wait_slow_sleep_sec}"
         attempt=1
+        continue
+      fi
+      if [[ -n "${dispatch_run_id}" ]]; then
+        run_status_payload="$(dispatch_run_status_payload "${dispatch_run_id}")"
+        run_status="${run_status_payload%%|*}"
+        run_status_payload="${run_status_payload#*|}"
+        run_conclusion="${run_status_payload%%|*}"
+        run_url="${run_status_payload#*|}"
+        if [[ "${run_status}" == "completed" && "${run_conclusion}" != "success" ]]; then
+          emit_failed_run_result "${run_conclusion}" "${run_url}"
+          return 0
+        fi
+        if [[ "${run_status}" != "completed" && "${canary_wait_run_attempts}" != "0" && "${phase}" != "run" ]]; then
+          phase="run"
+          max_attempts="${canary_wait_run_attempts}"
+          sleep_sec="${canary_wait_run_sleep_sec}"
+          attempt=1
+          echo "Canary: issue #${issue_num} still waiting on workflow run ${dispatch_run_id} (status=${run_status:-unknown})" >&2
+          continue
+        fi
+        if [[ "${run_status}" == "completed" && "${canary_wait_post_run_attempts}" != "0" && "${phase}" != "post-run" ]]; then
+          phase="post-run"
+          max_attempts="${canary_wait_post_run_attempts}"
+          sleep_sec="${canary_wait_post_run_sleep_sec}"
+          attempt=1
+          echo "Canary: issue #${issue_num} workflow run ${dispatch_run_id} completed (conclusion=${run_conclusion:-unknown}); waiting for final review comment" >&2
+          continue
+        fi
+      elif [[ "${saw_progress_comment}" == "true" && "${canary_wait_post_run_attempts}" != "0" && "${phase}" != "post-run" ]]; then
+        phase="post-run"
+        max_attempts="${canary_wait_post_run_attempts}"
+        sleep_sec="${canary_wait_post_run_sleep_sec}"
+        attempt=1
+        echo "Canary: issue #${issue_num} saw progress comments; granting final review grace window" >&2
         continue
       fi
       break
@@ -638,11 +900,11 @@ conclude_issue() {
   local cleanup_labels=()
   local cleanup_cmd=()
   if [[ "${pass}" == "true" ]]; then
-    gh issue comment "${issue_num}" --repo "${repo}" --body "Canary pass (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\` handoff=\`${expected_handoff_target:-n/a}\` mode_source=\`${expected_mode_source:-n/a}\` task_size=\`${expected_task_size_tier:-n/a}\`, actual main=\`${actual_main}\` assist=\`${actual_assist}\` profile=\`${actual_profile}\` runner=\`${actual_runner}\` handoff=\`${actual_handoff_target:-n/a}\` mode_source=\`${actual_mode_source:-n/a}\` task_size=\`${actual_task_size_tier:-n/a}\`, lanes=\`${actual_lanes}\`."
-    if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null 2>&1; then
+    GH_TOKEN="${gh_ops_token}" gh issue comment "${issue_num}" --repo "${repo}" --body "$(canary_comment_body "pass" "${case_name}" "${expected_main}" "${expected_assist}" "${expected_profile}" "${expected_runner}" "${expected_handoff_target}" "${expected_mode_source}" "${expected_task_size_tier}" "${actual_main}" "${actual_assist}" "${actual_profile}" "${actual_runner}" "${actual_lanes}" "${actual_handoff_target}" "${actual_mode_source}" "${actual_task_size_tier}" "ok")"
+    if ! GH_TOKEN="${gh_ops_token}" gh issue edit "${issue_num}" --repo "${repo}" --add-label "completed" >/dev/null 2>&1; then
       echo "Warning: failed to add completed label to issue #${issue_num}" >&2
     fi
-    label_json="$(gh issue view "${issue_num}" --repo "${repo}" --json labels -q '.labels[].name' 2>/dev/null || true)"
+    label_json="$(GH_TOKEN="${gh_ops_token}" gh issue view "${issue_num}" --repo "${repo}" --json labels -q '.labels[].name' 2>/dev/null || true)"
     if [[ -n "${label_json}" ]]; then
       while IFS= read -r label_name; do
         case "${label_name}" in
@@ -658,22 +920,22 @@ conclude_issue() {
       for cleanup_label in "${cleanup_labels[@]}"; do
         cleanup_cmd+=(--remove-label "${cleanup_label}")
       done
-      if ! "${cleanup_cmd[@]}" >/dev/null 2>&1; then
+      if ! GH_TOKEN="${gh_ops_token}" "${cleanup_cmd[@]}" >/dev/null 2>&1; then
         echo "Warning: failed to remove transient canary labels from issue #${issue_num}" >&2
       fi
     fi
-    issue_state="$(gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
+    issue_state="$(GH_TOKEN="${gh_ops_token}" gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
     if [[ "${issue_state}" == "OPEN" ]]; then
-      if ! gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification." >/dev/null 2>&1; then
-        issue_state_after="$(gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
+      if ! GH_TOKEN="${gh_ops_token}" gh issue close "${issue_num}" --repo "${repo}" --comment "Canary cleanup: closed automatically after successful verification." >/dev/null 2>&1; then
+        issue_state_after="$(GH_TOKEN="${gh_ops_token}" gh issue view "${issue_num}" --repo "${repo}" --json state -q '.state' 2>/dev/null || true)"
         if [[ "${issue_state_after}" != "CLOSED" ]]; then
           echo "Warning: failed to close issue #${issue_num} during canary cleanup." >&2
         fi
       fi
     fi
   else
-    gh issue comment "${issue_num}" --repo "${repo}" --body "Canary fail (${case_name}): expected main=\`${expected_main}\` assist=\`${expected_assist}\` profile=\`${expected_profile}\` runner=\`${expected_runner}\` handoff=\`${expected_handoff_target:-n/a}\` mode_source=\`${expected_mode_source:-n/a}\` task_size=\`${expected_task_size_tier:-n/a}\`, actual main=\`${actual_main:-timeout}\` assist=\`${actual_assist:-timeout}\` profile=\`${actual_profile:-timeout}\` runner=\`${actual_runner:-timeout}\` handoff=\`${actual_handoff_target:-timeout}\` mode_source=\`${actual_mode_source:-timeout}\` task_size=\`${actual_task_size_tier:-timeout}\`, lanes=\`${actual_lanes:-timeout}\`, reason=\`${reason}\`. Investigate router/caller policy."
-    if ! gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null 2>&1; then
+    GH_TOKEN="${gh_ops_token}" gh issue comment "${issue_num}" --repo "${repo}" --body "$(canary_comment_body "fail" "${case_name}" "${expected_main}" "${expected_assist}" "${expected_profile}" "${expected_runner}" "${expected_handoff_target}" "${expected_mode_source}" "${expected_task_size_tier}" "${actual_main:-timeout}" "${actual_assist:-timeout}" "${actual_profile:-timeout}" "${actual_runner:-timeout}" "${actual_lanes:-timeout}" "${actual_handoff_target:-timeout}" "${actual_mode_source:-timeout}" "${actual_task_size_tier:-timeout}" "${reason}")"
+    if ! GH_TOKEN="${gh_ops_token}" gh issue edit "${issue_num}" --repo "${repo}" --add-label "needs-human" >/dev/null 2>&1; then
       echo "Warning: failed to add needs-human label to issue #${issue_num}" >&2
     fi
   fi
@@ -691,6 +953,8 @@ if [[ "${canary_mode}" == "lite" ]]; then
   issue_prefix="[canary-lite]"
 fi
 regular_issue="$(create_issue "${issue_prefix} regular ${default_main_provider}-main request ${ts}" "" "${default_main_provider}" "${primary_handoff_target}" "claude")"
+regular_issue_num="${regular_issue%%|*}"
+regular_dispatch_run_id="${regular_issue#*|}"
 force_issue=""
 rollback_issue=""
 if [[ "${run_force_case}" == "true" ]]; then
@@ -707,6 +971,10 @@ if [[ "${verify_rollback_case}" == "true" ]]; then
   fi
   rollback_issue="$(create_issue "${issue_prefix} rollback legacy ${legacy_main_provider}-main request ${ts}" "${rollback_force_label}" "${legacy_main_provider}" "${rollback_handoff_target}" "${legacy_assist_provider}")"
 fi
+force_issue_num="${force_issue%%|*}"
+force_dispatch_run_id="${force_issue#*|}"
+rollback_issue_num="${rollback_issue%%|*}"
+rollback_dispatch_run_id="${rollback_issue#*|}"
 
 regular_pair_file="$(mktemp)"
 force_pair_file="$(mktemp)"
@@ -716,16 +984,16 @@ cleanup_wait_files() {
 }
 trap cleanup_wait_files EXIT
 
-wait_for_resolved_orchestrators "${regular_issue}" >"${regular_pair_file}" &
+wait_for_resolved_orchestrators "${regular_issue_num}" "${regular_dispatch_run_id}" >"${regular_pair_file}" &
 regular_wait_pid="$!"
 force_wait_pid=""
 if [[ "${run_force_case}" == "true" ]]; then
-  wait_for_resolved_orchestrators "${force_issue}" >"${force_pair_file}" &
+  wait_for_resolved_orchestrators "${force_issue_num}" "${force_dispatch_run_id}" >"${force_pair_file}" &
   force_wait_pid="$!"
 fi
 rollback_wait_pid=""
 if [[ "${verify_rollback_case}" == "true" ]]; then
-  wait_for_resolved_orchestrators "${rollback_issue}" >"${rollback_pair_file}" &
+  wait_for_resolved_orchestrators "${rollback_issue_num}" "${rollback_dispatch_run_id}" >"${rollback_pair_file}" &
   rollback_wait_pid="$!"
 fi
 
@@ -734,7 +1002,7 @@ regular_wait_ok="false"
 if wait "${regular_wait_pid}"; then
   regular_pair="$(tail -n1 "${regular_pair_file}" | tr -d '\r')"
   regular_wait_ok="true"
-  echo "Canary: regular issue #${regular_issue} resolved -> ${regular_pair}"
+  echo "Canary: regular issue #${regular_issue_num} resolved -> ${regular_pair}"
 fi
 
 force_pair=""
@@ -744,7 +1012,7 @@ if [[ "${run_force_case}" != "true" ]]; then
 elif wait "${force_wait_pid}"; then
   force_pair="$(tail -n1 "${force_pair_file}" | tr -d '\r')"
   force_wait_ok="true"
-  echo "Canary: alternate issue #${force_issue} resolved -> ${force_pair}"
+  echo "Canary: alternate issue #${force_issue_num} resolved -> ${force_pair}"
 fi
 
 rollback_pair=""
@@ -754,12 +1022,21 @@ if [[ "${verify_rollback_case}" != "true" ]]; then
 elif wait "${rollback_wait_pid}"; then
   rollback_pair="$(tail -n1 "${rollback_pair_file}" | tr -d '\r')"
   rollback_wait_ok="true"
-  echo "Canary: rollback issue #${rollback_issue} resolved -> ${rollback_pair}"
+  echo "Canary: rollback issue #${rollback_issue_num} resolved -> ${rollback_pair}"
 fi
 
 # --- Verify regular case ---
 
 if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
+  if [[ "${regular_pair}" == __RUN_FAILED__\|* ]]; then
+    regular_reason="workflow-$(printf '%s' "${regular_pair#*|}" | cut -d'|' -f1)"
+    run_failure_url="$(printf '%s' "${regular_pair#*|}" | cut -d'|' -f2-)"
+    if [[ -n "${run_failure_url}" ]]; then
+      regular_reason="${regular_reason}:${run_failure_url}"
+    fi
+    conclude_issue "${regular_issue_num}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" "false" "regular" "${regular_reason}"
+    failures="$((failures + 1))"
+  else
   regular_main="${regular_pair%%|*}"
   regular_rest="${regular_pair#*|}"
   regular_assist="${regular_rest%%|*}"
@@ -798,13 +1075,14 @@ if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
     regular_reason="lanes-not-materialized"
   fi
   if [[ "${regular_ok}" == "true" ]]; then
-    conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "true" "regular" "ok"
+    conclude_issue "${regular_issue_num}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "true" "regular" "ok"
   else
-    conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "false" "regular" "${regular_reason}"
+    conclude_issue "${regular_issue_num}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "false" "regular" "${regular_reason}"
     failures="$((failures + 1))"
   fi
+  fi
 else
-  conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
+  conclude_issue "${regular_issue_num}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
   failures="$((failures + 1))"
 fi
 
@@ -813,6 +1091,15 @@ fi
 if [[ "${run_force_case}" != "true" ]]; then
   echo "Canary lite mode: skipped forced-claude case."
 elif [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
+  if [[ "${force_pair}" == __RUN_FAILED__\|* ]]; then
+    force_reason="workflow-$(printf '%s' "${force_pair#*|}" | cut -d'|' -f1)"
+    run_failure_url="$(printf '%s' "${force_pair#*|}" | cut -d'|' -f2-)"
+    if [[ -n "${run_failure_url}" ]]; then
+      force_reason="${force_reason}:${run_failure_url}"
+    fi
+    conclude_issue "${force_issue_num}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" "false" "force" "${force_reason}"
+    failures="$((failures + 1))"
+  else
   force_main="${force_pair%%|*}"
   force_rest="${force_pair#*|}"
   force_assist="${force_rest%%|*}"
@@ -851,13 +1138,14 @@ elif [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
     force_reason="lanes-not-materialized"
   fi
   if [[ "${force_ok}" == "true" ]]; then
-    conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "true" "force" "ok"
+    conclude_issue "${force_issue_num}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "true" "force" "ok"
   else
-    conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "false" "force" "${force_reason}"
+    conclude_issue "${force_issue_num}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "false" "force" "${force_reason}"
     failures="$((failures + 1))"
   fi
+  fi
 else
-  conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
+  conclude_issue "${force_issue_num}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
   failures="$((failures + 1))"
 fi
 
@@ -866,6 +1154,15 @@ fi
 if [[ "${verify_rollback_case}" != "true" ]]; then
   echo "Canary rollback verification: skipped."
 elif [[ "${rollback_wait_ok}" == "true" && -n "${rollback_pair}" ]]; then
+  if [[ "${rollback_pair}" == __RUN_FAILED__\|* ]]; then
+    rollback_reason="workflow-$(printf '%s' "${rollback_pair#*|}" | cut -d'|' -f1)"
+    run_failure_url="$(printf '%s' "${rollback_pair#*|}" | cut -d'|' -f2-)"
+    if [[ -n "${run_failure_url}" ]]; then
+      rollback_reason="${rollback_reason}:${run_failure_url}"
+    fi
+    conclude_issue "${rollback_issue_num}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" "false" "rollback" "${rollback_reason}"
+    failures="$((failures + 1))"
+  else
   rollback_main="${rollback_pair%%|*}"
   rollback_rest="${rollback_pair#*|}"
   rollback_assist="${rollback_rest%%|*}"
@@ -910,13 +1207,14 @@ elif [[ "${rollback_wait_ok}" == "true" && -n "${rollback_pair}" ]]; then
     rollback_reason="lanes-not-materialized"
   fi
   if [[ "${rollback_ok}" == "true" ]]; then
-    conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "true" "rollback" "ok"
+    conclude_issue "${rollback_issue_num}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "true" "rollback" "ok"
   else
-    conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "false" "rollback" "${rollback_reason}"
+    conclude_issue "${rollback_issue_num}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "false" "rollback" "${rollback_reason}"
     failures="$((failures + 1))"
   fi
+  fi
 else
-  conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" "false" "rollback" "timeout-no-integrated-review"
+  conclude_issue "${rollback_issue_num}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" "false" "rollback" "timeout-no-integrated-review"
   failures="$((failures + 1))"
 fi
 
