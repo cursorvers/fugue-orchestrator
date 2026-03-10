@@ -1,0 +1,139 @@
+name: kernel-task-completion-backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_id:
+        description: "Deterministic local completion record id"
+        required: true
+        type: string
+      payload_b64:
+        description: "Base64-encoded JSON backup payload"
+        required: true
+        type: string
+  repository_dispatch:
+    types:
+      - kernel-task-completion-backup
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kernel-task-completion-backup-${{ github.event.inputs.record_id || github.event.client_payload.record_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Decode and validate payload
+        id: decode
+        env:
+          RECORD_ID: ${{ github.event.inputs.record_id || github.event.client_payload.record_id }}
+          PAYLOAD_B64: ${{ github.event.inputs.payload_b64 || github.event.client_payload.payload_b64 }}
+          MAX_PAYLOAD_B64_CHARS: "60000"
+          BACKUP_BRANCH: kernel-task-completion-backups
+        run: |
+          set -euo pipefail
+          PAYLOAD_B64_CHARS="$(printf '%s' "${PAYLOAD_B64}" | wc -c | tr -d ' ')"
+          if (( PAYLOAD_B64_CHARS > MAX_PAYLOAD_B64_CHARS )); then
+            echo "payload_b64 exceeds workflow limit (${PAYLOAD_B64_CHARS} chars)" >&2
+            exit 2
+          fi
+          SAFE_RECORD_ID="$(printf '%s' "${RECORD_ID}" | tr -cd 'A-Za-z0-9._-')"
+          if [[ -z "${SAFE_RECORD_ID}" ]]; then
+            echo "record_id is empty after sanitization" >&2
+            exit 2
+          fi
+          if [[ "${SAFE_RECORD_ID}" != "${RECORD_ID}" ]]; then
+            echo "record_id contains unsupported characters" >&2
+            exit 2
+          fi
+
+          PAYLOAD_DIR="${RUNNER_TEMP}/kernel-task-completion-backup"
+          mkdir -p "${PAYLOAD_DIR}"
+          PAYLOAD_PATH="${PAYLOAD_DIR}/${SAFE_RECORD_ID}.json"
+          printf '%s' "${PAYLOAD_B64}" | base64 --decode > "${PAYLOAD_PATH}"
+
+          jq -e \
+            --arg record_id "${SAFE_RECORD_ID}" \
+            '
+              type == "object"
+              and (.record_id | type == "string" and . == $record_id)
+              and (.assistant | type == "string" and length > 0)
+              and (.source | type == "string" and length > 0)
+              and (.session_id | type == "string")
+              and (.completed_at | type == "string" and length > 0)
+              and (.summary_text | type == "string" and length > 0)
+              and (.gha_repo | type == "string" and length > 0)
+              and (.gha_workflow | type == "string" and length > 0)
+            ' \
+            "${PAYLOAD_PATH}" >/dev/null
+
+          PAYLOAD_SHA256="$(sha256sum "${PAYLOAD_PATH}" | awk '{print $1}')"
+          {
+            echo "safe_record_id=${SAFE_RECORD_ID}"
+            echo "payload_path=${PAYLOAD_PATH}"
+            echo "payload_sha256=${PAYLOAD_SHA256}"
+            echo "backup_branch=${BACKUP_BRANCH}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## Kernel task completion backup"
+            echo
+            echo "- record_id: \`${SAFE_RECORD_ID}\`"
+            echo "- assistant: \`$(jq -r '.assistant' "${PAYLOAD_PATH}")\`"
+            echo "- source: \`$(jq -r '.source' "${PAYLOAD_PATH}")\`"
+            echo "- session_id: \`$(jq -r '.session_id' "${PAYLOAD_PATH}")\`"
+            echo "- completed_at: \`$(jq -r '.completed_at' "${PAYLOAD_PATH}")\`"
+            echo "- orchestration_compliance: \`$(jq -r '.orchestration_compliance // "unverified"' "${PAYLOAD_PATH}")\`"
+            echo "- observed_models: \`$(jq -r '[.observed_models[]?.provider] | unique | join(",")' "${PAYLOAD_PATH}")\`"
+            echo "- title: \`$(jq -r '.title // ""' "${PAYLOAD_PATH}")\`"
+            echo "- payload_sha256: \`${PAYLOAD_SHA256}\`"
+            echo "- durable_branch: \`${BACKUP_BRANCH}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Checkout repository for durable mirror
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Persist durable mirror
+        env:
+          SAFE_RECORD_ID: ${{ steps.decode.outputs.safe_record_id }}
+          PAYLOAD_PATH: ${{ steps.decode.outputs.payload_path }}
+          BACKUP_BRANCH: ${{ steps.decode.outputs.backup_branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin "${BACKUP_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${BACKUP_BRANCH}"
+            git checkout -B "${BACKUP_BRANCH}" "origin/${BACKUP_BRANCH}"
+          else
+            git checkout --orphan "${BACKUP_BRANCH}"
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          mkdir -p backups/task-completion
+          cp "${PAYLOAD_PATH}" "backups/task-completion/${SAFE_RECORD_ID}.json"
+          git add "backups/task-completion/${SAFE_RECORD_ID}.json"
+
+          if git diff --cached --quiet; then
+            echo "Durable mirror already up to date for ${SAFE_RECORD_ID}"
+            exit 0
+          fi
+
+          git commit -m "backup: task completion ${SAFE_RECORD_ID}"
+          git push origin "HEAD:${BACKUP_BRANCH}"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-task-completion-${{ steps.decode.outputs.safe_record_id }}
+          path: ${{ steps.decode.outputs.payload_path }}
+          if-no-files-found: error
+          retention-days: 90

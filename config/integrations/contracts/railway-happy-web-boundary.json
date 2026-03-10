@@ -1,0 +1,10 @@
+{
+  "id": "railway-happy-web-boundary",
+  "description": "Public Railway-hosted Happy web boundary for mobile-first user access.",
+  "network_plane": "railway-public-edge",
+  "ingress_surface": "public-web",
+  "ingress_auth": "session-auth",
+  "routing_domain": "happy-public-web",
+  "accepts_signed_payload": false,
+  "operator_views_tailnet_gated": true
+}

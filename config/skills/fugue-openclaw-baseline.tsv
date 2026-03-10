@@ -1,0 +1,6 @@
+# skill_id\tprofile\trationale
+github	required	FUGUE control plane operations for issues, PRs, workflow runs, and logs.
+model-usage	required	Codex/Claude model cost telemetry for rate-limit-aware orchestration decisions.
+tmux	required	Interactive lane/session control for long-running local orchestration tasks.
+obsidian	optional	Local decision and runbook capture in markdown vault workflows.
+summarize	optional	URL/video/file summarization for fast context intake during investigations.

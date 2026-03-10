@@ -1,0 +1,74 @@
+{
+  "systems": [
+    {
+      "id": "auto-video",
+      "name": "Auto Video (Remotion)",
+      "description": "Remotion-based auto video pipeline.",
+      "adapter": "scripts/local/integrations/auto-video.sh",
+      "kind": "content",
+      "adapter_class": "shell",
+      "authority": "artifact-only",
+      "validation_mode": "budgeted",
+      "contract_owner": "kernel-local",
+      "preferred_lane": "claude",
+      "protected_interface": false,
+      "enabled": true
+    },
+    {
+      "id": "note-semi-auto",
+      "name": "note Semi-Auto",
+      "description": "Generate note manuscript draft scaffold from FUGUE issue context.",
+      "adapter": "scripts/local/integrations/note-semi-auto.sh",
+      "kind": "content",
+      "adapter_class": "shell",
+      "authority": "artifact-only",
+      "validation_mode": "smoke",
+      "contract_owner": "kernel-local",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "enabled": true
+    },
+    {
+      "id": "obsidian-audio-ai",
+      "name": "Obsidian Audio AI",
+      "description": "Create Obsidian intake note and optionally run audio transcription dry-run.",
+      "adapter": "scripts/local/integrations/obsidian-audio-ai.sh",
+      "kind": "knowledge",
+      "adapter_class": "shell",
+      "authority": "artifact-only",
+      "validation_mode": "smoke",
+      "contract_owner": "kernel-local",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "enabled": true
+    },
+    {
+      "id": "discord-notify",
+      "name": "Discord Notify",
+      "description": "Send linked-run health notifications to Discord webhook.",
+      "adapter": "scripts/local/integrations/discord-notify.sh",
+      "kind": "notify",
+      "adapter_class": "shell",
+      "authority": "service-adapter",
+      "validation_mode": "smoke",
+      "contract_owner": "kernel-local",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "enabled": true
+    },
+    {
+      "id": "line-notify",
+      "name": "LINE Notify",
+      "description": "Send linked-run health notifications to LINE (webhook or Messaging API push).",
+      "adapter": "scripts/local/integrations/line-notify.sh",
+      "kind": "notify",
+      "adapter_class": "shell",
+      "authority": "service-adapter",
+      "validation_mode": "smoke",
+      "contract_owner": "kernel-local",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "enabled": true
+    }
+  ]
+}

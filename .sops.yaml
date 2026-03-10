@@ -1,0 +1,7 @@
+# .sops.yaml - sops configuration for fugue-orchestrator
+# Design: Hybrid - shared dev recipient + per-repo CI age key
+creation_rules:
+  - path_regex: \.(env|enc).*$
+    age: >-
+      age13h4s0ztxzl7phl4r7qczw9mtnt3pr6d7tlmc6cxft4z8tuzgxcxsz6af2w,
+      age1738s9v7lg5u46lpgg0s95wrt2ajcxut7tql309huf3hsgz4pzyxsjv6342

@@ -1,0 +1,64 @@
+{
+  "adapters": [
+    {
+      "id": "supabase-rest-mcp",
+      "provider": "supabase",
+      "access_mode": "rest-bridge",
+      "runtime_availability": "hybrid",
+      "control_plane": "kernel",
+      "kernel_compatible": true,
+      "fallback_route": "none",
+      "path": "scripts/lib/mcp-rest-bridge.sh"
+    },
+    {
+      "id": "stripe-rest-mcp",
+      "provider": "stripe",
+      "access_mode": "rest-bridge",
+      "runtime_availability": "hybrid",
+      "control_plane": "kernel",
+      "kernel_compatible": true,
+      "fallback_route": "none",
+      "path": "scripts/lib/mcp-rest-bridge.sh"
+    },
+    {
+      "id": "pencil-session-mcp",
+      "provider": "pencil",
+      "access_mode": "kernel-adapter",
+      "runtime_availability": "adapter-backed",
+      "control_plane": "kernel",
+      "kernel_compatible": true,
+      "fallback_route": "claude-session",
+      "path": "scripts/lib/mcp-kernel-adapter.sh"
+    },
+    {
+      "id": "excalidraw-session-mcp",
+      "provider": "excalidraw",
+      "access_mode": "kernel-adapter",
+      "runtime_availability": "adapter-backed",
+      "control_plane": "kernel",
+      "kernel_compatible": true,
+      "fallback_route": "claude-session",
+      "path": "scripts/lib/mcp-kernel-adapter.sh"
+    },
+    {
+      "id": "slack-session-mcp",
+      "provider": "slack",
+      "access_mode": "skill-cli",
+      "runtime_availability": "cli-backed",
+      "control_plane": "kernel",
+      "kernel_compatible": true,
+      "fallback_route": "claude-session",
+      "path": "scripts/lib/skill-cli-adapter.sh"
+    },
+    {
+      "id": "vercel-session-mcp",
+      "provider": "vercel",
+      "access_mode": "skill-cli",
+      "runtime_availability": "cli-backed",
+      "control_plane": "kernel",
+      "kernel_compatible": true,
+      "fallback_route": "claude-session",
+      "path": "scripts/lib/skill-cli-adapter.sh"
+    }
+  ]
+}

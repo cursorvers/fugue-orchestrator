@@ -1,0 +1,12 @@
+.env
+.env.*
+*.local
+node_modules/
+.DS_Store
+.claude/.git/
+.claude/cache/
+.claude/projects/
+.claude/.credentials.json
+.fugue/local-run/
+#...but encrypted secrets are safe to commit
+!.env.enc

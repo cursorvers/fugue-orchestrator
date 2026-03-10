@@ -1,0 +1,58 @@
+# Template: FUGUE Result Receiver
+# Copy this file to consumer repos that call FUGUE via fugue-caller.yml.
+# It receives dispatch-back results and posts them as issue comments.
+#
+# Required setup:
+#   1. Copy this file to `.github/workflows/fugue-result-receiver.yml` in the consumer repo.
+#   2. Ensure the FUGUE orchestrator has TARGET_REPO_PAT with repo dispatch permission.
+#   3. Set CONSUMER_REPO and CONSUMER_ISSUE env vars when triggering FUGUE.
+
+name: FUGUE Result Receiver
+
+on:
+  repository_dispatch:
+    types: [fugue-linked-result]
+
+permissions:
+  issues: write
+
+jobs:
+  post-result:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Post FUGUE result to issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ github.event.client_payload.status }}
+          SUCCESS_COUNT: ${{ github.event.client_payload.success_count }}
+          ERROR_COUNT: ${{ github.event.client_payload.error_count }}
+          MODE: ${{ github.event.client_payload.mode }}
+          SOURCE_ISSUE: ${{ github.event.client_payload.source_issue }}
+          CONSUMER_ISSUE: ${{ github.event.client_payload.issue }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CONSUMER_ISSUE}" ]]; then
+            echo "No consumer issue specified; skipping comment."
+            exit 0
+          fi
+
+          status_emoji="✅"
+          if [[ "${STATUS}" != "ok" ]]; then
+            status_emoji="❌"
+          fi
+
+          body="$(cat <<EOF
+          ## ${status_emoji} FUGUE Linked Systems Result
+
+          - status: \`${STATUS}\`
+          - mode: \`${MODE}\`
+          - success: ${SUCCESS_COUNT}
+          - errors: ${ERROR_COUNT}
+          - source: cursorvers/fugue-orchestrator#${SOURCE_ISSUE}
+          EOF
+          )"
+
+          gh issue comment "${CONSUMER_ISSUE}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${body}"

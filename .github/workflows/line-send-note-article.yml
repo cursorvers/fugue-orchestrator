@@ -1,0 +1,89 @@
+name: Send undelivered note article via LINE
+
+on:
+  schedule:
+    # March 1, 2026 06:00 UTC (15:00 JST) — after LINE monthly quota reset
+    - cron: '0 6 1 3 *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  send-article:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Send note article via LINE push
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+        run: |
+          set -euo pipefail
+
+          ARTICLE_TITLE="【医療AIにおけるHuman-in-the-Loopの再定義】音声を介するAI-電子カルテの直結を徹底検証"
+          ARTICLE_URL="https://note.com/nice_wren7963/n/n8fcfa0ffb50a"
+
+          MESSAGE=$(cat <<'MSG'
+          📝 note新着記事のお知らせ
+
+          【医療AIにおけるHuman-in-the-Loopの再定義】
+          音声を介するAI-電子カルテの直結を徹底検証
+
+          https://note.com/nice_wren7963/n/n8fcfa0ffb50a
+          MSG
+          )
+          # Remove leading whitespace from heredoc
+          MESSAGE=$(echo "$MESSAGE" | sed 's/^          //')
+
+          echo "Sending article: ${ARTICLE_TITLE}"
+
+          HTTP_CODE=$(curl -s -o /tmp/line-response.json -w "%{http_code}" \
+            -X POST "https://api.line.me/v2/bot/message/push" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+            -d "{
+              \"to\": \"${LINE_TO}\",
+              \"messages\": [{
+                \"type\": \"text\",
+                \"text\": $(echo "$MESSAGE" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')
+              }]
+            }")
+
+          echo "HTTP status: ${HTTP_CODE}"
+          cat /tmp/line-response.json || true
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Article sent successfully"
+          else
+            echo "Failed to send article (HTTP ${HTTP_CODE})"
+            exit 1
+          fi
+
+      - name: Update articles table (mark as notified)
+        if: success()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Skip if Supabase secrets not available in this repo
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "Supabase secrets not available — update articles table manually"
+            echo "SQL: UPDATE articles SET is_notified = true WHERE id = 'e6fff88f-40de-4ba7-b4ce-45986c257fa3';"
+            exit 0
+          fi
+
+          curl -s -X PATCH \
+            "${SUPABASE_URL}/rest/v1/articles?id=eq.e6fff88f-40de-4ba7-b4ce-45986c257fa3" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{"is_notified": true}'
+
+          echo "Articles table updated (is_notified = true)"
