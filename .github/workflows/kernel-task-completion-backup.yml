@@ -1,0 +1,60 @@
+name: kernel-task-completion-backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_id:
+        description: "Deterministic local completion record id"
+        required: true
+        type: string
+      payload_b64:
+        description: "Base64-encoded JSON backup payload"
+        required: true
+        type: string
+  repository_dispatch:
+    types:
+      - kernel-task-completion-backup
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Decode payload
+        env:
+          RECORD_ID: ${{ github.event.inputs.record_id || github.event.client_payload.record_id }}
+          PAYLOAD_B64: ${{ github.event.inputs.payload_b64 || github.event.client_payload.payload_b64 }}
+        run: |
+          set -euo pipefail
+          SAFE_RECORD_ID="$(printf '%s' "${RECORD_ID}" | tr -cd 'A-Za-z0-9._-')"
+          if [[ -z "${SAFE_RECORD_ID}" ]]; then
+            echo "record_id is empty after sanitization" >&2
+            exit 2
+          fi
+          mkdir -p artifact
+          printf '%s' "${PAYLOAD_B64}" | base64 --decode > "artifact/${SAFE_RECORD_ID}.json"
+          jq . "artifact/${SAFE_RECORD_ID}.json" >/dev/null
+
+          {
+            echo "## Kernel task completion backup"
+            echo
+            echo "- record_id: \`${SAFE_RECORD_ID}\`"
+            echo "- assistant: \`$(jq -r '.assistant' "artifact/${SAFE_RECORD_ID}.json")\`"
+            echo "- source: \`$(jq -r '.source' "artifact/${SAFE_RECORD_ID}.json")\`"
+            echo "- session_id: \`$(jq -r '.session_id' "artifact/${SAFE_RECORD_ID}.json")\`"
+            echo "- completed_at: \`$(jq -r '.completed_at' "artifact/${SAFE_RECORD_ID}.json")\`"
+            echo "- orchestration_compliance: \`$(jq -r '.orchestration_compliance // "unverified"' "artifact/${SAFE_RECORD_ID}.json")\`"
+            echo "- observed_models: \`$(jq -r '[.observed_models[]?.provider] | unique | join(",")' "artifact/${SAFE_RECORD_ID}.json")\`"
+            echo "- title: \`$(jq -r '.title // ""' "artifact/${SAFE_RECORD_ID}.json")\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-task-completion-${{ github.event.inputs.record_id || github.event.client_payload.record_id }}
+          path: artifact/*.json
+          if-no-files-found: error
