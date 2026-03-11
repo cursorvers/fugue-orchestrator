@@ -85,12 +85,13 @@ elif [[ "${required_claude_assist_gate}" == "fail" ]]; then
   required_assist_section="- required claude assist gate: fail (\`${required_claude_assist_reason}\`)"
 fi
 
-baseline_trio_section="- baseline trio gate (codex+claude+glm): not-required"
+baseline_trio_section="- baseline trio gate (codex+claude+glm only): not-required"
 if [[ "${baseline_trio_gate}" == "pass" ]]; then
-  baseline_trio_section="- baseline trio gate (codex+claude+glm): pass (\`${baseline_trio_reason}\`, codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})"
+  baseline_trio_section="- baseline trio gate (codex+claude+glm only): pass (\`${baseline_trio_reason}\`, codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})"
 elif [[ "${baseline_trio_gate}" == "fail" ]]; then
-  baseline_trio_section="- baseline trio gate (codex+claude+glm): fail (\`${baseline_trio_reason}\`, codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})"
+  baseline_trio_section="- baseline trio gate (codex+claude+glm only): fail (\`${baseline_trio_reason}\`, codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})"
 fi
+shadow_continuity_section="- shadow continuity lanes: ${shadow_continuity_success_count} (${shadow_continuity_families:-none})"
 
 complex_assist_section="- complex claude-sub requirement: ${complex_claude_sub_required} (\`${complex_claude_sub_reason}\`)"
 
@@ -119,6 +120,8 @@ integrated_meta="$(jq -cn \
   --arg codex_baseline_success "${codex_baseline_success}" \
   --arg claude_baseline_success "${claude_baseline_success}" \
   --arg glm_baseline_success "${glm_baseline_success}" \
+  --arg shadow_continuity_families "${shadow_continuity_families}" \
+  --arg shadow_continuity_success_count "${shadow_continuity_success_count}" \
   --arg complex_claude_sub_required "${complex_claude_sub_required}" \
   --arg complex_claude_sub_reason "${complex_claude_sub_reason}" \
   '{
@@ -145,6 +148,8 @@ integrated_meta="$(jq -cn \
     codex_baseline_success:($codex_baseline_success | tonumber? // 0),
     claude_baseline_success:($claude_baseline_success | tonumber? // 0),
     glm_baseline_success:($glm_baseline_success | tonumber? // 0),
+    shadow_continuity_families:(if $shadow_continuity_families == "" then [] else ($shadow_continuity_families | split(",")) end),
+    shadow_continuity_success_count:($shadow_continuity_success_count | tonumber? // 0),
     complex_claude_sub_required:($complex_claude_sub_required == "true"),
     complex_claude_sub_reason:$complex_claude_sub_reason
   }'
@@ -183,6 +188,7 @@ ${claude_pressure_section}
 ${complex_assist_section}
 ${required_assist_section}
 ${baseline_trio_section}
+${shadow_continuity_section}
 - lanes configured: ${EXPECTED_LANES}
 
 **Rule a: Security criticism (unconditionally adopted)**

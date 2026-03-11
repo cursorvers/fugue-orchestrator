@@ -50,6 +50,10 @@ require_baseline_trio="$(lower_trim "${REQUIRE_BASELINE_TRIO:-true}")"
 if [[ "${require_baseline_trio}" != "false" ]]; then
   require_baseline_trio="true"
 fi
+vote_command_input="$(normalize_bool "${VOTE_COMMAND_INPUT:-false}")"
+if [[ "${vote_command_input}" == "true" ]]; then
+  require_baseline_trio="true"
+fi
 input_risk_tier="$(lower_trim "${INPUT_RISK_TIER:-}")"
 if [[ "${input_risk_tier}" != "low" && "${input_risk_tier}" != "medium" && "${input_risk_tier}" != "high" ]]; then
   input_risk_tier=""
@@ -174,6 +178,7 @@ baseline_trio_reason="policy-disabled"
 provider_success_filter='[
   .[] | select(
     .skipped != true
+    and ((.fallback_used // false) != true)
     and ((.provider // "" | ascii_downcase) == $provider)
     and (
       ((.http_code // "" | tostring) == "200")
@@ -188,6 +193,7 @@ claude_baseline_success="$(jq -r --arg provider "claude" "${provider_success_fil
 glm_baseline_success="$(jq -r '[
   .[] | select(
     .skipped != true
+    and ((.fallback_used // false) != true)
     and ((.provider // "" | ascii_downcase) == "glm")
     and ((.name // "") | test("^glm-.*-subagent$") | not)
     and (
@@ -197,34 +203,85 @@ glm_baseline_success="$(jq -r '[
     )
   )
 ] | length' all-results.json)"
+shadow_continuity_families="$(jq -r '
+[
+  .[] | select(
+    .skipped != true
+    and (
+      (((.fallback_used // false) == true) and ((.fallback_provider // "") | length > 0))
+      or
+      ((.provider // "" | ascii_downcase) == "copilot")
+      or
+      ((.provider // "" | ascii_downcase) == "gemini")
+      or
+      ((.provider // "" | ascii_downcase) == "xai")
+    )
+    and (
+      ((.http_code // "" | tostring) == "200")
+      or
+      ((.http_code // "" | tostring | startswith("cli:0")))
+    )
+  )
+  | (
+      if ((.fallback_used // false) == true) and ((.fallback_provider // "") | length > 0)
+      then (.fallback_provider // "" | ascii_downcase | sub("-cli$"; ""))
+      else (.provider // "" | ascii_downcase)
+      end
+    )
+  | select(. != "codex" and . != "")
+] | unique | join(",")
+' all-results.json)"
+shadow_continuity_success_count="$(jq -r '
+[
+  .[] | select(
+    .skipped != true
+    and (
+      (((.fallback_used // false) == true) and ((.fallback_provider // "") | length > 0))
+      or
+      ((.provider // "" | ascii_downcase) == "copilot")
+      or
+      ((.provider // "" | ascii_downcase) == "gemini")
+      or
+      ((.provider // "" | ascii_downcase) == "xai")
+    )
+    and (
+      ((.http_code // "" | tostring) == "200")
+      or
+      ((.http_code // "" | tostring | startswith("cli:0")))
+    )
+  )
+  | (
+      if ((.fallback_used // false) == true) and ((.fallback_provider // "") | length > 0)
+      then (.fallback_provider // "" | ascii_downcase | sub("-cli$"; ""))
+      else (.provider // "" | ascii_downcase)
+      end
+    )
+  | select(. != "codex" and . != "")
+] | unique | length
+' all-results.json)"
 
 if [[ "${require_baseline_trio}" == "true" ]]; then
   baseline_trio_gate="pass"
   baseline_missing=()
-  require_claude_baseline="true"
-  if [[ "${assist_provider_resolved}" == "claude" && "${claude_state_effective}" != "ok" ]]; then
-    require_claude_baseline="false"
-  fi
   if [[ "${codex_baseline_success}" -eq 0 ]]; then
     baseline_missing+=("codex")
   fi
-  if [[ "${require_claude_baseline}" == "true" && "${claude_baseline_success}" -eq 0 ]]; then
+  if [[ "${claude_baseline_success}" -eq 0 ]]; then
     baseline_missing+=("claude")
   fi
   if [[ "${glm_baseline_success}" -eq 0 ]]; then
     baseline_missing+=("glm")
   fi
-  if (( ${#baseline_missing[@]} > 0 )); then
+  if (( ${#baseline_missing[@]} == 0 )); then
+    baseline_trio_reason="codex+claude+glm-ok"
+  else
     baseline_trio_gate="fail"
     baseline_trio_reason="missing-$(IFS=,; echo "${baseline_missing[*]}")"
+    if [[ "${shadow_continuity_success_count}" -gt 0 ]]; then
+      baseline_trio_reason="${baseline_trio_reason};shadow-continuity=${shadow_continuity_families}"
+    fi
     high_risk="true"
     high_risk_count="$((high_risk_count + 1))"
-  else
-    if [[ "${require_claude_baseline}" == "true" ]]; then
-      baseline_trio_reason="codex+claude+glm-ok"
-    else
-      baseline_trio_reason="codex+glm-ok(claude-waived-${claude_state_effective})"
-    fi
   fi
 fi
 
@@ -314,6 +371,8 @@ _esc() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
   echo "codex_baseline_success='$(_esc "${codex_baseline_success}")'"
   echo "claude_baseline_success='$(_esc "${claude_baseline_success}")'"
   echo "glm_baseline_success='$(_esc "${glm_baseline_success}")'"
+  echo "shadow_continuity_families='$(_esc "${shadow_continuity_families}")'"
+  echo "shadow_continuity_success_count='$(_esc "${shadow_continuity_success_count}")'"
   echo "complex_claude_sub_required='$(_esc "${complex_claude_sub_required}")'"
   echo "complex_claude_sub_reason='$(_esc "${complex_claude_sub_reason}")'"
 } > integration-vars.sh
