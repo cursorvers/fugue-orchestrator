@@ -76,14 +76,26 @@ jobs:
             ' \
             "${PAYLOAD_PATH}" >/dev/null
 
+          PAYLOAD_TOKEN="$(jq -r '.gha_dispatch_token' "${PAYLOAD_PATH}")"
+          CANONICAL_MIRROR_PATH="backups/task-completion/${SAFE_RECORD_ID}/${PAYLOAD_TOKEN}.json"
+          CANONICAL_RECEIPT_PATH="${RECEIPT_ROOT}/${SAFE_RECORD_ID}/${PAYLOAD_TOKEN}.json"
+          if [[ "$(jq -r '.gha_mirror_path' "${PAYLOAD_PATH}")" != "${CANONICAL_MIRROR_PATH}" ]]; then
+            echo "gha_mirror_path does not match canonical token path" >&2
+            exit 2
+          fi
+          if [[ "$(jq -r '.gha_receipt_path' "${PAYLOAD_PATH}")" != "${CANONICAL_RECEIPT_PATH}" ]]; then
+            echo "gha_receipt_path does not match canonical token path" >&2
+            exit 2
+          fi
+
           PAYLOAD_SHA256="$(sha256sum "${PAYLOAD_PATH}" | awk '{print $1}')"
           {
             echo "safe_record_id=${SAFE_RECORD_ID}"
             echo "payload_path=${PAYLOAD_PATH}"
             echo "payload_sha256=${PAYLOAD_SHA256}"
             echo "backup_branch=${BACKUP_BRANCH}"
-            echo "mirror_path=$(jq -r '.gha_mirror_path' "${PAYLOAD_PATH}")"
-            echo "receipt_path=$(jq -r '.gha_receipt_path' "${PAYLOAD_PATH}")"
+            echo "mirror_path=${CANONICAL_MIRROR_PATH}"
+            echo "receipt_path=${CANONICAL_RECEIPT_PATH}"
           } >> "${GITHUB_OUTPUT}"
 
           {
@@ -99,7 +111,7 @@ jobs:
             echo "- title: \`$(jq -r '.title // ""' "${PAYLOAD_PATH}")\`"
             echo "- payload_sha256: \`${PAYLOAD_SHA256}\`"
             echo "- durable_branch: \`${BACKUP_BRANCH}\`"
-            echo "- receipt_path: \`$(jq -r '.gha_receipt_path' "${PAYLOAD_PATH}")\`"
+            echo "- receipt_path: \`${CANONICAL_RECEIPT_PATH}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Checkout repository for durable mirror
