@@ -1,0 +1,14 @@
+{
+  "record_id": "7704ec41aa69549b1a6add4a",
+  "gha_dispatch_token": "7704ec41aa69549b1a6add4a-1-2c06ee8cd6073ea2",
+  "payload_sha256": "291867fec3f0538797a18974b52f46c835ab0a8b23ee1e4bd2640754624bccfa",
+  "gha_repo": "cursorvers/fugue-orchestrator",
+  "gha_workflow": "kernel-task-completion-backup.yml",
+  "gha_mirror_branch": "kernel-task-completion-backups",
+  "gha_mirror_path": "backups/task-completion/7704ec41aa69549b1a6add4a/7704ec41aa69549b1a6add4a-1-2c06ee8cd6073ea2.json",
+  "gha_receipt_path": "backups/task-completion-receipts/7704ec41aa69549b1a6add4a/7704ec41aa69549b1a6add4a-1-2c06ee8cd6073ea2.json",
+  "run_id": "22940654180",
+  "run_attempt": "1",
+  "event_name": "workflow_dispatch",
+  "created_at": "2026-03-11T06:55:31Z"
+}
