@@ -35,6 +35,7 @@ jobs:
           PAYLOAD_B64: ${{ github.event.inputs.payload_b64 || github.event.client_payload.payload_b64 }}
           MAX_PAYLOAD_B64_CHARS: "60000"
           BACKUP_BRANCH: kernel-task-completion-backups
+          RECEIPT_ROOT: backups/task-completion-receipts
         run: |
           set -euo pipefail
           PAYLOAD_B64_CHARS="$(printf '%s' "${PAYLOAD_B64}" | wc -c | tr -d ' ')"
@@ -79,6 +80,8 @@ jobs:
             echo "payload_path=${PAYLOAD_PATH}"
             echo "payload_sha256=${PAYLOAD_SHA256}"
             echo "backup_branch=${BACKUP_BRANCH}"
+            echo "mirror_path=backups/task-completion/${SAFE_RECORD_ID}.json"
+            echo "receipt_path=${RECEIPT_ROOT}/${SAFE_RECORD_ID}.json"
           } >> "${GITHUB_OUTPUT}"
 
           {
@@ -94,6 +97,7 @@ jobs:
             echo "- title: \`$(jq -r '.title // ""' "${PAYLOAD_PATH}")\`"
             echo "- payload_sha256: \`${PAYLOAD_SHA256}\`"
             echo "- durable_branch: \`${BACKUP_BRANCH}\`"
+            echo "- receipt_path: \`${RECEIPT_ROOT}/${SAFE_RECORD_ID}.json\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Checkout repository for durable mirror
@@ -105,7 +109,10 @@ jobs:
         env:
           SAFE_RECORD_ID: ${{ steps.decode.outputs.safe_record_id }}
           PAYLOAD_PATH: ${{ steps.decode.outputs.payload_path }}
+          PAYLOAD_SHA256: ${{ steps.decode.outputs.payload_sha256 }}
           BACKUP_BRANCH: ${{ steps.decode.outputs.backup_branch }}
+          MIRROR_PATH: ${{ steps.decode.outputs.mirror_path }}
+          RECEIPT_PATH: ${{ steps.decode.outputs.receipt_path }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -119,14 +126,36 @@ jobs:
             git rm -rf . >/dev/null 2>&1 || true
           fi
 
-          mkdir -p backups/task-completion
-          cp "${PAYLOAD_PATH}" "backups/task-completion/${SAFE_RECORD_ID}.json"
-          git add "backups/task-completion/${SAFE_RECORD_ID}.json"
-
-          if git diff --cached --quiet; then
-            echo "Durable mirror already up to date for ${SAFE_RECORD_ID}"
-            exit 0
-          fi
+          mkdir -p "$(dirname "${MIRROR_PATH}")" "$(dirname "${RECEIPT_PATH}")"
+          cp "${PAYLOAD_PATH}" "${MIRROR_PATH}"
+          jq -n \
+            --arg record_id "${SAFE_RECORD_ID}" \
+            --arg gha_dispatch_token "$(jq -r '.gha_dispatch_token' "${PAYLOAD_PATH}")" \
+            --arg payload_sha256 "${PAYLOAD_SHA256}" \
+            --arg gha_repo "$(jq -r '.gha_repo' "${PAYLOAD_PATH}")" \
+            --arg gha_workflow "$(jq -r '.gha_workflow' "${PAYLOAD_PATH}")" \
+            --arg gha_mirror_branch "${BACKUP_BRANCH}" \
+            --arg gha_mirror_path "${MIRROR_PATH}" \
+            --arg gha_receipt_path "${RECEIPT_PATH}" \
+            --arg run_id "${GITHUB_RUN_ID}" \
+            --arg run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg event_name "${GITHUB_EVENT_NAME}" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              record_id: $record_id,
+              gha_dispatch_token: $gha_dispatch_token,
+              payload_sha256: $payload_sha256,
+              gha_repo: $gha_repo,
+              gha_workflow: $gha_workflow,
+              gha_mirror_branch: $gha_mirror_branch,
+              gha_mirror_path: $gha_mirror_path,
+              gha_receipt_path: $gha_receipt_path,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              event_name: $event_name,
+              created_at: $created_at
+            }' > "${RECEIPT_PATH}"
+          git add "${MIRROR_PATH}" "${RECEIPT_PATH}"
 
           git commit -m "backup: task completion ${SAFE_RECORD_ID}"
           git push origin "HEAD:${BACKUP_BRANCH}"

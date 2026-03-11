@@ -73,4 +73,9 @@ grep -q "kernel-task-completion-backups" "${WORKFLOW_FILE}" || {
   exit 1
 }
 
+grep -q "backups/task-completion-receipts" "${WORKFLOW_FILE}" || {
+  echo "workflow must persist receipt files for provenance verification" >&2
+  exit 1
+}
+
 echo "PASS [kernel-task-completion-backup]"
