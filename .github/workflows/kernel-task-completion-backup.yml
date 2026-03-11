@@ -69,6 +69,7 @@ jobs:
               and (.summary_text | type == "string" and length > 0)
               and (.gha_repo | type == "string" and length > 0)
               and (.gha_workflow | type == "string" and length > 0)
+              and (.gha_dispatch_token | type == "string" and length > 0)
             ' \
             "${PAYLOAD_PATH}" >/dev/null
 
