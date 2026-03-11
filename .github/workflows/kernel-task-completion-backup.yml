@@ -71,6 +71,8 @@ jobs:
               and (.gha_repo | type == "string" and length > 0)
               and (.gha_workflow | type == "string" and length > 0)
               and (.gha_dispatch_token | type == "string" and length > 0)
+              and (.gha_mirror_path | type == "string" and startswith("backups/task-completion/") and endswith(".json"))
+              and (.gha_receipt_path | type == "string" and startswith("backups/task-completion-receipts/") and endswith(".json"))
             ' \
             "${PAYLOAD_PATH}" >/dev/null
 
@@ -80,8 +82,8 @@ jobs:
             echo "payload_path=${PAYLOAD_PATH}"
             echo "payload_sha256=${PAYLOAD_SHA256}"
             echo "backup_branch=${BACKUP_BRANCH}"
-            echo "mirror_path=backups/task-completion/${SAFE_RECORD_ID}.json"
-            echo "receipt_path=${RECEIPT_ROOT}/${SAFE_RECORD_ID}.json"
+            echo "mirror_path=$(jq -r '.gha_mirror_path' "${PAYLOAD_PATH}")"
+            echo "receipt_path=$(jq -r '.gha_receipt_path' "${PAYLOAD_PATH}")"
           } >> "${GITHUB_OUTPUT}"
 
           {
@@ -97,7 +99,7 @@ jobs:
             echo "- title: \`$(jq -r '.title // ""' "${PAYLOAD_PATH}")\`"
             echo "- payload_sha256: \`${PAYLOAD_SHA256}\`"
             echo "- durable_branch: \`${BACKUP_BRANCH}\`"
-            echo "- receipt_path: \`${RECEIPT_ROOT}/${SAFE_RECORD_ID}.json\`"
+            echo "- receipt_path: \`$(jq -r '.gha_receipt_path' "${PAYLOAD_PATH}")\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Checkout repository for durable mirror
@@ -156,6 +158,11 @@ jobs:
               created_at: $created_at
             }' > "${RECEIPT_PATH}"
           git add "${MIRROR_PATH}" "${RECEIPT_PATH}"
+
+          if git diff --cached --quiet; then
+            echo "Durable mirror and receipt already up to date for ${SAFE_RECORD_ID}"
+            exit 0
+          fi
 
           git commit -m "backup: task completion ${SAFE_RECORD_ID}"
           git push origin "HEAD:${BACKUP_BRANCH}"
