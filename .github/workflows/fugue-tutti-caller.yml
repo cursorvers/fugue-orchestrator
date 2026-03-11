@@ -1,5 +1,5 @@
 name: Fugue Mainframe (Tutti + Optional Codex Implement)
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('issue #{0} dispatch {1}', github.event.inputs.issue_number || 'unknown', github.event.inputs.dispatch_nonce || github.run_id) || github.event.issue.title || format('issue-{0}', github.event.issue.number || github.run_id) }}
+run-name: issue-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
 
 on:
   issues:
@@ -759,24 +759,11 @@ jobs:
       workspace_readonly_actions: "${{ needs.ctx.outputs.workspace_readonly_actions }}"
       workspace_approval_required_actions: "${{ needs.ctx.outputs.workspace_approval_required_actions }}"
       workspace_readonly_environment: "${{ vars.FUGUE_WORKSPACE_READONLY_ENV || 'workspace-readonly' }}"
-      freee_hint_applied: "${{ needs.ctx.outputs.freee_hint_applied }}"
-      freee_action_hint: "${{ needs.ctx.outputs.freee_action_hint }}"
-      freee_domain_hint: "${{ needs.ctx.outputs.freee_domain_hint }}"
-      freee_reason: "${{ needs.ctx.outputs.freee_reason }}"
-      freee_suggested_phases: "${{ needs.ctx.outputs.freee_suggested_phases }}"
-      freee_readonly_actions: "${{ needs.ctx.outputs.freee_readonly_actions }}"
-      freee_approval_required_actions: "${{ needs.ctx.outputs.freee_approval_required_actions }}"
-      freee_readonly_environment: "${{ vars.FUGUE_FREEE_READONLY_ENV || 'freee-readonly' }}"
       execution_mode: "${{ needs.execution-policy.outputs.codex_execution_mode }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
       GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
-      FREEE_ACCESS_TOKEN: ${{ secrets.FREEE_ACCESS_TOKEN }}
-      FREEE_REFRESH_TOKEN: ${{ secrets.FREEE_REFRESH_TOKEN }}
-      FREEE_CLIENT_ID: ${{ secrets.FREEE_CLIENT_ID }}
-      FREEE_CLIENT_SECRET: ${{ secrets.FREEE_CLIENT_SECRET }}
-      FREEE_COMPANY_ID: ${{ secrets.FREEE_COMPANY_ID }}
 
   implement-awaiting-confirmation:
     if: >-
