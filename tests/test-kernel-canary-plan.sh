@@ -46,6 +46,10 @@ grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script missing GitHub variable hydration helper" >&2
   exit 1
 }
+grep -q -- '--ref "\${caller_ref}"' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should dispatch tutti-caller against the active branch ref" >&2
+  exit 1
+}
 grep -q "needs-human|needs-review|processing" "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script should clean transient review labels on pass" >&2
   exit 1
