@@ -184,11 +184,13 @@ jobs:
           set -euo pipefail
           repo="${GITHUB_REPOSITORY}"
           start_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          trust_subject="${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}"
 
           gh workflow run fugue-orchestrator-canary.yml \
             --repo "${repo}" \
             --ref main \
-            -f canary_mode=lite
+            -f canary_mode=lite \
+            -f trust_subject="${trust_subject}"
 
           target_sha=""
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then

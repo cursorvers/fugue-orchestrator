@@ -13,6 +13,11 @@ on:
           - full
           - lite
         default: full
+      trust_subject:
+        description: "Optional trusted actor login to pass into canary issue dispatches"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   issues: write
@@ -60,4 +65,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
+          CANARY_TRUST_SUBJECT: ${{ github.event.inputs.trust_subject || '' }}
         run: bash scripts/harness/run-canary.sh

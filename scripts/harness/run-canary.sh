@@ -503,7 +503,7 @@ create_issue() {
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
-  trust_subject="${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}"
+  trust_subject="${CANARY_TRUST_SUBJECT:-${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}}"
   if [[ -n "${GITHUB_RUN_ID:-}" && ( -z "${trust_subject}" || "${trust_subject}" == "github-actions[bot]" || "${trust_subject}" == "github-actions" || "${trust_subject}" == "app/github-actions" ) ]]; then
     trust_subject="$(GH_TOKEN="${gh_readonly_token:-${GH_TOKEN:-}}" gh_timeout_cmd 20s gh api "repos/${repo}/actions/runs/${GITHUB_RUN_ID}" --jq '.triggering_actor.login // .actor.login // ""' 2>/dev/null || true)"
   fi

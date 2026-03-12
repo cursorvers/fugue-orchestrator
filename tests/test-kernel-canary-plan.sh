@@ -22,8 +22,20 @@ grep -q "CANARY_VERIFY_ROLLBACK" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing rollback verification env" >&2
   exit 1
 }
+grep -q "trust_subject:" "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow missing trust_subject workflow_dispatch input" >&2
+  exit 1
+}
 grep -q "LEGACY_MAIN_ORCHESTRATOR_PROVIDER" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing legacy main provider env" >&2
+  exit 1
+}
+grep -q 'CANARY_TRUST_SUBJECT: .*github.event.inputs.trust_subject' "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow should export trust_subject into run-canary env" >&2
+  exit 1
+}
+grep -q 'trust_subject="\${GITHUB_TRIGGERING_ACTOR:-\${GITHUB_ACTOR:-}}"' "${ROOT_DIR}/.github/workflows/fugue-orchestration-gate.yml" || {
+  echo "FAIL: orchestration gate should pass triggering actor into canary dispatch" >&2
   exit 1
 }
 grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
