@@ -386,6 +386,7 @@ jobs:
           }
 
           TRUST_SUBJECT="${{ steps.ctx.outputs.trust_subject }}"
+          CANARY_DISPATCH_OWNED="${{ steps.ctx.outputs.canary_dispatch_owned }}"
           if [[ -z "${TRUST_SUBJECT}" ]]; then
             TRUST_SUBJECT="${{ steps.ctx.outputs.author }}"
           fi
@@ -400,6 +401,12 @@ jobs:
           TRUSTED="false"
           if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
             TRUSTED="true"
+          fi
+          if [[ "${CANARY_DISPATCH_OWNED}" == "true" ]]; then
+            TRUSTED="true"
+            if [[ "${PERM}" == "none" ]]; then
+              PERM="canary-bypass"
+            fi
           fi
           if [[ "${VOTE_COMMAND}" == "true" ]]; then
             TRUSTED="true"
