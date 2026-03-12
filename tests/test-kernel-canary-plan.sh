@@ -71,6 +71,10 @@ grep -q 'canary_dispatch_owned: "\${{ needs.ctx.outputs.canary_dispatch_owned }}
   echo "FAIL: caller workflow should pass canary dispatch ownership into router" >&2
   exit 1
 }
+grep -q 'GITHUB_TRIGGERING_ACTOR:-\${GITHUB_ACTOR:-}' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should prefer triggering actor for trust subject dispatch" >&2
+  exit 1
+}
 grep -q 'CANARY_DISPATCH_OWNED="\${{ steps.ctx.outputs.canary_dispatch_owned }}"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow should trust explicit caller-owned canary dispatch input" >&2
   exit 1

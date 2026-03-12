@@ -502,8 +502,8 @@ create_issue() {
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
-  if [[ -n "${GITHUB_ACTOR:-}" ]]; then
-    run_cmd+=(-f trust_subject="${GITHUB_ACTOR}")
+  if [[ -n "${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}" ]]; then
+    run_cmd+=(-f trust_subject="${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}")
   fi
   if [[ -n "${dispatch_offline_policy}" ]]; then
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
