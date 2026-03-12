@@ -6,6 +6,7 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-matrix-parity.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/model-policy.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/local/integrations/**'
@@ -13,6 +14,8 @@ on:
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'tests/test-build-agent-matrix-defaults.sh'
+      - 'tests/test-codex-live-defaults.sh'
+      - 'tests/test-model-policy.sh'
       - 'config/integrations/local-systems.json'
   push:
     branches:
@@ -21,6 +24,7 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-matrix-parity.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/model-policy.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/local/integrations/**'
@@ -28,6 +32,8 @@ on:
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'tests/test-build-agent-matrix-defaults.sh'
+      - 'tests/test-codex-live-defaults.sh'
+      - 'tests/test-model-policy.sh'
       - 'config/integrations/local-systems.json'
   workflow_dispatch:
 
@@ -46,17 +52,22 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/lib/model-policy.sh
           bash -n scripts/local/run-local-orchestration.sh
           bash -n scripts/local/run-linked-systems.sh
           bash -n scripts/sim-orchestrator-switch.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n tests/test-build-agent-matrix-defaults.sh
+          bash -n tests/test-codex-live-defaults.sh
+          bash -n tests/test-model-policy.sh
 
       - name: Matrix parity check
         run: |
           set -euo pipefail
-          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh tests/test-build-agent-matrix-defaults.sh
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh tests/test-build-agent-matrix-defaults.sh tests/test-codex-live-defaults.sh tests/test-model-policy.sh
           ./tests/test-build-agent-matrix-defaults.sh
+          ./tests/test-codex-live-defaults.sh
+          ./tests/test-model-policy.sh
           ./scripts/check-agent-matrix-parity.sh
           ./scripts/check-linked-systems-integrity.sh

@@ -32,14 +32,17 @@ If a file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 ## Slash Prompt Contract
 
 - The supported entrypoint for Kernel work in this repository is a fresh Codex session started at the repository root and then `/kernel`.
+- `/k` is a local one-word alias for `/kernel` in this repository and must obey the same Kernel bootstrap contract.
 - The authoritative prompt for this repository is `.codex/prompts/kernel.md`.
+- The local alias prompt for one-word chat-box startup is `.codex/prompts/k.md`.
 - Do not rely on `~/.codex/prompts/kernel.md` alone for repository work; treat the global prompt as convenience only.
 - Hot reload is not guaranteed. After changing `.codex/prompts/kernel.md`, start a new Codex session before assuming the update is active.
 - If `/kernel` is not recognized, restart Codex from this repository root and retry before doing manual fallback work.
-- `/kernel` bootstrap must launch at least 3 active subagent lanes before the first acknowledgement.
-- The normal operating target is 6 concurrent lanes across multiple LLM models or model profiles when the environment supports it.
+- Bare `/kernel` inside the Codex chat UI is not a local SLO path for this repository; it remains upstream Codex CLI/TUI behavior until proven otherwise.
+- `/kernel` bootstrap must launch at least 6 active subagent lanes before the first acknowledgement.
+- The minimum operating target is 6 or more concurrent lanes across multiple LLM models or model profiles.
 - The first valid acknowledgement must include a `Lane manifest:` section describing currently active lanes, not planned lanes.
-- The first valid acknowledgement must also include `Bootstrap target: 6 lanes (minimum 3).`
+- The first valid acknowledgement must also include `Bootstrap target: 6+ lanes (minimum 6).`
 - `/vote` and `/v` are local continuation prompts in this repository. They must not post to GitHub or hand off to issue-comment workflows.
 - GitHub `/vote` workflow triggering remains an explicit issue-comment path (`gh issue comment ... --body '/vote'` or `vote-gh ...`), not a Codex slash prompt.
 - Hot reload is not guaranteed for `.codex/prompts/vote.md` and `.codex/prompts/v.md` either. Restart the session after changing them.
@@ -70,11 +73,24 @@ For `/kernel` prompt verification:
 
 - static contract check: `bash tests/test-codex-kernel-prompt.sh`
 - runtime smoke on a fresh session: `RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh`
-- runtime smoke passes only when the acknowledgement includes `Kernel orchestration is active ...`, `Bootstrap target: 6 lanes (minimum 3).`, and a lane manifest with at least 3 active lanes
+- runtime smoke passes only when the acknowledgement includes `Kernel orchestration is active ...`, `Bootstrap target: 6+ lanes (minimum 6).`, and a lane manifest with at least 6 active lanes
 
 For `/vote` prompt verification:
 
 - static contract check: `bash tests/test-codex-vote-prompt.sh`
+- runtime smoke on a fresh session: `RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh`
+- runtime smoke passes only when output includes `Local consensus mode is active.`, `Smoke verification: PASS`, and `Smoke result marker: ...` within `CODEX_VOTE_SMOKE_TIMEOUT_SEC` seconds (default: `90`)
+- CI static enforcement: `.github/workflows/fugue-orchestration-gate.yml` runs `bash tests/test-codex-vote-prompt.sh`
+- approval-prompt quiescence rule applies to `/vote` and `/v`
+- do not request approval for exploratory convenience; require explicit user ask or strict necessity first
+
+Approval-prompt safety rules for `/kernel` and `/vote`:
+
+- do not request approval for exploratory convenience
+- Only request approval for network, GitHub, or other escalated commands when the user explicitly asked for them or they are strictly required
+- quiesce active lanes that can still write to the current TTY before any approval prompt
+- Do not surface approval prompts while background Codex activity is still emitting output into the same terminal.
+- if quiescence cannot be established promptly, fail closed with a one-line `quiescence_timeout` status
 
 ## Current Intent
 

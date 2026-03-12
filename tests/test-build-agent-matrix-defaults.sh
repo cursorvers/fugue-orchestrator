@@ -24,12 +24,18 @@ assert_eq() {
 }
 
 help_output="$("${BUILDER}" --help)"
-assert_eq "$(printf '%s\n' "${help_output}" | grep -F "default: gpt-5-codex" | head -n1)" \
-  "  --codex-multi-agent-model VALUE   default: gpt-5-codex" \
-  "help codex multi default"
-assert_eq "$(printf '%s\n' "${help_output}" | grep -F "default: glm-5" | head -n1)" \
-  "  --glm-model VALUE                 default: glm-5" \
-  "help glm default"
+if printf '%s\n' "${help_output}" | grep -Eq -- '--codex-multi-agent-model[[:space:]]+VALUE[[:space:]]+default: gpt-5-codex'; then
+  echo "[PASS] help codex multi default" >&2
+else
+  echo "[FAIL] help codex multi default" >&2
+  failures=$((failures + 1))
+fi
+if printf '%s\n' "${help_output}" | grep -Eq -- '--glm-model[[:space:]]+VALUE[[:space:]]+default: glm-5'; then
+  echo "[PASS] help glm default" >&2
+else
+  echo "[FAIL] help glm default" >&2
+  failures=$((failures + 1))
+fi
 
 default_payload="$("${BUILDER}" --format json)"
 assert_eq "$(echo "${default_payload}" | jq -r '.matrix.include[] | select(.provider == "codex" and .name != "codex-main-orchestrator") | .model' | sort -u)" \

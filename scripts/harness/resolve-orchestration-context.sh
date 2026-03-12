@@ -378,15 +378,15 @@ translation_skip_reason=""
 translation_event="false"
 translation_payload=""
 normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
-CODEX_MAIN_MODEL="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+CODEX_MAIN_MODEL="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
   eval "$(
     "${ROOT_DIR}/scripts/lib/model-policy.sh" \
       --codex-main-model "${CODEX_MAIN_MODEL}" \
       --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
       --claude-model "claude-sonnet-4-6" \
-      --glm-model "glm-5.0" \
+      --glm-model "glm-5" \
       --gemini-model "gemini-3.1-pro" \
       --gemini-fallback-model "gemini-3-flash" \
       --xai-model "grok-4" \
@@ -394,8 +394,8 @@ if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
   )"
   CODEX_MAIN_MODEL="${codex_main_model}"
   CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
-elif ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
-  CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+elif [[ "${CODEX_MULTI_AGENT_MODEL}" != "gpt-5-codex" && "${CODEX_MULTI_AGENT_MODEL}" != "gpt-5.4" ]] && ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+  CODEX_MULTI_AGENT_MODEL="gpt-5-codex"
 fi
 if [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
   judge_sys_prompt="You are Codex Orchestrator gate. Decide if Claude translation should be inserted before orchestration. Return ONLY compact JSON: {\"score\":0-100,\"should_translate\":true|false,\"reason\":\"short\",\"signals\":[\"...\"]}."

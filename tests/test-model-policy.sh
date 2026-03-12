@@ -75,16 +75,16 @@ echo ""
 
 # --- Group 1: Default values (no args) ---
 assert_model "default-codex-main" \
-  "codex_main_model" "gpt-5.4"
+  "codex_main_model" "gpt-5-codex"
 
 assert_model "default-codex-multi" \
-  "codex_multi_agent_model" "gpt-5.3-codex-spark"
+  "codex_multi_agent_model" "gpt-5-codex"
 
 assert_model "default-claude" \
   "claude_model" "claude-sonnet-4-6"
 
 assert_model "default-glm" \
-  "glm_model" "glm-5.0"
+  "glm_model" "glm-5"
 
 assert_model "default-gemini" \
   "gemini_model" "gemini-3.1-pro"
@@ -117,11 +117,7 @@ assert_model "claude-sonnet-valid" \
   --claude-model "claude-sonnet-4-6"
 
 assert_model "glm-4.5-valid" \
-  "glm_model" "glm-4.5" \
-  --glm-model "glm-4.5"
-
-assert_model "glm-5.0-valid" \
-  "glm_model" "glm-5.0" \
+  "glm_model" "glm-5" \
   --glm-model "glm-5.0"
 
 assert_model "gemini-flash-valid" \
@@ -134,7 +130,7 @@ assert_model "xai-grok4-variant" \
 
 # --- Group 3: Invalid models get normalized ---
 assert_model "invalid-codex-main" \
-  "codex_main_model" "gpt-5.4" \
+  "codex_main_model" "gpt-5-codex" \
   --codex-main-model "gpt-4-turbo"
 
 assert_model "invalid-claude" \
@@ -142,7 +138,7 @@ assert_model "invalid-claude" \
   --claude-model "claude-opus-4-6"
 
 assert_model "invalid-glm" \
-  "glm_model" "glm-5.0" \
+  "glm_model" "glm-5" \
   --glm-model "glm-3-turbo"
 
 assert_model "invalid-gemini" \
@@ -160,11 +156,11 @@ assert_model "adjusted-true" \
 
 assert_model "adjusted-false-all-valid" \
   "model_policy_adjusted" "false" \
-  --codex-multi-agent-model "gpt-5.3-codex-spark" --glm-model "glm-5.0"
+  --codex-multi-agent-model "gpt-5-codex" --glm-model "glm-5"
 
 # --- Group 5: JSON format ---
 assert_json "json-codex-main" \
-  ".codex_main_model" "gpt-5.4"
+  ".codex_main_model" "gpt-5-codex"
 
 assert_json "json-adjusted-false" \
   ".adjusted" "false"
@@ -179,7 +175,7 @@ assert_json "json-adjustments" \
 
 # --- Group 6: Edge cases ---
 assert_model "empty-codex-main" \
-  "codex_main_model" "gpt-5.4" \
+  "codex_main_model" "gpt-5-codex" \
   --codex-main-model ""
 
 assert_model "whitespace-model" \

@@ -72,11 +72,11 @@ done
 
 source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
-LATEST_CODEX_MAIN="gpt-5.4"
-FALLBACK_CODEX_MAIN="gpt-5-codex"
-LATEST_CODEX_MULTI_DEFAULT="gpt-5.3-codex-spark"
+DEFAULT_CODEX_MAIN="gpt-5-codex"
+ALT_CODEX_MAIN="gpt-5.4"
+LATEST_CODEX_MULTI_DEFAULT="${DEFAULT_CODEX_MAIN}"
 LATEST_CLAUDE_DEFAULT="claude-sonnet-4-6"
-LATEST_GLM_DEFAULT="glm-5.0"
+LATEST_GLM_DEFAULT="glm-5"
 LATEST_GEMINI_PRIMARY="gemini-3.1-pro"
 LATEST_GEMINI_FALLBACK="gemini-3-flash"
 LATEST_XAI_DEFAULT="grok-4"
@@ -89,7 +89,7 @@ gemini_raw="$(lower_trim "${gemini_model}")"
 gemini_fallback_raw="$(lower_trim "${gemini_fallback_model}")"
 xai_raw="$(lower_trim "${xai_model}")"
 
-normalized_codex_main="${LATEST_CODEX_MAIN}"
+normalized_codex_main="${DEFAULT_CODEX_MAIN}"
 normalized_codex_multi="${LATEST_CODEX_MULTI_DEFAULT}"
 normalized_claude="${LATEST_CLAUDE_DEFAULT}"
 normalized_glm="${LATEST_GLM_DEFAULT}"
@@ -101,16 +101,16 @@ adjusted="false"
 adjustments=()
 
 if [[ -n "${codex_main_raw}" ]]; then
-  if [[ "${codex_main_raw}" == "${LATEST_CODEX_MAIN}" || "${codex_main_raw}" == "${FALLBACK_CODEX_MAIN}" ]]; then
+  if [[ "${codex_main_raw}" == "${DEFAULT_CODEX_MAIN}" || "${codex_main_raw}" == "${ALT_CODEX_MAIN}" ]]; then
     normalized_codex_main="${codex_main_raw}"
   else
     adjusted="true"
-    adjustments+=("codex_main:${codex_main_raw}->${LATEST_CODEX_MAIN}")
+    adjustments+=("codex_main:${codex_main_raw}->${DEFAULT_CODEX_MAIN}")
   fi
 fi
 
 if [[ -n "${codex_multi_raw}" ]]; then
-  if [[ "${codex_multi_raw}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+  if [[ "${codex_multi_raw}" == "${DEFAULT_CODEX_MAIN}" || "${codex_multi_raw}" == "${ALT_CODEX_MAIN}" || "${codex_multi_raw}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
     normalized_codex_multi="${codex_multi_raw}"
   else
     adjusted="true"
@@ -129,8 +129,8 @@ if [[ -n "${claude_raw}" ]]; then
 fi
 
 if [[ -n "${glm_raw}" ]]; then
-  if [[ "${glm_raw}" == "glm-4.5" || "${glm_raw}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
-    normalized_glm="${glm_raw}"
+  if [[ "${glm_raw}" == "glm-5" || "${glm_raw}" == "glm-5.0" ]]; then
+    normalized_glm="${LATEST_GLM_DEFAULT}"
   else
     adjusted="true"
     adjustments+=("glm:${glm_raw}->${LATEST_GLM_DEFAULT}")

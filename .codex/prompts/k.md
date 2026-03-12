@@ -5,9 +5,12 @@ argument-hint: [FOCUS="..."]
 
 # Start Kernel Orchestration
 
+Treat `/k` as a local one-word alias for `/kernel`.
+
 Execute immediately. Do not create or edit GitHub issues, pull requests, review comments, or issue comments. Do not inspect CI unless explicitly asked later. Backup-only GitHub Actions dispatch or repository_dispatch for task or audit logging is allowed.
 
-This prompt is bootstrap-first. If the current user message is only `/kernel`, or `/kernel` plus a short focus string, treat it as a bootstrap-only start. Do not inspect the repository before bootstrap.
+This prompt is bootstrap-first. If the current user message is only `/k`, or `/k` plus a short focus string, treat it as a bootstrap-only start. Do not inspect the repository before bootstrap.
+An empty focus is valid. Do not ask the user what `/k` means. A bare `/k` must bootstrap Kernel orchestration immediately.
 
 Hard order:
 
@@ -49,4 +52,4 @@ Constraints:
 - Treat Kernel as parallel orchestration, not a single-agent continuation mode.
 - Prefer multiple LLM models for the 6-lane-or-more baseline whenever the environment supports them.
 - The manifest must describe currently active lanes, not planned lanes.
-- The first useful output for a fresh `/kernel` start is the acknowledgement and live lane manifest, not a repository summary.
+- The first useful output for a fresh `/k` start is the acknowledgement and live lane manifest, not a repository summary.

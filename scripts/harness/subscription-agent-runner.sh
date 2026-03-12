@@ -34,9 +34,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/../lib/model-policy.sh"
 recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
 raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_glm_model="$(echo "${GLM_MODEL:-glm-5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-3.1-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 # shellcheck source=../lib/safe-eval-policy.sh
@@ -54,9 +54,9 @@ if [[ -x "${model_policy_script}" ]]; then
   claude_opus_model="${claude_model}"
 else
   claude_opus_model="claude-sonnet-4-6"
-  codex_main_model="gpt-5.4"
-  codex_multi_agent_model="gpt-5.3-codex-spark"
-  glm_model="glm-5.0"
+  codex_main_model="gpt-5-codex"
+  codex_multi_agent_model="gpt-5-codex"
+  glm_model="glm-5"
   gemini_model="gemini-3.1-pro"
   gemini_fallback_model="gemini-3-flash"
 fi
@@ -95,7 +95,7 @@ if [[ "${PROVIDER}" == "codex" ]]; then
 elif [[ "${PROVIDER}" == "claude" ]]; then
   MODEL="${claude_opus_model}"
 elif [[ "${PROVIDER}" == "glm" ]]; then
-  if [[ -n "${requested_model}" && "${requested_model}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
+  if [[ -n "${requested_model}" && "${requested_model}" =~ ^glm-5(\.0)?$ ]]; then
     MODEL="${requested_model}"
   else
     MODEL="${glm_model}"

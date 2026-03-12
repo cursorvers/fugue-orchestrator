@@ -93,9 +93,9 @@ Auditability:
 - `FUGUE_REQUIRE_BASELINE_TRIO=true` enforces baseline trio success (`codex` + `claude` + `glm`) before execution approval (default enabled).
 - Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
 - Codex lane model split:
-  - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.3-codex`)
-  - `FUGUE_CODEX_MULTI_AGENT_MODEL` for non-main codex lanes (default `gpt-5.3-codex-spark`)
-- GLM baseline model: `glm-5.0`.
+  - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5-codex` in live/local orchestration; `gpt-5.4` remains an explicit opt-in)
+  - `FUGUE_CODEX_MULTI_AGENT_MODEL` for non-main codex lanes (default `gpt-5-codex` in live/local orchestration; reserve `gpt-5.3-codex-spark` for deterministic simulation or explicit opt-in)
+- GLM baseline model: `glm-5`.
 - `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=true` (default) keeps GLM baseline voters active even when `FUGUE_CI_EXECUTION_ENGINE=subscription` (hybrid: codex/claude via CLI, GLM via API).
 - Codex recursive delegation (`parent -> child -> grandchild`) can be enabled per-lane:
   - `FUGUE_CODEX_RECURSIVE_DELEGATION` (`true|false`, default `true` since v8.5)
