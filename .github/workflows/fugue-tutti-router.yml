@@ -1674,7 +1674,7 @@ jobs:
                 --title "${ISSUE_TITLE}" \
                 --body "${ISSUE_BODY}" \
                 --labels "" \
-                --has-implement "false" \
+                --has-implement "${implementation_phase}" \
                 --orchestration-profile "${execution_profile}"
             )"
             risk_policy_task_size_tier="${task_size_tier}"
