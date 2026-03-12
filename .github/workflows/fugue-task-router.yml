@@ -441,12 +441,12 @@ jobs:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          ZAI_MODEL: glm-5.0
+          ZAI_MODEL: glm-5
           XAI_MODEL: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_PRIMARY_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5-codex' }}
-          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
           ISSUE_TITLE: ${{ steps.ctx.outputs.issue_title }}
           ISSUE_BODY: ${{ steps.ctx.outputs.issue_body }}
         run: |
@@ -459,8 +459,8 @@ jobs:
           TITLE="${ISSUE_TITLE}"
           BODY="${ISSUE_BODY}"
           CODEX_MAIN_MODEL="gpt-5-codex"
-          if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
-            CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+          if [[ "${CODEX_MULTI_AGENT_MODEL}" != "gpt-5-codex" ]] && ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+            CODEX_MULTI_AGENT_MODEL="gpt-5-codex"
           fi
           if [[ "${GEMINI_PRIMARY_MODEL}" != "gemini-3.1-pro" && "${GEMINI_PRIMARY_MODEL}" != "gemini-3-flash" ]]; then
             GEMINI_PRIMARY_MODEL="gemini-3.1-pro"

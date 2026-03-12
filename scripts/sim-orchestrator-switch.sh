@@ -47,7 +47,7 @@ if [[ "${glm_subagent_mode_default}" != "off" && "${glm_subagent_mode_default}" 
   glm_subagent_mode_default="paired"
 fi
 codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 sim_codex_spark_only="$(echo "${FUGUE_SIM_CODEX_SPARK_ONLY:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${sim_codex_spark_only}" != "false" ]]; then
@@ -65,7 +65,7 @@ if [[ -x "${model_policy_script}" ]]; then
     --codex-main-model "${codex_main_model_default}" \
     --codex-multi-agent-model "${codex_multi_agent_model_default}" \
     --claude-model "${claude_opus_model_default}" \
-    --glm-model "${FUGUE_GLM_MODEL:-glm-5.0}" \
+    --glm-model "${FUGUE_GLM_MODEL:-glm-5}" \
     --gemini-model "gemini-3.1-pro" \
     --gemini-fallback-model "gemini-3-flash" \
     --xai-model "grok-4" \

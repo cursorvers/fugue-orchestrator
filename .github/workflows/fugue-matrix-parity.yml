@@ -12,6 +12,7 @@ on:
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'tests/test-build-agent-matrix-defaults.sh'
       - 'config/integrations/local-systems.json'
   push:
     branches:
@@ -26,6 +27,7 @@ on:
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'tests/test-build-agent-matrix-defaults.sh'
       - 'config/integrations/local-systems.json'
   workflow_dispatch:
 
@@ -49,10 +51,12 @@ jobs:
           bash -n scripts/sim-orchestrator-switch.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
+          bash -n tests/test-build-agent-matrix-defaults.sh
 
       - name: Matrix parity check
         run: |
           set -euo pipefail
-          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh tests/test-build-agent-matrix-defaults.sh
+          ./tests/test-build-agent-matrix-defaults.sh
           ./scripts/check-agent-matrix-parity.sh
           ./scripts/check-linked-systems-integrity.sh

@@ -17,7 +17,7 @@ MAX_PARALLEL="${MAX_PARALLEL:-6}"
 MIN_CONSENSUS_LANES="${MIN_CONSENSUS_LANES:-${FUGUE_MIN_CONSENSUS_LANES:-6}}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
 CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5.4}"
-CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
+CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}"
 WITH_LINKED_SYSTEMS="${WITH_LINKED_SYSTEMS:-false}"
 LINKED_MODE="${LINKED_MODE:-smoke}"
 LINKED_SYSTEMS="${LINKED_SYSTEMS:-all}"
@@ -447,7 +447,7 @@ safe_eval_policy "${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --claude-model "${claude_opus_model}" \
-  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5.0}}" \
+  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5}}" \
   --gemini-model "gemini-3.1-pro" \
   --gemini-fallback-model "gemini-3-flash" \
   --xai-model "grok-4" \

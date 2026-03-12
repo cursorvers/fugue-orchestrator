@@ -517,8 +517,8 @@ jobs:
           CLAUDE_ASSIST_EXECUTION_POLICY: ${{ vars.FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY || '' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
-          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
           STRICT_MAIN_CODEX_MODEL: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
@@ -590,11 +590,11 @@ jobs:
           fi
           CODEX_MAIN_MODEL="gpt-5.4"
           if ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^(gpt-5(\.[0-9]+)?-codex-spark|gpt-5-codex)$ ]]; then
-            CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+            CODEX_MULTI_AGENT_MODEL="gpt-5-codex"
           fi
-          GLM_MODEL="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          GLM_MODEL="$(echo "${GLM_MODEL:-glm-5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${GLM_MODEL}" ]]; then
-            GLM_MODEL="glm-5.0"
+            GLM_MODEL="glm-5"
           fi
           if [[ "${CLAUDE_OPUS_MODEL}" != "claude-sonnet-4-6" ]]; then
             CLAUDE_OPUS_MODEL="claude-sonnet-4-6"
@@ -1348,8 +1348,8 @@ jobs:
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
-          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
-          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5.0' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
           MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || 'standard' }}
           GLM_SUBAGENT_MODE: ${{ vars.FUGUE_GLM_SUBAGENT_MODE || 'paired' }}
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
@@ -1706,17 +1706,17 @@ jobs:
           eval "$(
             bash "${orchestrator_lib_dir}/model-policy.sh" \
               --codex-main-model "${CODEX_MAIN_MODEL:-gpt-5.4}" \
-              --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" \
+              --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" \
               --claude-model "${CLAUDE_OPUS_MODEL}" \
-              --glm-model "${GLM_MODEL:-glm-5.0}" \
+              --glm-model "${GLM_MODEL:-glm-5}" \
               --gemini-model "${GEMINI_MODEL}" \
               --gemini-fallback-model "gemini-3-flash" \
               --xai-model "${XAI_MODEL}" \
               --format env
           )"
-          glm_model="$(echo "${GLM_MODEL:-glm-5.0}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          glm_model="$(echo "${GLM_MODEL:-glm-5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ -z "${glm_model}" ]]; then
-            glm_model="glm-5.0"
+            glm_model="glm-5"
           fi
 
           matrix_args=(

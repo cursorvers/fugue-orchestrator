@@ -13,9 +13,16 @@ on:
       - 'scripts/lib/orchestrator-policy.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
+      - 'tests/test-build-agent-matrix-defaults.sh'
+      - 'tests/test-codex-vote-prompt.sh'
+      - '.codex/prompts/vote.md'
+      - '.codex/prompts/v.md'
+      - 'CODEX.md'
+      - 'README.md'
   push:
     branches:
       - main
@@ -30,9 +37,16 @@ on:
       - 'scripts/lib/orchestrator-policy.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
+      - 'tests/test-build-agent-matrix-defaults.sh'
+      - 'tests/test-codex-vote-prompt.sh'
+      - '.codex/prompts/vote.md'
+      - '.codex/prompts/v.md'
+      - 'CODEX.md'
+      - 'README.md'
   workflow_dispatch:
     inputs:
       run_canary_lite:
@@ -64,6 +78,14 @@ jobs:
           bash -n scripts/sim-orchestrator-switch.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
+          bash -n scripts/check-codex-vote-prompt.sh
+          bash -n tests/test-build-agent-matrix-defaults.sh
+          bash -n tests/test-codex-vote-prompt.sh
+
+      - name: Vote prompt static contract
+        run: |
+          set -euo pipefail
+          bash tests/test-codex-vote-prompt.sh
 
       - name: Workflow YAML parse checks
         run: |
@@ -86,7 +108,8 @@ jobs:
       - name: Matrix parity checks
         run: |
           set -euo pipefail
-          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh tests/test-build-agent-matrix-defaults.sh
+          ./tests/test-build-agent-matrix-defaults.sh
           ./scripts/check-agent-matrix-parity.sh
           ./scripts/check-linked-systems-integrity.sh
 

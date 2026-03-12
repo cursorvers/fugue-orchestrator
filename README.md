@@ -50,13 +50,16 @@ Main Orchestrator（統合・報告）
 ## `/kernel` 運用契約
 
 - この repo で Kernel orchestration を始める正式な入口は、repo root で新規に開いた Codex セッションから `/kernel` を実行することです。
+- chat 欄から 1語で起動したい場合の local alias は `/k` です。`/k` は `/kernel` と同じ Kernel bootstrap 契約に従います。
 - この repo の SSOT は [`.codex/prompts/kernel.md`](/Users/masayuki/Dev/fugue-orchestrator-feed-runner/.codex/prompts/kernel.md) です。
+- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki/Dev/fugue-orchestrator-feed-runner/.codex/prompts/k.md) です。
 - `~/.codex/prompts/kernel.md` は補助扱いであり、この repo の実行契約は repo-local prompt を基準にします。
 - prompt の hot reload は保証しません。`.codex/prompts/kernel.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
 - `/kernel` が plain text として扱われた場合は、repo root で新規セッションを起動し直してから再実行してください。
-- `/kernel` の bootstrap は acknowledgement より先に最低 3 本の active lane を起動している必要があります。
-- 通常運用では複数 LLM モデルまたは model profile をまたいだ 6 列並列を基本形とします。
-- 最初の有効な応答には `Bootstrap target: 6 lanes (minimum 3).` と `Lane manifest:`、および現在アクティブな lane を最低 3 本列挙した行が必要です。
+- bare `/kernel` は Codex chat UI の upstream 実装に依存するため、この repo のローカル SLO/保証経路には含めません。
+- `/kernel` の bootstrap は acknowledgement より先に最低 6 本の active lane を起動している必要があります。
+- 通常運用では複数 LLM モデルまたは model profile をまたいだ 6 列以上の並列を最低形とします。
+- 最初の有効な応答には `Bootstrap target: 6+ lanes (minimum 6).` と `Lane manifest:`、および現在アクティブな lane を最低 6 本列挙した行が必要です。
 
 ## `/vote` 運用契約
 
@@ -64,6 +67,11 @@ Main Orchestrator（統合・報告）
 - この repo の `/vote` / `/v` の SSOT は [`.codex/prompts/vote.md`](/Users/masayuki/Dev/fugue-orchestrator-feed-runner/.codex/prompts/vote.md) と [`.codex/prompts/v.md`](/Users/masayuki/Dev/fugue-orchestrator-feed-runner/.codex/prompts/v.md) です。
 - GitHub Actions 側の `/vote` workflow を起動したい場合は、slash prompt ではなく `gh issue comment ... --body '/vote'` または `vote-gh ...` を使ってください。
 - prompt の hot reload は保証しません。`.codex/prompts/vote.md` / `.codex/prompts/v.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
+- `/vote` / `/v` でも approval prompt を伴う操作に入る前は、`/kernel` と同じく lane を quiesce し、無理なら `quiescence_timeout` で fail-close します。
+- 便宜的な探索のために approval を要求してはいけません。
+- approval は、ユーザーが明示的に求めた場合か、現在のタスク完了に厳密に必要な場合だけです。
+- 同じ TTY に書き続ける active lane は quiesce してから approval prompt に入ってください。
+- 同じ terminal に出力中のまま approval prompt を表示してはいけません。
 
 ## ファイル構成
 
@@ -125,7 +133,7 @@ codex -C /Users/masayuki/Dev/fugue-orchestrator-feed-runner
 # 3B. API 実行を使う場合のみキー設定
 export OPENAI_API_KEY="your-openai-key"
 export GLM_API_KEY="your-glm-key"
-export GLM_MODEL="glm-5.0" # optional (default in Tutti lanes is glm-5.0)
+export GLM_MODEL="glm-5" # optional (default in Tutti lanes is glm-5)
 export GEMINI_API_KEY="your-gemini-key"
 export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
 export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
@@ -149,7 +157,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC   --body 20      -R <owner/repo> # canary統合コメント待機(保守フェーズ)秒
 # gh variable set FUGUE_DUAL_MAIN_SIGNAL             --body true    -R <owner/repo> # trueで codex-main / claude-main signal lane を両建て
 # gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5-codex -R <owner/repo> # main orchestrator lane model
-# gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
+# gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5-codex -R <owner/repo> # non-main codex lanes model (spark は simulation/明示opt-in専用)
 # gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body false   -R <owner/repo> # trueで codex-main-orchestrator=gpt-5-codex を厳格要求
 # gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body false   -R <owner/repo> # trueで claude-opus-assist=CLAUDE_OPUS_MODEL を厳格要求
 # gh variable set FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST --body false   -R <owner/repo> # trueで /vote 時に claude-opus-assist direct success を必須化
@@ -226,7 +234,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
-# NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、mainは `gpt-5-codex` 固定のまま multi-agent を `gpt-5.3-codex-spark` に寄せられます。
+# NOTE: live/local の既定は main / multi-agent ともに `gpt-5-codex` です。`gpt-5.3-codex-spark` は simulation または明示opt-in fast lane に限定します。
 # NOTE: `FUGUE_GLM_SUBAGENT_MODE=paired|symphony` で GLM subagent レーン（orchestration/architect/plan/reliability）を段階的に増やせます（`FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=false` の場合のみ subscription で自動off）。
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
@@ -278,13 +286,20 @@ bash tests/test-codex-kernel-prompt.sh
 
 # /kernel prompt の fresh-session smoke test（Codex CLI ログイン済み環境）
 RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh
-# 合格条件: acknowledgement + bootstrap target + lane manifest + 3 本以上の active lane
+# 合格条件: acknowledgement + bootstrap target + lane manifest + 6 本以上の active lane
 
 # /vote prompt 契約の静的検証
 bash tests/test-codex-vote-prompt.sh
+# NOTE: 同チェックは CI の `fugue-orchestration-gate` でも自動実行されます。
+
+# /vote prompt の fresh-session smoke test（Codex CLI ログイン済み環境）
+RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh
+# 合格条件: 出力に `Local consensus mode is active.` + `Smoke verification: PASS` + `Smoke result marker: ...` を含み、既定90秒以内に完了
+# `/vote` / `/v` でも approval prompt を伴う操作に入る前は active lane を quiesce すること
+# 便宜的な探索のために approval を要求してはいけません。明示依頼または厳密な必要性がある場合に限定します。
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
-# CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
+# CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5-codex \
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
 # NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
 # NOTE: `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST=true` のときのみ、`FUGUE_CLAUDE_RATE_LIMIT_STATE=ok` で

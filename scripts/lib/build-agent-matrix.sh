@@ -14,11 +14,11 @@ wants_xai="false"
 allow_glm_in_subscription="false"
 dual_main_signal="false"
 codex_main_model="gpt-5.4"
-codex_multi_agent_model="gpt-5.3-codex-spark"
+codex_multi_agent_model="gpt-5-codex"
 claude_opus_model="claude-sonnet-4-6"
 claude_sonnet4_model="claude-sonnet-4-6"
 claude_sonnet6_model="claude-sonnet-4-6"
-glm_model="glm-5.0"
+glm_model="glm-5"
 gemini_model="gemini-3.1-pro"
 xai_model="grok-4"
 enable_claude_teams="false"
@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --codex-multi-agent-model)
-      codex_multi_agent_model="${2:-gpt-5.3-codex-spark}"
+      codex_multi_agent_model="${2:-gpt-5-codex}"
       shift 2
       ;;
     --claude-opus-model)
@@ -87,7 +87,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --glm-model)
-      glm_model="${2:-glm-5.0}"
+      glm_model="${2:-glm-5}"
       shift 2
       ;;
     --gemini-model)
@@ -129,11 +129,11 @@ Options:
   --allow-glm-in-subscription VALUE true|false (local hybrid mode switch)
   --dual-main-signal VALUE          true|false (include both codex/claude main signal lanes)
   --codex-main-model VALUE          default: gpt-5.4
-  --codex-multi-agent-model VALUE   default: gpt-5.3-codex-spark
+  --codex-multi-agent-model VALUE   default: gpt-5-codex
   --claude-opus-model VALUE         default: claude-sonnet-4-6
   --claude-sonnet4-model VALUE      default: claude-sonnet-4-6
   --claude-sonnet6-model VALUE      default: claude-sonnet-4-6
-  --glm-model VALUE                 default: glm-5.0
+  --glm-model VALUE                 default: glm-5
   --gemini-model VALUE              default: gemini-3.1-pro
   --xai-model VALUE                 default: grok-4
   --enable-claude-teams VALUE       true|false
@@ -229,7 +229,7 @@ else
     codex_main_model="gpt-5.4"
   fi
   if [[ -z "${codex_multi_agent_model}" ]]; then
-    codex_multi_agent_model="gpt-5.3-codex-spark"
+    codex_multi_agent_model="gpt-5-codex"
   fi
   if [[ -z "${claude_opus_model}" ]]; then
     claude_opus_model="claude-sonnet-4-6"
@@ -241,7 +241,7 @@ else
     claude_sonnet6_model="claude-sonnet-4-6"
   fi
   if [[ -z "${glm_model}" ]]; then
-    glm_model="glm-5.0"
+    glm_model="glm-5"
   fi
   if [[ -z "${gemini_model}" ]]; then
     gemini_model="gemini-3.1-pro"
