@@ -149,13 +149,17 @@ run_gws_command() {
   local stderr_path="${2:-}"
   shift 2
   local cmd=("$@")
-  local env_cmd=(
-    env
-    -u GOOGLE_API_KEY
-    -u GOOGLE_APPLICATION_CREDENTIALS
-    -u GOOGLE_CLOUD_PROJECT
-    -u GCLOUD_PROJECT
-    -u GOOGLE_CREDENTIALS_PATH
+  local env_cmd=(env)
+  if [[ -n "${credentials_file}" ]]; then
+    env_cmd+=(
+      -u GOOGLE_API_KEY
+      -u GOOGLE_APPLICATION_CREDENTIALS
+      -u GOOGLE_CLOUD_PROJECT
+      -u GCLOUD_PROJECT
+      -u GOOGLE_CREDENTIALS_PATH
+    )
+  fi
+  env_cmd+=(
     -u GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE
     -u FUGUE_GWS_CREDENTIALS_FILE
     -u KERNEL_GWS_CREDENTIALS_FILE

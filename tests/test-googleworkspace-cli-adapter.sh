@@ -21,6 +21,11 @@ if [[ "${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE+x}" == "x" && -z "${GOOGLE_WORKSP
   exit 11
 fi
 
+if [[ "${TEST_REQUIRE_AMBIENT_GAC:-false}" == "true" && -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]]; then
+  echo '{"error":"missing-google-application-credentials"}' >&2
+  exit 12
+fi
+
 if [[ "${1:-}" == "--help" ]]; then
   echo "gws help"
   exit 0
@@ -123,6 +128,19 @@ test_readonly_clears_empty_ambient_credentials_env() {
     "${run_dir}/googleworkspace/gmail-triage-meta.json" >/dev/null
 }
 
+test_readonly_preserves_ambient_google_application_credentials() {
+  local run_dir="${tmp_dir}/ambient-gac"
+  mkdir -p "${run_dir}"
+  local output
+  output="$(env PATH="${tmp_dir}:${PATH}" TEST_REQUIRE_AMBIENT_GAC=true GOOGLE_APPLICATION_CREDENTIALS=/tmp/fake-service-account.json "${ADAPTER}" \
+    --action meeting-prep \
+    --format json \
+    --run-dir "${run_dir}")"
+  echo "${output}" | jq -e '.meetingCount == 1' >/dev/null
+  jq -e '.status == "ok" and .exit_code == 0' \
+    "${run_dir}/googleworkspace/meeting-prep-meta.json" >/dev/null
+}
+
 echo "=== googleworkspace-cli-adapter.sh unit tests ==="
 echo ""
 
@@ -130,6 +148,7 @@ assert_ok "write-gate-blocked" test_write_gate_blocked
 assert_ok "write-receipt-logged" test_write_receipt_logged
 assert_ok "readonly-evidence-written" test_readonly_evidence_written
 assert_ok "readonly-clears-empty-ambient-credentials-env" test_readonly_clears_empty_ambient_credentials_env
+assert_ok "readonly-preserves-ambient-google-application-credentials" test_readonly_preserves_ambient_google_application_credentials
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="
