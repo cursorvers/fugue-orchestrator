@@ -9,10 +9,13 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/claude-teams-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/model-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/aggregate-tutti-votes.sh'
       - 'scripts/harness/ci-agent-runner.sh'
+      - 'scripts/harness/generate-tutti-comment.sh'
       - 'scripts/harness/resolve-orchestration-context.sh'
       - 'scripts/harness/subscription-agent-runner.sh'
       - 'scripts/check-agent-matrix-parity.sh'
@@ -22,9 +25,12 @@ on:
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'tests/test-build-agent-matrix-defaults.sh'
+      - 'tests/test-claude-teams-policy.sh'
       - 'tests/test-codex-live-defaults.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-diversity-contract.sh'
       - 'tests/test-model-policy.sh'
+      - 'tests/test-resolve-orchestration-context.sh'
       - '.codex/prompts/k.md'
       - '.codex/prompts/vote.md'
       - '.codex/prompts/v.md'
@@ -41,10 +47,13 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/claude-teams-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/model-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/aggregate-tutti-votes.sh'
       - 'scripts/harness/ci-agent-runner.sh'
+      - 'scripts/harness/generate-tutti-comment.sh'
       - 'scripts/harness/resolve-orchestration-context.sh'
       - 'scripts/harness/subscription-agent-runner.sh'
       - 'scripts/check-agent-matrix-parity.sh'
@@ -54,9 +63,12 @@ on:
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'tests/test-build-agent-matrix-defaults.sh'
+      - 'tests/test-claude-teams-policy.sh'
       - 'tests/test-codex-live-defaults.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-diversity-contract.sh'
       - 'tests/test-model-policy.sh'
+      - 'tests/test-resolve-orchestration-context.sh'
       - '.codex/prompts/k.md'
       - '.codex/prompts/vote.md'
       - '.codex/prompts/v.md'
@@ -87,10 +99,13 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/lib/claude-teams-policy.sh
           bash -n scripts/lib/execution-profile-policy.sh
           bash -n scripts/lib/model-policy.sh
           bash -n scripts/lib/orchestrator-policy.sh
+          bash -n scripts/harness/aggregate-tutti-votes.sh
           bash -n scripts/harness/ci-agent-runner.sh
+          bash -n scripts/harness/generate-tutti-comment.sh
           bash -n scripts/harness/resolve-orchestration-context.sh
           bash -n scripts/harness/subscription-agent-runner.sh
           bash -n scripts/local/run-local-orchestration.sh
@@ -100,9 +115,12 @@ jobs:
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n scripts/check-codex-vote-prompt.sh
           bash -n tests/test-build-agent-matrix-defaults.sh
+          bash -n tests/test-claude-teams-policy.sh
           bash -n tests/test-codex-live-defaults.sh
           bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-kernel-diversity-contract.sh
           bash -n tests/test-model-policy.sh
+          bash -n tests/test-resolve-orchestration-context.sh
 
       - name: Vote prompt static contract
         run: |
@@ -130,10 +148,13 @@ jobs:
       - name: Matrix parity checks
         run: |
           set -euo pipefail
-          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh tests/test-build-agent-matrix-defaults.sh tests/test-codex-live-defaults.sh tests/test-model-policy.sh
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh tests/test-build-agent-matrix-defaults.sh tests/test-claude-teams-policy.sh tests/test-codex-live-defaults.sh tests/test-kernel-diversity-contract.sh tests/test-model-policy.sh tests/test-resolve-orchestration-context.sh
           ./tests/test-build-agent-matrix-defaults.sh
+          ./tests/test-claude-teams-policy.sh
           ./tests/test-codex-live-defaults.sh
+          ./tests/test-kernel-diversity-contract.sh
           ./tests/test-model-policy.sh
+          ./tests/test-resolve-orchestration-context.sh
           ./scripts/check-agent-matrix-parity.sh
           ./scripts/check-linked-systems-integrity.sh
 

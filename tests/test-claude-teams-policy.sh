@@ -42,10 +42,16 @@ assert_field "large-task-no-signal" "claude_teams_allowed" "false" \
   --task-size-tier large --risk-tier high --claude-state ok --title "large refactor" --body "refactor only"
 assert_field "large-task-signal" "claude_teams_allowed" "true" \
   --task-size-tier large --risk-tier high --claude-state ok --title "cross-repo incident" --body "need cross-layer root cause investigation"
+assert_field "implement-phase-bounded" "claude_teams_allowed" "true" \
+  --task-size-tier small --risk-tier medium --claude-state ok --execution-mode implement --title "bug fix" --body "enter implementation phase"
+assert_field "implement-phase-member-cap" "claude_teams_member_cap" "2" \
+  --task-size-tier small --risk-tier medium --claude-state ok --execution-mode implement --title "bug fix" --body "enter implementation phase"
 assert_field "degraded-blocked" "claude_teams_allowed" "false" \
   --task-size-tier critical --risk-tier high --claude-state degraded --title "incident" --body "cross-layer root cause investigation"
 assert_field "reason-signal" "claude_teams_reason" "large-task-collaboration-signal" \
   --task-size-tier critical --risk-tier high --claude-state ok --title "incident" --body "claude-native skill chain and cross repo debugging"
+assert_field "reason-implement" "claude_teams_reason" "implement-phase-bounded" \
+  --task-size-tier medium --risk-tier medium --claude-state ok --execution-mode implement --title "ship fix" --body "bounded implementation diversity"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

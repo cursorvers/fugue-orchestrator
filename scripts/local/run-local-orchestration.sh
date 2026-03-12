@@ -478,11 +478,17 @@ local_ambiguity_signal="$(echo "${FUGUE_LOCAL_AMBIGUITY_SIGNAL:-false}" | tr '[:
 if [[ "${local_ambiguity_signal}" != "true" ]]; then
   local_ambiguity_signal="false"
 fi
+local_implementation_phase="false"
+if echo "${ISSUE_LABELS_CSV}" | tr '[:upper:]' '[:lower:]' | grep -Eq '(^|,)(implement|codex-implement|claude-implement|implement-confirmed)(,|$)'; then
+  local_implementation_phase="true"
+elif echo "${ISSUE_BODY}" | grep -Eqi '^[[:space:]]*mode[[:space:]]*:[[:space:]]*implement[[:space:]]*$'; then
+  local_implementation_phase="true"
+fi
 safe_eval_policy "${WORKFLOW_RISK_POLICY}" \
   --title "${ISSUE_TITLE}" \
   --body "${ISSUE_BODY}" \
   --labels "${ISSUE_LABELS_CSV}" \
-  --has-implement "false" \
+  --has-implement "${local_implementation_phase}" \
   --orchestration-profile "codex-full"
 issue_risk_tier="${risk_tier}"
 issue_risk_score="${risk_score}"
@@ -493,6 +499,7 @@ eval "$("${CLAUDE_TEAMS_POLICY}" \
   --task-size-tier "${issue_task_size_tier}" \
   --risk-tier "${issue_risk_tier}" \
   --claude-state "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" \
+  --execution-mode "$([[ "${local_implementation_phase}" == "true" ]] && echo "implement" || echo "review")" \
   --title "${ISSUE_TITLE}" \
   --body "${ISSUE_BODY}")"
 claude_session_handoff="$(echo "${FUGUE_CLAUDE_SESSION_HANDOFF:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -517,6 +524,8 @@ if [[ "${dual_main_signal_raw}" == "true" ]]; then
   dual_main_signal="true"
 elif [[ "${dual_main_signal_raw}" == "false" ]]; then
   dual_main_signal="false"
+elif [[ "${local_implementation_phase}" == "true" ]]; then
+  dual_main_signal="true"
 elif [[ "${resolved_multi_agent_mode}" == "max" ]]; then
   dual_main_signal="true"
 else
@@ -529,6 +538,7 @@ matrix_payload="$("${MATRIX_BUILDER}" \
   --multi-agent-mode "${resolved_multi_agent_mode}" \
   --glm-subagent-mode "${GLM_SUBAGENT_MODE}" \
   --dual-main-signal "${dual_main_signal}" \
+  --implementation-phase "${local_implementation_phase}" \
   --enable-claude-teams "${claude_teams_allowed:-false}" \
   --claude-teams-member-cap "${claude_teams_member_cap:-3}" \
   --claude-teams-max-invocations "${claude_teams_max_invocations:-1}" \
@@ -998,6 +1008,32 @@ jq -n \
     workspace_context_file:$workspace_context_file
   }' > "${integrated_json}"
 
+active_providers="$(jq -r '
+  [ .[] | select(.skipped != true) | (.provider // "" | ascii_downcase) ]
+  | map(select(length > 0))
+  | unique
+  | join("+")
+' "${all_results}")"
+provider_activity_summary="$(jq -r '
+  [ .[] | select(.skipped != true) | (.provider // "" | ascii_downcase) ]
+  | map(select(length > 0))
+  | group_by(.)
+  | map("\(.[0]):\(length)")
+  | join(", ")
+' "${all_results}")"
+codex_multi_agent_active="$(jq -r '
+  [ .[] | select(.skipped != true and (.provider // "" | ascii_downcase) == "codex" and (.name // "") != "codex-main-orchestrator") ]
+  | length > 0
+' "${all_results}")"
+claude_teams_observed="$(jq -r '
+  [ .[] | select(.skipped != true and (.name // "") == "claude-teams-executor") ]
+  | length > 0
+' "${all_results}")"
+glm_observed="$(jq -r '
+  [ .[] | select(.skipped != true and (.provider // "" | ascii_downcase) == "glm") ]
+  | length > 0
+' "${all_results}")"
+
 summary_md="${RUN_DIR}/summary.md"
 cat > "${summary_md}" <<EOF
 ## Local Tutti Integrated Review
@@ -1006,10 +1042,12 @@ cat > "${summary_md}" <<EOF
 - issue context source: ${issue_context_source}
 - main orchestrator: ${MAIN_PROVIDER}
 - assist orchestrator: ${ASSIST_PROVIDER}
+- implementation phase: ${local_implementation_phase}
 - multi-agent mode: ${resolved_multi_agent_mode}
 - task size tier: ${issue_task_size_tier}
 - claude teams: ${claude_teams_allowed:-false} (${claude_teams_reason:-none}, member_cap=${claude_teams_member_cap:-3}, max_invocations=${claude_teams_max_invocations:-1})
 - glm subagent mode: ${GLM_SUBAGENT_MODE}
+- multi-agent diversity: active (providers=${active_providers:-none}, provider_activity=${provider_activity_summary:-none}, codex_multi_agent=${codex_multi_agent_active}, claude_teams=${claude_teams_observed}, glm=${glm_observed})
 - lanes configured: ${lanes_total}
 - minimum consensus lanes: ${MIN_CONSENSUS_LANES}
 - approvals: ${approve_count}/${total_count} (threshold ${threshold})

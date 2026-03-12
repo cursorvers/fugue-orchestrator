@@ -4,6 +4,7 @@ set -euo pipefail
 task_size_tier=""
 risk_tier=""
 claude_state=""
+execution_mode=""
 title=""
 body=""
 format="env"
@@ -16,6 +17,7 @@ Options:
   --task-size-tier <small|medium|large|critical>
   --risk-tier <low|medium|high>
   --claude-state <ok|degraded|exhausted>
+  --execution-mode <review|implement|unspecified>
   --title <text>
   --body <text>
   --format <env|json>
@@ -34,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --claude-state)
       claude_state="${2:-}"
+      shift 2
+      ;;
+    --execution-mode)
+      execution_mode="${2:-}"
       shift 2
       ;;
     --title)
@@ -74,9 +80,18 @@ if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_
   claude_state="ok"
 fi
 
+execution_mode="$(echo "${execution_mode:-unspecified}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${execution_mode}" != "review" && "${execution_mode}" != "implement" ]]; then
+  execution_mode="unspecified"
+fi
+
 text="$(printf '%s\n%s\n' "${title}" "${body}" | tr '[:upper:]' '[:lower:]')"
 
-member_cap="${FUGUE_CLAUDE_TEAMS_MEMBER_CAP:-3}"
+member_cap_default="3"
+if [[ "${execution_mode}" == "implement" ]]; then
+  member_cap_default="2"
+fi
+member_cap="${FUGUE_CLAUDE_TEAMS_MEMBER_CAP:-${member_cap_default}}"
 member_cap="$(printf '%s' "${member_cap}" | tr -cd '0-9')"
 if [[ -z "${member_cap}" ]]; then
   member_cap="3"
@@ -110,11 +125,19 @@ if [[ "${force_enable}" == "true" ]]; then
   allow="true"
   reason="force-enabled"
 elif [[ "${task_size_tier}" != "large" && "${task_size_tier}" != "critical" ]]; then
-  allow="false"
-  reason="task-not-large-enough"
+  if [[ "${execution_mode}" == "implement" && "${claude_state}" == "ok" ]]; then
+    allow="true"
+    reason="implement-phase-bounded"
+  else
+    allow="false"
+    reason="task-not-large-enough"
+  fi
 elif [[ "${claude_state}" != "ok" ]]; then
   allow="false"
   reason="claude-state-${claude_state}"
+elif [[ "${execution_mode}" == "implement" ]]; then
+  allow="true"
+  reason="implement-phase-bounded"
 elif [[ "${collaboration_signal}" != "true" ]]; then
   allow="false"
   reason="no-collaboration-signal"
@@ -131,6 +154,7 @@ if [[ "${format}" == "json" ]]; then
     --arg allowed "${allow}" \
     --arg reason "${reason}" \
     --arg collaboration_signal "${collaboration_signal}" \
+    --arg execution_mode "${execution_mode}" \
     --arg task_size_tier "${task_size_tier}" \
     --arg risk_tier "${risk_tier}" \
     --arg claude_state "${claude_state}" \
@@ -140,6 +164,7 @@ if [[ "${format}" == "json" ]]; then
       claude_teams_allowed:($allowed == "true"),
       claude_teams_reason:$reason,
       collaboration_signal:($collaboration_signal == "true"),
+      execution_mode:$execution_mode,
       task_size_tier:$task_size_tier,
       risk_tier:$risk_tier,
       claude_state:$claude_state,
@@ -152,5 +177,6 @@ fi
 printf 'claude_teams_allowed=%q\n' "${allow}"
 printf 'claude_teams_reason=%q\n' "${reason}"
 printf 'claude_teams_collaboration_signal=%q\n' "${collaboration_signal}"
+printf 'claude_teams_execution_mode=%q\n' "${execution_mode}"
 printf 'claude_teams_member_cap=%q\n' "${member_cap}"
 printf 'claude_teams_max_invocations=%q\n' "${max_invocations}"

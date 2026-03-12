@@ -64,6 +64,8 @@ jobs:
       canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
       has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
       has_implement_confirmed: ${{ steps.ctx.outputs.has_implement_confirmed }}
+      execution_mode_effective: ${{ steps.ctx.outputs.execution_mode_effective }}
+      implementation_phase: ${{ steps.ctx.outputs.implementation_phase }}
       target_repo: ${{ steps.ctx.outputs.target_repo }}
       orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
       main_orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
@@ -215,6 +217,8 @@ jobs:
           PREFLIGHT_CYCLES: ${{ steps.ctx.outputs.preflight_cycles }}
           IMPLEMENT_ROUNDS: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
           TASK_SIZE_TIER: ${{ steps.ctx.outputs.task_size_tier }}
+          EXECUTION_MODE_EFFECTIVE: ${{ steps.ctx.outputs.execution_mode_effective }}
+          IMPLEMENTATION_PHASE: ${{ steps.ctx.outputs.implementation_phase }}
           CLAUDE_TEAMS_ALLOWED: ${{ steps.ctx.outputs.claude_teams_allowed }}
           CLAUDE_TEAMS_REASON: ${{ steps.ctx.outputs.claude_teams_reason }}
           MODE_OVERRIDE: ${{ steps.ctx.outputs.multi_agent_mode_override }}
@@ -255,7 +259,8 @@ jobs:
           if [[ "${CLAUDE_TEAMS_ALLOWED}" == "true" ]]; then
             claude_teams_note=" claude_teams=enabled(\`${CLAUDE_TEAMS_REASON}\`)."
           fi
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${claude_teams_note}${budget_guard_note}${nl_note}"
+          diversity_note=" diversity=planned(codex+claude+glm, execution_mode=\`${EXECUTION_MODE_EFFECTIVE}\`, implementation_phase=\`${IMPLEMENTATION_PHASE}\`)."
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${diversity_note}${claude_teams_note}${budget_guard_note}${nl_note}"
 
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
@@ -308,6 +313,7 @@ jobs:
       multi_agent_mode_override: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'legacy-bridge-default' || needs.ctx.outputs.multi_agent_mode_override }}"
       multi_agent_mode_lock: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'legacy-bridge-default' || needs.ctx.outputs.multi_agent_mode_lock }}"
       task_size_tier: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'small' || needs.ctx.outputs.task_size_tier }}"
+      implementation_phase: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'false' || needs.ctx.outputs.implementation_phase }}"
       claude_teams_allowed: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'false' || needs.ctx.outputs.claude_teams_allowed }}"
       claude_teams_member_cap: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '3' || needs.ctx.outputs.claude_teams_member_cap }}"
       claude_teams_max_invocations: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '1' || needs.ctx.outputs.claude_teams_max_invocations }}"

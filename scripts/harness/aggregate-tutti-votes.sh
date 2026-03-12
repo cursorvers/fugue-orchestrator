@@ -201,14 +201,10 @@ glm_baseline_success="$(jq -r '[
 if [[ "${require_baseline_trio}" == "true" ]]; then
   baseline_trio_gate="pass"
   baseline_missing=()
-  require_claude_baseline="true"
-  if [[ "${assist_provider_resolved}" == "claude" && "${claude_state_effective}" != "ok" ]]; then
-    require_claude_baseline="false"
-  fi
   if [[ "${codex_baseline_success}" -eq 0 ]]; then
     baseline_missing+=("codex")
   fi
-  if [[ "${require_claude_baseline}" == "true" && "${claude_baseline_success}" -eq 0 ]]; then
+  if [[ "${claude_baseline_success}" -eq 0 ]]; then
     baseline_missing+=("claude")
   fi
   if [[ "${glm_baseline_success}" -eq 0 ]]; then
@@ -220,11 +216,7 @@ if [[ "${require_baseline_trio}" == "true" ]]; then
     high_risk="true"
     high_risk_count="$((high_risk_count + 1))"
   else
-    if [[ "${require_claude_baseline}" == "true" ]]; then
-      baseline_trio_reason="codex+claude+glm-ok"
-    else
-      baseline_trio_reason="codex+glm-ok(claude-waived-${claude_state_effective})"
-    fi
+    baseline_trio_reason="codex+claude+glm-ok"
   fi
 fi
 

@@ -25,6 +25,7 @@ enable_claude_teams="false"
 claude_teams_member_cap="3"
 claude_teams_max_invocations="1"
 format="json"
+implementation_phase="false"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/model-policy.sh"
 
@@ -114,6 +115,10 @@ while [[ $# -gt 0 ]]; do
       format="${2:-json}"
       shift 2
       ;;
+    --implementation-phase)
+      implementation_phase="${2:-false}"
+      shift 2
+      ;;
     -h|--help)
       cat <<'EOF'
 Usage: build-agent-matrix.sh [options]
@@ -141,6 +146,7 @@ Options:
   --claude-teams-max-invocations VALUE
                                     default: 1
   --format VALUE                    json (default) | env
+  --implementation-phase VALUE      true|false (raise diversity floors for code-change phase)
 
 Output (json):
 {
@@ -196,6 +202,7 @@ wants_gemini="$(normalize_bool "${wants_gemini}")"
 wants_xai="$(normalize_bool "${wants_xai}")"
 allow_glm_in_subscription="$(normalize_bool "${allow_glm_in_subscription}")"
 dual_main_signal="$(normalize_bool "${dual_main_signal}")"
+implementation_phase="$(normalize_bool "${implementation_phase}")"
 enable_claude_teams="$(normalize_bool "${enable_claude_teams}")"
 claude_teams_member_cap="$(printf '%s' "${claude_teams_member_cap}" | tr -cd '0-9')"
 if [[ -z "${claude_teams_member_cap}" ]]; then
@@ -251,9 +258,26 @@ else
   fi
 fi
 
+if [[ "${implementation_phase}" == "true" ]]; then
+  if [[ "${multi_agent_mode}" == "standard" ]]; then
+    multi_agent_mode="enhanced"
+  fi
+  if [[ "${glm_subagent_mode}" == "off" ]]; then
+    glm_subagent_mode="paired"
+  fi
+  dual_main_signal="true"
+  if [[ "${main_provider}" != "claude" && "${assist_provider}" != "claude" ]]; then
+    assist_provider="claude"
+  fi
+fi
+
 use_glm_baseline="false"
 if [[ "${engine}" != "subscription" || "${allow_glm_in_subscription}" == "true" ]]; then
   use_glm_baseline="true"
+fi
+
+if [[ "${use_glm_baseline}" == "true" && "${main_provider}" != "claude" && "${assist_provider}" != "claude" && "${enable_claude_teams}" != "true" ]]; then
+  assist_provider="claude"
 fi
 
 if [[ "${engine}" == "subscription" && "${allow_glm_in_subscription}" != "true" ]]; then

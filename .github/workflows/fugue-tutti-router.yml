@@ -47,6 +47,11 @@ on:
         required: false
         type: string
         default: ""
+      implementation_phase:
+        description: "True when the caller is entering post-verification implementation phase"
+        required: false
+        type: string
+        default: "false"
       claude_teams_allowed:
         description: "Enable bounded Claude Teams executor lane"
         required: false
@@ -1200,6 +1205,7 @@ jobs:
           ASSIST_PROVIDER: ${{ needs.resolve-orchestrator.outputs.assist_provider }}
           HANDOFF_TARGET: ${{ inputs.handoff_target || 'kernel' }}
           TASK_SIZE_TIER: ${{ needs.resolve-orchestrator.outputs.task_size_tier }}
+          IMPLEMENTATION_PHASE: ${{ needs.resolve-orchestrator.outputs.implementation_phase }}
           MULTI_AGENT_MODE: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode }}
           MULTI_AGENT_MODE_SOURCE: ${{ needs.resolve-orchestrator.outputs.multi_agent_mode_source }}
           GLM_SUBAGENT_MODE: ${{ needs.resolve-orchestrator.outputs.glm_subagent_mode }}
@@ -1312,6 +1318,7 @@ jobs:
       subscription_offline_policy: ${{ steps.resolve.outputs.subscription_offline_policy }}
       assist_adjusted_by_execution_profile: ${{ steps.resolve.outputs.assist_adjusted_by_execution_profile }}
       assist_adjustment_reason: ${{ steps.resolve.outputs.assist_adjustment_reason }}
+      implementation_phase: ${{ steps.resolve.outputs.implementation_phase }}
       main_signal_lane: ${{ steps.resolve.outputs.main_signal_lane }}
       main_signal_lanes: ${{ steps.resolve.outputs.main_signal_lanes }}
       task_size_tier: ${{ steps.resolve.outputs.task_size_tier }}
@@ -1383,6 +1390,7 @@ jobs:
           CLAUDE_TEAMS_ALLOWED: ${{ inputs.claude_teams_allowed || 'false' }}
           CLAUDE_TEAMS_MEMBER_CAP: ${{ inputs.claude_teams_member_cap || '3' }}
           CLAUDE_TEAMS_MAX_INVOCATIONS: ${{ inputs.claude_teams_max_invocations || '1' }}
+          IMPLEMENTATION_PHASE: ${{ inputs.implementation_phase || 'false' }}
           HANDOFF_TARGET: ${{ inputs.handoff_target || 'kernel' }}
         run: |
           set -euo pipefail
@@ -1551,9 +1559,14 @@ jobs:
           if [[ "${handoff_target}" != "fugue-bridge" ]]; then
             handoff_target="kernel"
           fi
+          implementation_phase="$(echo "${IMPLEMENTATION_PHASE:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${implementation_phase}" != "true" ]]; then
+            implementation_phase="false"
+          fi
           legacy_bridge_active="false"
           if [[ "${handoff_target}" == "fugue-bridge" ]]; then
             legacy_bridge_active="true"
+            implementation_phase="false"
           fi
           task_size_tier_input="$(echo "${TASK_SIZE_TIER_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_teams_allowed="$(echo "${CLAUDE_TEAMS_ALLOWED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -1639,6 +1652,10 @@ jobs:
             multi_agent_mode="standard"
             multi_agent_mode_source="repo-default"
           fi
+          if [[ "${implementation_phase}" == "true" && "${multi_agent_mode}" == "standard" ]]; then
+            multi_agent_mode="enhanced"
+            multi_agent_mode_source="implementation-phase-floor"
+          fi
           glm_subagent_mode="$(echo "${GLM_SUBAGENT_MODE:-paired}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           glm_subagent_mode_source="repo-default"
           if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
@@ -1682,10 +1699,16 @@ jobs:
             glm_subagent_mode="off"
             glm_subagent_mode_source="subscription-engine"
           fi
+          if [[ "${implementation_phase}" == "true" && "${glm_subagent_mode}" == "off" ]]; then
+            glm_subagent_mode="paired"
+            glm_subagent_mode_source="implementation-phase-floor"
+          fi
           wants_gemini="false"
           wants_xai="false"
           dual_main_signal_raw="$(echo "${DUAL_MAIN_SIGNAL:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${dual_main_signal_raw}" == "true" ]]; then
+          if [[ "${implementation_phase}" == "true" ]]; then
+            dual_main_signal="true"
+          elif [[ "${dual_main_signal_raw}" == "true" ]]; then
             dual_main_signal="true"
           elif [[ "${dual_main_signal_raw}" == "false" ]]; then
             dual_main_signal="false"
@@ -1730,6 +1753,7 @@ jobs:
             --glm-subagent-mode "${glm_subagent_mode}"
             --wants-gemini "${wants_gemini}"
             --wants-xai "${wants_xai}"
+            --implementation-phase "${implementation_phase}"
             --enable-claude-teams "${claude_teams_allowed}"
             --claude-teams-member-cap "${claude_teams_member_cap}"
             --claude-teams-max-invocations "${claude_teams_max_invocations}"
@@ -1778,6 +1802,7 @@ jobs:
             echo "multi_agent_mode=${multi_agent_mode}"
             echo "multi_agent_mode_source=${multi_agent_mode_source}"
             echo "task_size_tier=${task_size_tier}"
+            echo "implementation_phase=${implementation_phase}"
             echo "glm_subagent_mode=${glm_subagent_mode}"
             echo "glm_subagent_mode_source=${glm_subagent_mode_source}"
             echo "allow_glm_in_subscription=${allow_glm_in_subscription}"

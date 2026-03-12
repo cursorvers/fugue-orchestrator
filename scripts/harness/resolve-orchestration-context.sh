@@ -377,6 +377,7 @@ translation_reason="translation-not-required"
 translation_skip_reason=""
 translation_event="false"
 translation_payload=""
+exec_mode_hint="unspecified"
 normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
 CODEX_MAIN_MODEL="$(echo "${CODEX_MAIN_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -584,6 +585,28 @@ elif [[ "${translation_gate_decision}" == "true" ]]; then
   translation_event="true"
 fi
 
+execution_mode_effective="review"
+if [[ "${has_implement}" == "true" ]]; then
+  execution_mode_effective="implement"
+elif [[ "${body_mode}" == "implement" || "${body_mode}" == "review" ]]; then
+  execution_mode_effective="${body_mode}"
+elif [[ "${exec_mode_hint}" == "implement" || "${exec_mode_hint}" == "review" ]]; then
+  execution_mode_effective="${exec_mode_hint}"
+fi
+implementation_phase="false"
+if [[ "${execution_mode_effective}" == "implement" ]]; then
+  implementation_phase="true"
+fi
+
+if [[ "${handoff_target}" == "kernel" && "${implementation_phase}" == "true" && "${requested_assist_provider}" == "none" ]]; then
+  requested_assist_provider="claude"
+  if [[ -n "${assist_provider_source}" ]]; then
+    assist_provider_source="${assist_provider_source}+kernel-implementation-diversity"
+  else
+    assist_provider_source="kernel-implementation-diversity"
+  fi
+fi
+
 eval "$(
   "${ROOT_DIR}/scripts/lib/orchestrator-policy.sh" \
     --main "${requested_main_provider_initial}" \
@@ -686,6 +709,7 @@ if [[ -x "${ROOT_DIR}/scripts/lib/claude-teams-policy.sh" ]]; then
       --task-size-tier "${task_size_tier}" \
       --risk-tier "${risk_tier}" \
       --claude-state "${claude_state}" \
+      --execution-mode "${execution_mode_effective}" \
       --title "${title}" \
       --body "${body}"
   )"
@@ -836,6 +860,8 @@ fi
   echo "canary_dispatch_owned=${canary_dispatch_owned}"
   echo "has_implement_request=${has_implement}"
   echo "has_implement_confirmed=${has_implement_confirmed}"
+  echo "execution_mode_effective=${execution_mode_effective}"
+  echo "implementation_phase=${implementation_phase}"
   echo "self_hosted_online_count=${self_hosted_online_count}"
   echo "subscription_runner_label=${subscription_runner_label}"
   echo "subscription_offline_policy=${subscription_offline_policy}"

@@ -134,9 +134,11 @@ Auditability:
   4) Problem Fix
   5) Replan
   Repeat default 3 cycles (`FUGUE_IMPLEMENT_REFINEMENT_CYCLES=3`).
+- Requirements / planning on `kernel` must preserve diversity across `codex + claude + glm`; if GLM is active, Claude participation is also required.
 - After preflight passes, implement mode must run implementation collaboration dialogue rounds:
   - `Implementer Proposal` -> `Critic Challenge` -> `Integrator Decision` -> `Applied Change` -> `Verification`
   - Default rounds: `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS=2` (or `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE=1` when `execution_profile` is `claude-light`; in Hybrid Conductor Mode, `execution_profile=codex-full` applies full rounds).
+- Post-verification implementation phase on `kernel` must keep `codex-multi-agent` active, include GLM lanes, and use Claude via bounded teams when Claude state is `ok` to reduce rate-limit pressure.
 - Parallel Simulation and Critical Review are hard gates and must not be skipped.
 - For large refactor/rewrite/migration tasks, each cycle must explicitly compare at least two candidates and include failure-mode/rollback checks (`large-refactor` label or task-text detection).
 - Risk-tier policy (`low|medium|high`) adjusts minimum loop depth and default review fan-out; low-risk defaults should stay lightweight.
@@ -219,6 +221,7 @@ Security guardrails:
 - Control-plane enforcement in implement mode must keep:
   - Preflight refinement loop gates
   - Implementation collaboration dialogue gates
+  - Visible `multi-agent diversity` reporting in integrated comments / local summaries
   - Research artifact (`.fugue/pre-implement/issue-<N>-research.md`)
   - Plan artifact (`.fugue/pre-implement/issue-<N>-plan.md`)
   - Critic artifact (`.fugue/pre-implement/issue-<N>-critic.md`)

@@ -214,8 +214,10 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_MIN_CONSENSUS_LANES`（既定6）は lane数の下限ガードです。解決された lane 数が下回る場合は fail-fast で停止します。
 # NOTE: implement 時は Plan→Parallel Simulation→Critical Review→Problem Fix→Replan を 3 サイクル完了後に実装します。
 # NOTE: preflight通過後の実装フェーズでは Implementer/ Critic/ Integrator の対話ループを必須化しています。
+# NOTE: requirements / plan は `codex + claude + glm` の diversity を前提にし、kernel handoff では GLM を使う場合に Claude 参加も必須です。
 # NOTE: `fugue-codex-implement` は実装前に research/plan/critic ノードを並列起動し、`.fugue/pre-implement` の seed artifact を先に生成します。
 # NOTE: 共有プレイブックに基づき、todo/lessons成果物（.fugue/pre-implement）を必須化しています。
+# NOTE: post-verification の implementation phase では `codex-multi-agent` を維持しつつ `GLM` を参加させ、Claude は rate limit を避けるため bounded teams (`member_cap=2`, `max_invocations=1` 既定) で使います。
 # NOTE: 大規模リファクタ/リライト/移行タスクでは、各サイクルで Candidate A/B + Failure Modes + Rollback Check を必須化します。
 # NOTE: `gha24` は大規模リファクタ語を検知すると `large-refactor` ラベルを自動付与し、上記必須セクションを強制します。
 # NOTE: main=claude かつ assist=claude の重複は、rate limit 保護のため `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` に従って assist を自動調整します（force時除く）。
@@ -231,6 +233,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST=true` のときのみ、/vote で `claude-opus-assist` の direct success を必須化します（既定は非必須）。
 # NOTE: `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true`（既定）では、assist=claude かつ `risk_tier=high` または ambiguity translation-gate=true のタスクで claude-opus-assist 成功を必須化します。未達時は `ok_to_execute=false` になります。
 # NOTE: `FUGUE_REQUIRE_BASELINE_TRIO=true`（既定）では、codex+claude+glm の成功参加が揃わない限り `ok_to_execute=false` になります。
+# NOTE: integrated issue comment / local summary には `multi-agent diversity` セクションを出し、active providers と lane activity を可視化します。
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。

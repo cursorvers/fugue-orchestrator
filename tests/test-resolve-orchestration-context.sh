@@ -37,6 +37,12 @@ JSON
 JSON
       exit 0
       ;;
+    repos/cursorvers/fugue-orchestrator/issues/126)
+      cat <<'JSON'
+{"title":"実装フェーズの不具合修正","body":"Mode: implement\n既存の検証は終わっているので /kernel で実装を進めて","url":"https://github.com/cursorvers/fugue-orchestrator/issues/126","labels":[{"name":"fugue-task"},{"name":"tutti"},{"name":"implement"},{"name":"implement-confirmed"}]}
+JSON
+      exit 0
+      ;;
     *)
       echo "{}"
       exit 0
@@ -101,6 +107,10 @@ assert_output "workspace-none" "124" "workspace_hint_applied" "false"
 assert_output "content-hint-applied" "125" "content_hint_applied" "true"
 assert_output "content-action-hint" "125" "content_action_hint" "slide-deck"
 assert_output "content-skill-hint" "125" "content_skill_hint" "slide"
+assert_output "implement-execution-mode" "126" "execution_mode_effective" "implement"
+assert_output "implement-phase" "126" "implementation_phase" "true"
+assert_output "implement-claude-teams" "126" "claude_teams_allowed" "true"
+assert_output "implement-claude-cap" "126" "claude_teams_member_cap" "2"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

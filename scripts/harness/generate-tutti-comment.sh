@@ -52,6 +52,36 @@ skipped_agents="$(jq -r '
   ] | if length==0 then "- none" else join("\n") end
 ' all-results.json)"
 
+active_providers="$(jq -r '
+  [ .[] | select(.skipped != true) | (.provider // "" | ascii_downcase) ]
+  | map(select(length > 0))
+  | unique
+  | join("+")
+' all-results.json)"
+provider_activity_summary="$(jq -r '
+  [ .[] | select(.skipped != true) | (.provider // "" | ascii_downcase) ]
+  | map(select(length > 0))
+  | group_by(.)
+  | map("\(.[0]):\(length)")
+  | join(", ")
+' all-results.json)"
+codex_multi_agent_active="$(jq -r '
+  [ .[] | select(.skipped != true and (.provider // "" | ascii_downcase) == "codex" and (.name // "") != "codex-main-orchestrator") ]
+  | length > 0
+' all-results.json)"
+claude_teams_observed="$(jq -r '
+  [ .[] | select(.skipped != true and (.name // "") == "claude-teams-executor") ]
+  | length > 0
+' all-results.json)"
+glm_observed="$(jq -r '
+  [ .[] | select(.skipped != true and (.provider // "" | ascii_downcase) == "glm") ]
+  | length > 0
+' all-results.json)"
+multi_agent_diversity_section="- multi-agent diversity: inactive"
+if [[ -n "${active_providers}" ]]; then
+  multi_agent_diversity_section="- multi-agent diversity: active (providers=${active_providers}, provider_activity=${provider_activity_summary:-none}, codex_multi_agent=${codex_multi_agent_active}, claude_teams=${claude_teams_observed}, glm=${glm_observed}, implementation_phase=${IMPLEMENTATION_PHASE:-false})"
+fi
+
 # --- Fallback / pressure guard sections ---
 main_fallback_section="- main fallback: none"
 if [[ "${MAIN_CLAUDE_FALLBACK_APPLIED}" == "true" ]]; then
@@ -103,6 +133,7 @@ integrated_meta="$(jq -cn \
   --arg assist "${ASSIST_PROVIDER}" \
   --arg handoff_target "${HANDOFF_TARGET}" \
   --arg task_size_tier "${TASK_SIZE_TIER}" \
+  --arg implementation_phase "${IMPLEMENTATION_PHASE:-false}" \
   --arg multi_agent_mode "${MULTI_AGENT_MODE}" \
   --arg multi_agent_mode_source "${MULTI_AGENT_MODE_SOURCE}" \
   --arg glm_subagent_mode "${GLM_SUBAGENT_MODE}" \
@@ -129,6 +160,7 @@ integrated_meta="$(jq -cn \
     assist_orchestrator_resolved:$assist,
     handoff_target:$handoff_target,
     task_size_tier:$task_size_tier,
+    implementation_phase:($implementation_phase == "true"),
     multi_agent_mode:$multi_agent_mode,
     multi_agent_mode_source:$multi_agent_mode_source,
     glm_subagent_mode:$glm_subagent_mode,
@@ -162,6 +194,7 @@ cat > integrated-comment.md <<COMMENT_EOF
 - assist orchestrator resolved: ${ASSIST_PROVIDER}
 - handoff target: ${HANDOFF_TARGET}
 - task size tier: ${TASK_SIZE_TIER}
+- implementation phase: ${IMPLEMENTATION_PHASE:-false}
 - multi-agent mode: ${MULTI_AGENT_MODE}
 - multi-agent mode source: ${MULTI_AGENT_MODE_SOURCE}
 - glm subagent mode: ${GLM_SUBAGENT_MODE}
@@ -183,6 +216,7 @@ ${claude_pressure_section}
 ${complex_assist_section}
 ${required_assist_section}
 ${baseline_trio_section}
+${multi_agent_diversity_section}
 - lanes configured: ${EXPECTED_LANES}
 
 **Rule a: Security criticism (unconditionally adopted)**
