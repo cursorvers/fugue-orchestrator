@@ -475,6 +475,7 @@ create_issue() {
   local orch_provider="${3:-claude}"
   local handoff_target="${4:-kernel}"
   local assist_provider="${5:-claude}"
+  local trust_subject=""
   local body
   body="$(printf '## Canary\nAutomated orchestration canary.\n\n- orchestrator: %s main\n- assist orchestrator provider: %s\n- handoff target: %s\n- case: %s\n- created_at_utc: %s\n- cleanup: auto-close on pass, keep open on failure\n' \
     "${orch_provider}" \
@@ -502,8 +503,12 @@ create_issue() {
     --repo "${repo}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
-  if [[ -n "${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}" ]]; then
-    run_cmd+=(-f trust_subject="${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}")
+  trust_subject="${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-}}"
+  if [[ -n "${GITHUB_RUN_ID:-}" && ( -z "${trust_subject}" || "${trust_subject}" == "github-actions[bot]" || "${trust_subject}" == "github-actions" || "${trust_subject}" == "app/github-actions" ) ]]; then
+    trust_subject="$(GH_TOKEN="${gh_readonly_token:-${GH_TOKEN:-}}" gh_timeout_cmd 20s gh api "repos/${repo}/actions/runs/${GITHUB_RUN_ID}" --jq '.triggering_actor.login // .actor.login // ""' 2>/dev/null || true)"
+  fi
+  if [[ -n "${trust_subject}" ]]; then
+    run_cmd+=(-f trust_subject="${trust_subject}")
   fi
   if [[ -n "${dispatch_offline_policy}" ]]; then
     run_cmd+=(-f subscription_offline_policy_override="${dispatch_offline_policy}")
