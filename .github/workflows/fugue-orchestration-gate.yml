@@ -171,6 +171,21 @@ jobs:
           fi
           echo "sim-orchestrator-switch rows=${rows}"
 
+      - name: Append fast gate summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Fast Gate Summary"
+            echo
+            echo "- workflow: \`fugue-orchestration-gate\`"
+            echo "- event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- ref: \`${GITHUB_REF_NAME:-unknown}\`"
+            echo "- sha: \`${GITHUB_SHA}\`"
+            echo "- static checks: completed"
+            echo "- canary-lite scheduled: \`${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_canary_lite) }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   canary-lite:
     needs: [fast-gate]
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_canary_lite) }}
@@ -180,6 +195,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Trigger canary lite
+        id: canary_lite
         run: |
           set -euo pipefail
           repo="${GITHUB_REPOSITORY}"
@@ -223,4 +239,33 @@ jobs:
 
           echo "Watching canary-lite run ${run_id}"
           gh run watch "${run_id}" --repo "${repo}" --exit-status
-          gh run view "${run_id}" --repo "${repo}" --json status,conclusion,url,createdAt,updatedAt
+          run_json="$(gh run view "${run_id}" --repo "${repo}" --json status,conclusion,url,createdAt,updatedAt)"
+          echo "${run_json}"
+
+          {
+            echo "run_id=${run_id}"
+            echo "run_url=$(echo "${run_json}" | jq -r '.url // ""')"
+            echo "run_status=$(echo "${run_json}" | jq -r '.status // ""')"
+            echo "run_conclusion=$(echo "${run_json}" | jq -r '.conclusion // ""')"
+            echo "canary_ref=${canary_ref}"
+            echo "trust_subject=${trust_subject}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Append gate summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Orchestration Gate Summary"
+            echo
+            echo "- workflow: \`fugue-orchestration-gate\`"
+            echo "- ref: \`${GITHUB_REF_NAME:-unknown}\`"
+            echo "- sha: \`${GITHUB_SHA}\`"
+            echo "- fast-gate: \`${{ needs.fast-gate.result }}\`"
+            echo "- canary-lite enabled: \`true\`"
+            echo "- canary-lite ref: \`${{ steps.canary_lite.outputs.canary_ref || 'n/a' }}\`"
+            echo "- canary-lite trust subject: \`${{ steps.canary_lite.outputs.trust_subject || 'n/a' }}\`"
+            echo "- canary-lite run: ${{ steps.canary_lite.outputs.run_url && format('[{0}]({1})', steps.canary_lite.outputs.run_id, steps.canary_lite.outputs.run_url) || '`n/a`' }}"
+            echo "- canary-lite status: \`${{ steps.canary_lite.outputs.run_status || 'n/a' }}\`"
+            echo "- canary-lite conclusion: \`${{ steps.canary_lite.outputs.run_conclusion || 'n/a' }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

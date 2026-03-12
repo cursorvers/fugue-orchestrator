@@ -34,12 +34,28 @@ grep -q 'CANARY_TRUST_SUBJECT: .*github.event.inputs.trust_subject' "${CANARY_WO
   echo "FAIL: canary workflow should export trust_subject into run-canary env" >&2
   exit 1
 }
+grep -q '## Canary Summary' "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow should append a GHA step summary" >&2
+  exit 1
+}
+grep -q 'GITHUB_STEP_SUMMARY' "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow summary must target GITHUB_STEP_SUMMARY" >&2
+  exit 1
+}
 grep -q 'trust_subject="\${GITHUB_TRIGGERING_ACTOR:-\${GITHUB_ACTOR:-}}"' "${ROOT_DIR}/.github/workflows/fugue-orchestration-gate.yml" || {
   echo "FAIL: orchestration gate should pass triggering actor into canary dispatch" >&2
   exit 1
 }
 grep -q -- '--ref "\${canary_ref}"' "${ROOT_DIR}/.github/workflows/fugue-orchestration-gate.yml" || {
   echo "FAIL: orchestration gate should dispatch canary against branch ref for workflow_dispatch runs" >&2
+  exit 1
+}
+grep -q '## Orchestration Gate Summary' "${ROOT_DIR}/.github/workflows/fugue-orchestration-gate.yml" || {
+  echo "FAIL: orchestration gate should append a GHA step summary" >&2
+  exit 1
+}
+grep -q 'GITHUB_STEP_SUMMARY' "${ROOT_DIR}/.github/workflows/fugue-orchestration-gate.yml" || {
+  echo "FAIL: orchestration gate summary must target GITHUB_STEP_SUMMARY" >&2
   exit 1
 }
 grep -q "gh_var_default" "${CANARY_SCRIPT}" || {

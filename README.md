@@ -256,6 +256,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `fugue-orchestrator-canary` は full canary（regular+force）の定期検証です。`workflow_dispatch` では `canary_mode=full|lite` を選択できます。
 # NOTE: canaryは既定で `FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE=continuity` として、subscription runner 不在でも検証継続します（`hold` または `inherit` で従来どおりスキップ可能）。
 # NOTE: canaryは regular/force ケースの統合コメント待機を並列化し、待機上限は fast/slow 2段（上記 `FUGUE_CANARY_WAIT_*`）で調整できます。
+# NOTE: 2026-03-12 時点の production validation 記録は `docs/kernel-vote-production-validation-2026-03-12.md` に固定しています。
 # NOTE: `fugue-orchestration-weekly-review` が週次で assist昇格率と high-risk時の昇格カバレッジを status issue に投稿します。
 
 # 3.6 gha24 でリクエスト単位に上書き（任意）

@@ -61,9 +61,28 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run canary (mode-aware)
+        id: canary_run
         env:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
           CANARY_TRUST_SUBJECT: ${{ github.event.inputs.trust_subject || '' }}
         run: bash scripts/harness/run-canary.sh
+
+      - name: Append canary summary
+        if: always()
+        run: |
+          set -euo pipefail
+          canary_mode="${{ github.event.inputs.canary_mode || 'full' }}"
+          trust_subject="${{ github.event.inputs.trust_subject || github.triggering_actor || github.actor }}"
+          {
+            echo "## Canary Summary"
+            echo
+            echo "- workflow: \`fugue-orchestrator-canary\`"
+            echo "- ref: \`${GITHUB_REF_NAME:-unknown}\`"
+            echo "- sha: \`${GITHUB_SHA}\`"
+            echo "- mode: \`${canary_mode}\`"
+            echo "- trust subject: \`${trust_subject}\`"
+            echo "- result: \`${{ steps.canary_run.outcome }}\`"
+            echo "- run: [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } >> "${GITHUB_STEP_SUMMARY}"
