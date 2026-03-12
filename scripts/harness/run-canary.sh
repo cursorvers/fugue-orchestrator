@@ -517,11 +517,13 @@ create_issue() {
   url="$(GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${cmd[@]}")"
   local issue_num="${url##*/}"
   local dispatch_offline_policy=""
+  local caller_ref="${GITHUB_REF_NAME:-main}"
   if [[ "${canary_offline_policy_override}" == "hold" || "${canary_offline_policy_override}" == "continuity" ]]; then
     dispatch_offline_policy="${canary_offline_policy_override}"
   fi
   local run_cmd=(gh workflow run fugue-tutti-caller.yml \
     --repo "${repo}" \
+    --ref "${caller_ref}" \
     -f issue_number="${issue_num}" \
     -f handoff_target="${handoff_target}")
   if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
