@@ -31,6 +31,7 @@ check_contains "${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh" "multi-ag
 check_contains "${ROOT_DIR}/scripts/local/run-local-orchestration.sh" "- multi-agent diversity:" "local summary shows diversity"
 check_contains "${ROOT_DIR}/.github/workflows/fugue-tutti-caller.yml" "diversity=planned(codex+claude+glm" "caller announces planned diversity"
 check_contains "${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml" "--implementation-phase" "router passes implementation phase into matrix builder"
+check_contains "${ROOT_DIR}/.github/workflows/fugue-tutti-router.yml" "--has-implement \"\${implementation_phase}\"" "router risk policy sees implementation phase"
 check_absent "${ROOT_DIR}/scripts/harness/aggregate-tutti-votes.sh" "claude-waived" "glm no longer waives claude baseline"
 
 echo "kernel diversity contract checks passed"

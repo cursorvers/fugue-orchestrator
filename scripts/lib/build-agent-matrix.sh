@@ -13,7 +13,7 @@ wants_gemini="false"
 wants_xai="false"
 allow_glm_in_subscription="false"
 dual_main_signal="false"
-codex_main_model="gpt-5.4"
+codex_main_model="gpt-5-codex"
 codex_multi_agent_model="gpt-5-codex"
 claude_opus_model="claude-sonnet-4-6"
 claude_sonnet4_model="claude-sonnet-4-6"
@@ -68,7 +68,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --codex-main-model)
-      codex_main_model="${2:-gpt-5.4}"
+      codex_main_model="${2:-gpt-5-codex}"
       shift 2
       ;;
     --codex-multi-agent-model)
@@ -133,7 +133,7 @@ Options:
   --wants-xai VALUE                 true|false
   --allow-glm-in-subscription VALUE true|false (local hybrid mode switch)
   --dual-main-signal VALUE          true|false (include both codex/claude main signal lanes)
-  --codex-main-model VALUE          default: gpt-5.4
+  --codex-main-model VALUE          default: gpt-5-codex
   --codex-multi-agent-model VALUE   default: gpt-5-codex
   --claude-opus-model VALUE         default: claude-sonnet-4-6
   --claude-sonnet4-model VALUE      default: claude-sonnet-4-6
@@ -233,7 +233,7 @@ if [[ -x "${model_policy_script}" ]]; then
   claude_sonnet6_model="${claude_model}"
 else
   if [[ -z "${codex_main_model}" ]]; then
-    codex_main_model="gpt-5.4"
+    codex_main_model="gpt-5-codex"
   fi
   if [[ -z "${codex_multi_agent_model}" ]]; then
     codex_multi_agent_model="gpt-5-codex"
