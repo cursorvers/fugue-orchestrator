@@ -38,6 +38,10 @@ grep -q 'trust_subject="\${GITHUB_TRIGGERING_ACTOR:-\${GITHUB_ACTOR:-}}"' "${ROO
   echo "FAIL: orchestration gate should pass triggering actor into canary dispatch" >&2
   exit 1
 }
+grep -q -- '--ref "\${canary_ref}"' "${ROOT_DIR}/.github/workflows/fugue-orchestration-gate.yml" || {
+  echo "FAIL: orchestration gate should dispatch canary against branch ref for workflow_dispatch runs" >&2
+  exit 1
+}
 grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script missing GitHub variable hydration helper" >&2
   exit 1
