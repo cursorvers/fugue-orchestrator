@@ -38,11 +38,8 @@ Options:
   --title <text>                   Notebook title when creating a notebook.
   --prompt <text>                  Optional prompt or focus text.
   --source-manifest <path>         JSON file describing source inputs.
-  --artifact-type <mind_map|infographic>
+  --artifact-type <mind_map>
                                    Artifact type for visual-brief.
-  --orientation <landscape|portrait>
-                                   Infographic orientation (default: landscape).
-  --style <name>                   Infographic style (default: professional).
   --notebook-id <id>               Reuse an existing notebook instead of creating one.
   --run-dir <path>                 Write raw outputs and receipt metadata under <run-dir>/notebooklm.
   --sensitivity <public|internal|restricted>
@@ -369,9 +366,9 @@ validate_inputs() {
 
   if [[ "${action}" == "visual-brief" ]]; then
     case "${artifact_type}" in
-      mind_map|infographic) ;;
+      mind_map) ;;
       *)
-        fail "visual-brief only supports mind_map or infographic"
+        fail "visual-brief currently supports only mind_map"
         ;;
     esac
   fi
@@ -402,40 +399,31 @@ emit_commands() {
 build_source_command() {
   local notebook_ref="$1"
   local source_json="$2"
-  local source_type value source_title wait_flag
+  local source_type value
   source_type="$(jq -r '.type // empty' <<<"${source_json}")"
   value="$(jq -r '.value // .url // .file // .text // .youtube // .drive // empty' <<<"${source_json}")"
-  source_title="$(jq -r '.title // empty' <<<"${source_json}")"
-  wait_flag="$(jq -r '.wait // true' <<<"${source_json}")"
 
   case "${source_type}" in
     url)
-      cmd=("${nlm_bin}" source add "${notebook_ref}" --url "${value}")
+      cmd=("${nlm_bin}" add "${notebook_ref}" "${value}")
       ;;
     file)
       [[ -f "${value}" ]] || fail "source file not found: ${value}"
-      cmd=("${nlm_bin}" source add "${notebook_ref}" --file "${value}")
+      cmd=("${nlm_bin}" add "${notebook_ref}" "${value}")
       ;;
     text)
-      cmd=("${nlm_bin}" source add "${notebook_ref}" --text "${value}")
-      if [[ -n "${source_title}" ]]; then
-        cmd+=(--title "${source_title}")
-      fi
+      cmd=("${nlm_bin}" add "${notebook_ref}" "${value}")
       ;;
     youtube)
-      cmd=("${nlm_bin}" source add "${notebook_ref}" --youtube "${value}")
+      cmd=("${nlm_bin}" add "${notebook_ref}" "${value}")
       ;;
     drive)
-      cmd=("${nlm_bin}" source add "${notebook_ref}" --drive "${value}")
+      cmd=("${nlm_bin}" add "${notebook_ref}" "${value}")
       ;;
     *)
       fail "unsupported source type in manifest: ${source_type}"
       ;;
   esac
-
-  if [[ "${wait_flag}" == "true" ]]; then
-    cmd+=(--wait)
-  fi
 }
 
 write_command_log() {
@@ -496,7 +484,7 @@ main() {
   fi
 
   if [[ -z "${notebook_ref}" ]]; then
-    create_cmd=("${nlm_bin}" notebook create "${title}")
+    create_cmd=("${nlm_bin}" create "${title}")
     if [[ "${resolve_only}" == "true" ]]; then
       record_command "${create_cmd[@]}"
       notebook_ref="NOTEBOOK_ID"
@@ -512,44 +500,43 @@ main() {
     fi
   fi
 
+  local -a source_refs=()
+  local source_counter=0
   while IFS= read -r source_json; do
     [[ -n "${source_json}" ]] || continue
     build_source_command "${notebook_ref}" "${source_json}"
     if [[ "${resolve_only}" == "true" ]]; then
       record_command "${cmd[@]}"
+      source_counter=$((source_counter + 1))
+      source_refs+=("SOURCE_ID_${source_counter}")
       continue
     fi
 
     local source_id
-    source_id="$(printf '%s' "${RANDOM}")"
-    local source_stdout="${note_dir}/source-${source_id}.json"
-    local source_stderr="${note_dir}/source-${source_id}.stderr.log"
+    source_counter=$((source_counter + 1))
+    local source_stdout="${note_dir}/source-${source_counter}.json"
+    local source_stderr="${note_dir}/source-${source_counter}.stderr.log"
     run_cmd "${source_stdout}" "${source_stderr}" "${cmd[@]}" || {
       write_command_log
       write_meta "error" 1 "source add failed"
       [[ -s "${source_stderr}" ]] && cat "${source_stderr}" >&2
       exit 1
     }
+    source_id="$(parse_id_from_output "${source_stdout}" source)"
+    [[ -n "${source_id}" ]] || fail "could not resolve source id from source add output"
+    source_refs+=("${source_id}")
   done < <(iter_sources)
 
   local final_artifact_type="${artifact_type}"
   case "${action}" in
     visual-brief)
-      if [[ "${artifact_type}" == "mind_map" ]]; then
-        artifact_cmd=("${nlm_bin}" mindmap create "${notebook_ref}" --title "${title}" --confirm)
-      else
-        artifact_cmd=("${nlm_bin}" infographic create "${notebook_ref}" --orientation "${orientation}" --style "${style}" --confirm)
-      fi
+      artifact_cmd=("${nlm_bin}" mindmap "${notebook_ref}" "${source_refs[@]}")
       ;;
     slide-prep)
-      final_artifact_type="slide_deck"
-      artifact_cmd=("${nlm_bin}" slides create "${notebook_ref}" --confirm)
+      final_artifact_type="report"
+      artifact_cmd=("${nlm_bin}" briefing-doc "${notebook_ref}" "${source_refs[@]}")
       ;;
   esac
-
-  if [[ -n "${prompt}" ]]; then
-    artifact_cmd+=(--focus "${prompt}")
-  fi
 
   if [[ "${resolve_only}" == "true" ]]; then
     record_command "${artifact_cmd[@]}"

@@ -28,18 +28,21 @@ if [[ "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-case "${1:-} ${2:-} ${3:-}" in
-  "notebook create Demo")
+case "$*" in
+  "create Demo")
     printf '✓ Created notebook: Demo\n  ID: nb_demo\n'
     ;;
-  "source add nb_demo")
-    printf '✓ Added source: Example Source (ready)\nSource ID: src_ok\n'
+  "add nb_demo https://example.com/article")
+    printf '✓ Added source: Example Source (ready)\nSource ID: src_url\n'
     ;;
-  "mindmap create nb_demo")
+  add\ nb_demo\ /*)
+    printf '✓ Added source: File Source (ready)\nSource ID: src_file\n'
+    ;;
+  "mindmap nb_demo src_url src_file")
     printf '✓ Mind map created\n  ID: art_mindmap\n  Title: Demo\n'
     ;;
-  "slides create nb_demo")
-    printf '✓ Slide deck generation started\n  Artifact ID: art_slides\n'
+  "briefing-doc nb_demo src_url src_file")
+    printf '✓ Briefing doc created\n  Artifact ID: art_report\n'
     ;;
   *)
     echo "unexpected command: $*" >&2
@@ -88,9 +91,10 @@ test_resolve_only_visual_brief() {
       --resolve-only
   )"
 
-  grep -q 'notebook create Demo' <<< "${output}" &&
-    grep -q 'source add NOTEBOOK_ID --url https://example.com/article --wait' <<< "${output}" &&
-    grep -q 'mindmap create NOTEBOOK_ID --title Demo --confirm' <<< "${output}" &&
+  grep -q '^nlm create Demo$' <<< "${output}" &&
+    grep -q 'add NOTEBOOK_ID https://example.com/article' <<< "${output}" &&
+    grep -q 'add NOTEBOOK_ID '"${sample_file}" <<< "${output}" &&
+    grep -q 'mindmap NOTEBOOK_ID SOURCE_ID_1 SOURCE_ID_2' <<< "${output}" &&
     [[ ! -s "${fake_log}" ]]
 }
 
@@ -127,12 +131,14 @@ test_exec_visual_brief_writes_receipt() {
 
   jq -e '.action_intent == "visual-brief"' <<< "${output}" >/dev/null &&
     jq -e '.notebook_id == "nb_demo"' <<< "${output}" >/dev/null &&
-    jq -e '.artifact_id == "art_mindmap"' <<< "${output}" >/dev/null &&
+  jq -e '.artifact_id == "art_mindmap"' <<< "${output}" >/dev/null &&
     jq -e '.artifact_type == "mind_map"' "${run_dir}/notebooklm/receipt.json" >/dev/null &&
     jq -e '.status == "ok"' "${run_dir}/notebooklm/visual-brief-meta.json" >/dev/null &&
-    grep -q 'notebook create Demo' "${run_dir}/notebooklm/visual-brief.commands.txt" &&
-    grep -q '^notebook create Demo$' "${fake_log}" &&
-    grep -q '^mindmap create nb_demo --title Demo --confirm$' "${fake_log}"
+    grep -q '^nlm create Demo$' "${run_dir}/notebooklm/visual-brief.commands.txt" &&
+    grep -q '^create Demo$' "${fake_log}" &&
+    grep -q '^add nb_demo https://example.com/article$' "${fake_log}" &&
+    grep -q '^add nb_demo '"${sample_file}"'$' "${fake_log}" &&
+    grep -q '^mindmap nb_demo src_url src_file$' "${fake_log}"
 }
 
 test_smoke() {
