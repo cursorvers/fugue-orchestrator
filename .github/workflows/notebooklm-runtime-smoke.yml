@@ -27,6 +27,26 @@ on:
         required: false
         type: string
         default: "nlm"
+      content_hint_applied:
+        description: "Optional direct content-hint snapshot for workflow_dispatch"
+        required: false
+        type: string
+        default: "false"
+      content_action_hint:
+        description: "Optional direct content action hint for workflow_dispatch"
+        required: false
+        type: string
+        default: ""
+      content_skill_hint:
+        description: "Optional direct content skill hint for workflow_dispatch"
+        required: false
+        type: string
+        default: ""
+      content_reason:
+        description: "Optional direct content reason for workflow_dispatch"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -59,6 +79,10 @@ jobs:
           CLAUDE_TRANSLATOR_MODE: off
           DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: codex
           DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: none
+          CONTENT_HINT_APPLIED_INPUT: ${{ inputs.content_hint_applied }}
+          CONTENT_ACTION_HINT_INPUT: ${{ inputs.content_action_hint }}
+          CONTENT_SKILL_HINT_INPUT: ${{ inputs.content_skill_hint }}
+          CONTENT_REASON_INPUT: ${{ inputs.content_reason }}
         run: bash scripts/harness/resolve-orchestration-context.sh
 
   notebooklm-runtime:
