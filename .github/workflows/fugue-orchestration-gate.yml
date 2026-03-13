@@ -172,7 +172,9 @@ jobs:
           bash -n tests/test-check-kernel-vote-readiness.sh
           bash -n tests/test-check-notebooklm-runtime-readiness.sh
           bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-kernel-sequencing-policy.sh
           bash -n tests/test-kernel-council-review.sh
+          bash -n tests/test-recovery-pass-live.sh
           bash -n tests/test-aggregate-tutti-votes.sh
           bash -n tests/test-vote-command-implement-guard.sh
           bash -n tests/test-vote-handoff-simulation.sh
@@ -197,7 +199,9 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/test-codex-vote-prompt.sh
+          bash tests/test-kernel-sequencing-policy.sh
           bash tests/test-kernel-council-review.sh
+          bash tests/test-recovery-pass-live.sh
           bash tests/test-check-kernel-vote-readiness.sh
           bash tests/test-check-notebooklm-runtime-readiness.sh
           bash tests/test-aggregate-tutti-votes.sh

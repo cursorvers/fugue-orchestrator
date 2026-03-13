@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: "false"
+      council_force_missing_provider:
+        description: "Manual verification override for kernel council baseline provider"
+        required: false
+        type: string
+        default: "none"
       dispatch_nonce:
         description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
         required: false
@@ -767,9 +772,18 @@ jobs:
       freee_readonly_actions: "${{ needs.ctx.outputs.freee_readonly_actions }}"
       freee_approval_required_actions: "${{ needs.ctx.outputs.freee_approval_required_actions }}"
       freee_readonly_environment: "${{ vars.FUGUE_FREEE_READONLY_ENV || 'freee-readonly' }}"
+      content_hint_applied: "${{ needs.ctx.outputs.content_hint_applied }}"
+      content_action_hint: "${{ needs.ctx.outputs.content_action_hint }}"
+      content_skill_hint: "${{ needs.ctx.outputs.content_skill_hint }}"
+      content_reason: "${{ needs.ctx.outputs.content_reason }}"
+      vote_command: "${{ needs.ctx.outputs.vote_command }}"
       execution_mode: "${{ needs.execution-policy.outputs.codex_execution_mode }}"
     secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+      FUGUE_COPILOT_TOKEN: ${{ secrets.FUGUE_COPILOT_TOKEN }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
       GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
       FREEE_ACCESS_TOKEN: ${{ secrets.FREEE_ACCESS_TOKEN }}

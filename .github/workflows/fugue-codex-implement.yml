@@ -47,6 +47,11 @@ on:
         required: false
         type: string
         default: "false"
+      council_force_missing_provider:
+        description: "Manual verification override for kernel council baseline provider (default: none)"
+        required: false
+        type: string
+        default: "none"
       risk_tier:
         description: "Resolved risk tier (low|medium|high)"
         required: false
@@ -164,6 +169,10 @@ on:
         default: ""
     secrets:
       ZAI_API_KEY:
+        required: false
+      GEMINI_API_KEY:
+        required: false
+      XAI_API_KEY:
         required: false
       COPILOT_GITHUB_TOKEN:
         required: false
@@ -700,6 +709,8 @@ jobs:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.FUGUE_COPILOT_TOKEN || github.token }}
           COPILOT_CLI_BIN: ${{ steps.copilot.outputs.bin || 'copilot' }}
           HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || 'false' }}
@@ -718,6 +729,7 @@ jobs:
           COUNCIL_RUN_DIR: ".fugue/kernel-council/preflight"
           COUNCIL_EXECUTION_PROFILE: "subscription-strict"
           COUNCIL_FORCE_COPILOT_CONTINUITY: "true"
+          COUNCIL_FORCE_MISSING_PROVIDER: ${{ inputs.council_force_missing_provider || 'none' }}
           COUNCIL_MULTI_AGENT_MODE: "standard"
           COUNCIL_GLM_SUBAGENT_MODE: "off"
           CLAUDE_ASSIST_EXECUTION_POLICY: "hybrid"
@@ -989,6 +1001,8 @@ jobs:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.FUGUE_COPILOT_TOKEN || github.token }}
           COPILOT_CLI_BIN: ${{ steps.copilot.outputs.bin || 'copilot' }}
           HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || 'false' }}
@@ -1007,6 +1021,7 @@ jobs:
           COUNCIL_RUN_DIR: ".fugue/kernel-council/final"
           COUNCIL_EXECUTION_PROFILE: "subscription-strict"
           COUNCIL_FORCE_COPILOT_CONTINUITY: "true"
+          COUNCIL_FORCE_MISSING_PROVIDER: ${{ inputs.council_force_missing_provider || 'none' }}
           COUNCIL_MULTI_AGENT_MODE: "standard"
           COUNCIL_GLM_SUBAGENT_MODE: "off"
           CLAUDE_ASSIST_EXECUTION_POLICY: "hybrid"
