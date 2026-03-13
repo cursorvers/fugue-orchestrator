@@ -75,8 +75,8 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event_name == 'push' && '499' || inputs.issue_number }}
-          ISSUE_NUMBER_FROM_ISSUE: ""
+          ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event_name == 'push' && '' || inputs.issue_number }}
+          ISSUE_NUMBER_FROM_ISSUE: ${{ github.event_name == 'push' && '499' || '' }}
           HANDOFF_TARGET_INPUT: kernel
           CI_EXECUTION_ENGINE: api
           CLAUDE_TRANSLATOR_MODE: off
