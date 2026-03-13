@@ -342,7 +342,7 @@ fugue_gh_retry 4 gh label create "${assist_orchestrator_label}" \
   --color "0052CC" >/dev/null 2>&1 || true
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
-fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content-action:slide-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" >/dev/null 2>&1 || true
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content:notebooklm" --remove-label "content-action:slide-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" --remove-label "content-action:notebooklm-visual-brief" --remove-label "content-action:notebooklm-slide-prep" >/dev/null 2>&1 || true
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "fugue-task" >/dev/null
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${orchestrator_label}" >/dev/null
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${assist_orchestrator_label}" >/dev/null
@@ -356,6 +356,9 @@ if [[ "${content_hint_applied}" == "true" ]]; then
     --color "BFDADC" >/dev/null 2>&1 || true
   fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "content-task" >/dev/null || true
   case "${content_skill_hint}" in
+    *notebooklm-visual-brief*|*notebooklm-slide-prep*)
+      content_skill_label="content:notebooklm"
+      ;;
     *academic-two-stage-slide*)
       content_skill_label="content:academic-slide"
       ;;
@@ -367,6 +370,12 @@ if [[ "${content_hint_applied}" == "true" ]]; then
       ;;
   esac
   case "${content_action_hint}" in
+    *notebooklm-visual-brief*)
+      content_action_label="content-action:notebooklm-visual-brief"
+      ;;
+    *notebooklm-slide-prep*)
+      content_action_label="content-action:notebooklm-slide-prep"
+      ;;
     *academic-slide*)
       content_action_label="content-action:academic-slide"
       ;;
@@ -427,6 +436,42 @@ intake_source="github-issue-handoff"
 if [[ "${IS_VOTE_COMMAND}" == "true" ]]; then
   intake_source="github-vote-comment"
 fi
+kernel_handoff_mode="false"
+if [[ "${handoff_target}" == "kernel" && "${mode}" == "implement" && "${IS_VOTE_COMMAND}" == "true" ]]; then
+  kernel_handoff_mode="true"
+fi
+cost_provider_priority="$(printf '%s' "${COST_PROVIDER_PRIORITY:-codex,claude,glm,copilot,gemini,xai}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+if [[ -z "${cost_provider_priority}" ]]; then
+  cost_provider_priority="codex,claude,glm,copilot,gemini,xai"
+fi
+cost_copilot_policy="$(printf '%s' "${COST_COPILOT_POLICY:-low-cost-fallback-only}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${cost_copilot_policy}" ]]; then
+  cost_copilot_policy="low-cost-fallback-only"
+fi
+cost_metered_policy="$(printf '%s' "${COST_METERED_POLICY:-overflow-or-tie-break-only}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${cost_metered_policy}" ]]; then
+  cost_metered_policy="overflow-or-tie-break-only"
+fi
+metered_reason="$(printf '%s' "${METERED_REASON:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${metered_reason}" != "overflow" && "${metered_reason}" != "tie-break" ]]; then
+  metered_reason="none"
+fi
+fallback_used="$(printf '%s' "${FALLBACK_USED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${fallback_used}" != "true" ]]; then
+  fallback_used="false"
+fi
+missing_lane="$(printf '%s' "${MISSING_LANE:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${missing_lane}" ]]; then
+  missing_lane="none"
+fi
+fallback_provider="$(printf '%s' "${FALLBACK_PROVIDER:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${fallback_provider}" ]]; then
+  fallback_provider="none"
+fi
+fallback_reason="$(printf '%s' "${FALLBACK_REASON:-}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${fallback_used}" != "true" && ( "${missing_lane}" != "none" || "${fallback_provider}" != "none" || -n "${fallback_reason}" ) ]]; then
+  fallback_used="true"
+fi
 provider_line="- Orchestrator: ${provider}"
 if [[ -n "${main_fallback_note}" ]]; then
   provider_line="- Orchestrator: ${provider} (requested: ${requested_provider})"
@@ -476,12 +521,25 @@ dispatch_args=(
 )
 dispatch_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date -u +%Y%m%dT%H%M%SZ)"
 dispatch_args+=(-f dispatch_nonce="${dispatch_nonce}")
-dispatch_args+=(-f handoff_target="kernel")
+dispatch_args+=(-f handoff_target="${handoff_target}")
 dispatch_args+=(-f intake_source="${intake_source}")
 dispatch_args+=(-f requested_execution_mode="${mode}")
 dispatch_args+=(-f implement_request="${wants_implement}")
 dispatch_args+=(-f implement_confirmed="${confirm_implement}")
+dispatch_args+=(-f content_hint_applied="${content_hint_applied}")
+dispatch_args+=(-f content_action_hint="${content_action_hint}")
+dispatch_args+=(-f content_skill_hint="${content_skill_hint}")
+dispatch_args+=(-f content_reason="${content_reason}")
 dispatch_args+=(-f vote_command="${IS_VOTE_COMMAND}")
+dispatch_args+=(-f kernel_handoff_mode="${kernel_handoff_mode}")
+dispatch_args+=(-f cost_provider_priority="${cost_provider_priority}")
+dispatch_args+=(-f cost_copilot_policy="${cost_copilot_policy}")
+dispatch_args+=(-f cost_metered_policy="${cost_metered_policy}")
+dispatch_args+=(-f metered_reason="${metered_reason}")
+dispatch_args+=(-f fallback_used="${fallback_used}")
+dispatch_args+=(-f missing_lane="${missing_lane}")
+dispatch_args+=(-f fallback_provider="${fallback_provider}")
+dispatch_args+=(-f fallback_reason="${fallback_reason}")
 trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -n "${trust_subject}" ]]; then
   dispatch_args+=(-f trust_subject="${trust_subject}")
@@ -510,8 +568,21 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --requested-execution-mode "${mode}"
     --implement-request "${wants_implement}"
     --implement-confirmed "${confirm_implement}"
+    --content-hint-applied "${content_hint_applied}"
+    --content-action-hint "${content_action_hint}"
+    --content-skill-hint "${content_skill_hint}"
+    --content-reason "${content_reason}"
     --vote-command "${IS_VOTE_COMMAND}"
     --intake-source "${intake_source}"
+    --kernel-handoff-mode "${kernel_handoff_mode}"
+    --cost-provider-priority "${cost_provider_priority}"
+    --cost-copilot-policy "${cost_copilot_policy}"
+    --cost-metered-policy "${cost_metered_policy}"
+    --metered-reason "${metered_reason}"
+    --fallback-used "${fallback_used}"
+    --missing-lane "${missing_lane}"
+    --fallback-provider "${fallback_provider}"
+    --fallback-reason "${fallback_reason}"
   )
   if [[ -n "${trust_subject}" ]]; then
     bridge_args+=(--trust-subject "${trust_subject}")
@@ -530,3 +601,12 @@ fi
 echo "handoff=true" >> "${GITHUB_OUTPUT}"
 echo "handoff_target=${handoff_target}" >> "${GITHUB_OUTPUT}"
 echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+echo "kernel_handoff_mode=${kernel_handoff_mode}" >> "${GITHUB_OUTPUT}"
+echo "cost_provider_priority=${cost_provider_priority}" >> "${GITHUB_OUTPUT}"
+echo "cost_copilot_policy=${cost_copilot_policy}" >> "${GITHUB_OUTPUT}"
+echo "cost_metered_policy=${cost_metered_policy}" >> "${GITHUB_OUTPUT}"
+echo "metered_reason=${metered_reason}" >> "${GITHUB_OUTPUT}"
+echo "fallback_used=${fallback_used}" >> "${GITHUB_OUTPUT}"
+echo "missing_lane=${missing_lane}" >> "${GITHUB_OUTPUT}"
+echo "fallback_provider=${fallback_provider}" >> "${GITHUB_OUTPUT}"
+echo "fallback_reason=${fallback_reason}" >> "${GITHUB_OUTPUT}"

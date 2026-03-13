@@ -68,6 +68,10 @@ workspace_action_hint=""
 workspace_domain_hint=""
 workspace_reason=""
 workspace_hint_applied="false"
+freee_action_hint=""
+freee_domain_hint=""
+freee_reason=""
+freee_hint_applied="false"
 content_action_hint=""
 content_skill_hint=""
 content_reason=""
@@ -244,15 +248,87 @@ if [[ -n "${workspace_action_hint}" || -n "${workspace_domain_hint}" ]]; then
   workspace_hint_applied="true"
 fi
 
+if contains '(freee|invoice|請求書|見積書|billing|請求|債権|back[[:space:]_-]*office|accounting|会計|finance|財務)'; then
+  freee_action_hint="$(append_csv_unique "${freee_action_hint}" "company-profile")"
+  freee_action_hint="$(append_csv_unique "${freee_action_hint}" "invoice-status")"
+  freee_domain_hint="$(append_csv_unique "${freee_domain_hint}" "company")"
+  freee_domain_hint="$(append_csv_unique "${freee_domain_hint}" "invoice")"
+  freee_reason="$(append_csv_unique "${freee_reason}" "billing-context")"
+fi
+
+if contains '(expense|expenses|expense[[:space:]_-]*claim|経費|経費精算|立替|精算)'; then
+  freee_action_hint="$(append_csv_unique "${freee_action_hint}" "expense-claim-status")"
+  freee_domain_hint="$(append_csv_unique "${freee_domain_hint}" "expense-claim")"
+  freee_reason="$(append_csv_unique "${freee_reason}" "expense-context")"
+fi
+
+if contains '(payment|payments|支払|入金|振込|振り込み|着金|期日|due)'; then
+  freee_action_hint="$(append_csv_unique "${freee_action_hint}" "payment-due-summary")"
+  freee_domain_hint="$(append_csv_unique "${freee_domain_hint}" "payment")"
+  freee_reason="$(append_csv_unique "${freee_reason}" "payment-context")"
+fi
+
+# Fail-closed: when freee/accounting write intent appears, always surface
+# explicit handoff actions so downstream approval guards can block execution.
+if [[ -n "${freee_action_hint}" ]] && contains '(作成|発行|登録|更新|変更|削除|承認|確定|create|issue|approve|confirm|update|delete)'; then
+  write_handoff_added="false"
+
+  if contains '(invoice|請求書|見積書|billing|請求)'; then
+    freee_action_hint="$(append_csv_unique "${freee_action_hint}" "invoice-create-handoff")"
+    freee_reason="$(append_csv_unique "${freee_reason}" "write-intent-detected")"
+    write_handoff_added="true"
+  fi
+
+  if contains '(expense|expenses|expense[[:space:]_-]*claim|経費|経費精算|立替|精算)'; then
+    freee_action_hint="$(append_csv_unique "${freee_action_hint}" "expense-approval-handoff")"
+    freee_reason="$(append_csv_unique "${freee_reason}" "write-intent-detected")"
+    write_handoff_added="true"
+  fi
+
+  if contains '(payment|payments|支払|入金|振込|振り込み|着金|due)'; then
+    freee_action_hint="$(append_csv_unique "${freee_action_hint}" "payment-confirmation-handoff")"
+    freee_reason="$(append_csv_unique "${freee_reason}" "write-intent-detected")"
+    write_handoff_added="true"
+  fi
+
+  if [[ "${write_handoff_added}" != "true" ]]; then
+    freee_action_hint="$(append_csv_unique "${freee_action_hint}" "invoice-create-handoff")"
+    freee_action_hint="$(append_csv_unique "${freee_action_hint}" "expense-approval-handoff")"
+    freee_action_hint="$(append_csv_unique "${freee_action_hint}" "payment-confirmation-handoff")"
+    freee_reason="$(append_csv_unique "${freee_reason}" "write-intent-detected")"
+  fi
+fi
+
+if [[ -n "${freee_action_hint}" || -n "${freee_domain_hint}" ]]; then
+  freee_hint_applied="true"
+fi
+
 note_negated="false"
 if contains '(note\.com|note記事|note向け|note 用|noteを書|原稿|manuscript).{0,12}(ではなく|じゃなく|ではない|じゃない|not)'; then
   note_negated="true"
 fi
 
+notebooklm_requested="false"
+if contains '(notebooklm|notebook lm|nlm)'; then
+  notebooklm_requested="true"
+fi
+
+if [[ "${notebooklm_requested}" == "true" ]] && contains '(slide[[:space:]_-]*prep|slide[[:space:]_-]*draft|スライド下書き|叩き台|speaker[[:space:]_-]*notes|発表資料の骨子)'; then
+  content_action_hint="$(append_csv_unique "${content_action_hint}" "notebooklm-slide-prep")"
+  content_skill_hint="$(append_csv_unique "${content_skill_hint}" "notebooklm-slide-prep")"
+  content_reason="$(append_csv_unique "${content_reason}" "notebooklm-slide-prep-request")"
+elif [[ "${notebooklm_requested}" == "true" ]] && contains '(mind[[:space:]_-]*map|infographic|図解|図式化|概念図|関係図|調査結果の図)'; then
+  content_action_hint="$(append_csv_unique "${content_action_hint}" "notebooklm-visual-brief")"
+  content_skill_hint="$(append_csv_unique "${content_skill_hint}" "notebooklm-visual-brief")"
+  content_reason="$(append_csv_unique "${content_reason}" "notebooklm-visual-request")"
+fi
+
 if contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド|資料作成)'; then
-  content_action_hint="$(append_csv_unique "${content_action_hint}" "slide-deck")"
-  content_skill_hint="$(append_csv_unique "${content_skill_hint}" "slide")"
-  content_reason="$(append_csv_unique "${content_reason}" "slide-request")"
+  if [[ "${notebooklm_requested}" != "true" || -z "${content_skill_hint}" ]]; then
+    content_action_hint="$(append_csv_unique "${content_action_hint}" "slide-deck")"
+    content_skill_hint="$(append_csv_unique "${content_skill_hint}" "slide")"
+    content_reason="$(append_csv_unique "${content_reason}" "slide-request")"
+  fi
 fi
 
 if contains '(academic|学術|学会|研究発表|講義資料)' && contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド)'; then
@@ -297,6 +373,10 @@ if [[ "${format}" == "json" ]]; then
     --arg workspace_domain_hint "${workspace_domain_hint}" \
     --arg workspace_reason "${workspace_reason}" \
     --arg workspace_hint_applied "${workspace_hint_applied}" \
+    --arg freee_action_hint "${freee_action_hint}" \
+    --arg freee_domain_hint "${freee_domain_hint}" \
+    --arg freee_reason "${freee_reason}" \
+    --arg freee_hint_applied "${freee_hint_applied}" \
     --arg content_action_hint "${content_action_hint}" \
     --arg content_skill_hint "${content_skill_hint}" \
     --arg content_reason "${content_reason}" \
@@ -312,6 +392,10 @@ if [[ "${format}" == "json" ]]; then
       workspace_domain_hint: $workspace_domain_hint,
       workspace_reason: $workspace_reason,
       workspace_hint_applied: ($workspace_hint_applied == "true"),
+      freee_action_hint: $freee_action_hint,
+      freee_domain_hint: $freee_domain_hint,
+      freee_reason: $freee_reason,
+      freee_hint_applied: ($freee_hint_applied == "true"),
       content_action_hint: $content_action_hint,
       content_skill_hint: $content_skill_hint,
       content_reason: $content_reason,
@@ -328,6 +412,10 @@ else
   printf 'workspace_domain_hint=%q\n' "${workspace_domain_hint}"
   printf 'workspace_reason=%q\n' "${workspace_reason}"
   printf 'workspace_hint_applied=%q\n' "${workspace_hint_applied}"
+  printf 'freee_action_hint=%q\n' "${freee_action_hint}"
+  printf 'freee_domain_hint=%q\n' "${freee_domain_hint}"
+  printf 'freee_reason=%q\n' "${freee_reason}"
+  printf 'freee_hint_applied=%q\n' "${freee_hint_applied}"
   printf 'content_action_hint=%q\n' "${content_action_hint}"
   printf 'content_skill_hint=%q\n' "${content_skill_hint}"
   printf 'content_reason=%q\n' "${content_reason}"

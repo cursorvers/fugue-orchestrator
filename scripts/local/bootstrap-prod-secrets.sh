@@ -6,6 +6,7 @@ REPO="cursorvers/fugue-orchestrator"
 ENV_FILE=""
 APPLY="false"
 SKIP_AUDIT="false"
+FREEE_ENVIRONMENT="${FUGUE_FREEE_READONLY_ENV:-freee-readonly}"
 
 usage() {
   cat <<'EOF'
@@ -15,6 +16,7 @@ Options:
   --env-file <path>   Load secrets from an external env file
   --org <name>        GitHub organization (default: cursorvers)
   --repo <owner/repo> Target repository (default: cursorvers/fugue-orchestrator)
+  --freee-env <name>  Protected environment for freee readonly secrets/vars
   --apply             Apply secret updates
   --dry-run           Dry-run only (default)
   --skip-audit        Skip org/repo coverage audit
@@ -22,8 +24,15 @@ Options:
 
 Flow:
   1) Ensure gh auth is valid
-  2) Sync secrets from process env or explicit env file -> GitHub (org/repo)
+  2) Sync secrets/vars from process env or explicit env file -> GitHub (org/repo)
   3) Audit org secret coverage (unless --skip-audit)
+
+NotebookLM production vars recognized from env:
+  - FUGUE_NOTEBOOKLM_RUNTIME_ENV
+  - FUGUE_NOTEBOOKLM_RUNTIME_ENABLED
+  - FUGUE_NOTEBOOKLM_REQUIRE_RUNTIME_AUTH
+  - FUGUE_NOTEBOOKLM_SENSITIVITY
+  - FUGUE_NOTEBOOKLM_BIN
 EOF
 }
 
@@ -39,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo)
       REPO="${2:-}"
+      shift 2
+      ;;
+    --freee-env)
+      FREEE_ENVIRONMENT="${2:-}"
       shift 2
       ;;
     --apply)
@@ -72,7 +85,7 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! gh auth status -h github.com >/dev/null 2>&1; then
+if ! gh auth status --active -h github.com >/dev/null 2>&1; then
   echo "Error: gh auth is not ready. Run: gh auth login -h github.com -s admin:org,repo,workflow" >&2
   exit 1
 fi
@@ -86,6 +99,7 @@ echo "[1/2] Sync secrets (${mode_flag})"
 sync_args=(
   --org "${ORG}"
   --repo "${REPO}"
+  --freee-env "${FREEE_ENVIRONMENT}"
   "${mode_flag}"
 )
 
@@ -101,6 +115,6 @@ if [[ "${SKIP_AUDIT}" == "true" ]]; then
 fi
 
 echo "[2/2] Audit org/repo secret coverage"
-bash scripts/audit-org-secrets.sh --org "${ORG}"
+bash scripts/audit-org-secrets.sh --org "${ORG}" --repo "${REPO}"
 
 echo "Done."

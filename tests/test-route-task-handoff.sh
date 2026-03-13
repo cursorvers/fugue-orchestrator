@@ -93,7 +93,14 @@ assert_case() {
     "-f implement_request=${expected_request}" \
     "-f implement_confirmed=${expected_confirm}" \
     "-f vote_command=true" \
-    "-f allow_processing_rerun=true"
+    "-f allow_processing_rerun=true" \
+    "-f cost_provider_priority=codex,claude,glm,copilot,gemini,xai" \
+    "-f cost_copilot_policy=low-cost-fallback-only" \
+    "-f cost_metered_policy=overflow-or-tie-break-only" \
+    "-f metered_reason=none" \
+    "-f fallback_used=false" \
+    "-f missing_lane=none" \
+    "-f fallback_provider=none"
   do
     if [[ "${workflow_line}" != *"${expected}"* ]]; then
       echo "FAIL [${name}]: workflow dispatch missing '${expected}'"
@@ -136,6 +143,213 @@ echo ""
 assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true"
 assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false"
 assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false"
+
+assert_content_hints() {
+  local out_file="${TMP_DIR}/content-hints.out"
+  local workflow_line=""
+  local gh_log=""
+
+  total=$((total + 1))
+  : > "${FAKE_GH_LOG}"
+  jq -Rn '{title:"Task", body:"NotebookLM で調査結果を mind map にしたい", labels:[]}' > "${FAKE_ISSUE_JSON}"
+
+  if ! (
+    cd "${ROOT_DIR}"
+    env \
+      PATH="${FAKE_BIN}:${PATH}" \
+      FAKE_GH_LOG="${FAKE_GH_LOG}" \
+      FAKE_ISSUE_JSON="${FAKE_ISSUE_JSON}" \
+      GH_TOKEN="test-token" \
+      GITHUB_OUTPUT="${out_file}" \
+      GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
+      GITHUB_RUN_ID="101" \
+      GITHUB_RUN_ATTEMPT="1" \
+      ISSUE_NUMBER="1" \
+      ISSUE_TITLE="Task" \
+      ISSUE_BODY="NotebookLM で調査結果を mind map にしたい" \
+      COMMENT_BODY="/vote" \
+      IS_VOTE_COMMAND="true" \
+      VOTE_INSTRUCTION="" \
+      TRUST_SUBJECT="masayuki" \
+      DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
+      DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
+      CLAUDE_RATE_LIMIT_STATE="ok" \
+      CLAUDE_MAIN_ASSIST_POLICY="codex" \
+      CLAUDE_ROLE_POLICY="flex" \
+      CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
+      bash "${SCRIPT}" >/dev/null 2>"${TMP_DIR}/content-hints.stderr"
+  ); then
+    echo "FAIL [content-hints]: script exited with error"
+    failed=$((failed + 1))
+    return
+  fi
+
+  workflow_line="$(grep 'workflow run fugue-tutti-caller.yml' "${FAKE_GH_LOG}" | tail -n1 || true)"
+  for expected in \
+    "-f content_hint_applied=true" \
+    "-f content_action_hint=notebooklm-visual-brief" \
+    "-f content_skill_hint=notebooklm-visual-brief" \
+    "-f content_reason=notebooklm-visual-request"
+  do
+    if [[ "${workflow_line}" != *"${expected}"* ]]; then
+      echo "FAIL [content-hints]: workflow dispatch missing '${expected}'"
+      failed=$((failed + 1))
+      return
+    fi
+  done
+
+  gh_log="$(cat "${FAKE_GH_LOG}" || true)"
+  for expected in \
+    "--add-label content:notebooklm" \
+    "--add-label content-action:notebooklm-visual-brief"
+  do
+    if [[ "${gh_log}" != *"${expected}"* ]]; then
+      echo "FAIL [content-hints]: missing label mutation '${expected}'"
+      failed=$((failed + 1))
+      return
+    fi
+  done
+
+  echo "PASS [content-hints]"
+  passed=$((passed + 1))
+}
+
+assert_content_slide_prep_hints() {
+  local out_file="${TMP_DIR}/content-slide-prep.out"
+  local workflow_line=""
+  local gh_log=""
+
+  total=$((total + 1))
+  : > "${FAKE_GH_LOG}"
+  jq -Rn '{title:"Task", body:"NotebookLM で slide draft を作りたい", labels:[]}' > "${FAKE_ISSUE_JSON}"
+
+  if ! (
+    cd "${ROOT_DIR}"
+    env \
+      PATH="${FAKE_BIN}:${PATH}" \
+      FAKE_GH_LOG="${FAKE_GH_LOG}" \
+      FAKE_ISSUE_JSON="${FAKE_ISSUE_JSON}" \
+      GH_TOKEN="test-token" \
+      GITHUB_OUTPUT="${out_file}" \
+      GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
+      GITHUB_RUN_ID="101" \
+      GITHUB_RUN_ATTEMPT="1" \
+      ISSUE_NUMBER="1" \
+      ISSUE_TITLE="Task" \
+      ISSUE_BODY="NotebookLM で slide draft を作りたい" \
+      COMMENT_BODY="/vote" \
+      IS_VOTE_COMMAND="true" \
+      VOTE_INSTRUCTION="" \
+      TRUST_SUBJECT="masayuki" \
+      DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
+      DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
+      CLAUDE_RATE_LIMIT_STATE="ok" \
+      CLAUDE_MAIN_ASSIST_POLICY="codex" \
+      CLAUDE_ROLE_POLICY="flex" \
+      CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
+      bash "${SCRIPT}" >/dev/null 2>"${TMP_DIR}/content-slide-prep.stderr"
+  ); then
+    echo "FAIL [content-slide-prep-hints]: script exited with error"
+    failed=$((failed + 1))
+    return
+  fi
+
+  workflow_line="$(grep 'workflow run fugue-tutti-caller.yml' "${FAKE_GH_LOG}" | tail -n1 || true)"
+  for expected in \
+    "-f content_hint_applied=true" \
+    "-f content_action_hint=notebooklm-slide-prep" \
+    "-f content_skill_hint=notebooklm-slide-prep" \
+    "-f content_reason=notebooklm-slide-prep-request"
+  do
+    if [[ "${workflow_line}" != *"${expected}"* ]]; then
+      echo "FAIL [content-slide-prep-hints]: workflow dispatch missing '${expected}'"
+      failed=$((failed + 1))
+      return
+    fi
+  done
+
+  gh_log="$(cat "${FAKE_GH_LOG}" || true)"
+  for expected in \
+    "--add-label content:notebooklm" \
+    "--add-label content-action:notebooklm-slide-prep"
+  do
+    if [[ "${gh_log}" != *"${expected}"* ]]; then
+      echo "FAIL [content-slide-prep-hints]: missing label mutation '${expected}'"
+      failed=$((failed + 1))
+      return
+    fi
+  done
+
+  echo "PASS [content-slide-prep-hints]"
+  passed=$((passed + 1))
+}
+
+assert_snapshot_override() {
+  local out_file="${TMP_DIR}/snapshot-override.out"
+  local workflow_line=""
+
+  total=$((total + 1))
+  : > "${FAKE_GH_LOG}"
+  jq -Rn '{title:"Task", body:"通常タスク", labels:[]}' > "${FAKE_ISSUE_JSON}"
+
+  if ! (
+    cd "${ROOT_DIR}"
+    env \
+      PATH="${FAKE_BIN}:${PATH}" \
+      FAKE_GH_LOG="${FAKE_GH_LOG}" \
+      FAKE_ISSUE_JSON="${FAKE_ISSUE_JSON}" \
+      GH_TOKEN="test-token" \
+      GITHUB_OUTPUT="${out_file}" \
+      GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
+      GITHUB_RUN_ID="101" \
+      GITHUB_RUN_ATTEMPT="1" \
+      ISSUE_NUMBER="1" \
+      ISSUE_TITLE="Task" \
+      ISSUE_BODY="通常タスク" \
+      COMMENT_BODY="/vote" \
+      IS_VOTE_COMMAND="true" \
+      VOTE_INSTRUCTION="" \
+      TRUST_SUBJECT="masayuki" \
+      DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
+      DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
+      CLAUDE_RATE_LIMIT_STATE="ok" \
+      CLAUDE_MAIN_ASSIST_POLICY="codex" \
+      CLAUDE_ROLE_POLICY="flex" \
+      CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
+      METERED_REASON="overflow" \
+      FALLBACK_USED="true" \
+      MISSING_LANE="glm" \
+      FALLBACK_PROVIDER="gemini" \
+      FALLBACK_REASON="glm lane failed" \
+      bash "${SCRIPT}" >/dev/null 2>"${TMP_DIR}/snapshot-override.stderr"
+  ); then
+    echo "FAIL [snapshot-override]: script exited with error"
+    failed=$((failed + 1))
+    return
+  fi
+
+  workflow_line="$(grep 'workflow run fugue-tutti-caller.yml' "${FAKE_GH_LOG}" | tail -n1 || true)"
+  for expected in \
+    "-f metered_reason=overflow" \
+    "-f fallback_used=true" \
+    "-f missing_lane=glm" \
+    "-f fallback_provider=gemini" \
+    "-f fallback_reason=glm lane failed"
+  do
+    if [[ "${workflow_line}" != *"${expected}"* ]]; then
+      echo "FAIL [snapshot-override]: workflow dispatch missing '${expected}'"
+      failed=$((failed + 1))
+      return
+    fi
+  done
+
+  echo "PASS [snapshot-override]"
+  passed=$((passed + 1))
+}
+
+assert_snapshot_override
+assert_content_hints
+assert_content_slide_prep_hints
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

@@ -6,6 +6,8 @@ REPO="cursorvers/fugue-orchestrator"
 ENV_FILE=""
 APPLY="false"
 ENV_FILE_EXPLICIT="false"
+FREEE_ENVIRONMENT="${FUGUE_FREEE_READONLY_ENV:-freee-readonly}"
+SYNC_FREEE="${FUGUE_SYNC_FREEE:-auto}"
 
 required_missing=0
 set_ok=0
@@ -20,6 +22,8 @@ Options:
   --env-file <path>   Load env vars from an explicit external env file
   --org <name>        GitHub organization (default: cursorvers)
   --repo <owner/repo> Target repository (default: cursorvers/fugue-orchestrator)
+  --freee-env <name>  Deployment environment for protected freee readonly secrets/vars
+  --sync-freee <mode> Enable freee secret sync: auto|true|false (default: auto)
   --apply             Apply changes (default: dry-run)
   --dry-run           Print planned updates only
   -h, --help          Show help
@@ -47,6 +51,14 @@ while [[ $# -gt 0 ]]; do
       REPO="${2:-}"
       shift 2
       ;;
+    --freee-env)
+      FREEE_ENVIRONMENT="${2:-}"
+      shift 2
+      ;;
+    --sync-freee)
+      SYNC_FREEE="${2:-}"
+      shift 2
+      ;;
     --apply)
       APPLY="true"
       shift
@@ -65,6 +77,22 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+SYNC_FREEE="$(printf '%s' "${SYNC_FREEE}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+case "${SYNC_FREEE}" in
+  auto|true|false) ;;
+  *)
+    echo "Error: --sync-freee must be auto|true|false" >&2
+    exit 2
+    ;;
+esac
+if [[ "${SYNC_FREEE}" == "auto" ]]; then
+  if [[ "${REPO}" == "cursorvers/fugue-orchestrator" ]]; then
+    SYNC_FREEE="true"
+  else
+    SYNC_FREEE="false"
+  fi
+fi
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "Error: gh CLI not found." >&2
@@ -117,7 +145,7 @@ merge_repo_csv() {
 }
 
 if [[ "${APPLY}" == "true" ]]; then
-  if ! gh auth status -h github.com >/dev/null 2>&1; then
+  if ! gh auth status --active -h github.com >/dev/null 2>&1; then
     echo "Error: gh auth is not ready. Run: gh auth login -h github.com" >&2
     exit 1
   fi
@@ -176,6 +204,14 @@ apply_secret() {
       echo "FAIL: org secret ${secret_name}" >&2
       set_fail=$((set_fail + 1))
     fi
+  elif [[ "${scope}" == "env" ]]; then
+    if printf '%s' "${RESOLVED_VALUE}" | gh secret set "${secret_name}" --repo "${REPO}" --env "${FREEE_ENVIRONMENT}" >/dev/null; then
+      echo "OK: set env secret ${secret_name} from ${RESOLVED_SOURCE} (env=${FREEE_ENVIRONMENT})"
+      set_ok=$((set_ok + 1))
+    else
+      echo "FAIL: env secret ${secret_name} (env=${FREEE_ENVIRONMENT})" >&2
+      set_fail=$((set_fail + 1))
+    fi
   else
     if printf '%s' "${RESOLVED_VALUE}" | gh secret set "${secret_name}" --repo "${REPO}" >/dev/null; then
       echo "OK: set repo secret ${secret_name} from ${RESOLVED_SOURCE}"
@@ -222,6 +258,14 @@ apply_variable() {
       echo "FAIL: org variable ${variable_name}" >&2
       set_fail=$((set_fail + 1))
     fi
+  elif [[ "${scope}" == "env" ]]; then
+    if printf '%s' "${RESOLVED_VALUE}" | gh variable set "${variable_name}" --repo "${REPO}" --env "${FREEE_ENVIRONMENT}" >/dev/null; then
+      echo "OK: set env variable ${variable_name} from ${RESOLVED_SOURCE} (env=${FREEE_ENVIRONMENT})"
+      set_ok=$((set_ok + 1))
+    else
+      echo "FAIL: env variable ${variable_name} (env=${FREEE_ENVIRONMENT})" >&2
+      set_fail=$((set_fail + 1))
+    fi
   else
     if printf '%s' "${RESOLVED_VALUE}" | gh variable set "${variable_name}" --repo "${REPO}" >/dev/null; then
       echo "OK: set repo variable ${variable_name} from ${RESOLVED_SOURCE}"
@@ -237,7 +281,7 @@ env_source="process-env"
 if [[ -n "${ENV_FILE}" ]]; then
   env_source="${ENV_FILE}"
 fi
-echo "mode=$([[ "${APPLY}" == "true" ]] && echo apply || echo dry-run) org=${ORG} repo=${REPO} env=${env_source}"
+echo "mode=$([[ "${APPLY}" == "true" ]] && echo apply || echo dry-run) org=${ORG} repo=${REPO} env=${env_source} freee_env=${FREEE_ENVIRONMENT} sync_freee=${SYNC_FREEE}"
 
 # Core shared secrets. Audit decides what is truly required per repo.
 apply_secret org OPENAI_API_KEY optional OPENAI_API_KEY
@@ -248,6 +292,11 @@ apply_secret repo TARGET_REPO_PAT optional TARGET_REPO_PAT
 apply_secret org ANTHROPIC_API_KEY optional ANTHROPIC_API_KEY
 apply_secret org GEMINI_API_KEY optional GEMINI_API_KEY
 apply_secret org XAI_API_KEY optional XAI_API_KEY
+apply_variable org FUGUE_NOTEBOOKLM_RUNTIME_ENV optional FUGUE_NOTEBOOKLM_RUNTIME_ENV
+apply_variable org FUGUE_NOTEBOOKLM_RUNTIME_ENABLED optional FUGUE_NOTEBOOKLM_RUNTIME_ENABLED
+apply_variable org FUGUE_NOTEBOOKLM_REQUIRE_RUNTIME_AUTH optional FUGUE_NOTEBOOKLM_REQUIRE_RUNTIME_AUTH
+apply_variable org FUGUE_NOTEBOOKLM_SENSITIVITY optional FUGUE_NOTEBOOKLM_SENSITIVITY
+apply_variable org FUGUE_NOTEBOOKLM_BIN optional FUGUE_NOTEBOOKLM_BIN
 
 # Ops and notification lifelines
 apply_secret org FUGUE_OPS_PAT optional FUGUE_OPS_PAT
@@ -268,6 +317,20 @@ apply_secret org LINE_CHANNEL_ACCESS_TOKEN optional LINE_CHANNEL_ACCESS_TOKEN
 apply_secret org LINE_TO optional LINE_TO
 apply_secret org LINE_NOTIFY_TOKEN optional LINE_NOTIFY_TOKEN LINE_NOTIFY_ACCESS_TOKEN
 apply_secret org LINE_NOTIFY_ACCESS_TOKEN optional LINE_NOTIFY_ACCESS_TOKEN LINE_NOTIFY_TOKEN
+
+if [[ "${SYNC_FREEE}" == "true" ]]; then
+  # Protected external accounting boundary
+  apply_secret org FREEE_ACCESS_TOKEN optional FREEE_ACCESS_TOKEN FUGUE_FREEE_ACCESS_TOKEN
+  apply_secret org FREEE_REFRESH_TOKEN optional FREEE_REFRESH_TOKEN FUGUE_FREEE_REFRESH_TOKEN
+  apply_secret org FREEE_CLIENT_ID optional FREEE_CLIENT_ID
+  apply_secret org FREEE_CLIENT_SECRET optional FREEE_CLIENT_SECRET
+  apply_variable org FUGUE_FREEE_COMPANY_ID optional FUGUE_FREEE_COMPANY_ID FREEE_COMPANY_ID
+  apply_secret env FREEE_ACCESS_TOKEN optional FREEE_ACCESS_TOKEN FUGUE_FREEE_ACCESS_TOKEN
+  apply_secret env FREEE_REFRESH_TOKEN optional FREEE_REFRESH_TOKEN FUGUE_FREEE_REFRESH_TOKEN
+  apply_secret env FREEE_CLIENT_ID optional FREEE_CLIENT_ID
+  apply_secret env FREEE_CLIENT_SECRET optional FREEE_CLIENT_SECRET
+  apply_variable env FUGUE_FREEE_COMPANY_ID optional FUGUE_FREEE_COMPANY_ID FREEE_COMPANY_ID
+fi
 
 echo ""
 echo "summary: ok=${set_ok} skipped=${set_skip} missing_required=${required_missing} failed=${set_fail}"

@@ -42,6 +42,11 @@ on:
         required: false
         type: string
         default: "primary"
+      vote_command:
+        description: "True when the implementation handoff originated from `/vote`"
+        required: false
+        type: string
+        default: "false"
       risk_tier:
         description: "Resolved risk tier (low|medium|high)"
         required: false
@@ -97,12 +102,86 @@ on:
         required: false
         type: string
         default: "workspace-readonly"
+      freee_hint_applied:
+        description: "Whether freee readonly preflight is relevant"
+        required: false
+        type: string
+        default: "false"
+      freee_action_hint:
+        description: "Comma-separated freee action hints"
+        required: false
+        type: string
+        default: ""
+      freee_domain_hint:
+        description: "Comma-separated freee domain hints"
+        required: false
+        type: string
+        default: ""
+      freee_reason:
+        description: "Short explanation for freee relevance"
+        required: false
+        type: string
+        default: ""
+      freee_suggested_phases:
+        description: "Comma-separated Kernel phases suggested for freee use"
+        required: false
+        type: string
+        default: ""
+      freee_readonly_actions:
+        description: "Comma-separated readonly freee actions allowed in CI preflight"
+        required: false
+        type: string
+        default: ""
+      freee_approval_required_actions:
+        description: "Comma-separated freee actions requiring approval"
+        required: false
+        type: string
+        default: ""
+      freee_readonly_environment:
+        description: "Protected GitHub Environment used for readonly freee CI preflight"
+        required: false
+        type: string
+        default: ""
+      content_hint_applied:
+        description: "Whether content-specific routing hints were applied"
+        required: false
+        type: string
+        default: "false"
+      content_action_hint:
+        description: "Comma-separated content action hints"
+        required: false
+        type: string
+        default: ""
+      content_skill_hint:
+        description: "Comma-separated content skill hints"
+        required: false
+        type: string
+        default: ""
+      content_reason:
+        description: "Short explanation for content-route relevance"
+        required: false
+        type: string
+        default: ""
     secrets:
-      OPENAI_API_KEY:
+      ZAI_API_KEY:
+        required: false
+      COPILOT_GITHUB_TOKEN:
+        required: false
+      FUGUE_COPILOT_TOKEN:
         required: false
       TARGET_REPO_PAT:
         required: false
       GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:
+        required: false
+      FREEE_ACCESS_TOKEN:
+        required: false
+      FREEE_REFRESH_TOKEN:
+        required: false
+      FREEE_CLIENT_ID:
+        required: false
+      FREEE_CLIENT_SECRET:
+        required: false
+      FREEE_COMPANY_ID:
         required: false
 
 permissions:
@@ -321,8 +400,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
           TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+          FREEE_HINT_APPLIED: ${{ inputs.freee_hint_applied }}
+          FREEE_APPROVAL_REQUIRED_ACTIONS: ${{ inputs.freee_approval_required_actions }}
+          FREEE_READONLY_ENVIRONMENT: ${{ inputs.freee_readonly_environment }}
           EXECUTION_MODE: ${{ inputs.execution_mode }}
           GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
           FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
@@ -359,14 +440,22 @@ jobs:
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Codex implementation skipped: GHA is in record-only mode while the primary executor is considered available (\`${failover_state}\`)."
           fi
 
-          if [[ "${can_run}" == "true" && -z "${OPENAI_API_KEY:-}" ]]; then
-            can_run="false"
-            skip_reason="missing-openai-api-key"
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Escalating to humans."
-          elif [[ "${can_run}" == "true" && "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
+          if [[ "${can_run}" == "true" && "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
             can_run="false"
             skip_reason="missing-target-repo-pat"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret \`TARGET_REPO_PAT\`. Escalating to humans."
+          fi
+
+          if [[ "${can_run}" == "true" && "${FREEE_HINT_APPLIED:-false}" == "true" && -n "$(printf '%s' "${FREEE_APPROVAL_REQUIRED_ACTIONS:-}" | tr -d '[:space:]')" ]]; then
+            can_run="false"
+            skip_reason="freee-approval-required-actions"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: freee approval-required actions are present (\`${FREEE_APPROVAL_REQUIRED_ACTIONS}\`). Human approval is required before execution."
+          fi
+
+          if [[ "${can_run}" == "true" && "${FREEE_HINT_APPLIED:-false}" == "true" && -z "$(printf '%s' "${FREEE_READONLY_ENVIRONMENT:-}" | tr -d '[:space:]')" ]]; then
+            can_run="false"
+            skip_reason="missing-freee-readonly-environment"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run freee readonly preflight: missing input \`freee_readonly_environment\`. Configure protected environment \`FUGUE_FREEE_READONLY_ENV\` and retry."
           fi
 
           if [[ "${can_run}" != "true" ]]; then
@@ -399,6 +488,14 @@ jobs:
           ref: ${{ inputs.target_branch }}
           fetch-depth: 1
 
+      - name: Checkout orchestration repository
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          token: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          path: .fugue-orchestrator
+          fetch-depth: 1
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -425,9 +522,9 @@ jobs:
           OUT_DIR: .fugue/pre-implement
           RUN_DIR: .fugue/pre-implement/googleworkspace-run
           REPORT_PATH: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-googleworkspace.md
-          ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
+          ADAPTER: .fugue-orchestrator/scripts/lib/googleworkspace-cli-adapter.sh
           GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
-        run: bash scripts/harness/googleworkspace-preflight-enrich.sh
+        run: bash .fugue-orchestrator/scripts/harness/googleworkspace-preflight-enrich.sh
 
       - name: Upload Google Workspace preflight artifact
         if: always()
@@ -439,13 +536,72 @@ jobs:
             .fugue/pre-implement/googleworkspace-run
           if-no-files-found: ignore
 
-  implement:
-    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && (needs.workspace-preflight.result == 'success' || needs.workspace-preflight.result == 'skipped') }}
-    needs: [prepare, credential-guard, workspace-preflight]
+  freee-preflight:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && inputs.freee_hint_applied == 'true' }}
+    needs: [prepare, credential-guard]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: ${{ inputs.freee_readonly_environment }}
+    outputs:
+      freee_preflight_status: ${{ steps.freee_preflight.outputs.freee_preflight_status }}
+      freee_report_path: ${{ steps.freee_preflight.outputs.freee_report_path }}
+      freee_summary: ${{ steps.freee_preflight.outputs.freee_summary }}
+      freee_artifact_name: ${{ steps.freee_meta.outputs.freee_artifact_name }}
+    steps:
+      - name: Checkout orchestration repository
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          token: ${{ github.token }}
+          path: .fugue-orchestrator
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set freee artifact metadata
+        id: freee_meta
+        run: |
+          echo "freee_artifact_name=freee-preflight-${{ needs.prepare.outputs.issue_number }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run freee readonly preflight
+        id: freee_preflight
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          FREEE_ACTIONS: ${{ inputs.freee_readonly_actions || inputs.freee_action_hint }}
+          FREEE_DOMAINS: ${{ inputs.freee_domain_hint }}
+          FREEE_REASON: ${{ inputs.freee_reason }}
+          FREEE_SUGGESTED_PHASES: ${{ inputs.freee_suggested_phases }}
+          OUT_DIR: .fugue/pre-implement
+          RUN_DIR: .fugue/pre-implement/freee-run
+          REPORT_PATH: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-freee.md
+          POLICY_FILE: .fugue-orchestrator/config/integrations/freee-kernel-policy.json
+          ADAPTER: .fugue-orchestrator/scripts/lib/freee-readonly-adapter.sh
+          FREEE_ACCESS_TOKEN: ${{ secrets.FREEE_ACCESS_TOKEN || '' }}
+          FREEE_REFRESH_TOKEN: ${{ secrets.FREEE_REFRESH_TOKEN || '' }}
+          FREEE_CLIENT_ID: ${{ secrets.FREEE_CLIENT_ID || '' }}
+          FREEE_CLIENT_SECRET: ${{ secrets.FREEE_CLIENT_SECRET || '' }}
+          FREEE_COMPANY_ID: ${{ vars.FUGUE_FREEE_COMPANY_ID || '' }}
+          FREEE_REQUIRE_RUNTIME_AUTH: "true"
+        run: bash .fugue-orchestrator/scripts/harness/freee-preflight-enrich.sh
+
+      - name: Upload freee preflight artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.freee_meta.outputs.freee_artifact_name }}
+          path: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-freee.md
+          if-no-files-found: ignore
+
+  implement:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && (needs.workspace-preflight.result == 'success' || needs.workspace-preflight.result == 'skipped') && (needs.freee-preflight.result == 'success' || needs.freee-preflight.result == 'skipped') }}
+    needs: [prepare, credential-guard, workspace-preflight, freee-preflight]
+    runs-on:
+      - self-hosted
+      - ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
     timeout-minutes: 90
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     outputs:
       pr_url: ${{ steps.create-pr.outputs.pr_url }}
       codex_exit: ${{ steps.codex.outputs.exit_code }}
@@ -466,6 +622,14 @@ jobs:
           ref: ${{ inputs.target_branch }}
           fetch-depth: 1
 
+      - name: Checkout orchestration repository
+        uses: actions/checkout@v4
+        with:
+          repository: cursorvers/fugue-orchestrator
+          token: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          path: .fugue-orchestrator
+          fetch-depth: 1
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -476,9 +640,39 @@ jobs:
           npm install -g @openai/codex
           codex --version
 
-      - name: Authenticate Codex CLI with API key
+      - name: Sync NotebookLM skills on self-hosted runner
+        if: ${{ inputs.content_hint_applied == 'true' && (contains(inputs.content_action_hint, 'notebooklm-visual-brief') || contains(inputs.content_action_hint, 'notebooklm-slide-prep') || contains(inputs.content_skill_hint, 'notebooklm-visual-brief') || contains(inputs.content_skill_hint, 'notebooklm-slide-prep')) }}
+        env:
+          CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ inputs.content_skill_hint }}
         run: |
-          printenv OPENAI_API_KEY | codex login --with-api-key
+          set -euo pipefail
+          args=(--target both)
+          if [[ "${CONTENT_ACTION_HINT}${CONTENT_SKILL_HINT}" == *"notebooklm-slide-prep"* ]]; then
+            args+=(--with-optional)
+          fi
+          bash .fugue-orchestrator/scripts/skills/sync-notebooklm-skills.sh "${args[@]}"
+
+      - name: Ensure Copilot CLI continuity path
+        if: ${{ inputs.vote_command == 'true' }}
+        id: copilot
+        run: |
+          bash .fugue-orchestrator/scripts/harness/ensure-copilot-cli.sh
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.FUGUE_COPILOT_TOKEN || github.token }}
+
+      - name: Require Copilot CLI continuity path
+        if: ${{ inputs.vote_command == 'true' }}
+        run: |
+          set -euo pipefail
+          if [[ "${COPILOT_AVAILABLE}" != "true" ]]; then
+            echo "Copilot CLI continuity path is required for /vote -> implement in GHA." >&2
+            echo "reason=${COPILOT_REASON}" >&2
+            exit 1
+          fi
+        env:
+          COPILOT_AVAILABLE: ${{ steps.copilot.outputs.available || 'false' }}
+          COPILOT_REASON: ${{ steps.copilot.outputs.reason || 'unknown' }}
 
       - name: Create working branch
         run: |
@@ -490,6 +684,45 @@ jobs:
         with:
           name: ${{ needs.workspace-preflight.outputs.workspace_artifact_name }}
           path: .
+
+      - name: Download freee preflight artifact
+        if: ${{ inputs.freee_hint_applied == 'true' && needs.freee-preflight.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.freee-preflight.outputs.freee_artifact_name }}
+          path: .
+
+      - name: Run /vote kernel council preflight
+        if: ${{ inputs.vote_command == 'true' }}
+        id: kernel_preflight_council
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.FUGUE_COPILOT_TOKEN || github.token }}
+          COPILOT_CLI_BIN: ${{ steps.copilot.outputs.bin || 'copilot' }}
+          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || 'false' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ inputs.codex_model }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
+          CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
+          CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-opus-4-6' }}
+          CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-opus-4-6' }}
+          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro-preview' }}
+          XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
+          RISK_TIER: ${{ needs.prepare.outputs.risk_tier }}
+          VOTE_COMMAND_INPUT: "true"
+          COUNCIL_STAGE: "preflight"
+          COUNCIL_RUN_DIR: ".fugue/kernel-council/preflight"
+          COUNCIL_EXECUTION_PROFILE: "subscription-strict"
+          COUNCIL_FORCE_COPILOT_CONTINUITY: "true"
+          COUNCIL_MULTI_AGENT_MODE: "standard"
+          COUNCIL_GLM_SUBAGENT_MODE: "off"
+          CLAUDE_ASSIST_EXECUTION_POLICY: "hybrid"
+          STRICT_OPUS_ASSIST_DIRECT: "false"
+        run: bash .fugue-orchestrator/scripts/harness/run-kernel-council-review.sh
 
       - name: Run parallel preflight nodes
         id: preflight_parallel
@@ -663,6 +896,31 @@ jobs:
             echo "parallel preflight completed successfully" > "${log_dir}/summary.txt"
           fi
 
+      - name: Run NotebookLM content preflight
+        if: ${{ inputs.content_hint_applied == 'true' && (contains(inputs.content_action_hint, 'notebooklm-visual-brief') || contains(inputs.content_action_hint, 'notebooklm-slide-prep') || contains(inputs.content_skill_hint, 'notebooklm-visual-brief') || contains(inputs.content_skill_hint, 'notebooklm-slide-prep')) }}
+        id: notebooklm_preflight
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          CONTENT_HINT_APPLIED: ${{ inputs.content_hint_applied }}
+          CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ inputs.content_skill_hint }}
+          CONTENT_REASON: ${{ inputs.content_reason }}
+          RESEARCH_REPORT_PATH: ${{ steps.preflight_parallel.outputs.research_report_path }}
+          PLAN_REPORT_PATH: ${{ steps.preflight_parallel.outputs.plan_report_path }}
+          CRITIC_REPORT_PATH: ${{ steps.preflight_parallel.outputs.critic_report_path }}
+          OUT_DIR: .fugue/pre-implement
+          RUN_DIR: .fugue/pre-implement/notebooklm-run
+          REPORT_PATH: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-notebooklm.md
+          ADAPTER: .fugue-orchestrator/scripts/lib/notebooklm-cli-adapter.sh
+          NOTEBOOKLM_RUNTIME_ENABLED: ${{ vars.FUGUE_NOTEBOOKLM_RUNTIME_ENABLED || 'false' }}
+          NOTEBOOKLM_REQUIRE_RUNTIME_AUTH: ${{ vars.FUGUE_NOTEBOOKLM_REQUIRE_RUNTIME_AUTH || 'false' }}
+          NOTEBOOKLM_HUMAN_APPROVED: "true"
+          NOTEBOOKLM_SENSITIVITY: ${{ vars.FUGUE_NOTEBOOKLM_SENSITIVITY || 'internal' }}
+          NLM_BIN: ${{ vars.FUGUE_NOTEBOOKLM_BIN || 'nlm' }}
+        run: bash .fugue-orchestrator/scripts/harness/notebooklm-preflight-enrich.sh
+
       - name: Run Codex CLI
         id: codex
         env:
@@ -694,7 +952,71 @@ jobs:
           WORKSPACE_REPORT_PATH: ${{ needs.workspace-preflight.outputs.workspace_report_path }}
           WORKSPACE_SUMMARY: ${{ needs.workspace-preflight.outputs.workspace_summary }}
           WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
-        run: bash scripts/harness/codex-execute-validate.sh
+          FREEE_REPORT_PATH: ${{ needs.freee-preflight.outputs.freee_report_path }}
+          FREEE_SUMMARY: ${{ needs.freee-preflight.outputs.freee_summary }}
+          FREEE_PREFLIGHT_STATUS: ${{ needs.freee-preflight.outputs.freee_preflight_status }}
+          NOTEBOOKLM_REPORT_PATH: ${{ steps.notebooklm_preflight.outputs.notebooklm_report_path }}
+          NOTEBOOKLM_SUMMARY: ${{ steps.notebooklm_preflight.outputs.notebooklm_summary }}
+          NOTEBOOKLM_PREFLIGHT_STATUS: ${{ steps.notebooklm_preflight.outputs.notebooklm_preflight_status }}
+          NOTEBOOKLM_RECEIPT_PATH: ${{ steps.notebooklm_preflight.outputs.notebooklm_receipt_path }}
+          CONTENT_HINT_APPLIED: ${{ inputs.content_hint_applied }}
+          CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ inputs.content_skill_hint }}
+          CONTENT_REASON: ${{ inputs.content_reason }}
+        run: bash .fugue-orchestrator/scripts/harness/codex-execute-validate.sh
+
+      - name: Summarize implementation diff
+        if: ${{ steps.codex.outputs.exit_code == '0' }}
+        id: diff_summary
+        run: |
+          set -euo pipefail
+          {
+            echo "diff_stat<<EOF"
+            git diff --stat
+            echo "EOF"
+            echo "changed_files<<EOF"
+            git diff --name-only
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Run /vote kernel council final review
+        if: ${{ inputs.vote_command == 'true' && steps.codex.outputs.exit_code == '0' }}
+        id: kernel_final_council
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.FUGUE_COPILOT_TOKEN || github.token }}
+          COPILOT_CLI_BIN: ${{ steps.copilot.outputs.bin || 'copilot' }}
+          HAS_COPILOT_CLI: ${{ steps.copilot.outputs.available || 'false' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ inputs.codex_model }}
+          GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
+          CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
+          CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-opus-4-6' }}
+          CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-opus-4-6' }}
+          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro-preview' }}
+          XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
+          RISK_TIER: ${{ needs.prepare.outputs.risk_tier }}
+          VOTE_COMMAND_INPUT: "true"
+          COUNCIL_STAGE: "final"
+          COUNCIL_RUN_DIR: ".fugue/kernel-council/final"
+          COUNCIL_EXECUTION_PROFILE: "subscription-strict"
+          COUNCIL_FORCE_COPILOT_CONTINUITY: "true"
+          COUNCIL_MULTI_AGENT_MODE: "standard"
+          COUNCIL_GLM_SUBAGENT_MODE: "off"
+          CLAUDE_ASSIST_EXECUTION_POLICY: "hybrid"
+          STRICT_OPUS_ASSIST_DIRECT: "false"
+          COUNCIL_EXTRA_CONTEXT: |
+            Final implementation review before commit/PR.
+            Branch: ${{ needs.prepare.outputs.branch_name }}
+            Diff stat:
+            ${{ steps.diff_summary.outputs.diff_stat }}
+            Changed files:
+            ${{ steps.diff_summary.outputs.changed_files }}
+        run: bash .fugue-orchestrator/scripts/harness/run-kernel-council-review.sh
 
       - name: Commit changes
         if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
@@ -766,13 +1088,16 @@ jobs:
             ${{ steps.codex.outputs.research_report_path }}
             ${{ steps.codex.outputs.plan_report_path }}
             ${{ steps.codex.outputs.critic_report_path }}
+            ${{ steps.kernel_preflight_council.outputs.council_run_dir }}
+            ${{ steps.kernel_final_council.outputs.council_run_dir }}
             ${{ needs.workspace-preflight.outputs.workspace_report_path }}
+            ${{ needs.freee-preflight.outputs.freee_report_path }}
             .fugue/pre-implement/googleworkspace-run
           if-no-files-found: ignore
 
   finalize:
     if: always() && needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true'
-    needs: [prepare, credential-guard, workspace-preflight, implement]
+    needs: [prepare, credential-guard, workspace-preflight, freee-preflight, implement]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -783,6 +1108,7 @@ jobs:
           PR_URL: ${{ needs.implement.outputs.pr_url }}
           CODEX_EXIT: ${{ needs.implement.outputs.codex_exit }}
           WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
+          FREEE_PREFLIGHT_STATUS: ${{ needs.freee-preflight.outputs.freee_preflight_status }}
         run: |
           set -euo pipefail
 
@@ -796,18 +1122,25 @@ jobs:
           Workspace preflight: ${WORKSPACE_PREFLIGHT_STATUS}"
           fi
 
+          freee_note=""
+          if [[ -n "${FREEE_PREFLIGHT_STATUS}" ]]; then
+            freee_note="
+
+          freee preflight: ${FREEE_PREFLIGHT_STATUS}"
+          fi
+
           if [[ -n "${PR_URL}" ]]; then
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation complete. PR created: ${PR_URL}
 
-          Exit code: ${CODEX_EXIT}${workspace_note}"
+          Exit code: ${CODEX_EXIT}${workspace_note}${freee_note}"
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --add-label "completed"
           elif [[ "${CODEX_EXIT}" != "0" ]]; then
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation stopped before PR creation because mandatory protocol checks failed.
 
-          Exit code: ${CODEX_EXIT}${workspace_note}
+          Exit code: ${CODEX_EXIT}${workspace_note}${freee_note}
           Check artifacts for protocol reports and codex output log."
             gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --add-label "needs-review"
@@ -815,7 +1148,7 @@ jobs:
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
               --body "Codex implementation did not produce changes.
 
-          Exit code: ${CODEX_EXIT}${workspace_note}
+          Exit code: ${CODEX_EXIT}${workspace_note}${freee_note}
           This may mean: no code changes were needed, the task was unclear, or Codex encountered an error.
 
           Check the workflow run artifacts for the full Codex output log."

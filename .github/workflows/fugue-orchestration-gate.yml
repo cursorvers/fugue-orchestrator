@@ -18,15 +18,23 @@ on:
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
       - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
       - 'scripts/lib/workspace-root-policy.sh'
+      - 'scripts/local/integrations/line-notify.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
+      - 'scripts/check-kernel-vote-readiness.sh'
+      - 'tests/test-check-kernel-vote-readiness.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
+      - 'scripts/harness/run-kernel-council-review.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-council-review.sh'
+      - 'tests/test-aggregate-tutti-votes.sh'
+      - 'tests/test-vote-command-implement-guard.sh'
+      - 'tests/test-vote-handoff-simulation.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
       - 'tests/test-task-router-start-signal.sh'
@@ -38,6 +46,9 @@ on:
       - 'tests/test-resolve-orchestration-context.sh'
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-discord-notify-policy.sh'
+      - 'tests/test-line-notify-policy.sh'
+      - 'tests/test-watchdog-alert-routing.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
       - '.codex/prompts/kernel.md'
@@ -71,15 +82,23 @@ on:
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
       - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
       - 'scripts/lib/workspace-root-policy.sh'
+      - 'scripts/local/integrations/line-notify.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
+      - 'scripts/check-kernel-vote-readiness.sh'
+      - 'tests/test-check-kernel-vote-readiness.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
+      - 'scripts/harness/run-kernel-council-review.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-council-review.sh'
+      - 'tests/test-aggregate-tutti-votes.sh'
+      - 'tests/test-vote-command-implement-guard.sh'
+      - 'tests/test-vote-handoff-simulation.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
       - 'tests/test-task-router-start-signal.sh'
@@ -91,6 +110,9 @@ on:
       - 'tests/test-resolve-orchestration-context.sh'
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-discord-notify-policy.sh'
+      - 'tests/test-line-notify-policy.sh'
+      - 'tests/test-watchdog-alert-routing.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
       - '.codex/prompts/kernel.md'
@@ -138,12 +160,22 @@ jobs:
           bash -n scripts/lib/watchdog-alert-delivery-policy.sh
           bash -n scripts/lib/watchdog-reconcile-claim-policy.sh
           bash -n scripts/lib/workspace-root-policy.sh
+          bash -n scripts/local/integrations/line-notify.sh
           bash -n scripts/harness/run-recovery-console.sh
+          bash -n scripts/harness/run-kernel-council-review.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n scripts/check-codex-kernel-prompt.sh
           bash -n scripts/check-codex-vote-prompt.sh
+          bash -n scripts/check-kernel-vote-readiness.sh
+          bash -n scripts/check-notebooklm-runtime-readiness.sh
+          bash -n tests/test-check-kernel-vote-readiness.sh
+          bash -n tests/test-check-notebooklm-runtime-readiness.sh
           bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-kernel-council-review.sh
+          bash -n tests/test-aggregate-tutti-votes.sh
+          bash -n tests/test-vote-command-implement-guard.sh
+          bash -n tests/test-vote-handoff-simulation.sh
           bash -n tests/test-publish-decision-journal.sh
           bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
           bash -n tests/test-task-router-start-signal.sh
@@ -151,6 +183,9 @@ jobs:
           bash -n tests/test-recovery-reroute-claim-gate.sh
           bash -n tests/test-watchdog-reconcile-claim-policy.sh
           bash -n tests/test-watchdog-reconcile-workflow.sh
+          bash -n tests/test-discord-notify-policy.sh
+          bash -n tests/test-line-notify-policy.sh
+          bash -n tests/test-watchdog-alert-routing.sh
           bash -n tests/test-workspace-root-policy.sh
 
       - name: Kernel prompt static contract
@@ -162,14 +197,30 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/test-codex-vote-prompt.sh
+          bash tests/test-kernel-council-review.sh
+          bash tests/test-check-kernel-vote-readiness.sh
+          bash tests/test-check-notebooklm-runtime-readiness.sh
+          bash tests/test-aggregate-tutti-votes.sh
+          bash tests/test-vote-command-implement-guard.sh
+          bash tests/test-vote-handoff-simulation.sh
+
+      - name: Kernel vote readiness gate
+        run: |
+          set -euo pipefail
+          KERNEL_VOTE_READINESS_LIVE_SMOKE_MODE=off bash scripts/check-kernel-vote-readiness.sh
+          NOTEBOOKLM_READINESS_SKIP_REPO_TESTS=true NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE=off bash scripts/check-notebooklm-runtime-readiness.sh
 
       - name: Local orchestration boundary tests
         run: |
           set -euo pipefail
           bash tests/test-route-task-handoff.sh
           bash tests/test-resolve-orchestration-context.sh
+          bash tests/test-notebooklm-runtime-smoke.sh
           bash tests/test-watchdog-alert-policy.sh
           bash tests/test-watchdog-alert-delivery-policy.sh
+          bash tests/test-discord-notify-policy.sh
+          bash tests/test-line-notify-policy.sh
+          bash tests/test-watchdog-alert-routing.sh
           bash tests/test-primary-heartbeat-state.sh
           bash tests/test-publish-decision-journal.sh
           bash tests/test-local-orchestration-heartbeat-cleanup.sh

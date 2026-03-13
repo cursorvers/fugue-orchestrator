@@ -73,15 +73,82 @@ extract_mode_from_body() {
   printf '%s' "${mode}"
 }
 
+sanitize_bool() {
+  local value
+  value="$(printf '%s' "${1:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${value}" == "true" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+sanitize_content_csv() {
+  local raw="$1"
+  local allowed="$2"
+  local out=""
+  local item=""
+  raw="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  while [[ -n "${raw}" ]]; do
+    if [[ "${raw}" == *,* ]]; then
+      item="${raw%%,*}"
+      raw="${raw#*,}"
+    else
+      item="${raw}"
+      raw=""
+    fi
+    [[ -n "${item}" ]] || continue
+    case ",${allowed}," in
+      *,"${item}",*)
+        if [[ -z "${out}" ]]; then
+          out="${item}"
+        else
+          out="${out},${item}"
+        fi
+        ;;
+    esac
+  done
+  printf '%s' "${out}"
+}
+
+sanitize_reason_csv() {
+  local raw
+  raw="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [[ "${raw}" =~ ^[a-z0-9,._-]*$ ]]; then
+    printf '%s' "${raw}"
+  else
+    printf ''
+  fi
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT_DIR}/scripts/lib/common-utils.sh"
+temp_files=()
+register_temp_file() {
+  local temp_file="$1"
+  [[ -n "${temp_file}" ]] && temp_files+=("${temp_file}")
+}
+make_temp_file() {
+  local temp_file
+  temp_file="$(mktemp)"
+  register_temp_file "${temp_file}"
+  printf '%s' "${temp_file}"
+}
+cleanup_temp_files() {
+  if (( ${#temp_files[@]} == 0 )); then
+    return 0
+  fi
+  rm -f "${temp_files[@]}"
+}
+trap cleanup_temp_files EXIT
 DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="${DEFAULT_MAIN_ORCHESTRATOR_PROVIDER:-codex}"
 DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="${DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER:-claude}"
 CLAUDE_MAIN_ASSIST_POLICY="${CLAUDE_MAIN_ASSIST_POLICY:-codex}"
 CLAUDE_DEGRADED_ASSIST_POLICY="${CLAUDE_DEGRADED_ASSIST_POLICY:-claude}"
 CLAUDE_ROLE_POLICY="${CLAUDE_ROLE_POLICY:-flex}"
-CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-sonnet-4-0}"
-GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+CLAUDE_TRANSLATOR_MODEL="${CLAUDE_TRANSLATOR_MODEL:-claude-opus-4-6}"
+GOOGLEWORKSPACE_KERNEL_POLICY="${GOOGLEWORKSPACE_KERNEL_POLICY:-${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json}"
+FREEE_KERNEL_POLICY="${FREEE_KERNEL_POLICY:-${ROOT_DIR}/config/integrations/freee-kernel-policy.json}"
 
 ISSUE_NUMBER=""
 if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
@@ -141,6 +208,43 @@ vote_command="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]'
 if [[ "${vote_command}" != "true" ]]; then
   vote_command="false"
 fi
+kernel_handoff_mode="$(echo "${KERNEL_HANDOFF_MODE_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${kernel_handoff_mode}" != "true" ]]; then
+  kernel_handoff_mode="false"
+fi
+cost_provider_priority="$(echo "${COST_PROVIDER_PRIORITY_INPUT:-codex,claude,glm,copilot,gemini,xai}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+if [[ -z "${cost_provider_priority}" ]]; then
+  cost_provider_priority="codex,claude,glm,copilot,gemini,xai"
+fi
+cost_copilot_policy="$(echo "${COST_COPILOT_POLICY_INPUT:-low-cost-fallback-only}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${cost_copilot_policy}" ]]; then
+  cost_copilot_policy="low-cost-fallback-only"
+fi
+cost_metered_policy="$(echo "${COST_METERED_POLICY_INPUT:-overflow-or-tie-break-only}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${cost_metered_policy}" ]]; then
+  cost_metered_policy="overflow-or-tie-break-only"
+fi
+metered_reason="$(echo "${METERED_REASON_INPUT:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${metered_reason}" != "overflow" && "${metered_reason}" != "tie-break" ]]; then
+  metered_reason="none"
+fi
+fallback_used="$(echo "${FALLBACK_USED_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${fallback_used}" != "true" ]]; then
+  fallback_used="false"
+fi
+missing_lane="$(echo "${MISSING_LANE_INPUT:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${missing_lane}" ]]; then
+  missing_lane="none"
+fi
+fallback_provider="$(echo "${FALLBACK_PROVIDER_INPUT:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ -z "${fallback_provider}" ]]; then
+  fallback_provider="none"
+fi
+fallback_reason="$(printf '%s' "${FALLBACK_REASON_INPUT:-}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+|[[:space:]]+$//g')"
+content_hint_applied_input="$(sanitize_bool "${CONTENT_HINT_APPLIED_INPUT:-false}")"
+content_action_hint_input="$(sanitize_content_csv "${CONTENT_ACTION_HINT_INPUT:-}" "slide-deck,academic-slide,note-manuscript,notebooklm-visual-brief,notebooklm-slide-prep")"
+content_skill_hint_input="$(sanitize_content_csv "${CONTENT_SKILL_HINT_INPUT:-}" "slide,academic-two-stage-slide,note-manuscript,notebooklm-visual-brief,notebooklm-slide-prep")"
+content_reason_input="$(sanitize_reason_csv "${CONTENT_REASON_INPUT:-}")"
 if [[ -z "${intake_source}" ]]; then
   if [[ "${vote_command}" == "true" ]]; then
     intake_source="github-vote-comment"
@@ -206,6 +310,19 @@ if [[ "${ci_execution_engine}" == "subscription" ]]; then
     self_hosted_online_count="$((10#${self_hosted_online_count}))"
   fi
 fi
+canary_dispatch_owned="false"
+if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${is_canary_issue}" == "true" && -n "${canary_dispatch_run_id}" ]]; then
+  canary_dispatch_owned="true"
+fi
+pre_translation_should_run="true"
+pre_translation_skip_reason=""
+if [[ "${has_fugue}" != "true" || ( "${has_tutti}" != "true" && "${canary_dispatch_owned}" != "true" ) ]]; then
+  pre_translation_should_run="false"
+  pre_translation_skip_reason="missing-required-labels"
+elif [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" && "${emergency_continuity_mode}" != "true" && "${self_hosted_online_count}" == "0" ]]; then
+  pre_translation_should_run="false"
+  pre_translation_skip_reason="subscription-self-hosted-offline-strict"
+fi
 labels_csv="$(echo "${issue_json}" | jq -r '[.labels[]? | .name] | join(",")')"
 body_mode="$(extract_mode_from_body "${body}")"
 # Explicit review mode in issue body always wins over stale labels.
@@ -264,6 +381,9 @@ eval "$(
 workspace_suggested_phases=""
 workspace_readonly_actions=""
 workspace_approval_required_actions=""
+freee_suggested_phases=""
+freee_readonly_actions=""
+freee_approval_required_actions=""
 if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   workspace_policy_json="$(jq -cn \
     --arg action_hint "${workspace_action_hint}" \
@@ -298,6 +418,42 @@ if [[ -f "${GOOGLEWORKSPACE_KERNEL_POLICY}" ]]; then
   workspace_suggested_phases="$(echo "${workspace_policy_json}" | jq -r '.suggested_phases | join(",")')"
   workspace_readonly_actions="$(echo "${workspace_policy_json}" | jq -r '.readonly_actions | join(",")')"
   workspace_approval_required_actions="$(echo "${workspace_policy_json}" | jq -r '.approval_required_actions | join(",")')"
+fi
+
+if [[ -f "${FREEE_KERNEL_POLICY}" ]]; then
+  freee_policy_json="$(jq -cn \
+    --arg action_hint "${freee_action_hint}" \
+    --arg domain_hint "${freee_domain_hint}" \
+    --arg reason "${freee_reason}" \
+    --arg hint_applied "${freee_hint_applied}" \
+    --slurpfile policy "${FREEE_KERNEL_POLICY}" \
+    '($action_hint | split(",") | map(select(length > 0))) as $actions
+     | ($domain_hint | split(",") | map(select(length > 0))) as $domains
+     | {
+         freee_hint_applied: ($hint_applied == "true"),
+         freee_action_hint: $action_hint,
+         freee_domain_hint: $domain_hint,
+         freee_reason: $reason,
+         suggested_actions: $actions,
+         suggested_domains: $domains,
+         suggested_phases: (
+           $actions
+           | map($policy[0].action_policy[.]?.default_phase)
+           | map(select(. != null))
+           | unique
+         ),
+         readonly_actions: (
+           $actions
+           | map(select(($policy[0].action_policy[.]?.side_effect // false) | not))
+         ),
+         approval_required_actions: (
+           $actions
+           | map(select(($policy[0].action_policy[.]?.side_effect // false) == true))
+         )
+       }')"
+  freee_suggested_phases="$(echo "${freee_policy_json}" | jq -r '.suggested_phases | join(",")')"
+  freee_readonly_actions="$(echo "${freee_policy_json}" | jq -r '.readonly_actions | join(",")')"
+  freee_approval_required_actions="$(echo "${freee_policy_json}" | jq -r '.approval_required_actions | join(",")')"
 fi
 
 requested_main_provider="${label_main_provider}"
@@ -437,15 +593,15 @@ translation_event="false"
 translation_payload=""
 normalized_text="$(printf '%s\n\n%s\n' "${title}" "${body}" | head -c "${max_chars_raw}")"
 CODEX_MAIN_MODEL="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+CODEX_MULTI_AGENT_MODEL="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
   eval "$(
     "${ROOT_DIR}/scripts/lib/model-policy.sh" \
       --codex-main-model "${CODEX_MAIN_MODEL}" \
       --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
       --claude-model "${CLAUDE_TRANSLATOR_MODEL}" \
-      --glm-model "${FUGUE_GLM_MODEL:-glm-4.7}" \
-      --gemini-model "gemini-3.1-pro" \
+      --glm-model "${FUGUE_GLM_MODEL:-glm-5}" \
+      --gemini-model "gemini-3.1-pro-preview" \
       --gemini-fallback-model "gemini-3-flash" \
       --xai-model "grok-4" \
       --format env
@@ -453,27 +609,30 @@ if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
   CODEX_MAIN_MODEL="${codex_main_model}"
   CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
   CLAUDE_TRANSLATOR_MODEL="${claude_api_model}"
-elif ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
-  CODEX_MULTI_AGENT_MODEL="gpt-5.3-codex-spark"
+elif [[ "${CODEX_MULTI_AGENT_MODEL}" != "gpt-5-codex" && "${CODEX_MULTI_AGENT_MODEL}" != "gpt-5.4" ]] && ! [[ "${CODEX_MULTI_AGENT_MODEL}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+  CODEX_MULTI_AGENT_MODEL="gpt-5-codex"
 fi
-if [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
+if [[ "${pre_translation_should_run}" != "true" ]]; then
+  translation_skip_reason="pre-run-suppressed-${pre_translation_skip_reason}"
+elif [[ "${translator_mode}" != "off" && -n "${OPENAI_API_KEY:-}" ]]; then
   judge_sys_prompt="You are Codex Orchestrator gate. Decide if Claude translation should be inserted before orchestration. Return ONLY compact JSON: {\"score\":0-100,\"should_translate\":true|false,\"reason\":\"short\",\"signals\":[\"...\"]}."
   judge_user_prompt="Analyze this issue text for ambiguity/conflict/risk/implicit constraints. Prioritize translation when requirements are unclear, mixed-language, or high-risk refactor/migration. Text:\n${normalized_text}"
   judge_candidates=("${CODEX_MULTI_AGENT_MODEL}" "${CODEX_MAIN_MODEL}" "gpt-5-codex")
   judge_json=""
+  judge_response_file="$(make_temp_file)"
   for judge_model in "${judge_candidates[@]}"; do
     judge_req="$(jq -n \
       --arg model "${judge_model}" \
       --arg s "${judge_sys_prompt}" \
       --arg u "${judge_user_prompt}" \
       '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.0}')"
-    judge_http="$(curl -sS -o /tmp/fugue-judge-response.json -w "%{http_code}" https://api.openai.com/v1/chat/completions \
+    judge_http="$(curl -sS -o "${judge_response_file}" -w "%{http_code}" https://api.openai.com/v1/chat/completions \
       --connect-timeout 10 --max-time 60 --retry 2 \
       -H "Authorization: Bearer ${OPENAI_API_KEY}" \
       -H "Content-Type: application/json" \
       -d "${judge_req}" || true)"
     if [[ "${judge_http}" == "200" ]]; then
-      judge_content="$(jq -r '.choices[0].message.content // ""' /tmp/fugue-judge-response.json 2>/dev/null || echo "")"
+      judge_content="$(jq -r '.choices[0].message.content // ""' "${judge_response_file}" 2>/dev/null || echo "")"
       judge_json="$(printf '%s' "${judge_content}" | sed -E 's/^```json[[:space:]]*//; s/^```[[:space:]]*//; s/[[:space:]]*```$//')"
       if printf '%s' "${judge_json}" | jq -e . >/dev/null 2>&1; then
         break
@@ -512,13 +671,14 @@ elif [[ "${translator_mode}" == "off" ]]; then
   translation_reason="translator-mode-off"
 fi
 
-if [[ "${translation_gate_decision}" == "true" ]]; then
+if [[ "${pre_translation_should_run}" == "true" && "${translation_gate_decision}" == "true" ]]; then
   if [[ "${claude_state}" == "exhausted" && "${force_claude}" != "true" ]]; then
     translation_skip_reason="claude-rate-limit-exhausted"
   else
     translator_sys_prompt="You are a requirements translator between human request and Codex orchestrator. Preserve intent. Return ONLY compact JSON with keys: task_summary, goal, constraints(array), acceptance_criteria(array), risks(array), open_questions(array), execution_mode_hint(review|implement|unspecified)."
     translator_user_prompt="Translate and structure this issue for precise execution:\n${normalized_text}"
     translation_resp_json=""
+    translation_response_file="$(make_temp_file)"
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
       translation_provider="claude"
       claude_req="$(jq -n \
@@ -526,14 +686,14 @@ if [[ "${translation_gate_decision}" == "true" ]]; then
         --arg s "${translator_sys_prompt}" \
         --arg u "${translator_user_prompt}" \
         '{model:$model,system:$s,messages:[{role:"user",content:$u}],max_tokens:1400,temperature:0.1}')"
-      claude_http="$(curl -sS -o /tmp/fugue-translation-response.json -w "%{http_code}" https://api.anthropic.com/v1/messages \
+      claude_http="$(curl -sS -o "${translation_response_file}" -w "%{http_code}" https://api.anthropic.com/v1/messages \
         --connect-timeout 10 --max-time 60 --retry 2 \
         -H "x-api-key: ${ANTHROPIC_API_KEY}" \
         -H "anthropic-version: 2023-06-01" \
         -H "Content-Type: application/json" \
         -d "${claude_req}" || true)"
       if [[ "${claude_http}" == "200" ]]; then
-        translation_resp_json="$(jq -r '[.content[]? | select(.type=="text") | .text] | join("\n") // ""' /tmp/fugue-translation-response.json 2>/dev/null || echo "")"
+        translation_resp_json="$(jq -r '[.content[]? | select(.type=="text") | .text] | join("\n") // ""' "${translation_response_file}" 2>/dev/null || echo "")"
       fi
     elif [[ "${claude_max_plan}" == "true" && -n "${OPENAI_API_KEY:-}" ]]; then
       translation_provider="claude-max-proxy-codex"
@@ -544,13 +704,13 @@ if [[ "${translation_gate_decision}" == "true" ]]; then
           --arg s "${translator_sys_prompt}" \
           --arg u "${translator_user_prompt}" \
           '{model:$model,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
-        proxy_http="$(curl -sS -o /tmp/fugue-translation-response.json -w "%{http_code}" https://api.openai.com/v1/chat/completions \
+        proxy_http="$(curl -sS -o "${translation_response_file}" -w "%{http_code}" https://api.openai.com/v1/chat/completions \
           --connect-timeout 10 --max-time 60 --retry 2 \
           -H "Authorization: Bearer ${OPENAI_API_KEY}" \
           -H "Content-Type: application/json" \
           -d "${proxy_req}" || true)"
         if [[ "${proxy_http}" == "200" ]]; then
-          translation_resp_json="$(jq -r '.choices[0].message.content // ""' /tmp/fugue-translation-response.json 2>/dev/null || echo "")"
+          translation_resp_json="$(jq -r '.choices[0].message.content // ""' "${translation_response_file}" 2>/dev/null || echo "")"
           if [[ -n "${translation_resp_json}" ]]; then
             break
           fi
@@ -570,7 +730,7 @@ if [[ "${translation_gate_decision}" == "true" ]]; then
   fi
 fi
 
-if [[ "${translation_gate_decision}" == "true" && -n "${translation_payload}" ]]; then
+if [[ "${pre_translation_should_run}" == "true" && "${translation_gate_decision}" == "true" && -n "${translation_payload}" ]]; then
   task_summary="$(printf '%s' "${translation_payload}" | jq -r '.task_summary // ""')"
   translated_goal="$(printf '%s' "${translation_payload}" | jq -r '.goal // ""')"
   exec_mode_hint="$(printf '%s' "${translation_payload}" | jq -r '.execution_mode_hint // "unspecified"')"
@@ -581,9 +741,9 @@ if [[ "${translation_gate_decision}" == "true" && -n "${translation_payload}" ]]
   ts_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   marker_start="<!-- fugue-translation-gateway:start -->"
   marker_end="<!-- fugue-translation-gateway:end -->"
-  old_body_file="$(mktemp)"
-  new_body_file="$(mktemp)"
-  block_file="$(mktemp)"
+  old_body_file="$(make_temp_file)"
+  new_body_file="$(make_temp_file)"
+  block_file="$(make_temp_file)"
   printf '%s\n' "${body}" > "${old_body_file}"
   {
     echo "${marker_start}"
@@ -627,16 +787,22 @@ if [[ "${translation_gate_decision}" == "true" && -n "${translation_payload}" ]]
   cat "${block_file}" >> "${new_body_file}"
   new_body="$(cat "${new_body_file}")"
   if [[ "${new_body}" != "${body}" ]]; then
-    payload_file="$(mktemp)"
-    jq -n --arg b "${new_body}" '{body:$b}' > "${payload_file}"
-    gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
-      --method PATCH \
-      --input "${payload_file}" >/dev/null
-    body="${new_body}"
+    if [[ "${pre_translation_should_run}" == "true" ]]; then
+      payload_file="$(make_temp_file)"
+      jq -n --arg b "${new_body}" '{body:$b}' > "${payload_file}"
+      gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+        --method PATCH \
+        --input "${payload_file}" >/dev/null
+      body="${new_body}"
+    else
+      translation_skip_reason="write-suppressed-${pre_translation_skip_reason}"
+    fi
   fi
-  translation_applied="true"
+  if [[ "${pre_translation_should_run}" == "true" ]]; then
+    translation_applied="true"
+  fi
   translation_event="true"
-elif [[ "${translation_gate_decision}" == "true" ]]; then
+elif [[ "${pre_translation_should_run}" == "true" && "${translation_gate_decision}" == "true" ]]; then
   if [[ -z "${translation_skip_reason}" ]]; then
     translation_skip_reason="translator-no-output"
   fi
@@ -755,6 +921,14 @@ if (( preflight_cycles < preflight_cycles_floor )); then
 fi
 if (( implementation_dialogue_rounds < implementation_dialogue_rounds_floor )); then
   implementation_dialogue_rounds="${implementation_dialogue_rounds_floor}"
+fi
+if [[ "${vote_command}" == "true" ]]; then
+  if (( preflight_cycles_floor < 3 )); then
+    preflight_cycles_floor=3
+  fi
+  if (( preflight_cycles < 3 )); then
+    preflight_cycles=3
+  fi
 fi
 assist_auto_selected="explicit-or-default"
 sub_auto_escalate="$(echo "${CLAUDE_SUB_AUTO_ESCALATE:-high}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
@@ -876,18 +1050,21 @@ if [[ -z "${target_repo}" ]]; then
   target_repo="${GITHUB_REPOSITORY}"
 fi
 
-should_run="true"
-skip_reason=""
-canary_dispatch_owned="false"
-if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${is_canary_issue}" == "true" && -n "${canary_dispatch_run_id}" ]]; then
-  canary_dispatch_owned="true"
+should_run="${pre_translation_should_run}"
+skip_reason="${pre_translation_skip_reason}"
+
+content_snapshot_supplied="false"
+if [[ "${content_hint_applied_input}" == "true" || -n "${content_action_hint_input}" || -n "${content_skill_hint_input}" || -n "${content_reason_input}" ]]; then
+  content_snapshot_supplied="true"
 fi
-if [[ "${has_fugue}" != "true" || ( "${has_tutti}" != "true" && "${canary_dispatch_owned}" != "true" ) ]]; then
-  should_run="false"
-  skip_reason="missing-required-labels"
-elif [[ "${ci_execution_engine}" == "subscription" && "${subscription_offline_policy}" == "hold" && "${emergency_continuity_mode}" != "true" && "${self_hosted_online_count}" == "0" ]]; then
-  should_run="false"
-  skip_reason="subscription-self-hosted-offline-strict"
+if [[ "${content_snapshot_supplied}" == "true" ]]; then
+  content_action_hint="${content_action_hint_input}"
+  content_skill_hint="${content_skill_hint_input}"
+  content_reason="${content_reason_input}"
+  content_hint_applied="${content_hint_applied_input}"
+  if [[ "${content_hint_applied}" != "true" && ( -n "${content_action_hint}" || -n "${content_skill_hint}" ) ]]; then
+    content_hint_applied="true"
+  fi
 fi
 
 {
@@ -916,6 +1093,10 @@ fi
   echo "workspace_action_hint=${workspace_action_hint}"
   echo "workspace_domain_hint=${workspace_domain_hint}"
   echo "workspace_reason=${workspace_reason}"
+  echo "freee_hint_applied=${freee_hint_applied}"
+  echo "freee_action_hint=${freee_action_hint}"
+  echo "freee_domain_hint=${freee_domain_hint}"
+  echo "freee_reason=${freee_reason}"
   echo "content_hint_applied=${content_hint_applied}"
   echo "content_action_hint=${content_action_hint}"
   echo "content_skill_hint=${content_skill_hint}"
@@ -923,6 +1104,9 @@ fi
   echo "workspace_suggested_phases=${workspace_suggested_phases}"
   echo "workspace_readonly_actions=${workspace_readonly_actions}"
   echo "workspace_approval_required_actions=${workspace_approval_required_actions}"
+  echo "freee_suggested_phases=${freee_suggested_phases}"
+  echo "freee_readonly_actions=${freee_readonly_actions}"
+  echo "freee_approval_required_actions=${freee_approval_required_actions}"
   echo "claude_fallback_applied=${main_claude_fallback_applied}"
   echo "claude_fallback_reason=${main_claude_fallback_reason}"
   echo "main_claude_fallback_applied=${main_claude_fallback_applied}"
@@ -942,6 +1126,15 @@ fi
   echo "translation_skip_reason=${translation_skip_reason}"
   echo "translation_event=${translation_event}"
   echo "handoff_target=${handoff_target}"
+  echo "kernel_handoff_mode=${kernel_handoff_mode}"
+  echo "cost_provider_priority=${cost_provider_priority}"
+  echo "cost_copilot_policy=${cost_copilot_policy}"
+  echo "cost_metered_policy=${cost_metered_policy}"
+  echo "metered_reason=${metered_reason}"
+  echo "fallback_used=${fallback_used}"
+  echo "missing_lane=${missing_lane}"
+  echo "fallback_provider=${fallback_provider}"
+  echo "fallback_reason=${fallback_reason}"
   echo "intake_source=${intake_source}"
   echo "orchestration_profile=${orchestration_profile}"
   echo "preflight_cycles=${preflight_cycles}"

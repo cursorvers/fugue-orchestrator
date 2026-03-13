@@ -88,6 +88,43 @@ assert_workspace() {
   fi
 }
 
+assert_freee() {
+  local test_name="$1"
+  local expected_actions="$2"
+  local expected_domains="$3"
+  local expected_applied="$4"
+  shift 4
+
+  total=$((total + 1))
+  local output
+  output="$("${NL}" "$@" --format env)" || {
+    echo "FAIL [${test_name}]: script exited with error"
+    failed=$((failed + 1))
+    return
+  }
+
+  eval "${output}"
+
+  local errors=""
+  if [[ "${freee_action_hint}" != "${expected_actions}" ]]; then
+    errors+=" actions=${freee_action_hint}(expected ${expected_actions})"
+  fi
+  if [[ "${freee_domain_hint}" != "${expected_domains}" ]]; then
+    errors+=" domains=${freee_domain_hint}(expected ${expected_domains})"
+  fi
+  if [[ "${freee_hint_applied}" != "${expected_applied}" ]]; then
+    errors+=" applied=${freee_hint_applied}(expected ${expected_applied})"
+  fi
+
+  if [[ -n "${errors}" ]]; then
+    echo "FAIL [${test_name}]:${errors}"
+    failed=$((failed + 1))
+  else
+    echo "PASS [${test_name}]"
+    passed=$((passed + 1))
+  fi
+}
+
 assert_content() {
   local test_name="$1"
   local expected_actions="$2"
@@ -257,7 +294,24 @@ assert_workspace "workspace-doc-sheet-domain-only" \
   "" "drive,docs,sheets" "true" \
   --text "共有資料と spreadsheet を参照してレポート表を作る"
 
-# --- Group 13: Content route hints ---
+# --- Group 13: freee route hints ---
+assert_freee "freee-invoice" \
+  "company-profile,invoice-status,payment-due-summary" "company,invoice,payment" "true" \
+  --text "freee で請求書と支払期日を確認したい"
+
+assert_freee "freee-expense" \
+  "expense-claim-status" "expense-claim" "true" \
+  --text "経費精算の状況を見たい"
+
+assert_freee "freee-write-intent" \
+  "company-profile,invoice-status,payment-due-summary,invoice-create-handoff,payment-confirmation-handoff" "company,invoice,payment" "true" \
+  --text "freee で請求書を作成して支払を確定したい"
+
+assert_freee "freee-neutral" \
+  "" "" "false" \
+  --text "共有資料を読んで"
+
+# --- Group 14: Content route hints ---
 assert_content "content-slide" \
   "slide-deck" "slide" "true" \
   --text "外出先から会社紹介スライドを作って"
