@@ -58,6 +58,8 @@ assert_grep "${WORKFLOW}" "scripts/skills/sync-notebooklm-skills.sh" "runtime sm
 assert_grep "${WORKFLOW}" "scripts/check-notebooklm-runtime-readiness.sh" "runtime smoke runs readiness gate"
 assert_grep "${WORKFLOW}" 'NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE: "required"' "runtime smoke requires live smoke"
 assert_grep "${WORKFLOW}" 'NOTEBOOKLM_READINESS_EXECUTE_LIVE_MODE: "required"' "runtime smoke requires live execution"
+assert_grep "${WORKFLOW}" 'secrets.FUGUE_NOTEBOOKLM_AUTH_TOKEN' "runtime smoke wires NotebookLM auth token secret"
+assert_grep "${WORKFLOW}" 'secrets.FUGUE_NOTEBOOKLM_COOKIES' "runtime smoke wires NotebookLM cookies secret"
 assert_grep "${WORKFLOW}" "scripts/harness/notebooklm-preflight-enrich.sh" "runtime smoke runs NotebookLM preflight"
 assert_grep "${WORKFLOW}" 'inputs.notebooklm_runtime_environment' "runtime smoke uses dispatch environment input"
 assert_grep "${WORKFLOW}" 'inputs.subscription_runner_label' "runtime smoke uses dispatch runner label input"
@@ -78,9 +80,13 @@ assert_grep "${IMPLEMENT_WORKFLOW}" 'sync-notebooklm-skills.sh' "implement workf
 assert_grep "${SYNC_SCRIPT}" 'FUGUE_NOTEBOOKLM_RUNTIME_ENV' "sync script exports NotebookLM runtime env variable"
 assert_grep "${SYNC_SCRIPT}" 'FUGUE_NOTEBOOKLM_RUNTIME_ENABLED' "sync script exports NotebookLM runtime enabled variable"
 assert_grep "${SYNC_SCRIPT}" 'FUGUE_NOTEBOOKLM_REQUIRE_RUNTIME_AUTH' "sync script exports NotebookLM runtime auth variable"
+assert_grep "${SYNC_SCRIPT}" 'FUGUE_NOTEBOOKLM_AUTH_TOKEN' "sync script exports NotebookLM auth token secret"
+assert_grep "${SYNC_SCRIPT}" 'FUGUE_NOTEBOOKLM_COOKIES' "sync script exports NotebookLM cookies secret"
 
 assert_grep "${BOOTSTRAP_SCRIPT}" 'FUGUE_NOTEBOOKLM_RUNTIME_ENV' "bootstrap script documents NotebookLM env"
 assert_grep "${BOOTSTRAP_SCRIPT}" 'FUGUE_NOTEBOOKLM_RUNTIME_ENABLED' "bootstrap script documents NotebookLM runtime enabled"
+assert_grep "${BOOTSTRAP_SCRIPT}" 'FUGUE_NOTEBOOKLM_AUTH_TOKEN' "bootstrap script documents NotebookLM auth token"
+assert_grep "${BOOTSTRAP_SCRIPT}" 'FUGUE_NOTEBOOKLM_COOKIES' "bootstrap script documents NotebookLM cookies"
 
 echo "PASS [test-notebooklm-runtime-smoke]"
 

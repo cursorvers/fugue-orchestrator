@@ -919,6 +919,8 @@ jobs:
           NOTEBOOKLM_HUMAN_APPROVED: "true"
           NOTEBOOKLM_SENSITIVITY: ${{ vars.FUGUE_NOTEBOOKLM_SENSITIVITY || 'internal' }}
           NLM_BIN: ${{ vars.FUGUE_NOTEBOOKLM_BIN || 'nlm' }}
+          NLM_AUTH_TOKEN: ${{ secrets.FUGUE_NOTEBOOKLM_AUTH_TOKEN || secrets.NLM_AUTH_TOKEN || '' }}
+          NLM_COOKIES: ${{ secrets.FUGUE_NOTEBOOKLM_COOKIES || secrets.NLM_COOKIES || '' }}
         run: bash .fugue-orchestrator/scripts/harness/notebooklm-preflight-enrich.sh
 
       - name: Run Codex CLI
