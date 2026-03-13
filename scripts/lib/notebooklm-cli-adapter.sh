@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./notebooklm-bin.sh
+source "${SCRIPT_DIR}/notebooklm-bin.sh"
+
 action=""
 format="json"
 title=""
@@ -17,7 +21,9 @@ ok_to_execute="false"
 human_approved="false"
 resolve_only="false"
 dry_run="false"
-nlm_bin="${NLM_BIN:-nlm}"
+nlm_bin_requested="${NLM_BIN:-${FUGUE_NOTEBOOKLM_BIN:-nlm}}"
+nlm_bin=""
+nlm_display=""
 
 usage() {
   cat <<'EOF'
@@ -65,10 +71,6 @@ EOF
 fail() {
   echo "ERROR: $*" >&2
   exit 1
-}
-
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
 require_non_empty() {
@@ -271,7 +273,11 @@ stderr_output_path=""
 command_log_path=""
 
 record_command() {
-  commands+=("$(print_command "$@")")
+  local cmd=("$@")
+  if [[ -n "${nlm_bin:-}" && -n "${nlm_display:-}" && "${cmd[0]}" == "${nlm_bin}" ]]; then
+    cmd[0]="${nlm_display}"
+  fi
+  commands+=("$(print_command "${cmd[@]}")")
 }
 
 write_meta() {
@@ -376,6 +382,9 @@ validate_inputs() {
     [[ -f "${source_manifest}" ]] || fail "source manifest not found: ${source_manifest}"
     jq empty "${source_manifest}" >/dev/null 2>&1 || fail "source manifest is not valid JSON: ${source_manifest}"
   fi
+
+  nlm_bin="$(notebooklm_resolve_bin "${nlm_bin_requested}")" || exit 1
+  nlm_display="$(basename "${nlm_bin}")"
 }
 
 source_count() {
@@ -448,7 +457,6 @@ main() {
         emit_commands
         exit 0
       fi
-      require_cmd "${nlm_bin}"
       if "${nlm_bin}" --help >/dev/null 2>&1; then
         write_command_log
         write_meta "ok" 0 "adapter ready"
@@ -493,7 +501,6 @@ main() {
       record_command "${create_cmd[@]}"
       notebook_ref="NOTEBOOK_ID"
     else
-      require_cmd "${nlm_bin}"
       run_cmd "${notebook_create_stdout}" "${notebook_create_stderr}" "${create_cmd[@]}" || {
         write_command_log
         write_meta "error" 1 "notebook create failed"
@@ -552,7 +559,6 @@ main() {
     exit 0
   fi
 
-  require_cmd "${nlm_bin}"
   run_cmd "${artifact_stdout}" "${artifact_stderr}" "${artifact_cmd[@]}" || {
     write_command_log
     write_meta "error" 1 "artifact creation failed"

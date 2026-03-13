@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=./lib/notebooklm-bin.sh
+source "${ROOT_DIR}/scripts/lib/notebooklm-bin.sh"
 
 ADAPTER_SCRIPT="${NOTEBOOKLM_READINESS_ADAPTER_SCRIPT:-${ROOT_DIR}/scripts/lib/notebooklm-cli-adapter.sh}"
 SYNC_SCRIPT="${NOTEBOOKLM_READINESS_SYNC_SCRIPT:-${ROOT_DIR}/scripts/skills/sync-notebooklm-skills.sh}"
@@ -11,15 +13,12 @@ LIVE_SMOKE_MODE="$(printf '%s' "${NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE:-off}" | 
 EXECUTE_LIVE_MODE="$(printf '%s' "${NOTEBOOKLM_READINESS_EXECUTE_LIVE_MODE:-off}" | tr '[:upper:]' '[:lower:]')"
 REQUIRE_OPTIONAL="$(printf '%s' "${NOTEBOOKLM_READINESS_REQUIRE_OPTIONAL:-false}" | tr '[:upper:]' '[:lower:]')"
 SKIP_REPO_TESTS="$(printf '%s' "${NOTEBOOKLM_READINESS_SKIP_REPO_TESTS:-false}" | tr '[:upper:]' '[:lower:]')"
-NLM_BIN="${NOTEBOOKLM_READINESS_NLM_BIN:-${NLM_BIN:-nlm}}"
+NLM_BIN_REQUESTED="${NOTEBOOKLM_READINESS_NLM_BIN:-${NLM_BIN:-${FUGUE_NOTEBOOKLM_BIN:-nlm}}}"
+NLM_BIN=""
 
 fail() {
   echo "ERROR: $*" >&2
   exit 1
-}
-
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"
 }
 
 run_repo_test() {
@@ -108,7 +107,10 @@ main() {
   fi
   [[ -f "${ADAPTER_SCRIPT}" ]] || fail "adapter missing: ${ADAPTER_SCRIPT}"
   [[ -f "${SYNC_SCRIPT}" ]] || fail "sync script missing: ${SYNC_SCRIPT}"
-  require_cmd jq
+  command -v jq >/dev/null 2>&1 || fail "missing command: jq"
+  if [[ "${LIVE_SMOKE_MODE}" == "required" ]]; then
+    NLM_BIN="$(notebooklm_resolve_bin "${NLM_BIN_REQUESTED}")" || exit 1
+  fi
 
   echo "=== notebooklm runtime readiness gate ==="
 

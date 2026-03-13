@@ -57,6 +57,16 @@ echo sync-ok
 EOF
 chmod +x "${tmpdir}/sync-ok.sh"
 
+fake_bin_dir="${tmpdir}/bin"
+mkdir -p "${fake_bin_dir}"
+fake_nlm="${fake_bin_dir}/nlm"
+cat > "${fake_nlm}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "nlm help"
+EOF
+chmod +x "${fake_nlm}"
+
 cat > "${tmpdir}/adapter-ok.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -128,6 +138,7 @@ required_output="$(
   NOTEBOOKLM_READINESS_SYNC_SCRIPT="${tmpdir}/sync-ok.sh" \
   CODEX_SKILLS_DIR="${codex_dir}" \
   CLAUDE_SKILLS_DIR="${claude_dir}" \
+  PATH="${fake_bin_dir}:${PATH}" \
   bash "${SCRIPT}" 2>&1
 )"
 assert_contains "${required_output}" "==> live smoke: adapter smoke" "required mode runs smoke"
@@ -146,11 +157,28 @@ required_live_output="$(
   NOTEBOOKLM_READINESS_SYNC_SCRIPT="${tmpdir}/sync-ok.sh" \
   CODEX_SKILLS_DIR="${codex_dir}" \
   CLAUDE_SKILLS_DIR="${claude_dir}" \
+  PATH="${fake_bin_dir}:${PATH}" \
   bash "${SCRIPT}" 2>&1
 )"
 assert_contains "${required_live_output}" "==> live smoke: execute visual-brief" "required live mode runs execution"
 assert_contains "${required_live_output}" "notebooklm-runtime-readiness: PASS" "required live mode passes"
 assert_contains "$(cat "${tmpdir}/adapter.log")" "visual-brief:false" "live execution call logged"
+
+: > "${tmpdir}/adapter.log"
+explicit_bin_output="$(
+  ADAPTER_LOG="${tmpdir}/adapter.log" \
+  NOTEBOOKLM_READINESS_SKIP_REPO_TESTS=true \
+  NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE=required \
+  NOTEBOOKLM_READINESS_EXECUTE_LIVE_MODE=off \
+  NOTEBOOKLM_READINESS_ADAPTER_SCRIPT="${tmpdir}/adapter-ok.sh" \
+  NOTEBOOKLM_READINESS_SYNC_SCRIPT="${tmpdir}/sync-ok.sh" \
+  NOTEBOOKLM_READINESS_NLM_BIN="${fake_nlm}" \
+  CODEX_SKILLS_DIR="${codex_dir}" \
+  CLAUDE_SKILLS_DIR="${claude_dir}" \
+  PATH="/usr/bin:/bin" \
+  bash "${SCRIPT}" 2>&1
+)"
+assert_contains "${explicit_bin_output}" "notebooklm-runtime-readiness: PASS" "explicit nlm path passes"
 
 set +e
 missing_optional_output="$(

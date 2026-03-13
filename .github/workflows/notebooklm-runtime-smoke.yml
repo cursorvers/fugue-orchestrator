@@ -124,7 +124,7 @@ jobs:
           NOTEBOOKLM_READINESS_SKIP_REPO_TESTS: "true"
           NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE: "required"
           NOTEBOOKLM_READINESS_EXECUTE_LIVE_MODE: "required"
-          NOTEBOOKLM_READINESS_NLM_BIN: ${{ github.event_name == 'push' && 'nlm' || inputs.notebooklm_nlm_bin }}
+          NOTEBOOKLM_READINESS_NLM_BIN: ${{ github.event_name == 'push' && (vars.FUGUE_NOTEBOOKLM_BIN || 'nlm') || inputs.notebooklm_nlm_bin }}
         run: bash scripts/check-notebooklm-runtime-readiness.sh
 
       - name: Run NotebookLM runtime preflight
@@ -145,7 +145,7 @@ jobs:
           NOTEBOOKLM_REQUIRE_RUNTIME_AUTH: "true"
           NOTEBOOKLM_HUMAN_APPROVED: "true"
           NOTEBOOKLM_SENSITIVITY: ${{ github.event_name == 'push' && 'internal' || inputs.notebooklm_sensitivity }}
-          NLM_BIN: ${{ github.event_name == 'push' && 'nlm' || inputs.notebooklm_nlm_bin }}
+          NLM_BIN: ${{ github.event_name == 'push' && (vars.FUGUE_NOTEBOOKLM_BIN || 'nlm') || inputs.notebooklm_nlm_bin }}
         run: bash scripts/harness/notebooklm-preflight-enrich.sh
 
       - name: Upload NotebookLM smoke artifact

@@ -19,7 +19,11 @@ NOTEBOOKLM_RUNTIME_ENABLED="${NOTEBOOKLM_RUNTIME_ENABLED:-false}"
 NOTEBOOKLM_REQUIRE_RUNTIME_AUTH="${NOTEBOOKLM_REQUIRE_RUNTIME_AUTH:-false}"
 NOTEBOOKLM_HUMAN_APPROVED="${NOTEBOOKLM_HUMAN_APPROVED:-false}"
 NOTEBOOKLM_SENSITIVITY="${NOTEBOOKLM_SENSITIVITY:-internal}"
-NLM_BIN="${NLM_BIN:-nlm}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/notebooklm-bin.sh
+source "${SCRIPT_DIR}/../lib/notebooklm-bin.sh"
+NLM_BIN_REQUESTED="${NLM_BIN:-${FUGUE_NOTEBOOKLM_BIN:-nlm}}"
+NLM_BIN="${NLM_BIN_REQUESTED}"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -217,8 +221,9 @@ run_preflight() {
   human_approved="$(normalize_bool "${NOTEBOOKLM_HUMAN_APPROVED}")"
   local runtime_available="false"
 
-  if [[ "${runtime_enabled}" == "true" ]] && command -v "${NLM_BIN}" >/dev/null 2>&1; then
-    if NLM_BIN="${NLM_BIN}" bash "${ADAPTER}" --action smoke > "${smoke_output}" 2>/dev/null; then
+  if [[ "${runtime_enabled}" == "true" ]]; then
+    if NLM_BIN="$(notebooklm_resolve_bin "${NLM_BIN_REQUESTED}" 2>/dev/null)" && \
+      NLM_BIN="${NLM_BIN}" bash "${ADAPTER}" --action smoke > "${smoke_output}" 2>/dev/null; then
       runtime_available="true"
     fi
   fi
