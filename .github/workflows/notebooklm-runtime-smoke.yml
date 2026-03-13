@@ -1,0 +1,160 @@
+name: NotebookLM Runtime Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number used to derive NotebookLM hints"
+        required: true
+        type: string
+      notebooklm_runtime_environment:
+        description: "Protected GitHub Environment used for NotebookLM runtime smoke"
+        required: false
+        type: string
+        default: "notebooklm-runtime"
+      subscription_runner_label:
+        description: "Self-hosted runner label used for NotebookLM runtime smoke"
+        required: false
+        type: string
+        default: "fugue-subscription"
+      notebooklm_sensitivity:
+        description: "Sensitivity label attached to the bounded NotebookLM receipt"
+        required: false
+        type: string
+        default: "internal"
+      notebooklm_nlm_bin:
+        description: "NotebookLM CLI binary name or absolute path"
+        required: false
+        type: string
+        default: "nlm"
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  resolve-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      issue_title: ${{ steps.ctx.outputs.issue_title }}
+      issue_body: ${{ steps.ctx.outputs.issue_body }}
+      content_hint_applied: ${{ steps.ctx.outputs.content_hint_applied }}
+      content_action_hint: ${{ steps.ctx.outputs.content_action_hint }}
+      content_skill_hint: ${{ steps.ctx.outputs.content_skill_hint }}
+      content_reason: ${{ steps.ctx.outputs.content_reason }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER_FROM_DISPATCH: ${{ inputs.issue_number }}
+          ISSUE_NUMBER_FROM_ISSUE: ""
+          HANDOFF_TARGET_INPUT: kernel
+          CI_EXECUTION_ENGINE: api
+          CLAUDE_TRANSLATOR_MODE: off
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: codex
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: none
+        run: bash scripts/harness/resolve-orchestration-context.sh
+
+  notebooklm-runtime:
+    if: ${{ needs.resolve-context.outputs.content_hint_applied == 'true' && (contains(needs.resolve-context.outputs.content_action_hint, 'notebooklm-visual-brief') || contains(needs.resolve-context.outputs.content_action_hint, 'notebooklm-slide-prep') || contains(needs.resolve-context.outputs.content_skill_hint, 'notebooklm-visual-brief') || contains(needs.resolve-context.outputs.content_skill_hint, 'notebooklm-slide-prep')) }}
+    needs: [resolve-context]
+    runs-on:
+      - self-hosted
+      - ${{ inputs.subscription_runner_label }}
+    timeout-minutes: 45
+    environment:
+      name: ${{ inputs.notebooklm_runtime_environment }}
+    outputs:
+      notebooklm_preflight_status: ${{ steps.preflight.outputs.notebooklm_preflight_status }}
+      notebooklm_report_path: ${{ steps.preflight.outputs.notebooklm_report_path }}
+      notebooklm_summary: ${{ steps.preflight.outputs.notebooklm_summary }}
+      notebooklm_receipt_path: ${{ steps.preflight.outputs.notebooklm_receipt_path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync NotebookLM skills
+        env:
+          CONTENT_ACTION_HINT: ${{ needs.resolve-context.outputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ needs.resolve-context.outputs.content_skill_hint }}
+        run: |
+          set -euo pipefail
+          args=(--target both)
+          if [[ "${CONTENT_ACTION_HINT}${CONTENT_SKILL_HINT}" == *"notebooklm-slide-prep"* ]]; then
+            args+=(--with-optional)
+          fi
+          bash scripts/skills/sync-notebooklm-skills.sh "${args[@]}"
+
+      - name: NotebookLM runtime readiness gate
+        env:
+          NOTEBOOKLM_READINESS_REQUIRE_OPTIONAL: "true"
+          NOTEBOOKLM_READINESS_SKIP_REPO_TESTS: "true"
+          NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE: "required"
+          NOTEBOOKLM_READINESS_EXECUTE_LIVE_MODE: "required"
+          NOTEBOOKLM_READINESS_NLM_BIN: ${{ inputs.notebooklm_nlm_bin }}
+        run: bash scripts/check-notebooklm-runtime-readiness.sh
+
+      - name: Run NotebookLM runtime preflight
+        id: preflight
+        env:
+          ISSUE_NUMBER: ${{ needs.resolve-context.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.resolve-context.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.resolve-context.outputs.issue_body }}
+          CONTENT_HINT_APPLIED: ${{ needs.resolve-context.outputs.content_hint_applied }}
+          CONTENT_ACTION_HINT: ${{ needs.resolve-context.outputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ needs.resolve-context.outputs.content_skill_hint }}
+          CONTENT_REASON: ${{ needs.resolve-context.outputs.content_reason }}
+          OUT_DIR: .fugue/pre-implement
+          RUN_DIR: .fugue/pre-implement/notebooklm-run
+          REPORT_PATH: .fugue/pre-implement/issue-${{ needs.resolve-context.outputs.issue_number }}-notebooklm.md
+          ADAPTER: scripts/lib/notebooklm-cli-adapter.sh
+          NOTEBOOKLM_RUNTIME_ENABLED: "true"
+          NOTEBOOKLM_REQUIRE_RUNTIME_AUTH: "true"
+          NOTEBOOKLM_HUMAN_APPROVED: "true"
+          NOTEBOOKLM_SENSITIVITY: ${{ inputs.notebooklm_sensitivity }}
+          NLM_BIN: ${{ inputs.notebooklm_nlm_bin }}
+        run: bash scripts/harness/notebooklm-preflight-enrich.sh
+
+      - name: Upload NotebookLM smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebooklm-runtime-smoke-${{ needs.resolve-context.outputs.issue_number }}
+          path: |
+            .fugue/pre-implement/issue-${{ needs.resolve-context.outputs.issue_number }}-notebooklm.md
+            .fugue/pre-implement/notebooklm-run
+          if-no-files-found: ignore
+
+  finalize:
+    if: always()
+    needs: [resolve-context, notebooklm-runtime]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record smoke result
+        env:
+          ISSUE_NUMBER: ${{ needs.resolve-context.outputs.issue_number }}
+          CONTENT_HINT_APPLIED: ${{ needs.resolve-context.outputs.content_hint_applied }}
+          CONTENT_ACTION_HINT: ${{ needs.resolve-context.outputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ needs.resolve-context.outputs.content_skill_hint }}
+          NOTEBOOKLM_PREFLIGHT_STATUS: ${{ needs.notebooklm-runtime.outputs.notebooklm_preflight_status }}
+          NOTEBOOKLM_SUMMARY: ${{ needs.notebooklm-runtime.outputs.notebooklm_summary }}
+          NOTEBOOKLM_RUNTIME_ENV: ${{ inputs.notebooklm_runtime_environment }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${CONTENT_HINT_APPLIED}" != "true" ]]; then
+            message="NotebookLM runtime smoke: no applicable NotebookLM content hint was derived from this issue. No protected runtime job was run."
+            printf '%s\n' "${message}" >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          status="${NOTEBOOKLM_PREFLIGHT_STATUS:-unknown}"
+          message="NotebookLM runtime smoke completed. content_action=\`${CONTENT_ACTION_HINT:-none}\`, content_skill=\`${CONTENT_SKILL_HINT:-none}\`, env=\`${NOTEBOOKLM_RUNTIME_ENV}\`, status=\`${status}\`, summary=\`${NOTEBOOKLM_SUMMARY:-none}\`. Check the workflow artifacts for the bounded NotebookLM report and receipt."
+          printf '%s\n' "${message}" >> "${GITHUB_STEP_SUMMARY}"
