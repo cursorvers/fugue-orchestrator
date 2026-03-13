@@ -52,6 +52,8 @@ assert_grep "${WORKFLOW}" 'content_skill_hint:' "runtime smoke accepts direct co
 assert_grep "${WORKFLOW}" 'content_reason:' "runtime smoke accepts direct content-reason input"
 assert_grep "${WORKFLOW}" 'issues: read' "runtime smoke uses read-only issue permission"
 assert_grep "${WORKFLOW}" 'self-hosted' "runtime smoke uses self-hosted runner"
+assert_grep "${WORKFLOW}" 'actions/setup-go@v5' "runtime smoke sets up Go for NotebookLM CLI"
+assert_grep "${WORKFLOW}" 'go install github.com/tmc/nlm/cmd/nlm@latest' "runtime smoke installs NotebookLM CLI"
 assert_grep "${WORKFLOW}" "scripts/skills/sync-notebooklm-skills.sh" "runtime smoke syncs NotebookLM skills"
 assert_grep "${WORKFLOW}" "scripts/check-notebooklm-runtime-readiness.sh" "runtime smoke runs readiness gate"
 assert_grep "${WORKFLOW}" 'NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE: "required"' "runtime smoke requires live smoke"

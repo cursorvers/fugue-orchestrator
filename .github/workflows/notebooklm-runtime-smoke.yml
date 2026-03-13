@@ -106,6 +106,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Go for NotebookLM CLI
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Install NotebookLM CLI
+        run: |
+          set -euo pipefail
+          go install github.com/tmc/nlm/cmd/nlm@latest
+          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+
       - name: Sync NotebookLM skills
         env:
           CONTENT_ACTION_HINT: ${{ needs.resolve-context.outputs.content_action_hint }}
