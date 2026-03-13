@@ -70,8 +70,8 @@ run_live_smoke() {
     --ok-to-execute true \
     --human-approved true \
     --resolve-only)"
-  grep -Fq 'notebook create' <<<"${output}" || fail "resolve-only smoke missing notebook create"
-  grep -Fq 'mindmap create' <<<"${output}" || fail "resolve-only smoke missing mindmap create"
+  grep -Fq 'nlm create' <<<"${output}" || fail "resolve-only smoke missing notebook create"
+  grep -Fq 'nlm mindmap' <<<"${output}" || fail "resolve-only smoke missing mindmap create"
 
   if [[ "${EXECUTE_LIVE_MODE}" == "required" ]]; then
     echo "==> live smoke: execute visual-brief"

@@ -120,8 +120,9 @@ fi
 mkdir -p "${run_dir}/notebooklm"
 if [[ "${resolve_only}" == "true" ]]; then
   cat <<'OUT'
-nlm notebook create Demo --json
-nlm mindmap create NOTEBOOK_ID --confirm --json
+nlm create Demo
+nlm add NOTEBOOK_ID /tmp/source.md
+nlm mindmap NOTEBOOK_ID SOURCE_ID_1
 OUT
   exit 0
 fi
