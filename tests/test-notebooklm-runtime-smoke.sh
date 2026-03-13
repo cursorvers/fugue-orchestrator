@@ -41,6 +41,7 @@ assert_grep() {
 }
 
 assert_grep "${WORKFLOW}" 'name: NotebookLM Runtime Smoke' "workflow exists"
+assert_grep "${WORKFLOW}" 'push:' "runtime smoke has push trigger for branch canary"
 assert_grep "${WORKFLOW}" 'runs-on:' "workflow has jobs"
 assert_grep "${WORKFLOW}" 'subscription_runner_label:' "runtime smoke accepts runner label input"
 assert_grep "${WORKFLOW}" 'notebooklm_sensitivity:' "runtime smoke accepts sensitivity input"
@@ -60,10 +61,12 @@ assert_grep "${WORKFLOW}" 'inputs.notebooklm_runtime_environment' "runtime smoke
 assert_grep "${WORKFLOW}" 'inputs.subscription_runner_label' "runtime smoke uses dispatch runner label input"
 assert_grep "${WORKFLOW}" 'inputs.notebooklm_sensitivity' "runtime smoke uses dispatch sensitivity input"
 assert_grep "${WORKFLOW}" 'inputs.notebooklm_nlm_bin' "runtime smoke uses dispatch CLI input"
-assert_grep "${WORKFLOW}" 'CONTENT_HINT_APPLIED_INPUT: ${{ inputs.content_hint_applied }}' "runtime smoke passes direct content-hint snapshot"
-assert_grep "${WORKFLOW}" 'CONTENT_ACTION_HINT_INPUT: ${{ inputs.content_action_hint }}' "runtime smoke passes direct content-action snapshot"
-assert_grep "${WORKFLOW}" 'CONTENT_SKILL_HINT_INPUT: ${{ inputs.content_skill_hint }}' "runtime smoke passes direct content-skill snapshot"
-assert_grep "${WORKFLOW}" 'CONTENT_REASON_INPUT: ${{ inputs.content_reason }}' "runtime smoke passes direct content-reason snapshot"
+assert_grep "${WORKFLOW}" 'CONTENT_HINT_APPLIED_INPUT:' "runtime smoke passes direct content-hint snapshot"
+assert_grep "${WORKFLOW}" 'CONTENT_ACTION_HINT_INPUT:' "runtime smoke passes direct content-action snapshot"
+assert_grep "${WORKFLOW}" 'CONTENT_SKILL_HINT_INPUT:' "runtime smoke passes direct content-skill snapshot"
+assert_grep "${WORKFLOW}" 'CONTENT_REASON_INPUT:' "runtime smoke passes direct content-reason snapshot"
+assert_grep "${WORKFLOW}" "github.event_name == 'push' && '499'" "runtime smoke seeds push canary issue context"
+assert_grep "${WORKFLOW}" "github.event_name == 'push' && 'notebooklm-visual-brief'" "runtime smoke seeds push canary NotebookLM hint"
 assert_grep "${WORKFLOW}" 'GITHUB_STEP_SUMMARY' "runtime smoke records result in workflow summary"
 assert_not_grep "${WORKFLOW}" 'gh issue comment' "runtime smoke does not post issue comments"
 
