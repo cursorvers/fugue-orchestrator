@@ -1,5 +1,5 @@
 name: Fugue Mainframe (Tutti + Optional Codex Implement)
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('issue #{0} dispatch {1}', github.event.inputs.issue_number || 'unknown', github.event.inputs.dispatch_nonce || github.run_id) || github.event.issue.title || format('issue-{0}', github.event.issue.number || github.run_id) }}
+run-name: issue-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}
 
 on:
   issues:
