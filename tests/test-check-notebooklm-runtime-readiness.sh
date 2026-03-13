@@ -67,6 +67,22 @@ echo "nlm help"
 EOF
 chmod +x "${fake_nlm}"
 
+pkg_bin_dir="${tmpdir}/pkg-bin"
+mkdir -p "${pkg_bin_dir}"
+fake_npm_prefix="${tmpdir}/npm-prefix"
+mkdir -p "${fake_npm_prefix}/bin"
+cp "${fake_nlm}" "${fake_npm_prefix}/bin/nlm"
+cat > "${pkg_bin_dir}/npm" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "prefix" && "\${2:-}" == "-g" ]]; then
+  printf '%s\n' "${fake_npm_prefix}"
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "${pkg_bin_dir}/npm"
+
 cat > "${tmpdir}/adapter-ok.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -179,6 +195,21 @@ explicit_bin_output="$(
   bash "${SCRIPT}" 2>&1
 )"
 assert_contains "${explicit_bin_output}" "notebooklm-runtime-readiness: PASS" "explicit nlm path passes"
+
+: > "${tmpdir}/adapter.log"
+npm_prefix_output="$(
+  ADAPTER_LOG="${tmpdir}/adapter.log" \
+  NOTEBOOKLM_READINESS_SKIP_REPO_TESTS=true \
+  NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE=required \
+  NOTEBOOKLM_READINESS_EXECUTE_LIVE_MODE=off \
+  NOTEBOOKLM_READINESS_ADAPTER_SCRIPT="${tmpdir}/adapter-ok.sh" \
+  NOTEBOOKLM_READINESS_SYNC_SCRIPT="${tmpdir}/sync-ok.sh" \
+  CODEX_SKILLS_DIR="${codex_dir}" \
+  CLAUDE_SKILLS_DIR="${claude_dir}" \
+  PATH="${pkg_bin_dir}:/usr/bin:/bin" \
+  bash "${SCRIPT}" 2>&1
+)"
+assert_contains "${npm_prefix_output}" "notebooklm-runtime-readiness: PASS" "npm prefix nlm path passes"
 
 set +e
 missing_optional_output="$(
