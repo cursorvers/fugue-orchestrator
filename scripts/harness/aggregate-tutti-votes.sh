@@ -17,6 +17,7 @@ set -euo pipefail
 
 # --- Input normalization ---
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common-utils.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/shadow-continuity-policy.sh"
 
 # Guard: ensure agent result files exist before aggregation.
 if ! compgen -G "agent-results/*.json" > /dev/null 2>&1; then
@@ -48,6 +49,10 @@ if [[ "${require_claude_sub_on_complex}" != "false" ]]; then
 fi
 require_baseline_trio="$(lower_trim "${REQUIRE_BASELINE_TRIO:-true}")"
 if [[ "${require_baseline_trio}" != "false" ]]; then
+  require_baseline_trio="true"
+fi
+vote_command_input="$(normalize_bool "${VOTE_COMMAND_INPUT:-false}")"
+if [[ "${vote_command_input}" == "true" ]]; then
   require_baseline_trio="true"
 fi
 input_risk_tier="$(lower_trim "${INPUT_RISK_TIER:-}")"
@@ -169,63 +174,17 @@ fi
 # --- Baseline trio gate ---
 baseline_trio_gate="not-required"
 baseline_trio_reason="policy-disabled"
-
-# Reusable jq filter for provider success count.
-provider_success_filter='[
-  .[] | select(
-    .skipped != true
-    and ((.provider // "" | ascii_downcase) == $provider)
-    and (
-      ((.http_code // "" | tostring) == "200")
-      or
-      ((.http_code // "" | tostring | startswith("cli:0")))
-    )
-  )
-] | length'
-
-codex_baseline_success="$(jq -r --arg provider "codex" "${provider_success_filter}" all-results.json)"
-claude_baseline_success="$(jq -r --arg provider "claude" "${provider_success_filter}" all-results.json)"
-glm_baseline_success="$(jq -r '[
-  .[] | select(
-    .skipped != true
-    and ((.provider // "" | ascii_downcase) == "glm")
-    and ((.name // "") | test("^glm-.*-subagent$") | not)
-    and (
-      ((.http_code // "" | tostring) == "200")
-      or
-      ((.http_code // "" | tostring | startswith("cli:0")))
-    )
-  )
-] | length' all-results.json)"
-
-if [[ "${require_baseline_trio}" == "true" ]]; then
-  baseline_trio_gate="pass"
-  baseline_missing=()
-  require_claude_baseline="true"
-  if [[ "${assist_provider_resolved}" == "claude" && "${claude_state_effective}" != "ok" ]]; then
-    require_claude_baseline="false"
-  fi
-  if [[ "${codex_baseline_success}" -eq 0 ]]; then
-    baseline_missing+=("codex")
-  fi
-  if [[ "${require_claude_baseline}" == "true" && "${claude_baseline_success}" -eq 0 ]]; then
-    baseline_missing+=("claude")
-  fi
-  if [[ "${glm_baseline_success}" -eq 0 ]]; then
-    baseline_missing+=("glm")
-  fi
-  if (( ${#baseline_missing[@]} > 0 )); then
-    baseline_trio_gate="fail"
-    baseline_trio_reason="missing-$(IFS=,; echo "${baseline_missing[*]}")"
-    high_risk="true"
-    high_risk_count="$((high_risk_count + 1))"
-  else
-    if [[ "${require_claude_baseline}" == "true" ]]; then
-      baseline_trio_reason="codex+claude+glm-ok"
-    else
-      baseline_trio_reason="codex+glm-ok(claude-waived-${claude_state_effective})"
-    fi
-  fi
+fugue_calculate_baseline_trio_policy "all-results.json" "${require_baseline_trio}"
+baseline_trio_gate="${FUGUE_BASELINE_TRIO_GATE}"
+baseline_trio_reason="${FUGUE_BASELINE_TRIO_REASON}"
+codex_baseline_success="${FUGUE_BASELINE_CODEX_SUCCESS}"
+claude_baseline_success="${FUGUE_BASELINE_CLAUDE_SUCCESS}"
+glm_baseline_success="${FUGUE_BASELINE_GLM_SUCCESS}"
+shadow_continuity_families="${FUGUE_SHADOW_CONTINUITY_FAMILIES}"
+shadow_continuity_success_count="${FUGUE_SHADOW_CONTINUITY_SUCCESS_COUNT}"
+if [[ "${FUGUE_BASELINE_HIGH_RISK_BUMP}" == "true" ]]; then
+  high_risk="true"
+  high_risk_count="$((high_risk_count + 1))"
 fi
 
 # --- Weighted vote calculation ---
@@ -314,6 +273,8 @@ _esc() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
   echo "codex_baseline_success='$(_esc "${codex_baseline_success}")'"
   echo "claude_baseline_success='$(_esc "${claude_baseline_success}")'"
   echo "glm_baseline_success='$(_esc "${glm_baseline_success}")'"
+  echo "shadow_continuity_families='$(_esc "${shadow_continuity_families}")'"
+  echo "shadow_continuity_success_count='$(_esc "${shadow_continuity_success_count}")'"
   echo "complex_claude_sub_required='$(_esc "${complex_claude_sub_required}")'"
   echo "complex_claude_sub_reason='$(_esc "${complex_claude_sub_reason}")'"
 } > integration-vars.sh
