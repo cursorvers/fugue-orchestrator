@@ -838,6 +838,8 @@ jobs:
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
       target_repo: "${{ needs.ctx.outputs.target_repo }}"
+      implement_request: "${{ needs.ctx.outputs.has_implement_request }}"
+      implement_confirmed: "${{ needs.ctx.outputs.has_implement_confirmed }}"
       refinement_cycles: "${{ needs.ctx.outputs.preflight_cycles }}"
       implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"
       orchestration_profile: "${{ needs.ctx.outputs.execution_profile }}"

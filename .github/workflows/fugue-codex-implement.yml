@@ -12,6 +12,16 @@ on:
         required: false
         type: string
         default: ""
+      implement_request:
+        description: "Override implement intent detected by caller context (true|false|empty)"
+        required: false
+        type: string
+        default: ""
+      implement_confirmed:
+        description: "Override implement confirmation detected by caller context (true|false|empty)"
+        required: false
+        type: string
+        default: ""
       target_branch:
         description: "Base branch to create PR against"
         required: false
@@ -257,6 +267,22 @@ jobs:
           HAS_IMPLEMENT_CONFIRMED="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement-confirmed") != null)')"
           HAS_LARGE_REFACTOR="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("large-refactor") != null)')"
           LABELS_CSV="$(echo "${issue_json}" | jq -r '[.labels[]?.name] | join(",")')"
+
+          INPUT_IMPLEMENT_REQUEST="$(echo "${{ inputs.implement_request }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${INPUT_IMPLEMENT_REQUEST}" != "true" && "${INPUT_IMPLEMENT_REQUEST}" != "false" ]]; then
+            INPUT_IMPLEMENT_REQUEST=""
+          fi
+          if [[ -n "${INPUT_IMPLEMENT_REQUEST}" ]]; then
+            HAS_IMPLEMENT="${INPUT_IMPLEMENT_REQUEST}"
+          fi
+
+          INPUT_IMPLEMENT_CONFIRMED="$(echo "${{ inputs.implement_confirmed }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${INPUT_IMPLEMENT_CONFIRMED}" != "true" && "${INPUT_IMPLEMENT_CONFIRMED}" != "false" ]]; then
+            INPUT_IMPLEMENT_CONFIRMED=""
+          fi
+          if [[ -n "${INPUT_IMPLEMENT_CONFIRMED}" ]]; then
+            HAS_IMPLEMENT_CONFIRMED="${INPUT_IMPLEMENT_CONFIRMED}"
+          fi
 
           SHOULD_RUN="true"
           SKIP_REASON=""
