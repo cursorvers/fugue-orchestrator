@@ -138,7 +138,7 @@ Auditability:
 - Fallback quorum and lane-floor requirements by mode:
   | Mode | Lane Floor | Baseline | Fallback Quorum (recovery-pass) |
   |------|-----------|----------|--------------------------------|
-  | `/vote` strict | 2 active lanes | codex + claude + glm | codex + 2 distinct non-codex families |
+  | `/vote` strict | 3 active lanes | codex + claude + glm | codex + 2 distinct non-codex families |
   | `/kernel` | 6 active lanes | codex + claude + glm | codex + 2 distinct non-codex families |
   | Ordinary continuity | 2 active lanes | best-effort | shadow lanes accepted for read-only |
 - Codex recursive delegation (`parent -> child -> grandchild`) can be enabled per-lane:

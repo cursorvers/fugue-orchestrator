@@ -7,7 +7,7 @@ argument-hint: [FOCUS="..."]
 
 Continue the current task inside this Codex session with local Kernel consensus.
 
-Execute immediately. Do not create or edit GitHub issues, pull requests, review comments, or issue comments. Do not inspect CI unless explicitly asked later. Backup-only GitHub Actions dispatch or repository_dispatch for task or audit logging is allowed.
+Execute immediately. Do not create or edit GitHub issues, pull requests, review comments, or issue comments. Do not inspect CI unless explicitly asked later. Backup-only GitHub Actions dispatch or repository_dispatch for task or audit logging is allowed, and when the user explicitly asks for production verification, live rerun or workflow_dispatch needed to complete that verification is also allowed.
 If the user explicitly asks for production verification, live workflow inspection is mandatory and overrides the default no-CI rule for the minimum scope needed to finish the verification.
 
 Procedure:
@@ -76,7 +76,7 @@ Procedure:
 
 Constraints:
 - Keep output concise and operational.
-- Treat `/vote` as local continuation, not GitHub handoff.
+- Treat `/vote` as local continuation, not GitHub issue-comment handoff.
 - Do not create or edit GitHub issues, pull requests, review comments, or issue comments.
 - Backup-only GitHub Actions dispatch or repository_dispatch for task or audit logging is allowed.
 - Do not post to any other external service.

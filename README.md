@@ -89,10 +89,11 @@ Main Orchestrator（統合・報告）
 
 ## `/vote` 運用契約
 
-- この repo で Codex の `/vote` はローカル継続用の slash prompt です。現在のタスクをそのまま継続し、GitHub への投稿は行いません。
+- この repo で Codex の `/vote` はローカル継続用の slash prompt です。現在のタスクをそのまま継続し、GitHub issue comment への投稿は行いません。
 - 非自明な `/vote` は `Codex + Claude + GLM` の 3 系統 council を基準とし、3 系統が利用可能なのに 2 lane へ縮退して完了扱いにしてはいけません。
 - 非自明な `/vote` はメジャーな編集前に 3 回の refinement round を回します。順序は `Plan -> Parallel Simulation -> Critical Review -> Problem Fix -> Replan` です。
 - `/vote` で本番確認を求められた場合、local continuation の責務は patch -> push -> workflow_dispatch or rerun -> artifact / log inspection -> PASS 判定まで含みます。status-only で止めてはいけません。
+- 上の production verification 経路で使う `workflow_dispatch` / rerun は verification 用の実行経路であり、GitHub handoff や issue comment 投稿とは別扱いです。
 - `/vote` で `BLOCKED` を返してよいのは、live rerun / verification path を実際に試し、その失敗が current session から解消不能な external blocker だと証拠付きで示せた場合だけです。
 - `/vote` / `/v` でも approval prompt を伴う操作に入る前は、`/kernel` と同じく lane を quiesce し、無理なら `quiescence_timeout` で fail-close します。
 - この repo の `/vote` / `/v` の SSOT は [`.codex/prompts/vote.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/vote.md) と [`.codex/prompts/v.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/v.md) です。
