@@ -670,7 +670,15 @@ jobs:
           ref: ${{ inputs.target_branch }}
           fetch-depth: 1
 
-      - name: Checkout orchestration repository
+      - name: Checkout orchestration repository (same-repo)
+        if: ${{ github.repository == 'cursorvers/fugue-orchestrator' }}
+        uses: actions/checkout@v4
+        with:
+          path: .fugue-orchestrator
+          fetch-depth: 1
+
+      - name: Checkout orchestration repository (external)
+        if: ${{ github.repository != 'cursorvers/fugue-orchestrator' }}
         uses: actions/checkout@v4
         with:
           repository: cursorvers/fugue-orchestrator
