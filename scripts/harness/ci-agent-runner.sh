@@ -47,6 +47,7 @@ raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_glm_model="$(echo "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-2.5-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_xai_model="$(echo "${XAI_MODEL_LATEST:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-2.5-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 # shellcheck source=../lib/safe-eval-policy.sh
@@ -63,17 +64,19 @@ if [[ -x "${model_policy_script}" ]]; then
     --codex-multi-agent-model "${raw_codex_multi_agent_model}" \
     --claude-model "${raw_claude_model}" \
     --glm-model "${raw_glm_model}" \
-    --gemini-model "gemini-2.5-pro" \
+    --gemini-model "${raw_gemini_model}" \
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
     --xai-model "${raw_xai_model}" \
     --format env
   claude_opus_model="${claude_api_model}"
+  gemini_primary_model="${raw_gemini_model}"
   xai_latest_model="${xai_model}"
 else
   claude_opus_model="claude-opus-4-6"
   codex_main_model="gpt-5.4"
   codex_multi_agent_model="gpt-5-codex"
   glm_model="glm-5"
+  gemini_primary_model="gemini-2.5-pro"
   xai_latest_model="grok-4"
   gemini_fallback_model="gemini-2.5-flash"
 fi
@@ -631,11 +634,35 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
       -H "anthropic-version: 2023-06-01" \
       -H "Content-Type: application/json" \
       -d "${req}" || true)"
-    append_attempt "claude" "${m}" "${http_code}"
-    if [[ "${http_code}" == "200" ]]; then
-      break
+      append_attempt "claude" "${m}" "${http_code}"
+      if [[ "${http_code}" == "200" ]]; then
+        break
+      fi
+    done
+  fi
+  if [[ "${http_code}" != "200" && "${http_code}" != "cli:0" && "${AGENT_NAME}" != "claude-opus-assist" && -n "${GEMINI_API_KEY:-}" ]]; then
+    PROVIDER="gemini"
+    effective_provider="gemini"
+    effective_api_url="https://generativelanguage.googleapis.com/v1beta/models"
+    gemini_candidates=("${gemini_primary_model}")
+    if [[ -n "${gemini_fallback_model}" && "${gemini_fallback_model}" != "${gemini_primary_model}" ]]; then
+      gemini_candidates+=("${gemini_fallback_model}")
     fi
-  done
+    for gm in "${gemini_candidates[@]}"; do
+      chosen_model="${gm}"
+      gemini_req="$(jq -n \
+        --arg text "SYSTEM:\n${sys_prompt}\n\nUSER:\n${user_prompt}\n\nReturn ONLY JSON." \
+        '{contents:[{parts:[{text:$text}]}],generationConfig:{temperature:0.1}}')"
+      gemini_url="${effective_api_url}/${gm}:generateContent?key=${GEMINI_API_KEY}"
+      http_code="$(curl -sS -o response.json -w "%{http_code}" "${gemini_url}" \
+        --connect-timeout "${FUGUE_CURL_CONNECT_TIMEOUT}" --max-time "${FUGUE_CURL_MAX_TIME}" --retry "${FUGUE_CURL_RETRY}" ${FUGUE_CURL_RETRY_ALL} \
+        -H "Content-Type: application/json" \
+        -d "${gemini_req}" || true)"
+      append_attempt "gemini" "${gm}" "${http_code}"
+      if [[ "${http_code}" == "200" ]]; then
+        break
+      fi
+    done
   fi
 else
   if [[ "${PROVIDER}" == "glm" ]]; then
@@ -843,6 +870,9 @@ fi
 if [[ "${effective_api_url}" == "copilot-cli" ]]; then
   execution_route="claude-via-copilot-cli"
 fi
+if [[ "${ORIGINAL_PROVIDER}" == "claude" && "${effective_provider}" == "gemini" ]]; then
+  execution_route="claude-via-gemini-fallback"
+fi
 if [[ "${ORIGINAL_PROVIDER}" == "codex" && "${recursive_active}" == "true" ]]; then
   if [[ "${effective_provider}" == "codex" ]]; then
     execution_route="codex-api-recursive"
@@ -865,6 +895,9 @@ result="$(jq -n \
   --arg execution_route "${execution_route}" \
   --arg model_attempts "${attempt_trace}" \
   --arg copilot_failure "${copilot_failure_note}" \
+  --arg fallback_used "$(if [[ "${ORIGINAL_PROVIDER}" == "claude" && ( "${effective_api_url}" == "copilot-cli" || "${effective_provider}" == "gemini" ) ]]; then echo "true"; else echo "false"; fi)" \
+  --arg missing_lane "$(if [[ "${ORIGINAL_PROVIDER}" == "claude" && ( "${effective_api_url}" == "copilot-cli" || "${effective_provider}" == "gemini" ) ]]; then echo "claude"; else echo ""; fi)" \
+  --arg fallback_provider "$(if [[ "${effective_api_url}" == "copilot-cli" ]]; then echo "copilot-cli"; elif [[ "${ORIGINAL_PROVIDER}" == "claude" && "${effective_provider}" == "gemini" ]]; then echo "gemini"; else echo ""; fi)" \
   --arg delegation_mode "$( [[ "${recursive_active}" == "true" ]] && echo "recursive" || echo "flat" )" \
   --arg delegation_depth "$( [[ "${recursive_active}" == "true" ]] && echo "${recursive_depth}" || echo "1" )" \
   --arg delegation_reason "${recursive_reason}" \
@@ -880,6 +913,9 @@ result="$(jq -n \
     skipped:($skipped == "true"),
     model_attempts:$model_attempts,
     copilot_failure:(if $copilot_failure == "" then null else $copilot_failure end),
+    fallback_used:($fallback_used == "true"),
+    missing_lane:(if $missing_lane == "" then null else $missing_lane end),
+    fallback_provider:(if $fallback_provider == "" then null else $fallback_provider end),
     delegation_mode:$delegation_mode,
     delegation_depth:($delegation_depth|tonumber),
     delegation_reason:$delegation_reason,
