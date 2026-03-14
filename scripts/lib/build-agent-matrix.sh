@@ -11,15 +11,16 @@ multi_agent_mode="standard"
 glm_subagent_mode="paired"
 wants_gemini="false"
 wants_xai="false"
-allow_glm_in_subscription="false"
+metered_reason="none"
+allow_glm_in_subscription="true"
 dual_main_signal="false"
 codex_main_model="gpt-5.4"
-codex_multi_agent_model="gpt-5.3-codex-spark"
-claude_opus_model="claude-sonnet-4-6"
-claude_sonnet4_model="claude-sonnet-4-6"
-claude_sonnet6_model="claude-sonnet-4-6"
-glm_model="glm-4.7"
-gemini_model="gemini-3.1-pro"
+codex_multi_agent_model="gpt-5-codex"
+claude_opus_model="claude-opus-4-6"
+claude_sonnet4_model="claude-opus-4-6"
+claude_sonnet6_model="claude-opus-4-6"
+glm_model="glm-5"
+gemini_model="gemini-2.5-pro"
 xai_model="grok-4"
 enable_claude_teams="false"
 claude_teams_member_cap="3"
@@ -58,8 +59,12 @@ while [[ $# -gt 0 ]]; do
       wants_xai="${2:-false}"
       shift 2
       ;;
+    --metered-reason)
+      metered_reason="${2:-none}"
+      shift 2
+      ;;
     --allow-glm-in-subscription)
-      allow_glm_in_subscription="${2:-false}"
+      allow_glm_in_subscription="${2:-true}"
       shift 2
       ;;
     --dual-main-signal)
@@ -71,27 +76,27 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --codex-multi-agent-model)
-      codex_multi_agent_model="${2:-gpt-5.3-codex-spark}"
+      codex_multi_agent_model="${2:-gpt-5-codex}"
       shift 2
       ;;
     --claude-opus-model)
-      claude_opus_model="${2:-claude-sonnet-4-6}"
+      claude_opus_model="${2:-claude-opus-4-6}"
       shift 2
       ;;
     --claude-sonnet4-model)
-      claude_sonnet4_model="${2:-claude-sonnet-4-6}"
+      claude_sonnet4_model="${2:-claude-opus-4-6}"
       shift 2
       ;;
     --claude-sonnet6-model)
-      claude_sonnet6_model="${2:-claude-sonnet-4-6}"
+      claude_sonnet6_model="${2:-claude-opus-4-6}"
       shift 2
       ;;
     --glm-model)
-      glm_model="${2:-glm-4.7}"
+      glm_model="${2:-glm-5}"
       shift 2
       ;;
     --gemini-model)
-      gemini_model="${2:-gemini-3.1-pro}"
+      gemini_model="${2:-gemini-2.5-pro}"
       shift 2
       ;;
     --xai-model)
@@ -126,15 +131,16 @@ Options:
   --glm-subagent-mode VALUE         off|paired|symphony
   --wants-gemini VALUE              true|false
   --wants-xai VALUE                 true|false
-  --allow-glm-in-subscription VALUE true|false (local hybrid mode switch)
+  --metered-reason VALUE            none|overflow|tie-break
+  --allow-glm-in-subscription VALUE true|false (default: true; disable only for simulation/special cases)
   --dual-main-signal VALUE          true|false (include both codex/claude main signal lanes)
   --codex-main-model VALUE          default: gpt-5.4
-  --codex-multi-agent-model VALUE   default: gpt-5.3-codex-spark
-  --claude-opus-model VALUE         default: claude-sonnet-4-6
-  --claude-sonnet4-model VALUE      default: claude-sonnet-4-6
-  --claude-sonnet6-model VALUE      default: claude-sonnet-4-6
-  --glm-model VALUE                 default: glm-4.7
-  --gemini-model VALUE              default: gemini-3.1-pro
+  --codex-multi-agent-model VALUE   default: gpt-5-codex
+  --claude-opus-model VALUE         default: claude-opus-4-6
+  --claude-sonnet4-model VALUE      default: claude-opus-4-6
+  --claude-sonnet6-model VALUE      default: claude-opus-4-6
+  --glm-model VALUE                 default: glm-5
+  --gemini-model VALUE              default: gemini-2.5-pro
   --xai-model VALUE                 default: grok-4
   --enable-claude-teams VALUE       true|false
   --claude-teams-member-cap VALUE   default: 3
@@ -194,6 +200,10 @@ if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "
 fi
 wants_gemini="$(normalize_bool "${wants_gemini}")"
 wants_xai="$(normalize_bool "${wants_xai}")"
+metered_reason="$(lower_trim "${metered_reason}")"
+if [[ "${metered_reason}" != "overflow" && "${metered_reason}" != "tie-break" ]]; then
+  metered_reason="none"
+fi
 allow_glm_in_subscription="$(normalize_bool "${allow_glm_in_subscription}")"
 dual_main_signal="$(normalize_bool "${dual_main_signal}")"
 enable_claude_teams="$(normalize_bool "${enable_claude_teams}")"
@@ -206,9 +216,13 @@ if (( 10#${claude_teams_member_cap} < 2 )); then
 elif (( 10#${claude_teams_member_cap} > 4 )); then
   claude_teams_member_cap="4"
 fi
-claude_teams_max_invocations="$(printf '%s' "${claude_teams_max_invocations}" | tr -cd '0-9')"
-if [[ -z "${claude_teams_max_invocations}" || 10#${claude_teams_max_invocations} != 1 ]]; then
+claude_teams_max_invocations="$(printf '%s' "${claude_teams_max_invocations}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if ! [[ "${claude_teams_max_invocations}" =~ ^[0-9]+$ ]]; then
   claude_teams_max_invocations="1"
+elif (( 10#${claude_teams_max_invocations} < 1 )); then
+  claude_teams_max_invocations="1"
+elif (( 10#${claude_teams_max_invocations} > 3 )); then
+  claude_teams_max_invocations="3"
 fi
 # shellcheck source=safe-eval-policy.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/safe-eval-policy.sh"
@@ -235,22 +249,22 @@ else
     codex_main_model="gpt-5.4"
   fi
   if [[ -z "${codex_multi_agent_model}" ]]; then
-    codex_multi_agent_model="gpt-5.3-codex-spark"
+    codex_multi_agent_model="gpt-5-codex"
   fi
   if [[ -z "${claude_opus_model}" ]]; then
-    claude_opus_model="claude-sonnet-4-6"
+    claude_opus_model="claude-opus-4-6"
   fi
   if [[ -z "${claude_sonnet4_model}" ]]; then
-    claude_sonnet4_model="claude-sonnet-4-6"
+    claude_sonnet4_model="claude-opus-4-6"
   fi
   if [[ -z "${claude_sonnet6_model}" ]]; then
-    claude_sonnet6_model="claude-sonnet-4-6"
+    claude_sonnet6_model="claude-opus-4-6"
   fi
   if [[ -z "${glm_model}" ]]; then
-    glm_model="glm-4.7"
+    glm_model="glm-5"
   fi
   if [[ -z "${gemini_model}" ]]; then
-    gemini_model="gemini-3.1-pro"
+    gemini_model="gemini-2.5-pro"
   fi
   if [[ -z "${xai_model}" ]]; then
     xai_model="grok-4"
@@ -263,6 +277,11 @@ if [[ "${engine}" != "subscription" || "${allow_glm_in_subscription}" == "true" 
 fi
 
 if [[ "${engine}" == "subscription" && "${allow_glm_in_subscription}" != "true" ]]; then
+  wants_gemini="false"
+  wants_xai="false"
+fi
+
+if [[ "${metered_reason}" == "none" ]]; then
   wants_gemini="false"
   wants_xai="false"
 fi
@@ -288,6 +307,7 @@ matrix="$(jq -cn \
   --arg glm_model "${glm_model}" \
   --arg gemini_model "${gemini_model}" \
   --arg xai_model "${xai_model}" \
+  --arg metered_reason "${metered_reason}" \
   --argjson enable_claude_teams "$( [[ "${enable_claude_teams}" == "true" ]] && echo true || echo false )" \
   --argjson claude_teams_member_cap "${claude_teams_member_cap}" \
   --argjson claude_teams_max_invocations "${claude_teams_max_invocations}" \
@@ -305,6 +325,7 @@ matrix="$(jq -cn \
 
   # --- Lane constructors ---
   def L(n;p;u;m;r): {name:n, provider:p, api_url:u, model:m, agent_role:r};
+  def Lm(n;p;u;m;r;reason): L(n;p;u;m;r) + {cost_tier:"metered", metered_reason:reason};
   def Ld(n;p;u;m;r;d): L(n;p;u;m;r) + {agent_directive:d};
   def codex(n;r): L(n; "codex"; codex_api; $codex_multi_agent_model; r);
   def codex_sub(n;r): L(n; "codex"; "subscription-cli"; $codex_multi_agent_model; r);
@@ -330,7 +351,12 @@ matrix="$(jq -cn \
         codex_sub("codex-general-critic";"general-critic") ]
     end;
 
-  {include: base}
+  {include: base,
+   provider_priority:["codex","claude","glm","copilot","gemini","xai"],
+   default_council:["codex","claude","glm"],
+   copilot_policy:"low-cost-fallback-only",
+   metered_reason:$metered_reason,
+   metered_policy:"overflow-or-tie-break-only"}
   # GLM orchestration subagent
   | if ($use_glm_baseline and $glm_subagent_mode != "off") then
       .include += [glmd("glm-orchestration-subagent";"orchestration-assistant";
@@ -367,11 +393,11 @@ matrix="$(jq -cn \
       .include += [codex("codex-orchestration-assist";"orchestration-assistant")]
     else . end
   # Optional provider lanes
-  | if $wants_gemini then
-      .include += [L("gemini-visual-reviewer";"gemini";gemini_api;$gemini_model;"ui-reviewer")]
+  | if ($wants_gemini and ($metered_reason == "overflow" or $metered_reason == "tie-break")) then
+      .include += [Lm("gemini-visual-reviewer";"gemini";gemini_api;$gemini_model;"ui-reviewer";$metered_reason)]
     else . end
-  | if $wants_xai then
-      .include += [L("xai-realtime-info";"xai";xai_api;$xai_model;"realtime-info")]
+  | if ($wants_xai and ($metered_reason == "overflow" or $metered_reason == "tie-break")) then
+      .include += [Lm("xai-realtime-info";"xai";xai_api;$xai_model;"realtime-info";$metered_reason)]
     else . end
   # Enhanced/Max mode lanes
   | if enhanced_or_max then
@@ -423,6 +449,7 @@ if [[ "${format}" == "env" ]]; then
   printf 'main_signal_lane=%q\n' "${main_signal_lane}"
   printf 'main_signal_lanes=%q\n' "$(jq -cn --arg primary "${main_signal_lane}" --arg secondary "${secondary_main_signal_lane}" --argjson dual "$( [[ "${dual_main_signal}" == "true" ]] && echo true || echo false )" '[$primary] + (if $dual and ($secondary|length)>0 then [$secondary] else [] end)')"
   printf 'use_glm_baseline=%q\n' "${use_glm_baseline}"
+  printf 'metered_reason=%q\n' "${metered_reason}"
   exit 0
 fi
 
@@ -433,10 +460,12 @@ jq -cn \
   --arg secondary_main_signal_lane "${secondary_main_signal_lane}" \
   --argjson dual_main_signal "$( [[ "${dual_main_signal}" == "true" ]] && echo true || echo false )" \
   --argjson use_glm_baseline "$( [[ "${use_glm_baseline}" == "true" ]] && echo true || echo false )" \
+  --arg metered_reason "${metered_reason}" \
   '{
     matrix:$matrix,
     lanes:$lanes,
     main_signal_lane:$main_signal_lane,
     main_signal_lanes:([$main_signal_lane] + (if $dual_main_signal and ($secondary_main_signal_lane|length)>0 then [$secondary_main_signal_lane] else [] end)),
-    use_glm_baseline:$use_glm_baseline
+    use_glm_baseline:$use_glm_baseline,
+    metered_reason:$metered_reason
   }'

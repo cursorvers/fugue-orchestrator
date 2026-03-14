@@ -60,6 +60,71 @@ on:
         required: false
         type: string
         default: "none"
+      kernel_handoff_mode:
+        description: "True when the handoff represents kernel->vote continuation mode"
+        required: false
+        type: string
+        default: "false"
+      content_hint_applied:
+        description: "Resolved content hint snapshot"
+        required: false
+        type: string
+        default: "false"
+      content_action_hint:
+        description: "Resolved content action snapshot"
+        required: false
+        type: string
+        default: ""
+      content_skill_hint:
+        description: "Resolved content skill snapshot"
+        required: false
+        type: string
+        default: ""
+      content_reason:
+        description: "Resolved content reason snapshot"
+        required: false
+        type: string
+        default: ""
+      cost_provider_priority:
+        description: "Cost policy provider priority snapshot"
+        required: false
+        type: string
+        default: ""
+      cost_copilot_policy:
+        description: "Cost policy Copilot snapshot"
+        required: false
+        type: string
+        default: ""
+      cost_metered_policy:
+        description: "Cost policy metered-provider snapshot"
+        required: false
+        type: string
+        default: ""
+      metered_reason:
+        description: "Metered provider reason snapshot"
+        required: false
+        type: string
+        default: "none"
+      fallback_used:
+        description: "Fallback-used snapshot"
+        required: false
+        type: string
+        default: "false"
+      missing_lane:
+        description: "Missing-lane snapshot"
+        required: false
+        type: string
+        default: "none"
+      fallback_provider:
+        description: "Fallback-provider snapshot"
+        required: false
+        type: string
+        default: "none"
+      fallback_reason:
+        description: "Fallback-reason snapshot"
+        required: false
+        type: string
+        default: ""
       dispatch_nonce:
         description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
         required: false
@@ -156,6 +221,15 @@ jobs:
       trust_subject: ${{ steps.ctx.outputs.trust_subject }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
       handoff_target: ${{ steps.ctx.outputs.handoff_target }}
+      kernel_handoff_mode: ${{ steps.ctx.outputs.kernel_handoff_mode }}
+      cost_provider_priority: ${{ steps.ctx.outputs.cost_provider_priority }}
+      cost_copilot_policy: ${{ steps.ctx.outputs.cost_copilot_policy }}
+      cost_metered_policy: ${{ steps.ctx.outputs.cost_metered_policy }}
+      metered_reason: ${{ steps.ctx.outputs.metered_reason }}
+      fallback_used: ${{ steps.ctx.outputs.fallback_used }}
+      missing_lane: ${{ steps.ctx.outputs.missing_lane }}
+      fallback_provider: ${{ steps.ctx.outputs.fallback_provider }}
+      fallback_reason: ${{ steps.ctx.outputs.fallback_reason }}
       intake_source: ${{ steps.ctx.outputs.intake_source }}
       vote_command: ${{ steps.ctx.outputs.vote_command }}
       workspace_hint_applied: ${{ steps.ctx.outputs.workspace_hint_applied }}
@@ -172,6 +246,10 @@ jobs:
       freee_suggested_phases: ${{ steps.ctx.outputs.freee_suggested_phases }}
       freee_readonly_actions: ${{ steps.ctx.outputs.freee_readonly_actions }}
       freee_approval_required_actions: ${{ steps.ctx.outputs.freee_approval_required_actions }}
+      content_hint_applied: ${{ steps.ctx.outputs.content_hint_applied }}
+      content_action_hint: ${{ steps.ctx.outputs.content_action_hint }}
+      content_skill_hint: ${{ steps.ctx.outputs.content_skill_hint }}
+      content_reason: ${{ steps.ctx.outputs.content_reason }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
@@ -191,6 +269,19 @@ jobs:
           IMPLEMENT_REQUEST_INPUT: ${{ github.event.inputs.implement_request || '' }}
           IMPLEMENT_CONFIRMED_INPUT: ${{ github.event.inputs.implement_confirmed || '' }}
           VOTE_COMMAND_INPUT: ${{ github.event.inputs.vote_command || 'false' }}
+          KERNEL_HANDOFF_MODE_INPUT: ${{ github.event.inputs.kernel_handoff_mode || 'false' }}
+          CONTENT_HINT_APPLIED_INPUT: ${{ github.event.inputs.content_hint_applied || 'false' }}
+          CONTENT_ACTION_HINT_INPUT: ${{ github.event.inputs.content_action_hint || '' }}
+          CONTENT_SKILL_HINT_INPUT: ${{ github.event.inputs.content_skill_hint || '' }}
+          CONTENT_REASON_INPUT: ${{ github.event.inputs.content_reason || '' }}
+          COST_PROVIDER_PRIORITY_INPUT: ${{ github.event.inputs.cost_provider_priority || '' }}
+          COST_COPILOT_POLICY_INPUT: ${{ github.event.inputs.cost_copilot_policy || '' }}
+          COST_METERED_POLICY_INPUT: ${{ github.event.inputs.cost_metered_policy || '' }}
+          METERED_REASON_INPUT: ${{ github.event.inputs.metered_reason || 'none' }}
+          FALLBACK_USED_INPUT: ${{ github.event.inputs.fallback_used || 'false' }}
+          MISSING_LANE_INPUT: ${{ github.event.inputs.missing_lane || 'none' }}
+          FALLBACK_PROVIDER_INPUT: ${{ github.event.inputs.fallback_provider || 'none' }}
+          FALLBACK_REASON_INPUT: ${{ github.event.inputs.fallback_reason || '' }}
           HANDOFF_TARGET_INPUT: ${{ github.event.inputs.handoff_target || 'kernel' }}
           INTAKE_SOURCE_INPUT: ${{ github.event.inputs.intake_source || '' }}
           ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
@@ -212,7 +303,7 @@ jobs:
           CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT || '90' }}
           CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
           CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
-          CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-sonnet-4-6' }}
+          CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-opus-4-6' }}
           CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
           DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
@@ -550,7 +641,19 @@ jobs:
       trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
       allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
       extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
+      requested_execution_mode: "${{ github.event.inputs.requested_execution_mode || '' }}"
+      implement_request: "${{ needs.ctx.outputs.has_implement_request }}"
+      implement_confirmed: "${{ needs.ctx.outputs.has_implement_confirmed }}"
       vote_command: "${{ needs.ctx.outputs.vote_command }}"
+      kernel_handoff_mode: "${{ needs.ctx.outputs.kernel_handoff_mode }}"
+      cost_provider_priority: "${{ needs.ctx.outputs.cost_provider_priority }}"
+      cost_copilot_policy: "${{ needs.ctx.outputs.cost_copilot_policy }}"
+      cost_metered_policy: "${{ needs.ctx.outputs.cost_metered_policy }}"
+      metered_reason: "${{ needs.ctx.outputs.metered_reason }}"
+      fallback_used: "${{ needs.ctx.outputs.fallback_used }}"
+      missing_lane: "${{ needs.ctx.outputs.missing_lane }}"
+      fallback_provider: "${{ needs.ctx.outputs.fallback_provider }}"
+      fallback_reason: "${{ needs.ctx.outputs.fallback_reason }}"
       dispatch_nonce: "${{ github.event.inputs.dispatch_nonce || github.run_id }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -777,6 +880,7 @@ jobs:
       content_skill_hint: "${{ needs.ctx.outputs.content_skill_hint }}"
       content_reason: "${{ needs.ctx.outputs.content_reason }}"
       vote_command: "${{ needs.ctx.outputs.vote_command }}"
+      council_force_missing_provider: "${{ github.event.inputs.council_force_missing_provider || 'none' }}"
       execution_mode: "${{ needs.execution-policy.outputs.codex_execution_mode }}"
     secrets:
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}

@@ -76,12 +76,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
 
 LATEST_CODEX_MAIN="gpt-5.4"
 FALLBACK_CODEX_MAIN="gpt-5-codex"
-LATEST_CODEX_MULTI_DEFAULT="gpt-5.3-codex-spark"
-LATEST_CLAUDE_CLI_DEFAULT="claude-sonnet-4-6"
-LATEST_CLAUDE_API_DEFAULT="claude-sonnet-4-0"
-LATEST_GLM_DEFAULT="glm-4.7"
-LATEST_GEMINI_PRIMARY="gemini-3.1-pro"
-LATEST_GEMINI_FALLBACK="gemini-3-flash"
+LATEST_CODEX_MULTI_DEFAULT="${FALLBACK_CODEX_MAIN}"
+LATEST_CLAUDE_CLI_DEFAULT="claude-opus-4-6"
+LATEST_CLAUDE_API_DEFAULT="claude-opus-4-6"
+LATEST_GLM_DEFAULT="glm-5"
+LATEST_GEMINI_PRIMARY="gemini-2.5-pro"
+LATEST_GEMINI_FALLBACK="gemini-2.5-flash"
 LATEST_XAI_DEFAULT="grok-4"
 
 codex_main_raw="$(lower_trim "${codex_main_model}")"
@@ -114,7 +114,7 @@ if [[ -n "${codex_main_raw}" ]]; then
 fi
 
 if [[ -n "${codex_multi_raw}" ]]; then
-  if [[ "${codex_multi_raw}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
+  if [[ "${codex_multi_raw}" == "${LATEST_CODEX_MAIN}" || "${codex_multi_raw}" == "${FALLBACK_CODEX_MAIN}" || "${codex_multi_raw}" =~ ^gpt-5(\.[0-9]+)?-codex-spark$ ]]; then
     normalized_codex_multi="${codex_multi_raw}"
   else
     adjusted="true"
@@ -122,13 +122,10 @@ if [[ -n "${codex_multi_raw}" ]]; then
   fi
 fi
 
-# Claude uses different "safe defaults" across execution engines:
-# - CLI/subscription flows keep the Codex-compatible alias in use today.
-# - Direct Anthropic API flows use the official API alias.
+# Claude is pinned to the latest Opus track across CLI and API execution.
 if [[ -n "${claude_raw}" ]]; then
-  if [[ "${claude_raw}" == "${LATEST_CLAUDE_CLI_DEFAULT}" ]]; then
+  if [[ "${claude_raw}" == "${LATEST_CLAUDE_CLI_DEFAULT}" || "${claude_raw}" == "${LATEST_CLAUDE_API_DEFAULT}" ]]; then
     normalized_claude_cli="${claude_raw}"
-  elif [[ "${claude_raw}" == "${LATEST_CLAUDE_API_DEFAULT}" || "${claude_raw}" =~ ^claude-sonnet-4-[0-9]{8}$ ]]; then
     normalized_claude_api="${claude_raw}"
   else
     adjusted="true"
@@ -137,8 +134,8 @@ if [[ -n "${claude_raw}" ]]; then
 fi
 
 if [[ -n "${glm_raw}" ]]; then
-  if [[ "${glm_raw}" == "glm-5" || "${glm_raw}" == "glm-4.7" || "${glm_raw}" == "glm-4.7-flash" || "${glm_raw}" == "glm-4.7-flashx" || "${glm_raw}" == "glm-4.6" || "${glm_raw}" == "glm-4.5" || "${glm_raw}" == "glm-4.5-air" ]]; then
-    normalized_glm="${glm_raw}"
+  if [[ "${glm_raw}" == "glm-5" || "${glm_raw}" == "glm-5.0" ]]; then
+    normalized_glm="${LATEST_GLM_DEFAULT}"
   else
     adjusted="true"
     adjustments+=("glm:${glm_raw}->${LATEST_GLM_DEFAULT}")
@@ -146,7 +143,7 @@ if [[ -n "${glm_raw}" ]]; then
 fi
 
 if [[ -n "${gemini_raw}" ]]; then
-  if [[ "${gemini_raw}" == "gemini-3.1-pro" || "${gemini_raw}" == "gemini-3-flash" ]]; then
+  if [[ "${gemini_raw}" == "gemini-2.5-pro" || "${gemini_raw}" == "gemini-2.5-flash" || "${gemini_raw}" == "gemini-2.5-flash-lite" ]]; then
     normalized_gemini="${gemini_raw}"
   else
     adjusted="true"
@@ -155,7 +152,7 @@ if [[ -n "${gemini_raw}" ]]; then
 fi
 
 if [[ -n "${gemini_fallback_raw}" ]]; then
-  if [[ "${gemini_fallback_raw}" == "gemini-3.1-pro" || "${gemini_fallback_raw}" == "gemini-3-flash" ]]; then
+  if [[ "${gemini_fallback_raw}" == "gemini-2.5-flash" || "${gemini_fallback_raw}" == "gemini-2.5-flash-lite" ]]; then
     normalized_gemini_fallback="${gemini_fallback_raw}"
   else
     adjusted="true"

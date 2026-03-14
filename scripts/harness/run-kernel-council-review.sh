@@ -249,7 +249,7 @@ bash "${build_matrix_script}" \
   --claude-opus-model "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" \
   --claude-sonnet4-model "${CLAUDE_SONNET4_MODEL:-claude-opus-4-6}" \
   --claude-sonnet6-model "${CLAUDE_SONNET6_MODEL:-claude-opus-4-6}" \
-  --gemini-model "${GEMINI_MODEL:-gemini-3.1-pro-preview}" \
+  --gemini-model "${GEMINI_MODEL:-gemini-2.5-pro}" \
   --xai-model "${XAI_MODEL_LATEST:-grok-4}" \
   --format json > "${matrix_build_stdout}" 2> "${matrix_build_stderr}"
 matrix_build_rc=$?
@@ -335,7 +335,7 @@ run_lane() {
     CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" \
     GLM_MODEL="${GLM_MODEL:-glm-5}" \
     XAI_MODEL_LATEST="${XAI_MODEL_LATEST:-grok-4}" \
-    GEMINI_FALLBACK_MODEL="${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" \
+    GEMINI_FALLBACK_MODEL="${GEMINI_FALLBACK_MODEL:-gemini-2.5-flash}" \
     COPILOT_GITHUB_TOKEN="${COPILOT_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}" \
     COPILOT_CLI_BIN="${COPILOT_CLI_BIN:-copilot}" \
     HAS_COPILOT_CLI="${HAS_COPILOT_CLI:-false}" \

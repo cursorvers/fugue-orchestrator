@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${script_dir}/../lib/shadow-continuity-policy.sh"
+
 # Local orchestration runner (no GitHub Actions runner required).
 # - codex/claude lanes: subscription CLI runner
 # - glm lanes: API harness runner
@@ -17,7 +20,7 @@ MAX_PARALLEL="${MAX_PARALLEL:-6}"
 MIN_CONSENSUS_LANES="${MIN_CONSENSUS_LANES:-${FUGUE_MIN_CONSENSUS_LANES:-6}}"
 POST_ISSUE_COMMENT="${POST_ISSUE_COMMENT:-false}"
 CODEX_MAIN_MODEL="${CODEX_MAIN_MODEL:-gpt-5.4}"
-CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}"
+CODEX_MULTI_AGENT_MODEL="${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}"
 WITH_LINKED_SYSTEMS="${WITH_LINKED_SYSTEMS:-false}"
 LINKED_MODE="${LINKED_MODE:-smoke}"
 LINKED_SYSTEMS="${LINKED_SYSTEMS:-all}"
@@ -80,6 +83,8 @@ Environment:
                          true|false (default: true; when true + assist=claude, high-risk or ambiguity-signaled tasks require claude-opus-assist success)
   FUGUE_LOCAL_REQUIRE_BASELINE_TRIO
                          true|false (default: true; require codex+claude+glm successful participation)
+  FUGUE_LOCAL_ALLOW_CLAUDE_SHADOW_CONTINUITY
+                         true|false (default: true; allow successful Claude substitute lanes to satisfy local continuity gates)
   FUGUE_LOCAL_AMBIGUITY_SIGNAL
                          true|false (default: false; explicit local ambiguity signal used by complex-gate)
   FUGUE_DUAL_MAIN_SIGNAL
@@ -290,9 +295,11 @@ MATRIX_BUILDER="${ROOT_DIR}/scripts/lib/build-agent-matrix.sh"
 MODEL_POLICY="${ROOT_DIR}/scripts/lib/model-policy.sh"
 WORKFLOW_RISK_POLICY="${ROOT_DIR}/scripts/lib/workflow-risk-policy.sh"
 CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
+ORCHESTRATOR_POLICY="${ROOT_DIR}/scripts/lib/orchestrator-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
-GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
+GOOGLEWORKSPACE_KERNEL_POLICY="${GOOGLEWORKSPACE_KERNEL_POLICY:-${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json}"
+FREEE_KERNEL_POLICY="${FREEE_KERNEL_POLICY:-${ROOT_DIR}/config/integrations/freee-kernel-policy.json}"
 PRIMARY_HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/local/pulse-primary-heartbeat.sh"
 if [[ ! -x "${SUBSCRIPTION_RUNNER}" || ! -x "${HARNESS_RUNNER}" || ! -x "${MATRIX_BUILDER}" ]]; then
   echo "Error: required harness runners are missing/executable flags are not set." >&2
@@ -304,6 +311,10 @@ if [[ ! -x "${MODEL_POLICY}" ]]; then
 fi
 if [[ ! -x "${WORKFLOW_RISK_POLICY}" ]]; then
   echo "Error: required workflow risk policy script is missing or not executable: ${WORKFLOW_RISK_POLICY}" >&2
+  exit 2
+fi
+if [[ ! -x "${ORCHESTRATOR_POLICY}" ]]; then
+  echo "Error: required orchestrator policy script is missing or not executable: ${ORCHESTRATOR_POLICY}" >&2
   exit 2
 fi
 if [[ ! -x "${CLAUDE_TEAMS_POLICY}" ]]; then
@@ -462,10 +473,16 @@ workspace_hint_json="$("${ORCHESTRATOR_NL_HINTS}" \
   --body "${ISSUE_BODY}" \
   --format json)"
 workspace_context_file="${RUN_DIR}/googleworkspace-context.json"
+freee_context_file="${RUN_DIR}/freee-context.json"
+freee_policy_available="false"
 workspace_hint_applied="$(echo "${workspace_hint_json}" | jq -r '.workspace_hint_applied // false')"
 workspace_action_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_action_hint // ""')"
 workspace_domain_hint="$(echo "${workspace_hint_json}" | jq -r '.workspace_domain_hint // ""')"
 workspace_reason="$(echo "${workspace_hint_json}" | jq -r '.workspace_reason // ""')"
+freee_hint_applied="$(echo "${workspace_hint_json}" | jq -r '.freee_hint_applied // false')"
+freee_action_hint="$(echo "${workspace_hint_json}" | jq -r '.freee_action_hint // ""')"
+freee_domain_hint="$(echo "${workspace_hint_json}" | jq -r '.freee_domain_hint // ""')"
+freee_reason="$(echo "${workspace_hint_json}" | jq -r '.freee_reason // ""')"
 jq -cn \
   --argjson hints "${workspace_hint_json}" \
   --slurpfile policy "${GOOGLEWORKSPACE_KERNEL_POLICY}" \
@@ -495,18 +512,75 @@ jq -cn \
        policy_file: "config/integrations/googleworkspace-kernel-policy.json"
      }' > "${workspace_context_file}"
 
+if [[ -f "${FREEE_KERNEL_POLICY}" ]]; then
+  freee_policy_available="true"
+  jq -cn \
+    --argjson hints "${workspace_hint_json}" \
+    --slurpfile policy "${FREEE_KERNEL_POLICY}" \
+    '($hints.freee_action_hint | split(",") | map(select(length > 0))) as $actions
+     | ($hints.freee_domain_hint | split(",") | map(select(length > 0))) as $domains
+     | {
+         freee_hint_applied: ($hints.freee_hint_applied // false),
+         freee_action_hint: $hints.freee_action_hint,
+         freee_domain_hint: $hints.freee_domain_hint,
+         freee_reason: $hints.freee_reason,
+         suggested_actions: $actions,
+         suggested_domains: $domains,
+         suggested_phases: (
+           $actions
+           | map($policy[0].action_policy[.]?.default_phase)
+           | map(select(. != null))
+           | unique
+         ),
+         readonly_actions: (
+           $actions
+           | map(select(($policy[0].action_policy[.]?.side_effect // false) | not))
+         ),
+         approval_required_actions: (
+           $actions
+           | map(select(($policy[0].action_policy[.]?.side_effect // false) == true))
+         ),
+         execution_status: ($policy[0].execution_status // "contract-only-staged"),
+         policy_available: true,
+         policy_file: "config/integrations/freee-kernel-policy.json"
+       }' > "${freee_context_file}"
+else
+  jq -cn \
+    --argjson hints "${workspace_hint_json}" \
+    --arg policy_file "${FREEE_KERNEL_POLICY}" \
+    '($hints.freee_action_hint | split(",") | map(select(length > 0))) as $actions
+     | ($hints.freee_domain_hint | split(",") | map(select(length > 0))) as $domains
+     | {
+         freee_hint_applied: ($hints.freee_hint_applied // false),
+         freee_action_hint: $hints.freee_action_hint,
+         freee_domain_hint: $hints.freee_domain_hint,
+         freee_reason: $hints.freee_reason,
+         suggested_actions: $actions,
+         suggested_domains: $domains,
+         suggested_phases: [],
+         readonly_actions: [],
+         approval_required_actions: [],
+         execution_status: "policy-missing",
+         policy_available: false,
+         policy_file: $policy_file
+       }' > "${freee_context_file}"
+fi
+freee_suggested_phases="$(jq -r '.suggested_phases | join(",")' "${freee_context_file}")"
+freee_readonly_actions="$(jq -r '.readonly_actions | join(",")' "${freee_context_file}")"
+freee_approval_required_actions="$(jq -r '.approval_required_actions | join(",")' "${freee_context_file}")"
+
 strict_main="${FUGUE_STRICT_MAIN_CODEX_MODEL:-false}"
 strict_opus="${FUGUE_STRICT_OPUS_ASSIST_DIRECT:-false}"
-claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}"
+claude_opus_model="${FUGUE_CLAUDE_OPUS_MODEL:-claude-opus-4-6}"
 # shellcheck source=../lib/safe-eval-policy.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/safe-eval-policy.sh"
 safe_eval_policy "${MODEL_POLICY}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --claude-model "${claude_opus_model}" \
-  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-4.7}}" \
-  --gemini-model "gemini-3.1-pro" \
-  --gemini-fallback-model "gemini-3-flash" \
+  --glm-model "${GLM_MODEL:-${FUGUE_GLM_MODEL:-glm-5}}" \
+  --gemini-model "gemini-2.5-pro" \
+  --gemini-fallback-model "gemini-2.5-flash" \
   --xai-model "grok-4" \
   --format env
 CODEX_MAIN_MODEL="${codex_main_model}"
@@ -514,11 +588,41 @@ CODEX_MULTI_AGENT_MODEL="${codex_multi_agent_model}"
 GLM_MODEL="${glm_model}"
 claude_opus_model="${claude_cli_model}"
 subscription_timeout="${FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}"
-claude_assist_policy="${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-hybrid}"
+claude_assist_policy="${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-direct}"
 claude_rate_limit_state="$(echo "${FUGUE_CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${claude_rate_limit_state}" != "ok" && "${claude_rate_limit_state}" != "degraded" && "${claude_rate_limit_state}" != "exhausted" ]]; then
   claude_rate_limit_state="ok"
 fi
+claude_main_assist_policy="$(echo "${FUGUE_CLAUDE_MAIN_ASSIST_POLICY:-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
+  claude_main_assist_policy="codex"
+fi
+claude_role_policy="$(echo "${FUGUE_CLAUDE_ROLE_POLICY:-flex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_role_policy}" != "sub-only" && "${claude_role_policy}" != "flex" ]]; then
+  claude_role_policy="flex"
+fi
+claude_degraded_assist_policy="$(echo "${FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY:-claude}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_degraded_assist_policy}" != "codex" && "${claude_degraded_assist_policy}" != "none" && "${claude_degraded_assist_policy}" != "claude" ]]; then
+  claude_degraded_assist_policy="claude"
+fi
+local_force_claude="$(echo "${FUGUE_LOCAL_FORCE_CLAUDE:-${FORCE_CLAUDE:-false}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_force_claude}" != "true" ]]; then
+  local_force_claude="false"
+fi
+requested_main_provider="${MAIN_PROVIDER}"
+requested_assist_provider="${ASSIST_PROVIDER}"
+safe_eval_policy "${ORCHESTRATOR_POLICY}" \
+  --main "${requested_main_provider}" \
+  --assist "${requested_assist_provider}" \
+  --default-main "${requested_main_provider}" \
+  --default-assist "${requested_assist_provider}" \
+  --claude-state "${claude_rate_limit_state}" \
+  --force-claude "${local_force_claude}" \
+  --assist-policy "${claude_main_assist_policy}" \
+  --claude-role-policy "${claude_role_policy}" \
+  --degraded-assist-policy "${claude_degraded_assist_policy}"
+MAIN_PROVIDER="${resolved_main}"
+ASSIST_PROVIDER="${resolved_assist}"
 local_require_claude_assist="$(echo "${FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${local_require_claude_assist}" != "true" ]]; then
   local_require_claude_assist="false"
@@ -531,6 +635,28 @@ local_require_baseline_trio="$(echo "${FUGUE_LOCAL_REQUIRE_BASELINE_TRIO:-true}"
 if [[ "${local_require_baseline_trio}" != "false" ]]; then
   local_require_baseline_trio="true"
 fi
+local_allow_claude_shadow_continuity="$(echo "${FUGUE_LOCAL_ALLOW_CLAUDE_SHADOW_CONTINUITY:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_allow_claude_shadow_continuity}" != "false" ]]; then
+  local_allow_claude_shadow_continuity="true"
+fi
+local_wants_gemini="$(echo "${FUGUE_LOCAL_WANTS_GEMINI:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_wants_gemini}" != "true" ]]; then
+  local_wants_gemini="false"
+fi
+local_wants_xai="$(echo "${FUGUE_LOCAL_WANTS_XAI:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_wants_xai}" != "true" ]]; then
+  local_wants_xai="false"
+fi
+local_metered_reason="$(echo "${FUGUE_LOCAL_METERED_REASON:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${local_metered_reason}" != "overflow" && "${local_metered_reason}" != "tie-break" ]]; then
+  local_metered_reason="none"
+fi
+vote_command_input="$(echo "${VOTE_COMMAND_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${vote_command_input}" != "true" ]]; then
+  vote_command_input="false"
+else
+  local_require_baseline_trio="true"
+fi
 local_ambiguity_signal="$(echo "${FUGUE_LOCAL_AMBIGUITY_SIGNAL:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${local_ambiguity_signal}" != "true" ]]; then
   local_ambiguity_signal="false"
@@ -540,7 +666,7 @@ safe_eval_policy "${WORKFLOW_RISK_POLICY}" \
   --body "${ISSUE_BODY}" \
   --labels "${ISSUE_LABELS_CSV}" \
   --has-implement "false" \
-  --orchestration-profile "codex-full"
+  --orchestration-profile "$(if [[ "${MAIN_PROVIDER}" == "claude" ]]; then printf '%s' "claude-light"; else printf '%s' "codex-full"; fi)"
 issue_risk_tier="${risk_tier}"
 issue_risk_score="${risk_score}"
 issue_risk_reasons="${risk_reasons}"
@@ -590,8 +716,9 @@ matrix_payload="$("${MATRIX_BUILDER}" \
   --claude-teams-member-cap "${claude_teams_member_cap:-3}" \
   --claude-teams-max-invocations "${claude_teams_max_invocations:-1}" \
   --allow-glm-in-subscription "true" \
-  --wants-gemini "false" \
-  --wants-xai "false" \
+  --wants-gemini "${local_wants_gemini}" \
+  --wants-xai "${local_wants_xai}" \
+  --metered-reason "${local_metered_reason}" \
   --codex-main-model "${CODEX_MAIN_MODEL}" \
   --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
   --glm-model "${GLM_MODEL}" \
@@ -614,13 +741,14 @@ jq -c '.include[]' "${matrix_file}" > "${lane_jobs_file}"
 
 run_lane() {
   local lane_json="$1"
-  local lane_name provider model role directive lane_work lane_result lane_log lane_err lane_session_id session_file
+  local lane_name provider model role directive metered_reason lane_work lane_result lane_log lane_err lane_session_id session_file
 
   lane_name="$(echo "${lane_json}" | jq -r '.name')"
   provider="$(echo "${lane_json}" | jq -r '.provider')"
   model="$(echo "${lane_json}" | jq -r '.model')"
   role="$(echo "${lane_json}" | jq -r '.agent_role')"
   directive="$(echo "${lane_json}" | jq -r '.agent_directive // ""')"
+  metered_reason="$(echo "${lane_json}" | jq -r '.metered_reason // "none"')"
   lane_work="${TMP_DIR}/${lane_name}"
   lane_result="${LANE_DIR}/agent-${lane_name}.json"
   lane_log="${LANE_DIR}/${lane_name}.out.log"
@@ -660,6 +788,7 @@ run_lane() {
     AGENT_ROLE="${role}" \
     AGENT_NAME="${lane_name}" \
     AGENT_DIRECTIVE="${directive}" \
+    METERED_PROVIDER_REASON="${metered_reason}" \
     ISSUE_NUMBER="${ISSUE_NUMBER}" \
     CLAUDE_SESSION_ID="${lane_session_id}" \
     API_URL="${api_url}" \
@@ -799,6 +928,8 @@ required_claude_assist_gate="not-required"
 required_claude_assist_reason="assist-not-required"
 complex_claude_sub_required="false"
 complex_claude_sub_reason="complex-not-required"
+claude_shadow_continuity_families="$(fugue_missing_lane_shadow_families "${all_results}" "claude")"
+claude_shadow_continuity_success_count="$(fugue_missing_lane_shadow_success_count "${all_results}" "claude")"
 if [[ "${local_require_claude_assist_on_complex}" == "true" ]]; then
   if [[ "${ASSIST_PROVIDER}" != "claude" ]]; then
     complex_claude_sub_reason="complex-policy-assist-${ASSIST_PROVIDER}"
@@ -837,10 +968,14 @@ if [[ "${gate_required}" == "true" ]]; then
     required_claude_assist_reason="${gate_requirement_kind}-claude-rate-limit-${claude_rate_limit_state}"
   elif jq -e \
     --arg opus "${claude_opus_model}" \
-    '[ .[] | select(.name == "claude-opus-assist" and .skipped != true and (.provider|ascii_downcase) == "claude" and (.model|ascii_downcase) == ($opus|ascii_downcase) and ((.http_code|tostring|startswith("cli:")) or (.http_code|tostring) == "200")) ] | length > 0' \
+    --arg requirement_kind "${gate_requirement_kind}" \
+    '[ .[] | select(.name == "claude-opus-assist" and .skipped != true and (.provider|ascii_downcase) == "claude" and (.model|ascii_downcase) == ($opus|ascii_downcase) and ((.http_code|tostring|startswith("cli:")) or (.http_code|tostring) == "200") and (if ($requirement_kind | test("direct")) then ((.execution_route // "") | test("^claude-cli($|-)")) else true end)) ] | length > 0' \
     "${all_results}" >/dev/null 2>&1; then
     required_claude_assist_gate="pass"
     required_claude_assist_reason="${gate_requirement_kind}-claude-opus-assist-success"
+  elif [[ "${local_allow_claude_shadow_continuity}" == "true" && "${claude_shadow_continuity_success_count}" -gt 0 ]]; then
+    required_claude_assist_gate="pass"
+    required_claude_assist_reason="${gate_requirement_kind}-claude-shadow-${claude_shadow_continuity_families}"
   else
     required_claude_assist_gate="fail"
     required_claude_assist_reason="${gate_requirement_kind}-claude-opus-assist-missing-or-failed"
@@ -860,61 +995,31 @@ fi
 
 baseline_trio_gate="not-required"
 baseline_trio_reason="policy-disabled"
-codex_baseline_success="$(jq '[
-  .[] | select(
-    .skipped != true
-    and ((.provider // "" | ascii_downcase) == "codex")
-    and (
-      ((.http_code // "" | tostring) == "200")
-      or
-      ((.http_code // "" | tostring | startswith("cli:0")))
-    )
-  )
-] | length' "${all_results}")"
-claude_baseline_success="$(jq '[
-  .[] | select(
-    .skipped != true
-    and ((.provider // "" | ascii_downcase) == "claude")
-    and (
-      ((.http_code // "" | tostring) == "200")
-      or
-      ((.http_code // "" | tostring | startswith("cli:0")))
-    )
-  )
-] | length' "${all_results}")"
-glm_baseline_success="$(jq '[
-  .[] | select(
-    .skipped != true
-    and ((.provider // "" | ascii_downcase) == "glm")
-    and ((.name // "") | test("^glm-.*-subagent$") | not)
-    and (
-      ((.http_code // "" | tostring) == "200")
-      or
-      ((.http_code // "" | tostring | startswith("cli:0")))
-    )
-  )
-] | length' "${all_results}")"
-if [[ "${local_require_baseline_trio}" == "true" ]]; then
+fugue_calculate_baseline_trio_policy "${all_results}" "${local_require_baseline_trio}"
+baseline_trio_gate="${FUGUE_BASELINE_TRIO_GATE}"
+baseline_trio_reason="${FUGUE_BASELINE_TRIO_REASON}"
+codex_baseline_success="${FUGUE_BASELINE_CODEX_SUCCESS}"
+claude_baseline_success="${FUGUE_BASELINE_CLAUDE_SUCCESS}"
+glm_baseline_success="${FUGUE_BASELINE_GLM_SUCCESS}"
+shadow_continuity_families="${FUGUE_SHADOW_CONTINUITY_FAMILIES}"
+shadow_continuity_success_count="${FUGUE_SHADOW_CONTINUITY_SUCCESS_COUNT}"
+if [[ "${baseline_trio_gate}" == "fail" \
+  && "${local_allow_claude_shadow_continuity}" == "true" \
+  && "${codex_baseline_success}" -gt 0 \
+  && "${glm_baseline_success}" -gt 0 \
+  && "${claude_baseline_success}" -eq 0 \
+  && "${claude_shadow_continuity_success_count}" -gt 0 ]]; then
   baseline_trio_gate="pass"
-  baseline_missing=()
-  if [[ "${codex_baseline_success}" -eq 0 ]]; then
-    baseline_missing+=("codex")
-  fi
-  if [[ "${claude_baseline_success}" -eq 0 ]]; then
-    baseline_missing+=("claude")
-  fi
-  if [[ "${glm_baseline_success}" -eq 0 ]]; then
-    baseline_missing+=("glm")
-  fi
-  if (( ${#baseline_missing[@]} > 0 )); then
-    baseline_trio_gate="fail"
-    baseline_trio_reason="missing-$(IFS=,; echo "${baseline_missing[*]}")"
-    high_risk="true"
-    high_risk_count="$((high_risk_count + 1))"
-    weighted_vote_passed="false"
-  else
-    baseline_trio_reason="codex+claude+glm-ok"
-  fi
+  baseline_trio_reason="codex+glm+claude-shadow-${claude_shadow_continuity_families}"
+  FUGUE_BASELINE_HIGH_RISK_BUMP="false"
+  FUGUE_BASELINE_FORCE_WEIGHTED_VOTE_FALSE="false"
+fi
+if [[ "${FUGUE_BASELINE_HIGH_RISK_BUMP}" == "true" ]]; then
+  high_risk="true"
+  high_risk_count="$((high_risk_count + 1))"
+fi
+if [[ "${FUGUE_BASELINE_FORCE_WEIGHTED_VOTE_FALSE}" == "true" ]]; then
+  weighted_vote_passed="false"
 fi
 
 if [[ "${weighted_vote_passed}" == "true" && "${high_risk}" != "true" ]]; then
@@ -932,16 +1037,20 @@ if [[ "${WITH_LINKED_SYSTEMS}" == "true" ]]; then
   else
     linked_out_dir="${RUN_DIR}/linked-systems"
     mkdir -p "${linked_out_dir}"
+    linked_cmd=(
+      bash "${LINKED_RUNNER}"
+      --issue "${ISSUE_NUMBER}"
+      --repo "${REPO}"
+      --mode "${LINKED_MODE}"
+      --systems "${LINKED_SYSTEMS}"
+      --max-parallel "${LINKED_MAX_PARALLEL}"
+      --out-dir "${linked_out_dir}"
+    )
+    if [[ "${POST_ISSUE_COMMENT}" == "true" ]]; then
+      linked_cmd+=(--comment)
+    fi
     set +e
-    bash "${LINKED_RUNNER}" \
-      --issue "${ISSUE_NUMBER}" \
-      --repo "${REPO}" \
-      --mode "${LINKED_MODE}" \
-      --systems "${LINKED_SYSTEMS}" \
-      --max-parallel "${LINKED_MAX_PARALLEL}" \
-      --out-dir "${linked_out_dir}" \
-      --comment \
-      > "${RUN_DIR}/linked-systems.out.log" 2> "${RUN_DIR}/linked-systems.err.log"
+    "${linked_cmd[@]}" > "${RUN_DIR}/linked-systems.out.log" 2> "${RUN_DIR}/linked-systems.err.log"
     linked_rc=$?
     set -e
     linked_run_dir="$(ls -dt "${linked_out_dir}"/linked-issue-"${ISSUE_NUMBER}"-* 2>/dev/null | head -n1 || true)"
@@ -959,6 +1068,8 @@ jq -n \
   --arg issue_number "${ISSUE_NUMBER}" \
   --arg issue_url "${ISSUE_URL}" \
   --arg run_dir "${RUN_DIR}" \
+  --arg requested_main "${requested_main_provider}" \
+  --arg requested_assist "${requested_assist_provider}" \
   --arg main "${MAIN_PROVIDER}" \
   --arg assist "${ASSIST_PROVIDER}" \
   --arg mode "${resolved_multi_agent_mode}" \
@@ -996,6 +1107,11 @@ jq -n \
   --argjson codex_baseline_success "${codex_baseline_success}" \
   --argjson claude_baseline_success "${claude_baseline_success}" \
   --argjson glm_baseline_success "${glm_baseline_success}" \
+  --arg shadow_continuity_families "${shadow_continuity_families}" \
+  --argjson shadow_continuity_success_count "${shadow_continuity_success_count}" \
+  --arg claude_shadow_continuity_families "${claude_shadow_continuity_families}" \
+  --argjson claude_shadow_continuity_success_count "${claude_shadow_continuity_success_count}" \
+  --arg local_allow_claude_shadow_continuity "${local_allow_claude_shadow_continuity}" \
   --argjson claude_session_count "${claude_session_count}" \
   --arg claude_sessions_file "${claude_sessions_file}" \
   --arg claude_resume_hint "${claude_resume_hint}" \
@@ -1004,10 +1120,21 @@ jq -n \
   --arg workspace_domain_hint "${workspace_domain_hint}" \
   --arg workspace_reason "${workspace_reason}" \
   --arg workspace_context_file "${workspace_context_file}" \
+  --arg freee_policy_available "${freee_policy_available}" \
+  --arg freee_hint_applied "${freee_hint_applied}" \
+  --arg freee_action_hint "${freee_action_hint}" \
+  --arg freee_domain_hint "${freee_domain_hint}" \
+  --arg freee_reason "${freee_reason}" \
+  --arg freee_suggested_phases "${freee_suggested_phases}" \
+  --arg freee_readonly_actions "${freee_readonly_actions}" \
+  --arg freee_approval_required_actions "${freee_approval_required_actions}" \
+  --arg freee_context_file "${freee_context_file}" \
   '{
     issue_number:($issue_number|tonumber),
     issue_url:$issue_url,
     run_dir:$run_dir,
+    requested_main_orchestrator:$requested_main,
+    requested_assist_orchestrator:$requested_assist,
     main_orchestrator:$main,
     assist_orchestrator:$assist,
     multi_agent_mode:$mode,
@@ -1045,6 +1172,11 @@ jq -n \
     codex_baseline_success:$codex_baseline_success,
     claude_baseline_success:$claude_baseline_success,
     glm_baseline_success:$glm_baseline_success,
+    shadow_continuity_families:(if $shadow_continuity_families == "" then [] else ($shadow_continuity_families | split(",")) end),
+    shadow_continuity_success_count:$shadow_continuity_success_count,
+    claude_shadow_continuity_families:(if $claude_shadow_continuity_families == "" then [] else ($claude_shadow_continuity_families | split(",")) end),
+    claude_shadow_continuity_success_count:$claude_shadow_continuity_success_count,
+    local_allow_claude_shadow_continuity:($local_allow_claude_shadow_continuity=="true"),
     claude_session_count:$claude_session_count,
     claude_sessions_file:$claude_sessions_file,
     claude_resume_hint:$claude_resume_hint,
@@ -1052,7 +1184,16 @@ jq -n \
     workspace_action_hint:$workspace_action_hint,
     workspace_domain_hint:$workspace_domain_hint,
     workspace_reason:$workspace_reason,
-    workspace_context_file:$workspace_context_file
+    workspace_context_file:$workspace_context_file,
+    freee_policy_available:($freee_policy_available=="true"),
+    freee_hint_applied:($freee_hint_applied=="true"),
+    freee_action_hint:$freee_action_hint,
+    freee_domain_hint:$freee_domain_hint,
+    freee_reason:$freee_reason,
+    freee_suggested_phases:$freee_suggested_phases,
+    freee_readonly_actions:$freee_readonly_actions,
+    freee_approval_required_actions:$freee_approval_required_actions,
+    freee_context_file:$freee_context_file
   }' > "${integrated_json}"
 
 summary_md="${RUN_DIR}/summary.md"
@@ -1061,6 +1202,8 @@ cat > "${summary_md}" <<EOF
 
 - issue: #${ISSUE_NUMBER} (${ISSUE_URL})
 - issue context source: ${issue_context_source}
+- requested main orchestrator: ${requested_main_provider}
+- requested assist orchestrator: ${requested_assist_provider}
 - main orchestrator: ${MAIN_PROVIDER}
 - assist orchestrator: ${ASSIST_PROVIDER}
 - multi-agent mode: ${resolved_multi_agent_mode}
@@ -1081,7 +1224,8 @@ cat > "${summary_md}" <<EOF
 - linked systems status: ${linked_status} (${linked_note})
 - linked systems run dir: ${linked_run_dir}
 - required claude assist gate: ${required_claude_assist_gate} (${required_claude_assist_reason})
-- baseline trio gate (codex+claude+glm): ${baseline_trio_gate} (${baseline_trio_reason}; codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})
+- baseline trio gate (codex+claude+glm only): ${baseline_trio_gate} (${baseline_trio_reason}; codex=${codex_baseline_success}, claude=${claude_baseline_success}, glm=${glm_baseline_success})
+- shadow continuity lanes: ${shadow_continuity_success_count} (${shadow_continuity_families:-none})
 - claude session handoff: ${claude_session_handoff} (sessions ${claude_session_count})
 - claude sessions file: ${claude_sessions_file}
 - claude resume hint: ${claude_resume_hint}
@@ -1089,6 +1233,14 @@ cat > "${summary_md}" <<EOF
 - workspace action hint: ${workspace_action_hint}
 - workspace domain hint: ${workspace_domain_hint}
 - workspace context file: ${workspace_context_file}
+- freee policy available: ${freee_policy_available}
+- freee hint applied: ${freee_hint_applied}
+- freee action hint: ${freee_action_hint}
+- freee domain hint: ${freee_domain_hint}
+- freee suggested phases: ${freee_suggested_phases}
+- freee readonly actions: ${freee_readonly_actions}
+- freee approval-required actions: ${freee_approval_required_actions}
+- freee context file: ${freee_context_file}
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}
 EOF

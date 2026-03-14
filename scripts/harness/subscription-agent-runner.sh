@@ -6,6 +6,7 @@ set -euo pipefail
 # - Claude lane -> `claude --print`
 # - Gemini lane -> `gemini` CLI first, API fallback
 # - Optional GLM specialist lanes -> direct API calls (hybrid mode)
+# - Metered Gemini/xAI lanes are reserved for overflow/tie-break only
 
 sys_prompt="You are ${AGENT_ROLE}. Analyze the GitHub issue and return ONLY valid JSON with keys: risk (LOW|MEDIUM|HIGH), approve (boolean), findings (array of strings), recommendation (string), rationale (string)."
 user_prompt="Issue Title: ${ISSUE_TITLE}
@@ -15,12 +16,40 @@ ${ISSUE_BODY}"
 
 ORIGINAL_PROVIDER="${PROVIDER:-}"
 ORIGINAL_MODEL="${MODEL:-}"
-chosen_model="${MODEL}"
-effective_provider="${PROVIDER}"
+execution_profile="$(echo "${EXECUTION_PROFILE:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+chosen_model="${MODEL:-}"
+effective_provider="${PROVIDER:-}"
 http_code=""
 execution_route="subscription-cli"
 attempt_trace=""
 session_id=""
+claude_failure_note=""
+copilot_failure_note=""
+claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-${FUGUE_CLAUDE_MAX_PLAN:-true}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_max_plan}" != "true" ]]; then
+  claude_max_plan="false"
+fi
+claude_assist_execution_policy="$(echo "${CLAUDE_ASSIST_EXECUTION_POLICY:-${FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY:-}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${claude_assist_execution_policy}" != "direct" && "${claude_assist_execution_policy}" != "hybrid" && "${claude_assist_execution_policy}" != "proxy" ]]; then
+  claude_assist_execution_policy=""
+fi
+if [[ -z "${claude_assist_execution_policy}" ]]; then
+  if [[ "${execution_profile}" == "local-direct" ]]; then
+    claude_assist_execution_policy="direct"
+  elif [[ "${claude_max_plan}" == "true" ]]; then
+    claude_assist_execution_policy="hybrid"
+  else
+    claude_assist_execution_policy="direct"
+  fi
+fi
+fallback_used="false"
+missing_lane=""
+fallback_provider=""
+fallback_reason=""
+metered_reason="$(echo "${METERED_PROVIDER_REASON:-${FUGUE_METERED_PROVIDER_REASON:-none}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+if [[ "${metered_reason}" != "overflow" && "${metered_reason}" != "tie-break" ]]; then
+  metered_reason="none"
+fi
 
 strict_main_codex_model="$(echo "${STRICT_MAIN_CODEX_MODEL:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${strict_main_codex_model}" != "true" ]]; then
@@ -33,12 +62,13 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 model_policy_script="${script_dir}/../lib/model-policy.sh"
 recursive_policy_script="${script_dir}/../lib/codex-recursive-policy.sh"
-raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_claude_model="$(echo "${CLAUDE_OPUS_MODEL:-claude-opus-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 raw_codex_main_model="$(echo "${CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_glm_model="$(echo "${GLM_MODEL:-glm-4.7}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-3.1-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-3-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_codex_multi_agent_model="$(echo "${CODEX_MULTI_AGENT_MODEL:-gpt-5-codex}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_glm_model="$(echo "${GLM_MODEL:-glm-5}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_gemini_model="$(echo "${GEMINI_MODEL:-gemini-2.5-pro}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_gemini_fallback_model="$(echo "${GEMINI_FALLBACK_MODEL:-gemini-2.5-flash}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+raw_xai_model="$(echo "${XAI_MODEL:-grok-4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 # shellcheck source=../lib/safe-eval-policy.sh
 source "${script_dir}/../lib/safe-eval-policy.sh"
 if [[ -x "${model_policy_script}" ]]; then
@@ -49,16 +79,17 @@ if [[ -x "${model_policy_script}" ]]; then
     --glm-model "${raw_glm_model}" \
     --gemini-model "${raw_gemini_model}" \
     --gemini-fallback-model "${raw_gemini_fallback_model}" \
-    --xai-model "grok-4" \
+    --xai-model "${raw_xai_model}" \
     --format env
   claude_opus_model="${claude_cli_model}"
 else
-  claude_opus_model="claude-sonnet-4-6"
+  claude_opus_model="claude-opus-4-6"
   codex_main_model="gpt-5.4"
-  codex_multi_agent_model="gpt-5.3-codex-spark"
-  glm_model="glm-4.7"
-  gemini_model="gemini-3.1-pro"
-  gemini_fallback_model="gemini-3-flash"
+  codex_multi_agent_model="gpt-5-codex"
+  glm_model="glm-5"
+  gemini_model="gemini-2.5-pro"
+  gemini_fallback_model="gemini-2.5-flash"
+  xai_model="grok-4"
 fi
 
 recursive_enabled_raw="${FUGUE_CODEX_RECURSIVE_DELEGATION:-false}"
@@ -95,17 +126,19 @@ if [[ "${PROVIDER}" == "codex" ]]; then
 elif [[ "${PROVIDER}" == "claude" ]]; then
   MODEL="${claude_opus_model}"
 elif [[ "${PROVIDER}" == "glm" ]]; then
-  if [[ -n "${requested_model}" && "${requested_model}" =~ ^glm-5(\.[0-9]+)?$ ]]; then
-    MODEL="${requested_model}"
+  if [[ -n "${requested_model}" && "${requested_model}" =~ ^glm-5(\.0)?$ ]]; then
+    MODEL="${glm_model}"
   else
     MODEL="${glm_model}"
   fi
 elif [[ "${PROVIDER}" == "gemini" ]]; then
-  if [[ "${requested_model}" == "gemini-3.1-pro" || "${requested_model}" == "gemini-3-flash" ]]; then
+  if [[ "${requested_model}" == "gemini-2.5-pro" || "${requested_model}" == "gemini-2.5-flash" || "${requested_model}" == "gemini-2.5-flash-lite" ]]; then
     MODEL="${requested_model}"
   else
     MODEL="${gemini_model}"
   fi
+elif [[ "${PROVIDER}" == "xai" ]]; then
+  MODEL="${xai_model}"
 fi
 
 subscription_timeout_sec="$(echo "${SUBSCRIPTION_CLI_TIMEOUT_SEC:-180}" | tr -cd '0-9')"
@@ -138,7 +171,7 @@ append_unique_candidate() {
 claude_help_cache=""
 detect_claude_permission_flag() {
   if [[ -z "${claude_help_cache}" ]]; then
-    claude_help_cache="$(claude --help 2>&1 || true)"
+    claude_help_cache="$(claude --help 2>&1 | strip_known_cli_noise || true)"
   fi
   if echo "${claude_help_cache}" | grep -q -- '--dangerously-skip-permissions'; then
     echo "dangerously-skip-permissions"
@@ -184,17 +217,103 @@ run_with_timeout() {
   fi
 }
 
+strip_known_cli_noise() {
+  awk 'index($0, "MallocStackLogging") == 0 { print }'
+}
+
+filter_known_cli_noise_file() {
+  local file_path="$1"
+  local tmp_file
+  [[ -f "${file_path}" ]] || return 0
+  tmp_file="${file_path}.filtered"
+  strip_known_cli_noise < "${file_path}" > "${tmp_file}"
+  mv "${tmp_file}" "${file_path}"
+}
+
+normalize_optional_bool() {
+  local raw="${1:-}"
+  raw="$(echo "${raw}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ -z "${raw}" ]]; then
+    return 1
+  fi
+  if [[ "${raw}" == "true" || "${raw}" == "1" || "${raw}" == "yes" || "${raw}" == "on" ]]; then
+    printf 'true'
+    return 0
+  fi
+  printf 'false'
+  return 0
+}
+
+mark_missing_lane() {
+  missing_lane="$1"
+}
+
+mark_fallback() {
+  local provider="$1"
+  local reason="$2"
+  fallback_used="true"
+  fallback_provider="${provider}"
+  fallback_reason="${reason}"
+}
+
+detect_token_type() {
+  local token="${1:-}"
+  case "${token}" in
+    gho_*) printf 'oauth' ;;
+    github_pat_*) printf 'fine_grained_pat' ;;
+    ghu_*) printf 'user_to_server' ;;
+    ghs_*) printf 'app_installation' ;;
+    ghp_*) printf 'classic_pat' ;;
+    '') printf 'none' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
 codex_runner_available="false"
 if command -v codex >/dev/null 2>&1; then
   codex_runner_available="true"
 fi
 claude_runner_available="false"
-if command -v claude >/dev/null 2>&1; then
+claude_cli_override="$(normalize_optional_bool "${HAS_CLAUDE_CLI:-${FUGUE_HAS_CLAUDE_CLI:-}}" || true)"
+if [[ -n "${claude_cli_override}" ]]; then
+  claude_runner_available="${claude_cli_override}"
+elif command -v claude >/dev/null 2>&1; then
   claude_runner_available="true"
 fi
 gemini_runner_available="false"
 if command -v gemini >/dev/null 2>&1; then
   gemini_runner_available="true"
+fi
+copilot_runner_bin="${COPILOT_CLI_BIN:-copilot}"
+copilot_npx_package="${COPILOT_NPX_PACKAGE:-@github/copilot}"
+copilot_runner_token="${COPILOT_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
+if [[ -z "${copilot_runner_token}" && -n "${HAS_GH_AUTH_TOKEN:-}" ]]; then
+  copilot_runner_token="${HAS_GH_AUTH_TOKEN}"
+fi
+if [[ -z "${copilot_runner_token}" && -n "${FUGUE_GH_AUTH_TOKEN:-}" ]]; then
+  copilot_runner_token="${FUGUE_GH_AUTH_TOKEN}"
+fi
+if [[ -z "${copilot_runner_token}" && -n "${GH_AUTH_TOKEN:-}" ]]; then
+  copilot_runner_token="${GH_AUTH_TOKEN}"
+fi
+if [[ -z "${copilot_runner_token}" ]]; then
+  if command -v gh >/dev/null 2>&1; then
+    copilot_runner_token="$(gh auth token 2>/dev/null || true)"
+  fi
+fi
+copilot_runner_token_type="$(detect_token_type "${copilot_runner_token}")"
+copilot_runner_available="false"
+copilot_cli_override="$(normalize_optional_bool "${HAS_COPILOT_CLI:-${FUGUE_HAS_COPILOT_CLI:-}}" || true)"
+if [[ -n "${copilot_cli_override}" ]]; then
+  copilot_runner_available="${copilot_cli_override}"
+elif [[ "${execution_profile}" == "local-direct" && "${claude_assist_execution_policy}" == "direct" ]]; then
+  copilot_runner_available="false"
+elif command -v "${copilot_runner_bin}" >/dev/null 2>&1; then
+  copilot_runner_available="true"
+fi
+copilot_allow_all_tools="$(normalize_optional_bool "${COPILOT_ALLOW_ALL_TOOLS:-true}" || true)"
+if [[ -z "${copilot_allow_all_tools}" ]]; then
+  copilot_allow_all_tools="true"
 fi
 
 write_skipped_result() {
@@ -221,6 +340,11 @@ write_skipped_result() {
     --arg execution_route "${route}" \
     --arg model_attempts "${attempt_trace}" \
     --arg session_id "${session_id}" \
+    --arg fallback_used "${fallback_used}" \
+    --arg missing_lane "${missing_lane}" \
+    --arg fallback_provider "${fallback_provider}" \
+    --arg fallback_reason "${fallback_reason}" \
+    --arg metered_reason "${metered_reason}" \
     --arg delegation_mode "$( [[ "${recursive_active}" == "true" ]] && echo "recursive" || echo "flat" )" \
     --arg delegation_depth "$( [[ "${recursive_active}" == "true" ]] && echo "${recursive_depth}" || echo "1" )" \
     --arg delegation_reason "${recursive_reason}" \
@@ -236,6 +360,11 @@ write_skipped_result() {
       skipped:true,
       model_attempts:$model_attempts,
       session_id:(if $session_id == "" then null else $session_id end),
+      fallback_used:($fallback_used == "true"),
+      missing_lane:(if $missing_lane == "" then null else $missing_lane end),
+      fallback_provider:(if $fallback_provider == "" then null else $fallback_provider end),
+      fallback_reason:(if $fallback_reason == "" then null else $fallback_reason end),
+      metered_reason:(if $metered_reason == "none" then null else $metered_reason end),
       delegation_mode:$delegation_mode,
       delegation_depth:($delegation_depth|tonumber),
       delegation_reason:$delegation_reason,
@@ -322,6 +451,7 @@ Recursive Delegation Mode:
   run_with_timeout "${subscription_timeout_sec}" "${codex_cmd[@]}" >"${events_file}" 2>"${err_file}"
   local rc=$?
   set -e
+  filter_known_cli_noise_file "${err_file}"
 
   append_attempt "codex" "${model}" "exit${rc}"
   if [[ "${rc}" -ne 0 ]]; then
@@ -396,13 +526,19 @@ Claude Teams bounded mode is active. Work as a narrow collaboration executor and
     "${claude_cmd[@]}" >"${out_file}" 2>"${err_file}"
   local rc=$?
   set -e
+  filter_known_cli_noise_file "${err_file}"
 
   append_attempt "claude" "${model}" "exit${rc}"
   if [[ "${rc}" -ne 0 ]]; then
+    claude_failure_note="$(extract_claude_error_message "${err_file}")"
+    if [[ -z "${claude_failure_note}" ]]; then
+      claude_failure_note="Claude CLI failed with exit code ${rc}."
+    fi
     return 1
   fi
   if [[ ! -s "${out_file}" ]]; then
     append_attempt "claude" "${model}" "empty"
+    claude_failure_note="Claude CLI returned empty output."
     return 1
   fi
 
@@ -413,6 +549,7 @@ Claude Teams bounded mode is active. Work as a narrow collaboration executor and
   fi
   if ! parsed="$(extract_json_object "${result_text}")"; then
     append_attempt "claude" "${model}" "parse-failed"
+    claude_failure_note="Claude CLI returned non-JSON output."
     return 1
   fi
   session_id="$(jq -r '.session_id // empty' "${out_file}" 2>/dev/null || true)"
@@ -428,7 +565,108 @@ Claude Teams bounded mode is active. Work as a narrow collaboration executor and
     execution_route="claude-cli"
   fi
   http_code="cli:0"
+  claude_failure_note=""
   append_attempt "claude" "${model}" "ok"
+  return 0
+}
+
+extract_claude_error_message() {
+  local file_path="${1:-claude-response.stderr}"
+  if [[ ! -s "${file_path}" ]]; then
+    return 0
+  fi
+  sed -E 's/\x1b\[[0-9;]*m//g' "${file_path}" \
+    | tr '\r' '\n' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+    | awk 'NF { print; exit }'
+}
+
+extract_copilot_error_message() {
+  local file_path="${1:-copilot-response.stderr}"
+  if [[ ! -s "${file_path}" ]]; then
+    return 0
+  fi
+  sed -E 's/\x1b\[[0-9;]*m//g' "${file_path}" \
+    | tr '\r' '\n' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+    | awk 'NF { print; exit }'
+}
+
+execute_copilot_claude() {
+  local requested_model="$1"
+  local out_file="${tmp_dir}/copilot-response.txt"
+  local err_file="${tmp_dir}/copilot-response.stderr"
+  local prompt parsed_output
+  local -a copilot_cmd
+
+  prompt="SYSTEM:
+${sys_prompt}
+
+USER:
+${user_prompt}
+
+Return ONLY valid JSON."
+  if [[ "${AGENT_NAME:-}" == "claude-teams-executor" || "${AGENT_ROLE:-}" == "teams-executor" ]]; then
+    prompt="${prompt}
+
+Claude Teams bounded mode is active. Work as a narrow collaboration executor and return handoff-ready JSON only."
+  fi
+
+  if [[ -z "${copilot_runner_token}" ]]; then
+    copilot_failure_note="Copilot CLI authentication token is missing."
+    append_attempt "copilot-cli" "${requested_model}" "missing-token"
+    return 1
+  fi
+  if [[ "${copilot_runner_token_type}" == "classic_pat" || "${copilot_runner_token_type}" == "app_installation" ]]; then
+    copilot_failure_note="Copilot CLI token type is unsupported (${copilot_runner_token_type})."
+    append_attempt "copilot-cli" "${requested_model}" "unsupported-token-type"
+    return 1
+  fi
+
+  if [[ "${copilot_runner_bin}" == npx:* ]]; then
+    copilot_cmd=(npx --yes "${copilot_runner_bin#npx:}" -p "${prompt}")
+  elif command -v "${copilot_runner_bin}" >/dev/null 2>&1; then
+    copilot_cmd=("${copilot_runner_bin}" -p "${prompt}")
+  elif command -v npx >/dev/null 2>&1; then
+    copilot_cmd=(npx --yes "${copilot_npx_package}" -p "${prompt}")
+  else
+    copilot_failure_note="Copilot CLI launcher is unavailable."
+    append_attempt "copilot-cli" "${requested_model}" "launcher-unavailable"
+    return 1
+  fi
+  if [[ "${copilot_allow_all_tools}" == "true" ]]; then
+    copilot_cmd+=(--allow-all-tools)
+  fi
+
+  set +e
+  GH_TOKEN="${copilot_runner_token}" \
+  GITHUB_TOKEN="${copilot_runner_token}" \
+    run_with_timeout "${subscription_timeout_sec}" "${copilot_cmd[@]}" >"${out_file}" 2>"${err_file}"
+  local rc=$?
+  set -e
+  filter_known_cli_noise_file "${err_file}"
+
+  append_attempt "copilot-cli" "${requested_model}" "exit${rc}"
+  if [[ "${rc}" -ne 0 || ! -s "${out_file}" ]]; then
+    copilot_failure_note="$(extract_copilot_error_message "${err_file}")"
+    if [[ -z "${copilot_failure_note}" ]]; then
+      copilot_failure_note="Copilot CLI failed with exit code ${rc}."
+    fi
+    return 1
+  fi
+  if ! parsed_output="$(extract_json_object "$(cat "${out_file}")")"; then
+    append_attempt "copilot-cli" "${requested_model}" "parse-failed"
+    copilot_failure_note="Copilot CLI returned non-JSON output."
+    return 1
+  fi
+
+  parsed="${parsed_output}"
+  copilot_failure_note=""
+  chosen_model="${requested_model}"
+  effective_provider="claude"
+  execution_route="claude-via-copilot-cli"
+  http_code="cli:0"
+  append_attempt "copilot-cli" "${requested_model}" "ok"
   return 0
 }
 
@@ -499,6 +737,7 @@ Return ONLY valid JSON."
       "${gemini_cmd[@]}" >"${out_file}" 2>"${err_file}"
     local rc=$?
     set -e
+    filter_known_cli_noise_file "${err_file}"
 
     append_attempt "gemini-cli" "${model}" "exit${rc}"
     if [[ "${rc}" -eq 0 && -s "${out_file}" ]]; then
@@ -553,6 +792,83 @@ Return ONLY valid JSON."
   return 0
 }
 
+execute_xai_model() {
+  local model="$1"
+  local out_file="${tmp_dir}/xai-${model}-response.json"
+  local req content
+
+  req="$(jq -n \
+    --arg m "${model}" \
+    --arg s "${sys_prompt}" \
+    --arg u "${user_prompt}" \
+    '{model:$m,messages:[{role:"system",content:$s},{role:"user",content:$u}],temperature:0.1}')"
+
+  set +e
+  http_code="$(curl -sS -o "${out_file}" -w "%{http_code}" "https://api.x.ai/v1/chat/completions" \
+    --connect-timeout 10 --max-time 60 --retry 2 \
+    -H "Authorization: Bearer ${XAI_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "${req}")"
+  local rc=$?
+  set -e
+
+  append_attempt "xai" "${model}" "exit${rc}-http${http_code}"
+  if [[ "${rc}" -ne 0 || "${http_code}" != "200" ]]; then
+    return 1
+  fi
+
+  content="$(jq -r '.choices[0].message.content // ""' "${out_file}" 2>/dev/null || true)"
+  if [[ -z "${content}" ]]; then
+    append_attempt "xai" "${model}" "empty"
+    return 1
+  fi
+  if ! parsed="$(extract_json_object "${content}")"; then
+    append_attempt "xai" "${model}" "parse-failed"
+    return 1
+  fi
+
+  chosen_model="${model}"
+  effective_provider="xai"
+  execution_route="xai-api"
+  append_attempt "xai" "${model}" "ok"
+  return 0
+}
+
+execute_metered_specialist_fallback() {
+  local missing_provider="$1"
+  local reason="$2"
+  local ok="false"
+  if [[ "${metered_reason}" != "overflow" && "${metered_reason}" != "tie-break" ]]; then
+    return 1
+  fi
+
+  if [[ -n "${GEMINI_API_KEY:-}" || "${gemini_runner_available}" == "true" ]]; then
+    local gemini_candidates=("${gemini_model}")
+    if [[ -n "${gemini_fallback_model}" && "${gemini_fallback_model}" != "${gemini_model}" ]]; then
+      gemini_candidates+=("${gemini_fallback_model}")
+    fi
+    local gm
+    for gm in "${gemini_candidates[@]}"; do
+      if execute_gemini_model "${gm}"; then
+        mark_missing_lane "${missing_provider}"
+        mark_fallback "gemini" "${reason}"
+        ok="true"
+        break
+      fi
+    done
+  fi
+
+  if [[ "${ok}" != "true" && -n "${XAI_API_KEY:-}" ]]; then
+    if execute_xai_model "${xai_model}"; then
+      mark_missing_lane "${missing_provider}"
+      mark_fallback "xai" "${reason}"
+      ok="true"
+    fi
+  fi
+
+  [[ "${ok}" == "true" ]]
+}
+
 if [[ "${PROVIDER}" == "codex" ]]; then
   if [[ "${codex_runner_available}" != "true" ]]; then
     if [[ "${strict_main_codex_model}" == "true" && "${AGENT_NAME}" == "codex-main-orchestrator" ]]; then
@@ -594,27 +910,33 @@ if [[ "${PROVIDER}" == "codex" ]]; then
       "codex-cli-failed"
   fi
 elif [[ "${PROVIDER}" == "claude" ]]; then
-  if [[ "${claude_runner_available}" != "true" ]]; then
-    if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
-      echo "Strict guard violation: claude-opus-assist requires claude CLI, but claude command is not available." >&2
-      exit 43
-    fi
-    write_skipped_result \
-      "Skipped: subscription-cli mode requires Claude CLI but command is unavailable" \
-      "Install/login Claude CLI on the subscription worker" \
-      "claude executable was not found in PATH" \
-      "claude-cli-unavailable"
-  fi
   candidates=()
   append_unique_candidate "${MODEL}"
   append_unique_candidate "${claude_opus_model}"
   ok="false"
-  for m in "${candidates[@]}"; do
-    if execute_claude_model "${m}"; then
+  if [[ "${claude_runner_available}" == "true" ]]; then
+    for m in "${candidates[@]}"; do
+      if execute_claude_model "${m}"; then
+        ok="true"
+        break
+      fi
+    done
+  elif [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
+    echo "Strict guard violation: claude-opus-assist requires claude CLI, but claude command is not available." >&2
+    exit 43
+  fi
+  if [[ "${ok}" != "true" && "${strict_opus_assist_direct}" != "true" && "${copilot_runner_available}" == "true" ]]; then
+    if execute_copilot_claude "${MODEL}"; then
+      mark_missing_lane "claude"
+      mark_fallback "copilot" "claude-cli->copilot-cli"
       ok="true"
-      break
     fi
-  done
+  fi
+  if [[ "${ok}" != "true" ]]; then
+    if [[ "${strict_opus_assist_direct}" != "true" ]] && execute_metered_specialist_fallback "claude" "claude-lane->metered-${metered_reason}"; then
+      ok="true"
+    fi
+  fi
   if [[ "${ok}" != "true" ]]; then
     if [[ "${strict_opus_assist_direct}" == "true" && "${AGENT_NAME}" == "claude-opus-assist" ]]; then
       echo "Strict guard violation: claude-opus-assist must execute via claude CLI with model=${claude_opus_model}." >&2
@@ -622,40 +944,69 @@ elif [[ "${PROVIDER}" == "claude" ]]; then
       echo "Attempt trace=${attempt_trace}" >&2
       exit 43
     fi
+    if [[ "${claude_runner_available}" != "true" && "${copilot_runner_available}" != "true" ]]; then
+      write_skipped_result \
+        "Skipped: subscription-cli mode requires Claude CLI or Copilot CLI for Claude lanes" \
+        "Install/login Claude CLI, or configure Copilot CLI with a supported token" \
+        "Neither claude executable nor Copilot CLI was available" \
+        "claude-cli-and-copilot-unavailable"
+    fi
+    if [[ "${claude_runner_available}" != "true" && "${copilot_runner_available}" == "true" ]]; then
+      write_skipped_result \
+        "Skipped: Copilot CLI failed to return valid JSON for Claude lane in subscription mode" \
+        "Check Copilot CLI auth, launcher, and supported token type on the worker host" \
+        "${copilot_failure_note:-Copilot CLI did not produce a valid JSON result}" \
+        "claude-via-copilot-cli-failed"
+    fi
     write_skipped_result \
-      "Skipped: Claude CLI failed to return valid JSON in subscription mode" \
-      "Check Claude subscription login and model availability on worker host" \
-      "All claude model attempts failed or returned non-JSON output" \
+      "Skipped: Claude lane failed in subscription mode" \
+      "Check Claude CLI login/model availability and Copilot CLI continuity auth on the worker host" \
+      "$(if [[ -n "${claude_failure_note}" || -n "${copilot_failure_note}" ]]; then printf '%s%s%s' "${claude_failure_note:-All claude model attempts failed or returned non-JSON output}" "$(if [[ -n "${claude_failure_note}" && -n "${copilot_failure_note}" ]]; then printf '; '; fi)" "$(if [[ -n "${copilot_failure_note}" ]]; then printf 'Copilot CLI preflight failed: %s' "${copilot_failure_note}"; fi)"; else printf 'All claude model attempts failed or returned non-JSON output'; fi)" \
       "claude-cli-failed"
   fi
 elif [[ "${PROVIDER}" == "glm" ]]; then
-  if [[ -z "${ZAI_API_KEY:-}" ]]; then
-    write_skipped_result \
-      "Skipped: GLM lane requires ZAI_API_KEY in subscription hybrid mode" \
-      "Set ZAI_API_KEY to enable GLM baseline voters" \
-      "GLM API credential was not configured" \
-      "glm-api-key-missing"
-  fi
-  candidates=()
-  append_unique_candidate "${MODEL}"
-  append_unique_candidate "${glm_model}"
-  append_unique_candidate "glm-4.6"
-  append_unique_candidate "glm-4.5"
   ok="false"
-  for m in "${candidates[@]}"; do
-    if execute_glm_model "${m}"; then
+  if [[ -z "${ZAI_API_KEY:-}" ]]; then
+    mark_missing_lane "glm"
+    if execute_metered_specialist_fallback "glm" "glm-lane->metered-${metered_reason}"; then
       ok="true"
-      break
+    else
+      write_skipped_result \
+        "Skipped: GLM lane requires ZAI_API_KEY in subscription hybrid mode" \
+        "Set ZAI_API_KEY to enable GLM baseline voters" \
+        "GLM API credential was not configured" \
+        "glm-api-key-missing"
     fi
-  done
+  fi
   if [[ "${ok}" != "true" ]]; then
-    write_skipped_result \
-      "Skipped: GLM API failed to return valid JSON in subscription hybrid mode" \
-      "Check ZAI_API_KEY and GLM endpoint availability" \
-      "All GLM model attempts failed or returned non-JSON output" \
-      "glm-api-failed"
+    candidates=()
+    append_unique_candidate "${MODEL}"
+    append_unique_candidate "${glm_model}"
+    for m in "${candidates[@]}"; do
+      if execute_glm_model "${m}"; then
+        ok="true"
+        break
+      fi
+    done
+  fi
+  if [[ "${ok}" != "true" ]]; then
+    mark_missing_lane "glm"
+    if ! execute_metered_specialist_fallback "glm" "glm-lane->metered-${metered_reason}"; then
+      write_skipped_result \
+        "Skipped: GLM API failed to return valid JSON in subscription hybrid mode" \
+        "Check ZAI_API_KEY and GLM endpoint availability" \
+        "All GLM model attempts failed or returned non-JSON output" \
+        "glm-api-failed"
+    fi
   fi
 elif [[ "${PROVIDER}" == "gemini" ]]; then
+  if [[ "${metered_reason}" == "none" ]]; then
+    write_skipped_result \
+      "Skipped: Gemini lane requires metered_reason=overflow|tie-break" \
+      "Set METERED_PROVIDER_REASON=overflow or tie-break before enabling Gemini lanes" \
+      "Gemini is reserved for metered overflow/tie-break usage in subscription mode" \
+      "gemini-metered-reason-missing"
+  fi
   gemini_cli_preferred="$(echo "${FUGUE_GEMINI_CLI_FIRST:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
   if [[ "${gemini_cli_preferred}" != "true" ]]; then
     gemini_cli_preferred="false"
@@ -696,11 +1047,33 @@ elif [[ "${PROVIDER}" == "gemini" ]]; then
       "All Gemini model attempts failed or returned non-JSON output" \
       "gemini-api-failed"
   fi
+elif [[ "${PROVIDER}" == "xai" ]]; then
+  if [[ "${metered_reason}" == "none" ]]; then
+    write_skipped_result \
+      "Skipped: xAI lane requires metered_reason=overflow|tie-break" \
+      "Set METERED_PROVIDER_REASON=overflow or tie-break before enabling xAI lanes" \
+      "xAI is reserved for metered overflow/tie-break usage in subscription mode" \
+      "xai-metered-reason-missing"
+  fi
+  if [[ -z "${XAI_API_KEY:-}" ]]; then
+    write_skipped_result \
+      "Skipped: xAI lane requires XAI_API_KEY" \
+      "Set XAI_API_KEY to enable xAI tie-break lanes" \
+      "xAI API credential was not configured" \
+      "xai-api-key-missing"
+  fi
+  if ! execute_xai_model "${xai_model}"; then
+    write_skipped_result \
+      "Skipped: xAI API failed to return valid JSON in subscription hybrid mode" \
+      "Check XAI_API_KEY and xAI endpoint availability" \
+      "All xAI model attempts failed or returned non-JSON output" \
+      "xai-api-failed"
+  fi
 else
   write_skipped_result \
     "Skipped: provider ${PROVIDER} is not supported in subscription-cli mode" \
-    "Use codex/claude/glm/gemini lanes for this execution profile" \
-    "subscription hybrid mode only supports codex-cli, claude-cli, glm-api, and gemini-api" \
+    "Use codex/claude/glm/gemini/xai lanes for this execution profile" \
+    "subscription hybrid mode only supports codex-cli, claude-cli, glm-api, gemini, and xai lanes" \
     "unsupported-provider"
 fi
 
@@ -736,6 +1109,12 @@ result="$(jq -n \
   --arg execution_route "${execution_route}" \
   --arg model_attempts "${attempt_trace}" \
   --arg session_id "${session_id}" \
+  --arg copilot_failure "${copilot_failure_note}" \
+  --arg fallback_used "${fallback_used}" \
+  --arg missing_lane "${missing_lane}" \
+  --arg fallback_provider "${fallback_provider}" \
+  --arg fallback_reason "${fallback_reason}" \
+  --arg metered_reason "${metered_reason}" \
   --arg delegation_mode "$( [[ "${recursive_active}" == "true" ]] && echo "recursive" || echo "flat" )" \
   --arg delegation_depth "$( [[ "${recursive_active}" == "true" ]] && echo "${recursive_depth}" || echo "1" )" \
   --arg delegation_reason "${recursive_reason}" \
@@ -751,6 +1130,12 @@ result="$(jq -n \
     skipped:false,
     model_attempts:$model_attempts,
     session_id:(if $session_id == "" then null else $session_id end),
+    copilot_failure:(if $copilot_failure == "" then null else $copilot_failure end),
+    fallback_used:($fallback_used == "true"),
+    missing_lane:(if $missing_lane == "" then null else $missing_lane end),
+    fallback_provider:(if $fallback_provider == "" then null else $fallback_provider end),
+    fallback_reason:(if $fallback_reason == "" then null else $fallback_reason end),
+    metered_reason:(if $metered_reason == "none" then null else $metered_reason end),
     delegation_mode:$delegation_mode,
     delegation_depth:($delegation_depth|tonumber),
     delegation_reason:$delegation_reason,

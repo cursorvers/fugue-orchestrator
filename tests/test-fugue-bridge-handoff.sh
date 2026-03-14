@@ -23,6 +23,10 @@ dry_run_cmd="$(
     --requested-execution-mode "review" \
     --implement-request "false" \
     --implement-confirmed "false" \
+    --content-hint-applied "true" \
+    --content-action-hint "notebooklm-visual-brief" \
+    --content-skill-hint "notebooklm-visual-brief" \
+    --content-reason "notebooklm-visual-request" \
     --vote-command "true" \
     --intake-source "github-vote-comment" \
     --allow-processing-rerun \
@@ -41,6 +45,10 @@ for expected in \
   "requested_execution_mode=review" \
   "implement_request=false" \
   "implement_confirmed=false" \
+  "content_hint_applied=true" \
+  "content_action_hint=notebooklm-visual-brief" \
+  "content_skill_hint=notebooklm-visual-brief" \
+  "content_reason=notebooklm-visual-request" \
   "vote_command=true" \
   "intake_source=github-vote-comment" \
   "allow_processing_rerun=true"
@@ -72,6 +80,10 @@ runtime_output="$(
     --requested-execution-mode "implement" \
     --implement-request "true" \
     --implement-confirmed "true" \
+    --content-hint-applied "true" \
+    --content-action-hint "notebooklm-slide-prep" \
+    --content-skill-hint "notebooklm-slide-prep" \
+    --content-reason "notebooklm-slide-prep-request" \
     --vote-command "true" \
     --intake-source "github-vote-comment"
 )"
@@ -98,6 +110,10 @@ for expected in \
   "-f requested_execution_mode=implement" \
   "-f implement_request=true" \
   "-f implement_confirmed=true" \
+  "-f content_hint_applied=true" \
+  "-f content_action_hint=notebooklm-slide-prep" \
+  "-f content_skill_hint=notebooklm-slide-prep" \
+  "-f content_reason=notebooklm-slide-prep-request" \
   "-f vote_command=true" \
   "-f intake_source=github-vote-comment"
 do
@@ -109,21 +125,87 @@ done
 echo "PASS [runtime-dispatch]"
 
 CALLER_WORKFLOW="${SCRIPT_DIR}/.github/workflows/fugue-tutti-caller.yml"
+IMPLEMENT_WORKFLOW="${SCRIPT_DIR}/.github/workflows/fugue-codex-implement.yml"
 ROUTER_WORKFLOW="${SCRIPT_DIR}/.github/workflows/fugue-tutti-router.yml"
+CODEX_SCRIPT="${SCRIPT_DIR}/scripts/harness/codex-execute-validate.sh"
 
 grep -q "FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER" "${CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing legacy bridge main provider override" >&2
   exit 1
 }
-grep -q 'handoff_target: "\${{ needs.ctx.outputs.handoff_target }}"' "${CALLER_WORKFLOW}" || {
+grep -Fq 'handoff_target: "${{ needs.ctx.outputs.handoff_target }}"' "${CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing handoff_target passthrough" >&2
   exit 1
 }
-grep -q 'vote_command: "\${{ needs.ctx.outputs.vote_command }}"' "${CALLER_WORKFLOW}" || {
+grep -Fq 'vote_command: "${{ needs.ctx.outputs.vote_command }}"' "${CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing vote_command passthrough" >&2
   exit 1
 }
-grep -q 'intake_source: "\${{ needs.ctx.outputs.intake_source }}"' "${CALLER_WORKFLOW}" || {
+grep -Fq 'requested_execution_mode: "${{ github.event.inputs.requested_execution_mode || '\'''\'' }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing requested_execution_mode passthrough to router" >&2
+  exit 1
+}
+grep -Fq 'implement_request: "${{ needs.ctx.outputs.has_implement_request }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing implement_request passthrough to router" >&2
+  exit 1
+}
+grep -Fq 'implement_confirmed: "${{ needs.ctx.outputs.has_implement_confirmed }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing implement_confirmed passthrough to router" >&2
+  exit 1
+}
+grep -Fq 'content_hint_applied: "${{ needs.ctx.outputs.content_hint_applied }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing content_hint_applied passthrough" >&2
+  exit 1
+}
+grep -Fq 'content_action_hint: "${{ needs.ctx.outputs.content_action_hint }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing content_action_hint passthrough" >&2
+  exit 1
+}
+grep -Fq 'content_skill_hint: "${{ needs.ctx.outputs.content_skill_hint }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing content_skill_hint passthrough" >&2
+  exit 1
+}
+grep -Fq 'content_reason: "${{ needs.ctx.outputs.content_reason }}"' "${CALLER_WORKFLOW}" || {
+  echo "FAIL: caller workflow missing content_reason passthrough" >&2
+  exit 1
+}
+grep -q 'content_hint_applied:' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing content_hint_applied input" >&2
+  exit 1
+}
+grep -q 'Run NotebookLM content preflight' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing NotebookLM preflight step" >&2
+  exit 1
+}
+grep -q 'notebooklm-preflight-enrich.sh' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing NotebookLM preflight script" >&2
+  exit 1
+}
+grep -Fq 'NOTEBOOKLM_REPORT_PATH: ${{ steps.notebooklm_preflight.outputs.notebooklm_report_path }}' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing NotebookLM report env handoff" >&2
+  exit 1
+}
+grep -Fq 'CONTENT_HINT_APPLIED: ${{ inputs.content_hint_applied }}' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing content hint env handoff" >&2
+  exit 1
+}
+grep -Fq 'CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing content action env handoff" >&2
+  exit 1
+}
+grep -Fq 'CONTENT_REASON: ${{ inputs.content_reason }}' "${IMPLEMENT_WORKFLOW}" || {
+  echo "FAIL: implement workflow missing content reason env handoff" >&2
+  exit 1
+}
+grep -q 'notebooklm-slide-prep' "${CODEX_SCRIPT}" || {
+  echo "FAIL: codex execute script missing notebooklm routing guidance" >&2
+  exit 1
+}
+grep -q 'NotebookLM peripheral evidence' "${CODEX_SCRIPT}" || {
+  echo "FAIL: codex execute script missing NotebookLM evidence section" >&2
+  exit 1
+}
+grep -Fq 'intake_source: "${{ needs.ctx.outputs.intake_source }}"' "${CALLER_WORKFLOW}" || {
   echo "FAIL: caller workflow missing intake_source passthrough" >&2
   exit 1
 }
@@ -137,6 +219,22 @@ grep -q 'multi_agent_mode_source="legacy-bridge"' "${ROUTER_WORKFLOW}" || {
 }
 grep -q 'echo "vote_command=${vote_command}"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router workflow missing vote_command output emission" >&2
+  exit 1
+}
+grep -q '^      requested_execution_mode:' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing requested_execution_mode workflow_call input" >&2
+  exit 1
+}
+grep -q '^      implement_request:' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing implement_request workflow_call input" >&2
+  exit 1
+}
+grep -Fq "IMPLEMENT_REQUEST_INPUT: \${{ inputs.implement_request || '' }}" "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing implement_request env wiring" >&2
+  exit 1
+}
+grep -q 'HAS_IMPLEMENT_REQUEST="\${implement_request_input}"' "${ROUTER_WORKFLOW}" || {
+  echo "FAIL: router workflow missing implement_request override logic" >&2
   exit 1
 }
 grep -q 'echo "intake_source=${intake_source}"' "${ROUTER_WORKFLOW}" || {

@@ -720,9 +720,9 @@ jobs:
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
           CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-opus-4-6' }}
           CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-opus-4-6' }}
-          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro-preview' }}
+          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-2.5-pro' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
-          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash' }}
           RISK_TIER: ${{ needs.prepare.outputs.risk_tier }}
           VOTE_COMMAND_INPUT: "true"
           COUNCIL_STAGE: "preflight"
@@ -1012,9 +1012,9 @@ jobs:
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-opus-4-6' }}
           CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-opus-4-6' }}
           CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-opus-4-6' }}
-          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro-preview' }}
+          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-2.5-pro' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
-          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash' }}
           RISK_TIER: ${{ needs.prepare.outputs.risk_tier }}
           VOTE_COMMAND_INPUT: "true"
           COUNCIL_STAGE: "final"

@@ -86,6 +86,12 @@ JSON
 JSON
       exit 0
       ;;
+    repos/cursorvers/fugue-orchestrator/issues/133)
+      cat <<'JSON'
+{"title":"[canary] workflow dispatch verification","body":"## Canary\nkernel council recovery verification","url":"https://github.com/cursorvers/fugue-orchestrator/issues/133","labels":[{"name":"fugue-task"}]}
+JSON
+      exit 0
+      ;;
     repos/cursorvers/fugue-orchestrator/actions/runners?per_page=100)
       cat <<'JSON'
 {"runners":[]}
@@ -146,6 +152,14 @@ printf '%s\n' '{"error":{"message":"unexpected request"}}' > "${output_file}"
 printf '500'
 EOF
 chmod +x "${fake_curl}"
+
+fake_sleep="${tmp_dir}/sleep"
+cat > "${fake_sleep}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+chmod +x "${fake_sleep}"
 
 assert_output() {
   local test_name="$1"
@@ -265,6 +279,44 @@ assert_output "workflow-dispatch-intake-source" "127" "intake_source" "workflow-
   "GITHUB_EVENT_NAME=workflow_dispatch" \
   "ISSUE_NUMBER_FROM_ISSUE=" \
   "ISSUE_NUMBER_FROM_DISPATCH=127"
+assert_output "workflow-dispatch-manual-implement-blocked" "130" "should_run" "false" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=130" \
+  "IMPLEMENT_REQUEST_INPUT=true" \
+  "IMPLEMENT_CONFIRMED_INPUT=true" \
+  "VOTE_COMMAND_INPUT=true"
+assert_output "workflow-dispatch-manual-implement-skip-reason" "130" "skip_reason" "missing-required-labels" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=130" \
+  "IMPLEMENT_REQUEST_INPUT=true" \
+  "IMPLEMENT_CONFIRMED_INPUT=true" \
+  "VOTE_COMMAND_INPUT=true"
+assert_output "workflow-dispatch-manual-implement-request-preserved" "130" "has_implement_request" "true" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=130" \
+  "IMPLEMENT_REQUEST_INPUT=true" \
+  "IMPLEMENT_CONFIRMED_INPUT=true" \
+  "VOTE_COMMAND_INPUT=true"
+assert_output "workflow-dispatch-manual-implement-confirm-preserved" "130" "has_implement_confirmed" "true" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=130" \
+  "IMPLEMENT_REQUEST_INPUT=true" \
+  "IMPLEMENT_CONFIRMED_INPUT=true" \
+  "VOTE_COMMAND_INPUT=true"
+assert_output "workflow-dispatch-canary-owned-bypasses-tutti" "133" "should_run" "true" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=133" \
+  "CANARY_DISPATCH_RUN_ID_INPUT=99999"
+assert_output "workflow-dispatch-canary-owned-output" "133" "canary_dispatch_owned" "true" \
+  "GITHUB_EVENT_NAME=workflow_dispatch" \
+  "ISSUE_NUMBER_FROM_ISSUE=" \
+  "ISSUE_NUMBER_FROM_DISPATCH=133" \
+  "CANARY_DISPATCH_RUN_ID_INPUT=99999"
 assert_output "explicit-intake-source" "127" "intake_source" "railway-public-edge" \
   "INTAKE_SOURCE_INPUT=railway-public-edge"
 

@@ -117,11 +117,71 @@ on:
         required: false
         type: string
         default: ""
+      requested_execution_mode:
+        description: "Resolved execution mode snapshot (review|implement)"
+        required: false
+        type: string
+        default: ""
+      implement_request:
+        description: "Resolved implementation intent snapshot"
+        required: false
+        type: string
+        default: ""
+      implement_confirmed:
+        description: "Resolved implementation confirmation snapshot"
+        required: false
+        type: string
+        default: ""
       vote_command:
         description: "True when the handoff originated from `/vote`"
         required: false
         type: string
         default: "false"
+      kernel_handoff_mode:
+        description: "True when the handoff represents kernel->vote continuation mode"
+        required: false
+        type: string
+        default: "false"
+      cost_provider_priority:
+        description: "Cost policy provider priority snapshot"
+        required: false
+        type: string
+        default: ""
+      cost_copilot_policy:
+        description: "Cost policy Copilot snapshot"
+        required: false
+        type: string
+        default: ""
+      cost_metered_policy:
+        description: "Cost policy metered-provider snapshot"
+        required: false
+        type: string
+        default: ""
+      metered_reason:
+        description: "Metered provider reason snapshot"
+        required: false
+        type: string
+        default: "none"
+      fallback_used:
+        description: "Fallback-used snapshot"
+        required: false
+        type: string
+        default: "false"
+      missing_lane:
+        description: "Missing-lane snapshot"
+        required: false
+        type: string
+        default: "none"
+      fallback_provider:
+        description: "Fallback-provider snapshot"
+        required: false
+        type: string
+        default: "none"
+      fallback_reason:
+        description: "Fallback-reason snapshot"
+        required: false
+        type: string
+        default: ""
       dispatch_nonce:
         description: "Optional unique nonce to isolate concurrent workflow_call runs"
         required: false
@@ -219,6 +279,15 @@ jobs:
       self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
       subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
       allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
+      kernel_handoff_mode: ${{ steps.ctx.outputs.kernel_handoff_mode }}
+      cost_provider_priority: ${{ steps.ctx.outputs.cost_provider_priority }}
+      cost_copilot_policy: ${{ steps.ctx.outputs.cost_copilot_policy }}
+      cost_metered_policy: ${{ steps.ctx.outputs.cost_metered_policy }}
+      metered_reason: ${{ steps.ctx.outputs.metered_reason }}
+      fallback_used: ${{ steps.ctx.outputs.fallback_used }}
+      missing_lane: ${{ steps.ctx.outputs.missing_lane }}
+      fallback_provider: ${{ steps.ctx.outputs.fallback_provider }}
+      fallback_reason: ${{ steps.ctx.outputs.fallback_reason }}
       trusted: ${{ steps.trust.outputs.trusted }}
       permission: ${{ steps.trust.outputs.permission }}
       vote_command: ${{ steps.ctx.outputs.vote_command }}
@@ -234,7 +303,19 @@ jobs:
           ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           EXTRA_ISSUE_INSTRUCTION_INPUT: ${{ inputs.extra_issue_instruction || '' }}
+          REQUESTED_EXECUTION_MODE_INPUT: ${{ inputs.requested_execution_mode || '' }}
+          IMPLEMENT_REQUEST_INPUT: ${{ inputs.implement_request || '' }}
+          IMPLEMENT_CONFIRMED_INPUT: ${{ inputs.implement_confirmed || '' }}
           VOTE_COMMAND_INPUT: ${{ inputs.vote_command || 'false' }}
+          KERNEL_HANDOFF_MODE_INPUT: ${{ inputs.kernel_handoff_mode || 'false' }}
+          COST_PROVIDER_PRIORITY_INPUT: ${{ inputs.cost_provider_priority || '' }}
+          COST_COPILOT_POLICY_INPUT: ${{ inputs.cost_copilot_policy || '' }}
+          COST_METERED_POLICY_INPUT: ${{ inputs.cost_metered_policy || '' }}
+          METERED_REASON_INPUT: ${{ inputs.metered_reason || 'none' }}
+          FALLBACK_USED_INPUT: ${{ inputs.fallback_used || 'false' }}
+          MISSING_LANE_INPUT: ${{ inputs.missing_lane || 'none' }}
+          FALLBACK_PROVIDER_INPUT: ${{ inputs.fallback_provider || 'none' }}
+          FALLBACK_REASON_INPUT: ${{ inputs.fallback_reason || '' }}
           INTAKE_SOURCE_INPUT: ${{ inputs.intake_source || '' }}
           CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
           SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
@@ -312,6 +393,18 @@ jobs:
             trust_subject="$(printf '%s' "${trust_subject}" | sed -E 's/[^A-Za-z0-9_.-]//g')"
           fi
           extra_issue_instruction="$(printf '%s' "${EXTRA_ISSUE_INSTRUCTION_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          requested_execution_mode_input="$(echo "${REQUESTED_EXECUTION_MODE_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${requested_execution_mode_input}" != "review" && "${requested_execution_mode_input}" != "implement" ]]; then
+            requested_execution_mode_input=""
+          fi
+          implement_request_input="$(echo "${IMPLEMENT_REQUEST_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${implement_request_input}" != "true" && "${implement_request_input}" != "false" ]]; then
+            implement_request_input=""
+          fi
+          implement_confirmed_input="$(echo "${IMPLEMENT_CONFIRMED_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${implement_confirmed_input}" != "true" && "${implement_confirmed_input}" != "false" ]]; then
+            implement_confirmed_input=""
+          fi
           allow_processing_rerun="$(echo "${ALLOW_PROCESSING_RERUN_INPUT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${allow_processing_rerun}" != "true" ]]; then
             allow_processing_rerun="false"
@@ -355,6 +448,14 @@ jobs:
                 break
               fi
             done
+          fi
+          if [[ -n "${implement_request_input}" ]]; then
+            HAS_IMPLEMENT_REQUEST="${implement_request_input}"
+          fi
+          if [[ "${requested_execution_mode_input}" == "review" ]]; then
+            HAS_IMPLEMENT_REQUEST="false"
+          elif [[ "${requested_execution_mode_input}" == "implement" ]]; then
+            HAS_IMPLEMENT_REQUEST="true"
           fi
           ci_execution_engine="$(echo "${CI_EXECUTION_ENGINE:-subscription}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
@@ -637,7 +738,7 @@ jobs:
           CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5-codex' }}
           GLM_MODEL: ${{ vars.FUGUE_GLM_MODEL || 'glm-5' }}
           XAI_MODEL_LATEST: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
-          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-3-flash' }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.FUGUE_GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash' }}
           STRICT_MAIN_CODEX_MODEL: ${{ needs.resolve-orchestrator.outputs.strict_main_codex_model_effective }}
           STRICT_OPUS_ASSIST_DIRECT: ${{ needs.resolve-orchestrator.outputs.strict_opus_assist_direct_effective }}
           CI_EXECUTION_ENGINE: ${{ needs.resolve-orchestrator.outputs.ci_execution_engine }}
@@ -650,6 +751,7 @@ jobs:
           API_URL: ${{ matrix.api_url }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
+          METERED_PROVIDER_REASON: ${{ matrix.metered_reason || needs.prepare.outputs.metered_reason || 'none' }}
           AGENT_ROLE: ${{ matrix.agent_role }}
           AGENT_NAME: ${{ matrix.name }}
           AGENT_DIRECTIVE: ${{ matrix.agent_directive || '' }}
@@ -716,8 +818,8 @@ jobs:
           if [[ "${CLAUDE_OPUS_MODEL}" != "claude-sonnet-4-6" ]]; then
             CLAUDE_OPUS_MODEL="claude-sonnet-4-6"
           fi
-          if [[ "${GEMINI_FALLBACK_MODEL}" != "gemini-3.1-pro" && "${GEMINI_FALLBACK_MODEL}" != "gemini-3-flash" ]]; then
-            GEMINI_FALLBACK_MODEL="gemini-3-flash"
+          if [[ "${GEMINI_FALLBACK_MODEL}" != "gemini-2.5-pro" && "${GEMINI_FALLBACK_MODEL}" != "gemini-2.5-flash" && "${GEMINI_FALLBACK_MODEL}" != "gemini-2.5-flash-lite" ]]; then
+            GEMINI_FALLBACK_MODEL="gemini-2.5-flash"
           fi
           if ! [[ "${XAI_MODEL_LATEST}" =~ ^grok-4([.-].+)?$ ]]; then
             XAI_MODEL_LATEST="grok-4"
@@ -741,10 +843,10 @@ jobs:
               MODEL="${GLM_MODEL}"
               ;;
             gemini)
-              if [[ "${requested_model}" == "gemini-3.1-pro" || "${requested_model}" == "gemini-3-flash" ]]; then
+              if [[ "${requested_model}" == "gemini-2.5-pro" || "${requested_model}" == "gemini-2.5-flash" || "${requested_model}" == "gemini-2.5-flash-lite" ]]; then
                 MODEL="${requested_model}"
               else
-                MODEL="gemini-3.1-pro"
+                MODEL="gemini-2.5-pro"
               fi
               ;;
             xai)
@@ -1480,7 +1582,7 @@ jobs:
           CLAUDE_OPUS_MODEL: ${{ vars.FUGUE_CLAUDE_OPUS_MODEL || 'claude-sonnet-4-6' }}
           CLAUDE_SONNET4_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET4_MODEL || 'claude-sonnet-4-6' }}
           CLAUDE_SONNET6_MODEL: ${{ vars.FUGUE_CLAUDE_SONNET6_MODEL || 'claude-sonnet-4-6' }}
-          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-3.1-pro' }}
+          GEMINI_MODEL: ${{ vars.FUGUE_GEMINI_MODEL || 'gemini-2.5-pro' }}
           XAI_MODEL: ${{ vars.FUGUE_XAI_MODEL || 'grok-4' }}
           ALLOW_GLM_IN_SUBSCRIPTION: ${{ vars.FUGUE_ALLOW_GLM_IN_SUBSCRIPTION || 'true' }}
           CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
@@ -1503,6 +1605,8 @@ jobs:
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
           TASK_SIZE_TIER_INPUT: ${{ inputs.task_size_tier }}
+          METERED_REASON_INPUT: ${{ needs.prepare.outputs.metered_reason }}
+          FALLBACK_PROVIDER_INPUT: ${{ needs.prepare.outputs.fallback_provider }}
           CLAUDE_TEAMS_ALLOWED: ${{ inputs.claude_teams_allowed || 'false' }}
           CLAUDE_TEAMS_MEMBER_CAP: ${{ inputs.claude_teams_member_cap || '3' }}
           CLAUDE_TEAMS_MAX_INVOCATIONS: ${{ inputs.claude_teams_max_invocations || '1' }}
@@ -1834,6 +1938,18 @@ jobs:
               wants_xai="true"
             fi
           fi
+          metered_reason="$(echo "${METERED_REASON_INPUT:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${metered_reason}" != "overflow" && "${metered_reason}" != "tie-break" ]]; then
+            metered_reason="none"
+          fi
+          fallback_provider="$(echo "${FALLBACK_PROVIDER_INPUT:-none}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${metered_reason}" != "none" ]]; then
+            if [[ "${fallback_provider}" == "gemini" ]]; then
+              wants_gemini="true"
+            elif [[ "${fallback_provider}" == "xai" ]]; then
+              wants_xai="true"
+            fi
+          fi
           eval "$(
             bash "${orchestrator_lib_dir}/model-policy.sh" \
               --codex-main-model "${CODEX_MAIN_MODEL:-gpt-5.4}" \
@@ -1841,7 +1957,7 @@ jobs:
               --claude-model "${CLAUDE_OPUS_MODEL}" \
               --glm-model "${GLM_MODEL:-glm-5}" \
               --gemini-model "${GEMINI_MODEL}" \
-              --gemini-fallback-model "gemini-3-flash" \
+              --gemini-fallback-model "gemini-2.5-flash" \
               --xai-model "${XAI_MODEL}" \
               --format env
           )"
@@ -1862,6 +1978,7 @@ jobs:
             --claude-teams-member-cap "${claude_teams_member_cap}"
             --claude-teams-max-invocations "${claude_teams_max_invocations}"
             --allow-glm-in-subscription "${allow_glm_in_subscription}"
+            --metered-reason "${metered_reason}"
             --codex-main-model "${codex_main_model}"
             --codex-multi-agent-model "${codex_multi_agent_model}"
             --glm-model "${glm_model}"

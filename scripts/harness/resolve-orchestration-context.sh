@@ -601,8 +601,8 @@ if [[ -x "${ROOT_DIR}/scripts/lib/model-policy.sh" ]]; then
       --codex-multi-agent-model "${CODEX_MULTI_AGENT_MODEL}" \
       --claude-model "${CLAUDE_TRANSLATOR_MODEL}" \
       --glm-model "${FUGUE_GLM_MODEL:-glm-5}" \
-      --gemini-model "gemini-3.1-pro-preview" \
-      --gemini-fallback-model "gemini-3-flash" \
+      --gemini-model "gemini-2.5-pro" \
+      --gemini-fallback-model "gemini-2.5-flash" \
       --xai-model "grok-4" \
       --format env
   )"
