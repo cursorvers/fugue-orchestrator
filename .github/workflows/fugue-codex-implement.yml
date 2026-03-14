@@ -530,7 +530,15 @@ jobs:
       workspace_summary: ${{ steps.workspace_preflight.outputs.workspace_summary }}
       workspace_artifact_name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
     steps:
-      - name: Checkout target repository
+      - name: Checkout current target repository
+        if: ${{ needs.prepare.outputs.target_repo == github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 1
+
+      - name: Checkout external target repository
+        if: ${{ needs.prepare.outputs.target_repo != github.repository }}
         uses: actions/checkout@v4
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}

@@ -56,6 +56,9 @@ check_prepare_allows_vote_command "${IMPLEMENT}"
 check "implement-runs-on-guard-selected-runner" 'runs-on: \$\{\{ fromJSON\(needs\.credential-guard\.outputs\.runner_json\) \}\}' "${IMPLEMENT}"
 check "implement-job-uses-always-with-optional-preflights" "if: \\$\\{\\{ always\\(\\) && needs\\.prepare\\.outputs\\.should_run == 'true'" "${IMPLEMENT}"
 check "implement-allows-skipped-optional-preflights" "needs\\.workspace-preflight\\.result != 'failure' && needs\\.workspace-preflight\\.result != 'cancelled' && needs\\.freee-preflight\\.result != 'failure' && needs\\.freee-preflight\\.result != 'cancelled'" "${IMPLEMENT}"
+check "implement-checks-out-current-repo-without-explicit-token" 'Checkout current target repository' "${IMPLEMENT}"
+check "implement-checks-out-external-repo-with-token" 'Checkout external target repository' "${IMPLEMENT}"
+check "implement-external-checkout-uses-target-repo-token" 'token: \$\{\{ secrets\.TARGET_REPO_PAT \|\| github\.token \}\}' "${IMPLEMENT}"
 check "implement-guard-has-runner-json-output" 'runner_json: \$\{\{ steps\.guard\.outputs\.runner_json \}\}' "${IMPLEMENT}"
 check "implement-guard-normalizes-subscription-runner-label" 'SUBSCRIPTION_RUNNER_LABEL: \$\{\{ vars\.FUGUE_SUBSCRIPTION_RUNNER_LABEL \|\| '\''fugue-subscription'\'' \}\}' "${IMPLEMENT}"
 check "implement-guard-routes-backup-heavy-to-ubuntu" 'runner_json='\''"ubuntu-latest"'\''' "${IMPLEMENT}"
@@ -110,4 +113,4 @@ if rg -q 'ci-agent-runner\.sh|--engine api' "${ROOT_DIR}/scripts/harness/run-ker
 fi
 echo "PASS [kernel-council-helper-no-api-mode]"
 
-echo "=== Results: 45/45 passed, 0 failed ==="
+echo "=== Results: 48/48 passed, 0 failed ==="
