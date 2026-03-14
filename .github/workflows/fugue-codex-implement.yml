@@ -646,7 +646,7 @@ jobs:
           if-no-files-found: ignore
 
   implement:
-    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && (needs.workspace-preflight.result == 'success' || needs.workspace-preflight.result == 'skipped') && (needs.freee-preflight.result == 'success' || needs.freee-preflight.result == 'skipped') }}
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && needs.workspace-preflight.result != 'failure' && needs.workspace-preflight.result != 'cancelled' && needs.freee-preflight.result != 'failure' && needs.freee-preflight.result != 'cancelled' }}
     needs: [prepare, credential-guard, workspace-preflight, freee-preflight]
     runs-on: ${{ fromJSON(needs.credential-guard.outputs.runner_json) }}
     timeout-minutes: 90

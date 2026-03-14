@@ -54,6 +54,7 @@ check "implement-workflow-gemini-secret" '^      GEMINI_API_KEY:' "${IMPLEMENT}"
 check "implement-workflow-xai-secret" '^      XAI_API_KEY:' "${IMPLEMENT}"
 check_prepare_allows_vote_command "${IMPLEMENT}"
 check "implement-runs-on-guard-selected-runner" 'runs-on: \$\{\{ fromJSON\(needs\.credential-guard\.outputs\.runner_json\) \}\}' "${IMPLEMENT}"
+check "implement-allows-skipped-optional-preflights" "needs\\.workspace-preflight\\.result != 'failure' && needs\\.workspace-preflight\\.result != 'cancelled' && needs\\.freee-preflight\\.result != 'failure' && needs\\.freee-preflight\\.result != 'cancelled'" "${IMPLEMENT}"
 check "implement-guard-has-runner-json-output" 'runner_json: \$\{\{ steps\.guard\.outputs\.runner_json \}\}' "${IMPLEMENT}"
 check "implement-guard-normalizes-subscription-runner-label" 'SUBSCRIPTION_RUNNER_LABEL: \$\{\{ vars\.FUGUE_SUBSCRIPTION_RUNNER_LABEL \|\| '\''fugue-subscription'\'' \}\}' "${IMPLEMENT}"
 check "implement-guard-routes-backup-heavy-to-ubuntu" 'runner_json='\''"ubuntu-latest"'\''' "${IMPLEMENT}"
@@ -108,4 +109,4 @@ if rg -q 'ci-agent-runner\.sh|--engine api' "${ROOT_DIR}/scripts/harness/run-ker
 fi
 echo "PASS [kernel-council-helper-no-api-mode]"
 
-echo "=== Results: 43/43 passed, 0 failed ==="
+echo "=== Results: 44/44 passed, 0 failed ==="
