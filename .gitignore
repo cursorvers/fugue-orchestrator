@@ -10,3 +10,4 @@ node_modules/
 .fugue/local-run/
 #...but encrypted secrets are safe to commit
 !.env.enc
+!secrets/*.enc
