@@ -150,7 +150,8 @@ Options:
 
 Output (json):
 {
-  "matrix": {"include":[...]},
+  "matrix": {"include":[...], "provider_priority":[...], ...},
+  "workflow_matrix": {"include":[...]},
   "lanes": 15,
   "main_signal_lane": "codex-main-orchestrator",
   "use_glm_baseline": true
@@ -455,6 +456,7 @@ fi
 
 jq -cn \
   --argjson matrix "${matrix}" \
+  --argjson workflow_matrix "$(echo "${matrix}" | jq -c '{include:(.include // [])}')" \
   --argjson lanes "${lanes}" \
   --arg main_signal_lane "${main_signal_lane}" \
   --arg secondary_main_signal_lane "${secondary_main_signal_lane}" \
@@ -463,6 +465,7 @@ jq -cn \
   --arg metered_reason "${metered_reason}" \
   '{
     matrix:$matrix,
+    workflow_matrix:$workflow_matrix,
     lanes:$lanes,
     main_signal_lane:$main_signal_lane,
     main_signal_lanes:([$main_signal_lane] + (if $dual_main_signal and ($secondary_main_signal_lane|length)>0 then [$secondary_main_signal_lane] else [] end)),

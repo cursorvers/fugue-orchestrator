@@ -2564,7 +2564,7 @@ jobs:
           fi
 
           matrix_payload="$(bash "${orchestrator_lib_dir}/build-agent-matrix.sh" "${matrix_args[@]}")"
-          matrix="$(echo "${matrix_payload}" | jq -c '.matrix')"
+          matrix="$(echo "${matrix_payload}" | jq -c '.workflow_matrix')"
           lanes="$(echo "${matrix_payload}" | jq -r '.lanes')"
           main_signal_lane="$(echo "${matrix_payload}" | jq -r '.main_signal_lane')"
           main_signal_lanes="$(echo "${matrix_payload}" | jq -c '.main_signal_lanes // []')"

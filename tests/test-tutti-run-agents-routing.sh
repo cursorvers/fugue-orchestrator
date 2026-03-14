@@ -28,6 +28,10 @@ grep -Fq 'needs: [prepare, resolve-orchestrator, run-agents-hosted, run-agents-s
   echo "FAIL: integrate no longer depends on both run-agents branches" >&2
   exit 1
 }
+grep -Fq "matrix=\"\$(echo \"\${matrix_payload}\" | jq -c '.workflow_matrix')\"" "${WORKFLOW}" || {
+  echo "FAIL: router is not extracting the clean workflow_matrix payload for strategy.matrix" >&2
+  exit 1
+}
 grep -Fq "if: \${{ always() && needs.prepare.outputs.should_run == 'true' && needs.prepare.outputs.trusted == 'true' && (needs.run-agents-hosted.result == 'success' || needs.run-agents-self-hosted.result == 'success') }}" "${WORKFLOW}" || {
   echo "FAIL: integrate gate missing hosted/self-hosted success OR condition" >&2
   exit 1
