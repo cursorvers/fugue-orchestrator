@@ -383,6 +383,7 @@ jobs:
     outputs:
       can_run: ${{ steps.guard.outputs.can_run }}
       skip_reason: ${{ steps.guard.outputs.skip_reason }}
+      runner_json: ${{ steps.guard.outputs.runner_json }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -442,11 +443,13 @@ jobs:
           EXECUTION_MODE: ${{ inputs.execution_mode }}
           GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
           FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: |
           set -euo pipefail
 
           can_run="true"
           skip_reason=""
+          runner_json=""
 
           execution_mode="$(echo "${EXECUTION_MODE:-primary}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           case "${execution_mode}" in
@@ -459,11 +462,22 @@ jobs:
             gha_mode="full"
           fi
 
+          subscription_runner_label="$(echo "${SUBSCRIPTION_RUNNER_LABEL:-fugue-subscription}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
+          fi
+
           failover_state="$(echo "${FAILOVER_STATE:-healthy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           case "${failover_state}" in
             healthy|degraded|offline|recovered) ;;
             *) failover_state="healthy" ;;
           esac
+
+          if [[ "${execution_mode}" == "backup-heavy" ]]; then
+            runner_json='"ubuntu-latest"'
+          else
+            runner_json="$(jq -cn --arg label "${subscription_runner_label}" '["self-hosted",$label]')"
+          fi
 
           if [[ "${execution_mode}" == "backup-safe" ]]; then
             can_run="false"
@@ -500,6 +514,7 @@ jobs:
           {
             echo "can_run=${can_run}"
             echo "skip_reason=${skip_reason}"
+            echo "runner_json=${runner_json}"
           } >> "${GITHUB_OUTPUT}"
 
   workspace-preflight:
@@ -633,9 +648,7 @@ jobs:
   implement:
     if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && (needs.workspace-preflight.result == 'success' || needs.workspace-preflight.result == 'skipped') && (needs.freee-preflight.result == 'success' || needs.freee-preflight.result == 'skipped') }}
     needs: [prepare, credential-guard, workspace-preflight, freee-preflight]
-    runs-on:
-      - self-hosted
-      - ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+    runs-on: ${{ fromJSON(needs.credential-guard.outputs.runner_json) }}
     timeout-minutes: 90
     outputs:
       pr_url: ${{ steps.create-pr.outputs.pr_url }}
