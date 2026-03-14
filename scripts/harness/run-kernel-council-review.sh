@@ -448,6 +448,29 @@ if [[ -z "${weighted_vote_value}" || -z "${ok_to_execute_value}" ]]; then
   exit 1
 fi
 
+# --- Force-missing-provider shadow recovery override ---
+# When council_force_missing_provider is active and shadow continuity provides
+# adequate coverage (>= 2 families), promote baseline_trio_gate from fail to
+# recovery-pass. This handles the implement job scenario where forced provider
+# absence plus copilot continuity causes all three baseline providers to be
+# unavailable, but shadow continuity (copilot, gemini, xai) provides coverage.
+# Does NOT override genuine vote rejections — only infrastructure gaps.
+if [[ "${baseline_trio_gate}" == "fail" \
+      && "${council_force_missing_provider}" != "none" \
+      && "${shadow_continuity_success_count:-0}" -ge 2 ]]; then
+  baseline_trio_gate="recovery-pass"
+  baseline_trio_reason="${baseline_trio_reason};force-missing=${council_force_missing_provider};shadow-quorum=${shadow_continuity_families}"
+  recovery_attempted_value="true"
+  _fmp_vote_pass="$(awk \
+    -v a="${weighted_approve_score:-0}" \
+    -v t="${weighted_threshold:-0}" \
+    'BEGIN{if(a+1e-9>=t)print"true";else print"false"}')"
+  if [[ "${_fmp_vote_pass}" == "true" ]]; then
+    weighted_vote_value="true"
+    ok_to_execute_value="true"
+  fi
+fi
+
 if [[ "${baseline_trio_gate}" != "pass" && "${baseline_trio_gate}" != "recovery-pass" ]]; then
   if attempt_recovery_matrix "baseline=${baseline_trio_gate}/${baseline_trio_reason},ok_to_execute=${ok_to_execute_value}"; then
     exit 0

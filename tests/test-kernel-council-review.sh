@@ -172,6 +172,56 @@ required_claude_assist_reason='direct-policy-disabled'
 OUT
 EOF
   chmod +x "${dir}/aggregate-vote-reject.sh"
+
+  cat > "${dir}/aggregate-force-missing-shadow.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat > "${GITHUB_OUTPUT}" <<'OUT'
+weighted_vote_passed=false
+ok_to_execute=false
+OUT
+cat > integration-vars.sh <<'OUT'
+baseline_trio_gate='fail'
+baseline_trio_reason='missing-codex,claude,glm;shadow-continuity=copilot,gemini,xai'
+required_claude_assist_gate='not-required'
+required_claude_assist_reason='direct-policy-disabled'
+shadow_continuity_success_count='3'
+shadow_continuity_families='copilot,gemini,xai'
+weighted_approve_score='2.500'
+weighted_total_score='2.500'
+weighted_threshold='1.667'
+weighted_vote_passed='false'
+codex_baseline_success='0'
+claude_baseline_success='0'
+glm_baseline_success='0'
+OUT
+EOF
+  chmod +x "${dir}/aggregate-force-missing-shadow.sh"
+
+  cat > "${dir}/aggregate-force-missing-vote-reject.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat > "${GITHUB_OUTPUT}" <<'OUT'
+weighted_vote_passed=false
+ok_to_execute=false
+OUT
+cat > integration-vars.sh <<'OUT'
+baseline_trio_gate='fail'
+baseline_trio_reason='missing-codex,claude,glm;shadow-continuity=copilot,gemini,xai'
+required_claude_assist_gate='not-required'
+required_claude_assist_reason='direct-policy-disabled'
+shadow_continuity_success_count='3'
+shadow_continuity_families='copilot,gemini,xai'
+weighted_approve_score='0.800'
+weighted_total_score='2.500'
+weighted_threshold='1.667'
+weighted_vote_passed='false'
+codex_baseline_success='0'
+claude_baseline_success='0'
+glm_baseline_success='0'
+OUT
+EOF
+  chmod +x "${dir}/aggregate-force-missing-vote-reject.sh"
 }
 
 run_case() {
@@ -263,6 +313,81 @@ run_case "council-status-fail-persists" "aggregate-fail.sh" 1 "false" "fail" "mi
 run_case "council-status-vote-reject-no-retry" "aggregate-vote-reject.sh" 1 "false" "pass" "codex+claude+glm-ok" "council" "weighted-vote=false;baseline=pass/codex+claude+glm-ok"
 run_case "council-status-build-matrix-recovery-pass" "aggregate-pass.sh" 0 "true" "pass" "codex+claude+glm-ok" "" "" "build-agent-matrix-recovery.sh"
 run_case "council-status-crash-persists" "aggregate-crash.sh" 23 "false" "fail" "aggregate-not-run" "aggregate" "aggregate-script-exit-23"
+
+# --- Force-missing-provider recovery tests ---
+run_force_missing_case() {
+  local name="$1"
+  local aggregate_script="$2"
+  local expected_rc="$3"
+  local expected_ok="$4"
+  local expected_gate="$5"
+  local expected_reason_pattern="$6"
+  local expected_failure_stage="${7:-}"
+  local case_dir="${tmp_dir}/${name}"
+  local stub_dir="${case_dir}/stubs"
+  local run_dir="${case_dir}/run"
+  local output_file="${case_dir}/github-output.txt"
+
+  total=$((total + 1))
+  mkdir -p "${case_dir}" "${run_dir}"
+  make_stubs "${stub_dir}"
+
+  set +e
+  env \
+    FUGUE_BUILD_MATRIX_SCRIPT="${stub_dir}/build-agent-matrix.sh" \
+    FUGUE_SUBSCRIPTION_RUNNER_SCRIPT="${stub_dir}/subscription-agent-runner.sh" \
+    FUGUE_AGGREGATE_VOTES_SCRIPT="${stub_dir}/${aggregate_script}" \
+    COUNCIL_RUN_DIR="${run_dir}" \
+    GITHUB_OUTPUT="${output_file}" \
+    COUNCIL_STAGE="preflight" \
+    COUNCIL_FORCE_MISSING_PROVIDER="glm" \
+    ISSUE_NUMBER="500" \
+    ISSUE_TITLE="Kernel council test" \
+    ISSUE_BODY="Force missing provider test" \
+    bash "${SCRIPT}" >/dev/null 2>"${case_dir}/stderr.log"
+  rc=$?
+  set -e
+
+  if [[ "${rc}" -ne "${expected_rc}" ]]; then
+    fail "${name}-exit-code (got ${rc}, expected ${expected_rc})"
+    return
+  fi
+  if [[ ! -f "${run_dir}/council-status.json" ]]; then
+    fail "${name}-status-file-missing"
+    return
+  fi
+  if ! jq -e --arg expected "${expected_ok}" '.ok_to_execute == ($expected == "true")' "${run_dir}/council-status.json" >/dev/null; then
+    fail "${name}-ok-to-execute"
+    return
+  fi
+  if ! jq -e --arg expected "${expected_gate}" '.baseline_trio_gate == $expected' "${run_dir}/council-status.json" >/dev/null; then
+    fail "${name}-baseline-gate"
+    return
+  fi
+  if ! jq -e --arg pattern "${expected_reason_pattern}" '.baseline_trio_reason | test($pattern)' "${run_dir}/council-status.json" >/dev/null; then
+    fail "${name}-baseline-reason"
+    return
+  fi
+  if ! jq -e '.force_missing_provider == "glm"' "${run_dir}/council-status.json" >/dev/null; then
+    fail "${name}-force-provider"
+    return
+  fi
+  if ! jq -e '.recovery_attempted == true' "${run_dir}/council-status.json" >/dev/null; then
+    fail "${name}-recovery-attempted"
+    return
+  fi
+  if [[ -n "${expected_failure_stage}" ]]; then
+    if ! jq -e --arg expected "${expected_failure_stage}" '.failure_stage == $expected' "${run_dir}/council-status.json" >/dev/null; then
+      fail "${name}-failure-stage"
+      return
+    fi
+  fi
+
+  pass "${name}"
+}
+
+run_force_missing_case "force-missing-shadow-recovery" "aggregate-force-missing-shadow.sh" 0 "true" "recovery-pass" "force-missing=glm.*shadow-quorum=copilot,gemini,xai"
+run_force_missing_case "force-missing-vote-reject-stays-rejected" "aggregate-force-missing-vote-reject.sh" 1 "false" "recovery-pass" "force-missing=glm.*shadow-quorum=copilot,gemini,xai" "council"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

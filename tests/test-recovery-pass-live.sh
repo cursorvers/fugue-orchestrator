@@ -158,6 +158,28 @@ assert_eq "${missing_glm_count}" "1" "S8: GLM-specific shadow has 1 fallback"
 [[ "${missing_glm_shadows}" == *"copilot"* ]] && assert_eq "glm-shadow-copilot" "glm-shadow-copilot" "S8: GLM shadow fallback is copilot" || { echo "[FAIL] S8: GLM shadow missing copilot: ${missing_glm_shadows}" >&2; failures=$((failures + 1)); }
 rm -f "${scenario8_file}"
 
+# --- Scenario 9: All three baselines missing → fail at policy level ---
+# The recovery-pass for this case is handled at the council level
+# (run-kernel-council-review.sh force-missing-provider override),
+# not the policy function level. This test documents the policy behavior.
+scenario9_file="$(mktemp)"
+cat > "${scenario9_file}" <<'JSON'
+[
+  {"name":"codex-main","provider":"codex","http_code":"500","skipped":false},
+  {"name":"claude-opus","provider":"claude","http_code":"500","skipped":false},
+  {"name":"glm-reviewer","provider":"glm","http_code":"500","skipped":false},
+  {"name":"copilot-fallback","provider":"copilot","http_code":"200","skipped":false,"fallback_used":true,"fallback_provider":"copilot-cli","missing_lane":"claude"},
+  {"name":"gemini-specialist","provider":"gemini","http_code":"200","skipped":false},
+  {"name":"xai-helper","provider":"xai","http_code":"200","skipped":false}
+]
+JSON
+
+fugue_calculate_baseline_trio_policy "${scenario9_file}" "true"
+assert_eq "${FUGUE_BASELINE_TRIO_GATE}" "fail" "S9: All three baselines missing → fail at policy level"
+assert_eq "${FUGUE_BASELINE_HIGH_RISK_BUMP}" "true" "S9: high-risk bump on total baseline failure"
+assert_eq "${FUGUE_SHADOW_CONTINUITY_SUCCESS_COUNT}" "3" "S9: shadow continuity detects 3 families"
+rm -f "${scenario9_file}"
+
 # --- Summary ---
 echo "" >&2
 echo "recovery-pass live verification: ${pass_count} passed, ${failures} failed" >&2
