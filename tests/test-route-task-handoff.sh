@@ -98,9 +98,7 @@ assert_case() {
     "-f cost_copilot_policy=low-cost-fallback-only" \
     "-f cost_metered_policy=overflow-or-tie-break-only" \
     "-f metered_reason=none" \
-    "-f fallback_used=false" \
-    "-f missing_lane=none" \
-    "-f fallback_provider=none"
+    "-f missing_lane=none"
   do
     if [[ "${workflow_line}" != *"${expected}"* ]]; then
       echo "FAIL [${name}]: workflow dispatch missing '${expected}'"
@@ -331,10 +329,7 @@ assert_snapshot_override() {
   workflow_line="$(grep 'workflow run fugue-tutti-caller.yml' "${FAKE_GH_LOG}" | tail -n1 || true)"
   for expected in \
     "-f metered_reason=overflow" \
-    "-f fallback_used=true" \
-    "-f missing_lane=glm" \
-    "-f fallback_provider=gemini" \
-    "-f fallback_reason=glm lane failed"
+    "-f missing_lane=glm"
   do
     if [[ "${workflow_line}" != *"${expected}"* ]]; then
       echo "FAIL [snapshot-override]: workflow dispatch missing '${expected}'"
@@ -347,9 +342,47 @@ assert_snapshot_override() {
   passed=$((passed + 1))
 }
 
+assert_workflow_dispatch_input_limit() {
+  total=$((total + 1))
+  local count
+  count="$(python3 - <<'PY'
+from pathlib import Path
+p=Path('/Users/masayuki/Dev/fugue-orchestrator/.github/workflows/fugue-tutti-caller.yml')
+lines=p.read_text().splitlines()
+in_dispatch=False
+in_inputs=False
+count=0
+for line in lines:
+    if line.startswith('  workflow_dispatch:'):
+        in_dispatch=True
+        continue
+    if in_dispatch and line.startswith('  ') and not line.startswith('    '):
+        in_dispatch=False
+        in_inputs=False
+    if in_dispatch and line.startswith('    inputs:'):
+        in_inputs=True
+        continue
+    if in_inputs:
+        if line.startswith('      ') and line.strip().endswith(':') and not line.strip().startswith(('description:','required:','type:','default:','options:')):
+            count += 1
+        elif line.startswith('    ') and not line.startswith('      '):
+            in_inputs=False
+print(count)
+PY
+)"
+  if [[ "${count}" != "25" ]]; then
+    echo "FAIL [workflow-dispatch-input-limit]: expected 25 inputs, got ${count}"
+    failed=$((failed + 1))
+    return
+  fi
+  echo "PASS [workflow-dispatch-input-limit]"
+  passed=$((passed + 1))
+}
+
 assert_snapshot_override
 assert_content_hints
 assert_content_slide_prep_hints
+assert_workflow_dispatch_input_limit
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

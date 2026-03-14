@@ -88,6 +88,15 @@ run_case() {
   local vote_instruction_b64=""
   local allow_processing_rerun=""
   local handoff_target=""
+  local kernel_handoff_mode=""
+  local cost_provider_priority=""
+  local cost_copilot_policy=""
+  local cost_metered_policy=""
+  local metered_reason=""
+  local fallback_used=""
+  local missing_lane=""
+  local fallback_provider=""
+  local fallback_reason=""
 
   total=$((total + 1))
   : > "${FAKE_GH_LOG}"
@@ -148,6 +157,12 @@ run_case() {
   vote_instruction_b64="$(dispatch_value "${dispatch_line}" "vote_instruction_b64" || true)"
   allow_processing_rerun="$(dispatch_value "${dispatch_line}" "allow_processing_rerun" || true)"
   handoff_target="$(dispatch_value "${dispatch_line}" "handoff_target" || true)"
+  kernel_handoff_mode="$(dispatch_value "${dispatch_line}" "kernel_handoff_mode" || true)"
+  cost_provider_priority="$(dispatch_value "${dispatch_line}" "cost_provider_priority" || true)"
+  cost_copilot_policy="$(dispatch_value "${dispatch_line}" "cost_copilot_policy" || true)"
+  cost_metered_policy="$(dispatch_value "${dispatch_line}" "cost_metered_policy" || true)"
+  metered_reason="$(dispatch_value "${dispatch_line}" "metered_reason" || true)"
+  missing_lane="$(dispatch_value "${dispatch_line}" "missing_lane" || true)"
 
   if [[ "${requested_execution_mode}" != "${expected_mode}" || \
         "${implement_request}" != "${expected_request}" || \
@@ -157,6 +172,15 @@ run_case() {
         "${handoff_target}" != "kernel" ]]; then
     echo "FAIL [${name}]: unexpected dispatch snapshot"
     echo "  mode=${requested_execution_mode} request=${implement_request} confirm=${implement_confirmed} vote=${vote_command} rerun=${allow_processing_rerun} handoff=${handoff_target}"
+    failed=$((failed + 1))
+    return
+  fi
+  if [[ "${cost_provider_priority}" != "codex,claude,glm,copilot,gemini,xai" || \
+        "${cost_copilot_policy}" != "low-cost-fallback-only" || \
+        "${cost_metered_policy}" != "overflow-or-tie-break-only" || \
+        "${metered_reason}" != "none" || \
+        "${missing_lane}" != "none" ]]; then
+    echo "FAIL [${name}]: cost-policy snapshot mismatch in dispatch"
     failed=$((failed + 1))
     return
   fi
@@ -195,6 +219,15 @@ run_case() {
     IMPLEMENT_REQUEST_INPUT="${implement_request}" \
     IMPLEMENT_CONFIRMED_INPUT="${implement_confirmed}" \
     VOTE_COMMAND_INPUT="${vote_command}" \
+    KERNEL_HANDOFF_MODE_INPUT="${kernel_handoff_mode}" \
+    COST_PROVIDER_PRIORITY_INPUT="${cost_provider_priority}" \
+    COST_COPILOT_POLICY_INPUT="${cost_copilot_policy}" \
+    COST_METERED_POLICY_INPUT="${cost_metered_policy}" \
+    METERED_REASON_INPUT="${metered_reason}" \
+    FALLBACK_USED_INPUT="false" \
+    MISSING_LANE_INPUT="${missing_lane}" \
+    FALLBACK_PROVIDER_INPUT="none" \
+    FALLBACK_REASON_INPUT="" \
     HANDOFF_TARGET_INPUT="${handoff_target}" \
     bash "${CTX_SCRIPT}" >/dev/null 2>"${TMP_DIR}/${name}-ctx.stderr"; then
     echo "FAIL [${name}]: resolve context exited with error"
@@ -205,7 +238,14 @@ run_case() {
   if ! assert_field "${ctx_out}" "has_implement_request" "${expected_request}" || \
      ! assert_field "${ctx_out}" "has_implement_confirmed" "${expected_confirm}" || \
      ! assert_field "${ctx_out}" "vote_command" "true" || \
-     ! assert_field "${ctx_out}" "allow_processing_rerun" "true"; then
+     ! assert_field "${ctx_out}" "allow_processing_rerun" "true" || \
+     ! assert_field "${ctx_out}" "cost_provider_priority" "codex,claude,glm,copilot,gemini,xai" || \
+     ! assert_field "${ctx_out}" "cost_copilot_policy" "low-cost-fallback-only" || \
+     ! assert_field "${ctx_out}" "cost_metered_policy" "overflow-or-tie-break-only" || \
+     ! assert_field "${ctx_out}" "metered_reason" "none" || \
+     ! assert_field "${ctx_out}" "fallback_used" "false" || \
+     ! assert_field "${ctx_out}" "missing_lane" "none" || \
+     ! assert_field "${ctx_out}" "fallback_provider" "none"; then
     echo "FAIL [${name}]: resolved context mismatch"
     failed=$((failed + 1))
     return

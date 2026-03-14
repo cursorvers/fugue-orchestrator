@@ -105,26 +105,11 @@ on:
         required: false
         type: string
         default: "none"
-      fallback_used:
-        description: "Fallback-used snapshot"
-        required: false
-        type: string
-        default: "false"
       missing_lane:
         description: "Missing-lane snapshot"
         required: false
         type: string
         default: "none"
-      fallback_provider:
-        description: "Fallback-provider snapshot"
-        required: false
-        type: string
-        default: "none"
-      fallback_reason:
-        description: "Fallback-reason snapshot"
-        required: false
-        type: string
-        default: ""
       dispatch_nonce:
         description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
         required: false

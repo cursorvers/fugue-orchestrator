@@ -536,10 +536,7 @@ dispatch_args+=(-f cost_provider_priority="${cost_provider_priority}")
 dispatch_args+=(-f cost_copilot_policy="${cost_copilot_policy}")
 dispatch_args+=(-f cost_metered_policy="${cost_metered_policy}")
 dispatch_args+=(-f metered_reason="${metered_reason}")
-dispatch_args+=(-f fallback_used="${fallback_used}")
 dispatch_args+=(-f missing_lane="${missing_lane}")
-dispatch_args+=(-f fallback_provider="${fallback_provider}")
-dispatch_args+=(-f fallback_reason="${fallback_reason}")
 trust_subject="$(printf '%s' "${TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ -n "${trust_subject}" ]]; then
   dispatch_args+=(-f trust_subject="${trust_subject}")
@@ -579,10 +576,7 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     --cost-copilot-policy "${cost_copilot_policy}"
     --cost-metered-policy "${cost_metered_policy}"
     --metered-reason "${metered_reason}"
-    --fallback-used "${fallback_used}"
     --missing-lane "${missing_lane}"
-    --fallback-provider "${fallback_provider}"
-    --fallback-reason "${fallback_reason}"
   )
   if [[ -n "${trust_subject}" ]]; then
     bridge_args+=(--trust-subject "${trust_subject}")
