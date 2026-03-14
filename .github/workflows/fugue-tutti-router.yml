@@ -1769,7 +1769,7 @@ jobs:
           strict_opus_assist_direct_effective="${strict_opus_effective}"
           assist_adjusted_by_execution_profile="${assist_adjusted_by_profile}"
           assist_provider="${assist_provider_effective}"
-          run_agents_runner_json='["ubuntu-latest"]'
+          run_agents_runner_json='"ubuntu-latest"'
           if [[ "${run_agents_runner}" == "self-hosted" ]]; then
             run_agents_runner_json="$(jq -cn --arg label "${subscription_runner_label}" '["self-hosted",$label]')"
           fi
