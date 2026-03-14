@@ -46,7 +46,11 @@ Important scope boundary:
   - Scorecard `mcp_calls` counter now reflects actual bridge calls instead of hardcoded `0`.
 - **Hybrid Failover** (when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted` during Hybrid):
   - Throttle guard demotes main to `codex`, deactivating Hybrid Conductor Mode.
-  - All tasks run through codex-only (no MCP access). MCP-dependent tasks will fail and require manual retry after Claude recovery.
+  - All tasks initially reroute through codex-first execution (no direct Claude MCP access), but
+    Kernel/FUGUE must still execute the recovery matrix before returning `BLOCKED`.
+  - MCP-dependent tasks must attempt provider re-probe, approved fallback providers, and sidecar
+    backfill first; return `BLOCKED` only when those recovery attempts fail and the task still
+    requires direct Claude MCP access.
   - Partial failover (MCP task queuing) is reserved for future implementation.
 - Operational default is `codex` (both main and execution) when `FUGUE_CLAUDE_RATE_LIMIT_STATE` is `degraded` or `exhausted`.
 - `codex` serves as assist sidecar when Claude is main (architectural invariant).
@@ -89,7 +93,7 @@ Auditability:
 ## 4. Execution/Evaluation Lanes
 
 - Core quorum: 6 lanes minimum (Codex3 + GLM3).
-- `FUGUE_MIN_CONSENSUS_LANES` (default `6`) is a hard floor; lane matrix resolution fails fast when the configured floor is not met.
+- `FUGUE_MIN_CONSENSUS_LANES` (default `6`) is a hard floor; when the configured floor is not met, the recovery matrix (see Recovery-first rule below) must be executed before returning `BLOCKED`.
 - Add one main-provider signal lane after resolution:
   - `codex-main-orchestrator` when main is `codex`
   - `claude-main-orchestrator` when main is `claude`
@@ -104,13 +108,39 @@ Auditability:
 - Strict guards (`FUGUE_STRICT_MAIN_CODEX_MODEL`, `FUGUE_STRICT_OPUS_ASSIST_DIRECT`) are enforced in `subscription-strict` and disabled by default in API continuity mode unless `FUGUE_API_STRICT_MODE=true`.
 - `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST=true` enables hard gate for `claude-opus-assist` direct success in `/vote` integration (default disabled).
 - `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true` enforces Claude sub gate on complex tasks (`risk_tier=high` or ambiguity translation-gate=true) **when assist is `claude`**; missing Claude Opus assist success turns `ok_to_execute=false` (default enabled).
-- `FUGUE_REQUIRE_BASELINE_TRIO=true` enforces baseline trio success (`codex` + `claude` + `glm`) before execution approval (default enabled).
+- `FUGUE_REQUIRE_BASELINE_TRIO=true` enforces baseline trio success (`codex` + `claude` + `glm`) or recovery-pass (`codex` + 2 distinct non-codex families after recovery matrix) before execution approval (default enabled).
 - Multi-agent depth baseline is controlled by `FUGUE_MULTI_AGENT_MODE=standard|enhanced|max` (default `enhanced`), with complexity-based downshift/upshift when no explicit override is present.
 - Codex lane model split:
-  - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.3-codex`)
-  - `FUGUE_CODEX_MULTI_AGENT_MODEL` for non-main codex lanes (default `gpt-5.3-codex-spark`)
-- GLM baseline model: `glm-5.0`.
+  - `FUGUE_CODEX_MAIN_MODEL` for `codex-main-orchestrator` (default `gpt-5.4`)
+  - `FUGUE_CODEX_MULTI_AGENT_MODEL` for non-main codex lanes (default `gpt-5-codex` in live/local orchestration; reserve `gpt-5.3-codex-spark` for deterministic simulation or explicit opt-in)
+- GLM baseline model: `glm-5`.
 - `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=true` (default) keeps GLM baseline voters active even when `FUGUE_CI_EXECUTION_ENGINE=subscription` (hybrid: codex/claude via CLI, GLM via API).
+- Optional non-baseline lanes stay opt-in:
+  - `copilot-cli` may be used only as Claude continuity fallback and does not satisfy direct-Claude gates.
+  - `gemini` / `xAI` lanes are additive specialist lanes, not baseline quorum, and should remain cost-gated/opt-in.
+- Continuity fallback is `shadow continuity`, not baseline substitution:
+  - `copilot-cli` / `gemini` / `xAI` may preserve review or observability coverage during degraded runs,
+  - but they do not satisfy baseline trio success,
+  - and they do not satisfy direct-provider gates for `/vote` or other strict execution paths.
+- Recovery-first rule:
+  - before returning `BLOCKED` for a missing baseline provider or lane-floor shortfall, Kernel/FUGUE must first execute a recovery matrix in the current run,
+  - recovery matrix order is:
+    1. re-probe the missing provider through the configured bridge or runtime path,
+    2. activate the approved fallback provider in priority order,
+    3. backfill the lane floor with replacement sidecar lanes for verification, monitoring, or context,
+    4. record each failed recovery attempt with the exact error,
+  - degraded continuation is allowed only when a valid fallback quorum exists and the required lane floor has been restored,
+  - `BLOCKED` is valid only after the recovery matrix is exhausted or the remaining blocker is external and not solvable from the current workspace/session.
+- Strictness by mode:
+  - strict `/vote`: attempt the recovery matrix first; if no valid fallback quorum is established, fail-closed for non-trivial autonomous writes,
+  - ordinary continuity: read-only / planning / critique may continue with shadow lanes, but write approval remains blocked,
+  - critical or irreversible actions: shadow continuity is insufficient; require direct baseline providers or explicit user approval.
+- Fallback quorum and lane-floor requirements by mode:
+  | Mode | Lane Floor | Baseline | Fallback Quorum (recovery-pass) |
+  |------|-----------|----------|--------------------------------|
+  | `/vote` strict | 2 active lanes | codex + claude + glm | codex + 2 distinct non-codex families |
+  | `/kernel` | 6 active lanes | codex + claude + glm | codex + 2 distinct non-codex families |
+  | Ordinary continuity | 2 active lanes | best-effort | shadow lanes accepted for read-only |
 - Codex recursive delegation (`parent -> child -> grandchild`) can be enabled per-lane:
   - `FUGUE_CODEX_RECURSIVE_DELEGATION` (`true|false`, default `true` since v8.5)
   - `FUGUE_CODEX_RECURSIVE_MAX_DEPTH` (minimum `2`, default `2` since v8.5, previously `3`)
@@ -141,6 +171,31 @@ Auditability:
 - Implementation execution requires both `implement` and `implement-confirmed`.
 - Cross-repo implementation requires `TARGET_REPO_PAT`.
 - Dangerous operations require explicit human consent paths.
+- Implement mode is requirements-first, not implementation-first.
+- Before any major edit, Kernel/FUGUE must explicitly define:
+  - requirements
+  - constraints
+  - acceptance criteria
+  - failure modes
+  - stop conditions
+- Requirements definition is a hard gate. If that packet is missing or materially unstable, implementation must not begin.
+- After requirements definition, the mandatory pre-implementation order is:
+  1) Requirements Definition
+  2) Parallel Simulation
+  3) Critical Review
+  4) Problem Fix
+  5) Replan
+- Do not start implementation while unresolved contradictions remain between requirements, simulation results, and critique findings.
+- Simulation and critique exist to invalidate weak plans before code changes. They are not optional documentation steps.
+- If simulation or critique reveals a design flaw, repair the design and rerun the sequence before implementation resumes.
+- If simulation or critique reveals an unresolved external blocker, execute the recovery matrix first
+  (re-probe, approved fallback provider, sidecar backfill, exact error capture). Return `BLOCKED` only when
+  the recovery matrix fails or the blocker is outside the current session's control.
+- If the user explicitly asks for production verification, treat it as an execution obligation rather than a reporting task:
+  - define the live rerun or dispatch path, artifact or log evidence, and PASS fields in the completion proof before implementation,
+  - continue through patch, push, rerun or dispatch, and evidence inspection while concrete execution remains,
+  - do not claim production PASS from local tests or readiness alone when the requested proof depends on a live workflow or runtime,
+  - return `BLOCKED` only after the live verification path has been attempted and failed with a concrete external blocker that cannot be solved from the current session.
 - Implement mode must complete preflight refinement loops before code changes:
   1) Plan
   2) Parallel Simulation

@@ -61,9 +61,28 @@ Main Orchestrator（統合・報告）
 - bare `/kernel` は Codex chat UI の upstream 実装に依存するため、この repo のローカル SLO/保証経路には含めません。
 - `/kernel` の bootstrap は acknowledgement より先に最低 6 本の active lane を起動している必要があります。
 - 通常運用では複数 LLM モデルまたは model profile をまたいだ 6 列以上の並列を最低形とします。
+- bootstrap 後の `/kernel` は、通常 3 ラウンドの再設計ループを回します。各ラウンドは「最低 6 planning lanes -> 最低 3 simulation lanes -> critique -> repair -> replan」です。
+- `/kernel` は細かい承認を都度戻さない low-touch autonomous development を前提とします。
+- round 1 の planning は、要件・制約・受け入れ条件・失敗モード・停止条件を定義することが必須です。
+- ユーザーが本番確認を明示した場合、その planning packet には live rerun / dispatch 経路、確認する artifact / log、成功と見なす PASS 条件を必ず含めます。
+- `/kernel` の planning・critique・最終 QA の既定 baseline model set は Codex + Claude + GLM です。`/kernel` を Codex 単独経路へ黙って縮退させてはいけません。
+- `/kernel` の根幹ループは、Codex / Claude / GLM / Copilot CLI / Gemini CLI など複数 agent family をまたぐ multi-agent orchestration として設計します。subagent は補助であり、根幹の代替ではありません。
+- Codex は統合・分解・競合解消を担う orchestrator であり、Codex 偏重の単独経路へ傾けてはいけません。
+- simulation lane は `codex-spark` を第一候補にし、rate-limit または unavailable の場合だけ Codex multi-agent simulation lanes に明示的に fallback します。
+- simulation validation は実装前に必須の品質ゲートです。
+- Codex 側の通常 fan-out substrate は `codex-multi-agents` とします。
+- Claude 側の通常 delegation substrate は `claude-code-agent-teams` とします。
+- Claude と GLM は `/kernel` の peer lane として実際に委譲し、Codex 単独オーケストレーションへ黙って縮退させてはいけません。
+- subagent / `codex-multi-agents` / `claude-code-agent-teams` だけで multi-model core を代替したと見なしてはいけません。
+- 3 ラウンド終了後の `/kernel` は `/vote` に hand off して実装を進めます。`/vote` は確認 checkpoint ではなく fast local continuation として扱います。
+- 実装完了後は異なる LLM モデルで品質レビューを行い、見つかった問題を修正してから完了とします。
+- 本番確認タスクでは、patch・push・dispatch・部分ログ確認で止めてはいけません。live rerun と artifact / log 検証まで進め、PASS か concrete external blocker のどちらかを証拠付きで確定するまで継続します。
+- 本番 PASS は local test / readiness だけでは主張できません。要求された proof が live workflow / runtime に依存する場合は、必要な live evidence を確認してから報告します。
 - 最初の有効な応答には `Bootstrap target: 6+ lanes (minimum 6).` と `Lane manifest:`、および現在アクティブな lane を最低 6 本列挙した行が必要です。
 - bootstrap 中や local 分析中は、便宜的な探索のために approval を要求してはいけません。まず local workspace の証拠を使ってください。
+- 通常の実装・分析・テスト・リファクタ・local verification のために approval を要求してはいけません。
 - network/GitHub/escalated command の approval は、ユーザーが明示的に求めた場合か、その操作なしでは現在タスクを完遂できない場合に限ります。
+- ユーザーが本番確認を明示した場合、live workflow / artifact inspection は完遂条件の一部であり、既定の no-CI/no-log 省略より優先します。
 - approval prompt を伴う network/GitHub/escalated command を出す前に、同じ TTY に書き続ける active lane は quiesce してください。
 - 背景の Codex activity が同じ terminal に出力中のまま approval prompt を表示してはいけません。
 - lane の quiesce がすぐに成立しない場合は、approval prompt を出さずに `quiescence_timeout` を 1 行で返して fail-close してください。
@@ -71,9 +90,14 @@ Main Orchestrator（統合・報告）
 ## `/vote` 運用契約
 
 - この repo で Codex の `/vote` はローカル継続用の slash prompt です。現在のタスクをそのまま継続し、GitHub への投稿は行いません。
+- 非自明な `/vote` は `Codex + Claude + GLM` の 3 系統 council を基準とし、3 系統が利用可能なのに 2 lane へ縮退して完了扱いにしてはいけません。
+- 非自明な `/vote` はメジャーな編集前に 3 回の refinement round を回します。順序は `Plan -> Parallel Simulation -> Critical Review -> Problem Fix -> Replan` です。
+- `/vote` で本番確認を求められた場合、local continuation の責務は patch -> push -> workflow_dispatch or rerun -> artifact / log inspection -> PASS 判定まで含みます。status-only で止めてはいけません。
+- `/vote` で `BLOCKED` を返してよいのは、live rerun / verification path を実際に試し、その失敗が current session から解消不能な external blocker だと証拠付きで示せた場合だけです。
 - `/vote` / `/v` でも approval prompt を伴う操作に入る前は、`/kernel` と同じく lane を quiesce し、無理なら `quiescence_timeout` で fail-close します。
 - この repo の `/vote` / `/v` の SSOT は [`.codex/prompts/vote.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/vote.md) と [`.codex/prompts/v.md`](/Users/masayuki/Dev/fugue-orchestrator/.codex/prompts/v.md) です。
 - GitHub Actions 側の `/vote` workflow を起動したい場合は、slash prompt ではなく `gh issue comment ... --body '/vote'` または `vote-gh ...` を使ってください。
+- `/vote` 起点の GitHub auto-implement は現状 fail-close です。`fugue-codex-implement` が `Codex + Claude + GLM` の council continuity を completion まで保持できるようになるまでは、自動実装へ進めません。
 - prompt の hot reload は保証しません。`.codex/prompts/vote.md` / `.codex/prompts/v.md` を変更したら既存セッションを使い回さず、新しい Codex セッションを開始してください。
 
 ## ファイル構成
@@ -136,8 +160,8 @@ codex -C /Users/masayuki/Dev/fugue-orchestrator
 
 # 3B. API 実行を使う場合のみキー設定（Anthropic は secondary fallback）
 export OPENAI_API_KEY="your-openai-key"
-export GLM_API_KEY="your-glm-key"
-export GLM_MODEL="glm-4.7" # optional (default in Tutti lanes is glm-4.7)
+export ZAI_API_KEY="your-glm-key"
+export GLM_MODEL="glm-5" # optional (default in Tutti lanes is glm-5)
 export GEMINI_API_KEY="your-gemini-key"
 export XAI_API_KEY="your-xai-key" # optional (X/Twitter / realtime specialist)
 export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
@@ -163,7 +187,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC   --body 20      -R <owner/repo> # canary統合コメント待機(保守フェーズ)秒
 # gh variable set FUGUE_DUAL_MAIN_SIGNAL             --body true    -R <owner/repo> # trueで codex-main / claude-main signal lane を両建て
 # gh variable set FUGUE_CODEX_MAIN_MODEL             --body gpt-5-codex -R <owner/repo> # main orchestrator lane model
-# gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5.3-codex-spark -R <owner/repo> # non-main codex lanes model
+# gh variable set FUGUE_CODEX_MULTI_AGENT_MODEL      --body gpt-5-codex -R <owner/repo> # non-main codex lanes model
 # gh variable set FUGUE_STRICT_MAIN_CODEX_MODEL      --body false   -R <owner/repo> # trueで codex-main-orchestrator=gpt-5-codex を厳格要求
 # gh variable set FUGUE_STRICT_OPUS_ASSIST_DIRECT    --body false   -R <owner/repo> # trueで claude-opus-assist の direct Claude 実行のみ許可（Copilot/proxy不可）
 # gh variable set FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST --body false   -R <owner/repo> # trueで /vote 時に claude-opus-assist direct success を必須化
@@ -183,10 +207,10 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # gh variable set FUGUE_CLAUDE_ROLE_POLICY           --body flex     -R <owner/repo> # sub-only|flex
 # gh variable set FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY --body claude -R <owner/repo> # none|codex|claude
 # gh variable set FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --body hybrid -R <owner/repo> # direct|hybrid|proxy
-# gh variable set FUGUE_CLAUDE_OPUS_MODEL            --body claude-sonnet-4-6 -R <owner/repo> # default assist model (compat var name)
-# gh variable set FUGUE_CLAUDE_SONNET4_MODEL         --body claude-sonnet-4-6 -R <owner/repo> # keep non-subscription assist lanes on Sonnet 4.6 only
-# gh variable set FUGUE_CLAUDE_SONNET6_MODEL         --body claude-sonnet-4-6 -R <owner/repo> # keep non-subscription assist lanes on Sonnet 4.6 only
-# gh variable set FUGUE_GEMINI_MODEL                 --body gemini-3.1-pro -R <owner/repo> # Gemini primary latest lane
+# gh variable set FUGUE_CLAUDE_OPUS_MODEL            --body claude-opus-4-6 -R <owner/repo> # pin Claude lanes to the latest Opus default (compat var name)
+# gh variable set FUGUE_CLAUDE_SONNET4_MODEL         --body claude-opus-4-6 -R <owner/repo> # compat env; normalized to the same latest Opus pin
+# gh variable set FUGUE_CLAUDE_SONNET6_MODEL         --body claude-opus-4-6 -R <owner/repo> # compat env; normalized to the same latest Opus pin
+# gh variable set FUGUE_GEMINI_MODEL                 --body gemini-3.1-pro-preview -R <owner/repo> # Gemini primary latest lane
 # gh variable set FUGUE_GEMINI_FALLBACK_MODEL        --body gemini-3-flash -R <owner/repo> # Gemini fallback lane
 # gh variable set FUGUE_XAI_MODEL                    --body grok-4 -R <owner/repo> # xAI latest lane
 # gh variable set FUGUE_CLAUDE_SUB_AUTO_ESCALATE     --body high    -R <owner/repo> # off|high|medium-high
@@ -237,10 +261,13 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 # NOTE: `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST=true` のときのみ、/vote で `claude-opus-assist` の direct success を必須化します（既定は非必須）。
 # NOTE: `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true`（既定）では、assist=claude かつ `risk_tier=high` または ambiguity translation-gate=true のタスクで claude-opus-assist 成功を必須化します。未達時は `ok_to_execute=false` になります。
 # NOTE: `FUGUE_REQUIRE_BASELINE_TRIO=true`（既定）では、codex+claude+glm の成功参加が揃わない限り `ok_to_execute=false` になります。
+# NOTE: `copilot-cli` は Claude continuity fallback 用であり、baseline trio や direct-Claude gate の代用にはなりません。
+# NOTE: `gemini` は additive specialist lane であり、GLM baseline の代用にはなりません。
+# NOTE: degraded continuity 中は shadow lane として review/read-only 継続に使えますが、strict `/vote` や非自明な自動 write gate は fail-close が正です。
 # NOTE: `FUGUE_EMERGENCY_CONTINUITY_MODE=true` のとき、新規 issue は処理せず `processing` 付き in-flight issue のみ継続します。
 # NOTE: continuity中に assist=claude は `FUGUE_EMERGENCY_ASSIST_POLICY` へ縮退（既定 none）し、Opus direct未構成でのfail連鎖を防ぎます。
 # NOTE: `FUGUE_MULTI_AGENT_MODE=enhanced|max` で /vote の合議レーンを段階的に増やせます。
-# NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、mainは `gpt-5-codex` 固定のまま multi-agent を `gpt-5.3-codex-spark` に寄せられます。
+# NOTE: `FUGUE_CODEX_MAIN_MODEL` と `FUGUE_CODEX_MULTI_AGENT_MODEL` を分離すると、live/local は main・multi-agent ともに `codex` baseline を維持しつつ、simulation だけ `gpt-5.3-codex-spark` に寄せられます。
 # NOTE: `FUGUE_GLM_SUBAGENT_MODE=paired|symphony` で GLM subagent レーン（orchestration/architect/plan/reliability）を段階的に増やせます（`FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=false` の場合のみ subscription で自動off）。
 # NOTE: `FUGUE_CODEX_RECURSIVE_DELEGATION=true` のとき、target lane で codex recursive delegation（parent->child->grandchild）を有効化します。
 # NOTE: main=claude でも assist=codex かつ `FUGUE_CODEX_RECURSIVE_TARGET_LANES` に `codex-orchestration-assist` を含めれば同モードが発動します。
@@ -304,7 +331,7 @@ RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh
 # 合格条件: 出力に `Local consensus mode is active.` + `Smoke verification: PASS` + `Smoke result marker: ...` を含み、既定90秒以内に完了
 
 # 3.8 GHAなしローカル直実行（Codex main + Claude assist + GLM並走）
-# CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5.3-codex-spark \
+# CODEX_MAIN_MODEL=gpt-5-codex CODEX_MULTI_AGENT_MODEL=gpt-5-codex \
 #   ./scripts/local/run-local-orchestration.sh --issue 176 --repo cursorvers/fugue-orchestrator --mode enhanced --glm-mode paired --max-parallel 4
 # NOTE: codex/claude は CLI 実行、glm は API 実行。実行結果は .fugue/local-run 配下に保存されます。
 # NOTE: `FUGUE_PRIMARY_HEARTBEAT_MODE=auto`（既定）では、gh が使えると実行開始/終了時に primary heartbeat を更新します。
@@ -327,7 +354,7 @@ RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh
 #       上記必須ゲートは `not-required` に切り替わります。
 # NOTE: `FUGUE_CLAUDE_SESSION_HANDOFF=true`（既定）で Claude lane の `session_id` を保存します。
 #       直近 run の引き継ぎ確認は `./scripts/local/claude-handoff-summary.sh`。
-# NOTE: assistモデルは Sonnet 4.6固定（`FUGUE_CLAUDE_OPUS_MODEL=claude-sonnet-4-6`）。
+# NOTE: assistモデルは最新 Opus 4.6 固定（`FUGUE_CLAUDE_OPUS_MODEL=claude-opus-4-6`）。
 # NOTE: model policy (latest track): Claude=Sonnet 4.6 only / GLM=5.0 only / Gemini=3.1-pro(primary)+3-flash(fallback) / xAI=Grok 4 family.
 # NOTE: `scripts/lib/model-policy.sh` が実行時に上記トラックへ自動正規化します（古い指定値は補正）。
 
@@ -339,8 +366,11 @@ RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh
 #     --with-linked-systems --linked-mode smoke --linked-systems all --linked-max-parallel 3
 # NOTE: 連結定義は `config/integrations/local-systems.json`。
 # NOTE: 既定の連結には `discord-notify` / `line-notify` も含まれます（通知設定未投入時は `execute` で失敗）。
-# NOTE: Discord: `DISCORD_NOTIFY_WEBHOOK_URL`（fallback: `DISCORD_WEBHOOK_URL` / `DISCORD_SYSTEM_WEBHOOK`）
+# NOTE: Discord: `DISCORD_NOTIFY_WEBHOOK_URL`（fallback: `DISCORD_WEBHOOK_URL`）
+# NOTE: `DISCORD_SYSTEM_WEBHOOK` は system alert 専用で、`discord-notify` では既定で fallback しません。
 # NOTE: LINE: `LINE_WEBHOOK_URL` または `LINE_CHANNEL_ACCESS_TOKEN` + `LINE_TO`（legacy fallback: `LINE_NOTIFY_TOKEN` / `LINE_NOTIFY_ACCESS_TOKEN`）
+# NOTE: LINE は明示的なユーザー向け通知専用です。system log / watchdog / audit / ops alert を LINE へ流すことは禁止です。
+# NOTE: `line-notify` の execute/send では `LINE_NOTIFY_PURPOSE` が必須で、非 user-facing 用途は拒否されます。
 # NOTE: line-notify は重複送信抑止と失敗クールダウンを標準有効化しています（`LINE_NOTIFY_GUARD_ENABLED=true`）。
 # NOTE: ガード状態は `LINE_NOTIFY_GUARD_FILE`（既定: `.fugue/state/line-notify-guard.json`）に永続化されます。
 # NOTE: 抑止窓は `LINE_NOTIFY_DEDUP_TTL_SECONDS` / `LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS` で調整できます。
