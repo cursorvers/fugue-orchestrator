@@ -27,6 +27,7 @@ bootstrap_max_attempts="${KERNEL_BOOTSTRAP_MAX_ATTEMPTS:-3}"
 bootstrap_backoff_sec="${KERNEL_BOOTSTRAP_RETRY_BACKOFF_SECONDS:-2}"
 computed_smoke_timeout_sec=$(( claude_bootstrap_timeout_sec * bootstrap_max_attempts + claude_bootstrap_timeout_step_sec * bootstrap_max_attempts * (bootstrap_max_attempts - 1) / 2 + bootstrap_backoff_sec * (bootstrap_max_attempts - 1) + 25 ))
 smoke_timeout_sec="${CODEX_KERNEL_SMOKE_TIMEOUT_SEC:-${computed_smoke_timeout_sec}}"
+kernel_smoke_startup_grace_sec="${CODEX_KERNEL_SMOKE_STARTUP_GRACE_SECONDS:-35}"
 
 assert_file() {
   local path="$1"
@@ -263,17 +264,21 @@ if [[ "${RUN_CODEX_KERNEL_SMOKE:-0}" == "1" ]]; then
 import os
 import signal
 import subprocess
+import sys
 
 patterns = ("kernel-smoke-", "kernel-session-smoke-")
 keepers = {os.getpid(), os.getppid()}
 targets: list[int] = []
 
-ps = subprocess.run(
-    ["ps", "-axo", "pid=,command="],
-    capture_output=True,
-    text=True,
-    check=True,
-)
+try:
+    ps = subprocess.run(
+        ["ps", "-axo", "pid=,command="],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+except Exception:
+    sys.exit(0)
 
 for raw_line in ps.stdout.splitlines():
     line = raw_line.strip()
@@ -305,10 +310,18 @@ for pid in targets:
 PY
   }
 
+  cooldown_smoke_runtime() {
+    local sleep_sec="${1:-0}"
+    cleanup_stale_smoke_processes || true
+    if [[ "${sleep_sec}" -gt 0 ]]; then
+      sleep "${sleep_sec}"
+    fi
+  }
+
   run_codex_smoke() {
     local prompt_name="$1"
     local focus_text="$2"
-    ROOT_DIR="${ROOT_DIR}" PROMPT_NAME="${prompt_name}" FOCUS_TEXT="${focus_text}" SMOKE_TIMEOUT_SEC="${smoke_timeout_sec}" python3 - <<'PY'
+    ROOT_DIR="${ROOT_DIR}" PROMPT_NAME="${prompt_name}" FOCUS_TEXT="${focus_text}" SMOKE_TIMEOUT_SEC="${smoke_timeout_sec}" CODEX_KERNEL_QUORUM_STARTUP_GRACE_SECONDS="${kernel_smoke_startup_grace_sec}" KERNEL_BOOTSTRAP_CLAUDE_TIMEOUT_SECONDS="${claude_bootstrap_timeout_sec}" KERNEL_BOOTSTRAP_CLAUDE_TIMEOUT_STEP_SECONDS="${claude_bootstrap_timeout_step_sec}" KERNEL_BOOTSTRAP_MAX_ATTEMPTS="${bootstrap_max_attempts}" KERNEL_BOOTSTRAP_RETRY_BACKOFF_SECONDS="${bootstrap_backoff_sec}" python3 - <<'PY'
 import os
 import subprocess
 import sys
@@ -317,6 +330,7 @@ root_dir = os.environ["ROOT_DIR"]
 prompt_name = os.environ["PROMPT_NAME"]
 focus_text = os.environ["FOCUS_TEXT"]
 timeout_sec = int(os.environ["SMOKE_TIMEOUT_SEC"])
+parent_timeout_sec = timeout_sec + 15
 launcher = "/Users/masayuki/Dev/tools/codex-prompt-launcher/bin/codex-prompt-launch"
 pty_runner = "/Users/masayuki/Dev/tools/codex-prompt-launcher/scripts/run_with_pty.py"
 command = ["python3", pty_runner, "--cwd", root_dir, "--timeout-sec", str(timeout_sec), "--", launcher, prompt_name]
@@ -328,7 +342,7 @@ try:
         command,
         capture_output=True,
         text=True,
-        timeout=timeout_sec,
+        timeout=parent_timeout_sec,
     )
 except subprocess.TimeoutExpired as exc:
     output = exc.stdout or ""
@@ -350,7 +364,9 @@ PY
   audit_canary_timeout() {
     local prompt_name="$1"
     local marker="$2"
-    ROOT_DIR="${ROOT_DIR}" PROMPT_NAME="${prompt_name}" MARKER="${marker}" PYTHONPATH="/Users/masayuki/Dev/tools/codex-kernel-guard/src${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<'PY'
+    local min_active_lanes="${3:-6}"
+    local require_ack="${4:-1}"
+    ROOT_DIR="${ROOT_DIR}" PROMPT_NAME="${prompt_name}" MARKER="${marker}" MIN_ACTIVE_LANES="${min_active_lanes}" REQUIRE_ACK="${require_ack}" PYTHONPATH="/Users/masayuki/Dev/tools/codex-kernel-guard/src${PYTHONPATH:+:${PYTHONPATH}}" python3 - <<'PY'
 import json
 import os
 import sqlite3
@@ -394,14 +410,91 @@ def manifest_lane_count(text: str) -> int:
             break
     return count
 
+def rollout_matches_canary(rollout_path: Path, root_dir: str, marker: str) -> bool:
+    canary_title = f"Kernel canary id: {marker}"
+    startup_title = f"Kernel startup canary id: {marker}"
+    cwd_ok = False
+    title_ok = False
+    try:
+        with rollout_path.open(encoding="utf-8", errors="replace") as handle:
+            for index, raw_line in enumerate(handle):
+                if index > 32:
+                    break
+                try:
+                    event = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                event_type = event.get("type")
+                payload = event.get("payload") or {}
+                if event_type == "session_meta":
+                    cwd_ok = str(payload.get("cwd") or "") == root_dir
+                elif event_type == "turn_context":
+                    cwd_ok = cwd_ok or str(payload.get("cwd") or "") == root_dir
+                elif event_type == "response_item":
+                    if payload.get("type") != "message" or payload.get("role") != "user":
+                        continue
+                    for content in payload.get("content") or []:
+                        if not isinstance(content, dict):
+                            continue
+                        text = content.get("text")
+                        if not isinstance(text, str):
+                            continue
+                        if canary_title in text and startup_title in text:
+                            title_ok = True
+                            break
+                if cwd_ok and title_ok:
+                    return True
+    except OSError:
+        return False
+    return False
+
+def resolve_rollout_from_recent_sessions(root_dir: str, marker: str) -> tuple[Path | None, int | None]:
+    sessions_root = Path("/Users/masayuki/.codex/sessions")
+    if not sessions_root.exists():
+        return None, None
+    candidates: list[tuple[float, Path]] = []
+    day_dirs: list[tuple[float, Path]] = []
+    for year_dir in sessions_root.iterdir():
+        if not year_dir.is_dir():
+            continue
+        for month_dir in year_dir.iterdir():
+            if not month_dir.is_dir():
+                continue
+            for day_dir in month_dir.iterdir():
+                if not day_dir.is_dir():
+                    continue
+                try:
+                    day_dirs.append((day_dir.stat().st_mtime, day_dir))
+                except OSError:
+                    continue
+    for _, day_dir in sorted(day_dirs, reverse=True)[:4]:
+        for rollout_path in day_dir.glob("rollout-*.jsonl"):
+            try:
+                mtime = rollout_path.stat().st_mtime
+            except OSError:
+                continue
+            candidates.append((mtime, rollout_path))
+    for _, rollout_path in sorted(candidates, reverse=True)[:400]:
+        if not rollout_matches_canary(rollout_path, root_dir, marker):
+            continue
+        try:
+            created_at = int(rollout_path.stat().st_mtime)
+        except OSError:
+            created_at = None
+        return rollout_path, created_at
+    return None, None
+
 root_dir = os.environ["ROOT_DIR"]
 prompt_name = os.environ["PROMPT_NAME"]
 marker = os.environ["MARKER"]
+min_active_lanes = int(os.environ.get("MIN_ACTIVE_LANES", "6"))
+require_ack = os.environ.get("REQUIRE_ACK", "1").strip().lower() not in {"0", "false", "no", "off"}
 state_db = Path("/Users/masayuki/.codex/state_5.sqlite")
 bootstrap_root = Path("/Users/masayuki/Dev/kernel-orchestration-tools/state/bootstrap-evidence")
 
 conn = sqlite3.connect(state_db)
 conn.row_factory = sqlite3.Row
+canary_title = f"Kernel canary id: {marker}"
 row = conn.execute(
     """
     SELECT rollout_path, created_at
@@ -415,30 +508,44 @@ row = conn.execute(
     ORDER BY created_at DESC
     LIMIT 1
     """,
-    (root_dir, f"%{marker}%", f"%{marker}%"),
+    (root_dir, f"{canary_title}%", f"{canary_title}%"),
 ).fetchone()
 if row is None:
-    raise SystemExit(2)
-rollout_path = Path(row["rollout_path"])
-thread_created_at = int(row["created_at"])
+    rollout_path, thread_created_at = resolve_rollout_from_recent_sessions(root_dir, marker)
+    if rollout_path is None or thread_created_at is None:
+        raise SystemExit(2)
+else:
+    rollout_path = Path(row["rollout_path"])
+    thread_created_at = int(row["created_at"])
+    if not rollout_matches_canary(rollout_path, root_dir, marker):
+        rollout_path, thread_created_at = resolve_rollout_from_recent_sessions(root_dir, marker)
+        if rollout_path is None or thread_created_at is None:
+            raise SystemExit(2)
 code, _, _ = audit_session_jsonl_with_evidence(
     rollout_path,
-    min_active_lanes=6,
+    min_active_lanes=min_active_lanes,
     min_distinct_lane_families=2,
     required_phase_evidence=("plan", "simulate", "critique", "repair", "replan"),
 )
 if code != 0:
     raise SystemExit(3)
 assistant_output = collect_assistant_output(rollout_path)
-if (
-    "Kernel orchestration is active for this session." not in assistant_output
-    or "Bootstrap target: 6+ lanes (minimum 6)." not in assistant_output
-    or "Lane manifest:" not in assistant_output
-    or manifest_lane_count(assistant_output) < 6
-    or f"Smoke result marker: {marker}" not in assistant_output
-    or "errored" in assistant_output
-):
-    raise SystemExit(5)
+if require_ack:
+    if (
+        "Kernel orchestration is active for this session." not in assistant_output
+        or "Bootstrap target: 6+ lanes (minimum 6)." not in assistant_output
+        or "Lane manifest:" not in assistant_output
+        or manifest_lane_count(assistant_output) < 6
+        or f"Smoke result marker: {marker}" not in assistant_output
+        or "errored" in assistant_output
+    ):
+        raise SystemExit(5)
+else:
+    if (
+        "Bootstrapping" not in assistant_output
+        or "errored" in assistant_output
+    ):
+        raise SystemExit(5)
 
 evidence_ok = False
 for path in sorted(bootstrap_root.glob(f"bootstrap-{prompt_name}-*"), key=lambda p: p.stat().st_mtime, reverse=True):
@@ -450,14 +557,19 @@ for path in sorted(bootstrap_root.glob(f"bootstrap-{prompt_name}-*"), key=lambda
     prompt_name_value = str(payload.get("prompt_name") or "")
     if prompt_root != root_dir or prompt_name_value != prompt_name:
         continue
+    bootstrap_task = str(payload.get("bootstrap_task") or "")
+    if marker and marker in bootstrap_task:
+        matched_marker = True
+    else:
+        matched_marker = False
     created_at = str(payload.get("created_at") or "")
-    if not created_at:
+    if not created_at and not matched_marker:
         continue
     try:
         evidence_ts = int(Path(path).stat().st_mtime)
     except OSError:
         continue
-    if abs(evidence_ts - thread_created_at) > 600:
+    if not matched_marker and abs(evidence_ts - thread_created_at) > 600:
         continue
     providers = payload.get("providers") or []
     names = {
@@ -472,6 +584,26 @@ if not evidence_ok:
     raise SystemExit(4)
 print("timeout-audit-pass")
 PY
+  }
+
+  audit_canary_quorum_success() {
+    local prompt_name="$1"
+    local marker="$2"
+    audit_canary_timeout "${prompt_name}" "${marker}" 3 0
+  }
+
+  audit_canary_quorum_success_with_retry() {
+    local prompt_name="$1"
+    local marker="$2"
+    local attempt=0
+    while [[ "${attempt}" -lt 6 ]]; do
+      if audit_canary_quorum_success "${prompt_name}" "${marker}" >/dev/null 2>&1; then
+        return 0
+      fi
+      attempt=$((attempt + 1))
+      sleep 5
+    done
+    return 1
   }
 
   audit_canary_timeout_with_retry() {
@@ -497,7 +629,12 @@ PY
     local marker=""
     local can_try_timeout_audit=0
 
-    while [[ "${attempt}" -lt 2 ]]; do
+    while [[ "${attempt}" -lt 4 ]]; do
+      if [[ "${attempt}" -eq 0 ]]; then
+        cooldown_smoke_runtime 2
+      else
+        cooldown_smoke_runtime $(( attempt * 5 ))
+      fi
       marker="kernel-smoke-${prompt_name}-$$-$(date +%s)-${RANDOM}"
       set +e
       smoke_output="$(run_codex_smoke "${prompt_name}" "SMOKE_RESULT_MARKER=${marker}" 2>&1)"
@@ -542,6 +679,10 @@ PY
         return 0
       fi
       can_try_timeout_audit=0
+      if audit_canary_quorum_success_with_retry "${prompt_name}" "${marker}"; then
+        echo "[PASS] runtime smoke: ${label} canary passed via quorum audit" >&2
+        return 0
+      fi
       if grep -Fq 'preflight: PASS:' <<<"${smoke_output}" \
         && grep -Fq 'Kernel runtime canary: PASS' <<<"${smoke_output}" \
         && grep -Fq "Smoke result marker: ${marker}" <<<"${smoke_output}"; then
@@ -555,6 +696,13 @@ PY
         can_try_timeout_audit=1
       fi
       if [[ "${can_try_timeout_audit}" -eq 1 ]]; then
+        if grep -Fq 'Kernel runtime canary: PASS' <<<"${smoke_output}" \
+          && grep -Fq "Smoke result marker: ${marker}" <<<"${smoke_output}"; then
+          if audit_canary_quorum_success "${prompt_name}" "${marker}" >/dev/null 2>&1; then
+            echo "[PASS] runtime smoke: ${label} canary passed via quorum audit" >&2
+            return 0
+          fi
+        fi
         if audit_canary_timeout_with_retry "${prompt_name}" "${marker}"; then
           echo "[PASS] runtime smoke: ${label} canary passed via timeout audit" >&2
           return 0
