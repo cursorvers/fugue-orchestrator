@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$ROOT/src/kernel-state.js"
 APP="$ROOT/src/app.js"
 HTML="$ROOT/index.html"

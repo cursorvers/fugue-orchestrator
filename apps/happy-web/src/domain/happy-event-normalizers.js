@@ -48,6 +48,19 @@ export function stableTaskId(title) {
   return `task-${stableSlug(title)}`;
 }
 
+export function taskIdentityFromRecord(record) {
+  if (typeof record?.task_id === "string" && record.task_id) return record.task_id;
+  if (typeof record?.id === "string" && record.id) return record.id;
+  if (typeof record?.run_id === "string" && record.run_id) return `run-${stableSlug(record.run_id)}`;
+  if (typeof record?.tmux_session === "string" && record.tmux_session) {
+    return `tmux-${stableSlug(record.tmux_session)}`;
+  }
+  if (typeof record?.session_id === "string" && record.session_id) {
+    return `session-${stableSlug(record.session_id)}`;
+  }
+  return stableTaskId(record?.title || "Untitled task");
+}
+
 export function stableOutputId(output, index = 0) {
   return `out-${stableSlug(output?.title || output?.value || "artifact")}-${index + 1}`;
 }
@@ -127,12 +140,7 @@ export function normalizeTask(task, config) {
     : [];
   const fallbackEventAt = outputs[0]?.created_at || safeIso(task?.last_event_at, nowIso());
   return {
-    id:
-      typeof task?.id === "string"
-        ? task.id
-        : typeof task?.task_id === "string"
-          ? task.task_id
-          : stableTaskId(title),
+    id: taskIdentityFromRecord(task),
     title,
     status: typeof task?.status === "string" ? task.status : "running",
     route: typeof task?.route === "string" ? task.route : "local",
@@ -157,6 +165,11 @@ export function normalizeTask(task, config) {
           ? task.summary
           : "Waiting for the next event.",
     last_event_at: safeIso(task?.last_event_at, fallbackEventAt),
+    run_id: typeof task?.run_id === "string" ? task.run_id : "",
+    session_id: typeof task?.session_id === "string" ? task.session_id : "",
+    tmux_session: typeof task?.tmux_session === "string" ? task.tmux_session : "",
+    codex_thread_title:
+      typeof task?.codex_thread_title === "string" ? task.codex_thread_title : "",
     outputs,
   };
 }
@@ -275,6 +288,10 @@ function compactSnapshotTask(task, config) {
     decision: normalized.decision,
     latest_step: normalized.latest_step,
     last_event_at: normalized.last_event_at,
+    run_id: normalized.run_id,
+    session_id: normalized.session_id,
+    tmux_session: normalized.tmux_session,
+    codex_thread_title: normalized.codex_thread_title,
     outputs: normalized.outputs.slice(0, MAX_CONTEXT_OUTPUTS),
   };
 }
@@ -308,6 +325,11 @@ export function normalizeEvent(event, config) {
       typeof event?.progress_confidence === "string" ? event.progress_confidence : "medium",
     latest_step: typeof event?.latest_step === "string" ? event.latest_step : "",
     decision: typeof event?.decision === "string" ? event.decision : "",
+    run_id: typeof event?.run_id === "string" ? event.run_id : "",
+    session_id: typeof event?.session_id === "string" ? event.session_id : "",
+    tmux_session: typeof event?.tmux_session === "string" ? event.tmux_session : "",
+    codex_thread_title:
+      typeof event?.codex_thread_title === "string" ? event.codex_thread_title : "",
     message: typeof event?.message === "string" ? event.message : "",
     severity: typeof event?.severity === "string" ? event.severity : "",
     detail: typeof event?.detail === "string" ? event.detail : "",

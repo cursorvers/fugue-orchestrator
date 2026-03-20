@@ -2,7 +2,9 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { pathToFileURL } = require("url");
 
-const root = "/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web";
+const path = require("path");
+
+const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(`${root}/index.html`, "utf8");
 const state = fs.readFileSync(`${root}/src/kernel-state.js`, "utf8");
 const app = fs.readFileSync(`${root}/src/app.js`, "utf8");
@@ -64,6 +66,7 @@ async function main() {
   assert(app.includes("stateAdapter.subscribe"), "missing incremental subscription");
   assert(app.includes("stateAdapter.syncTaskDetail"), "missing task detail sync wiring");
   assert(app.includes("renderEventList"), "missing event stream renderer");
+  assert(app.includes("taskSessionMeta"), "missing session-aware task rendering");
   assert(mockState.includes("secret issue"), "missing secret issue alert");
   assert(state.includes("runtimeConfig"), "missing runtime config wiring");
   assert(config.includes("happy-runtime-mode"), "missing runtime config meta binding");
@@ -191,6 +194,89 @@ async function main() {
     assert(eventsCalls === 1, "remote bootstrap should query the event feed first");
     assert(stateCalls === 1, "empty event feed should fall back to the state bootstrap endpoint");
     assert(synced.tasks.length === 0, "empty remote bootstrap should stay empty without synthetic tasks");
+  }
+
+  {
+    global.window = { localStorage: createMemoryStorage() };
+    global.navigator = { onLine: true };
+
+    const endpointClientStub = {
+      async fetchJson(url) {
+        const parsed = new URL(url);
+        if (parsed.origin + parsed.pathname === "https://example.com/events") {
+          return { events: [], next_cursor: null };
+        }
+        if (parsed.origin + parsed.pathname === "https://example.com/state") {
+          return {
+            state: {
+              health: "healthy",
+              recent_prompts: [],
+              alerts: [],
+              recover_result: "Recover idle",
+              tasks: [
+                {
+                  title: "Shared title",
+                  status: "running",
+                  route: "local",
+                  summary: "first session",
+                  current_phase: "plan",
+                  phase_index: 1,
+                  phase_total: 5,
+                  progress_confidence: "high",
+                  decision: "session A",
+                  latest_step: "session A",
+                  last_event_at: "2026-03-20T00:00:00.000Z",
+                  run_id: "run-a",
+                  tmux_session: "fugue-orchestrator__session-a",
+                },
+                {
+                  title: "Shared title",
+                  status: "running",
+                  route: "local",
+                  summary: "second session",
+                  current_phase: "plan",
+                  phase_index: 1,
+                  phase_total: 5,
+                  progress_confidence: "high",
+                  decision: "session B",
+                  latest_step: "session B",
+                  last_event_at: "2026-03-20T00:01:00.000Z",
+                  run_id: "run-b",
+                  tmux_session: "fugue-orchestrator__session-b",
+                },
+              ],
+            },
+          };
+        }
+        throw new Error(`unexpected url ${url}`);
+      },
+    };
+
+    const crowAdapter = createCrowAdapter();
+    const intakeAdapter = createIntakeAdapter();
+    const stateAdapter = createStateAdapter({
+      crowAdapter,
+      config: {
+        remoteEnabled: true,
+        issueUrl: "https://example.com/issues/session-split",
+        eventsEndpoint: "https://example.com/events",
+        stateEndpoint: "https://example.com/state",
+      },
+      intakeAdapter,
+      endpointClient: endpointClientStub,
+    });
+
+    const synced = await stateAdapter.syncRemoteState();
+    assert(synced.tasks.length === 2, "session-aware projection should keep same-title runs separate");
+    assert(synced.tasks[0].id !== synced.tasks[1].id, "same-title runs should not share an id");
+    assert(
+      synced.tasks.some((task) => task.tmux_session === "fugue-orchestrator__session-a"),
+      "first tmux session missing after normalization"
+    );
+    assert(
+      synced.tasks.some((task) => task.tmux_session === "fugue-orchestrator__session-b"),
+      "second tmux session missing after normalization"
+    );
   }
 
   {

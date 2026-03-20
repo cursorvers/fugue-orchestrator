@@ -35,6 +35,9 @@ export const initialState = {
       phase_total: 5,
       progress_confidence: "high",
       decision: "Auto-continue allowed. FUGUE rollback remains available.",
+      run_id: "run-company-deck",
+      tmux_session: "fugue-orchestrator__company-deck",
+      codex_thread_title: "fugue-orchestrator:company-deck",
       outputs: [
         {
           type: "slide_deck",
@@ -69,6 +72,9 @@ export const initialState = {
       phase_total: 5,
       progress_confidence: "medium",
       decision: "Needs review before publish. Recovery not required.",
+      run_id: "run-medical-note",
+      tmux_session: "fugue-orchestrator__medical-note",
+      codex_thread_title: "fugue-orchestrator:medical-note",
       outputs: [
         {
           type: "note_draft",
@@ -103,6 +109,9 @@ export const initialState = {
       phase_total: 4,
       progress_confidence: "high",
       decision: "Needs human approval. Use Recover only for reroute/status.",
+      run_id: "run-secret-rotation",
+      tmux_session: "fugue-orchestrator__secret-rotation",
+      codex_thread_title: "fugue-orchestrator:secret-rotation",
       outputs: [
         {
           type: "issue_comment",
@@ -127,6 +136,9 @@ export const initialState = {
       phase_total: 2,
       progress_confidence: "high",
       decision: "Rollback path verified. Safe to keep warm.",
+      run_id: "run-rollback-canary",
+      tmux_session: "fugue-orchestrator__rollback-canary",
+      codex_thread_title: "fugue-orchestrator:rollback-canary",
       outputs: [
         {
           type: "report",
