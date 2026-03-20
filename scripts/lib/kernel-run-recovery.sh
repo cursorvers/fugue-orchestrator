@@ -121,21 +121,45 @@ launch_runtime_thread() {
 
 refresh_compact_artifact() {
   local run_id="${1:-${RUN_ID}}"
-  local json next_actions decisions summary runtime
+  local json
   json="$(compact_json "${run_id}")" || return 1
-  next_actions="$(jq -r '(.next_action // []) | join("|")' <<<"${json}")"
-  decisions="$(jq -r '(.decisions // []) | join("|")' <<<"${json}")"
+
+  local next_actions decisions summary runtime project purpose phase mode tmux_session owner blocking_reason
+  {
+    IFS= read -r next_actions
+    IFS= read -r decisions
+    IFS= read -r runtime
+    IFS= read -r project
+    IFS= read -r purpose
+    IFS= read -r phase
+    IFS= read -r mode
+    IFS= read -r tmux_session
+    IFS= read -r owner
+    IFS= read -r blocking_reason
+  } < <(jq -r '
+      ((.next_action // []) | join("|")),
+      ((.decisions // []) | join("|")),
+      (.runtime // "kernel"),
+      (.project // "kernel-workspace"),
+      (.purpose // "unspecified"),
+      (.current_phase // "unknown"),
+      (.mode // "unknown"),
+      (.tmux_session // ""),
+      (.owner // "local-operator"),
+      (.blocking_reason // "")
+    ' <<<"${json}"
+  )
   summary="$(jq -r '(.summary // []) | join("\n")' <<<"${json}")"
-  runtime="$(jq -r '.runtime // "kernel"' <<<"${json}")"
+
   KERNEL_RUN_ID="${run_id}" \
-  KERNEL_PROJECT="$(jq -r '.project // "kernel-workspace"' <<<"${json}")" \
-  KERNEL_PURPOSE="$(jq -r '.purpose // "unspecified"' <<<"${json}")" \
-  KERNEL_PHASE="$(jq -r '.current_phase // "unknown"' <<<"${json}")" \
-  KERNEL_MODE="$(jq -r '.mode // "unknown"' <<<"${json}")" \
+  KERNEL_PROJECT="${project}" \
+  KERNEL_PURPOSE="${purpose}" \
+  KERNEL_PHASE="${phase}" \
+  KERNEL_MODE="${mode}" \
   KERNEL_RUNTIME="${runtime}" \
-  KERNEL_TMUX_SESSION="$(jq -r '.tmux_session // ""' <<<"${json}")" \
-  KERNEL_OWNER="$(jq -r '.owner // "local-operator"' <<<"${json}")" \
-  KERNEL_BLOCKING_REASON="$(jq -r '.blocking_reason // ""' <<<"${json}")" \
+  KERNEL_TMUX_SESSION="${tmux_session}" \
+  KERNEL_OWNER="${owner}" \
+  KERNEL_BLOCKING_REASON="${blocking_reason}" \
   KERNEL_NEXT_ACTIONS="${next_actions}" \
   KERNEL_DECISIONS="${decisions}" \
   KERNEL_SUMMARY="${summary}" \
@@ -144,26 +168,42 @@ refresh_compact_artifact() {
 
 cmd_status() {
   local run_id="${1:-${RUN_ID}}"
-  local json strategy current_phase resume_phase tmux_session codex_thread_title mode runtime next_action active_models updated_at session_fingerprint
+  local json strategy
   json="$(compact_json "${run_id}")" || {
     echo "compact artifact missing for run: ${run_id}" >&2
     exit 1
   }
 
   strategy="$(resume_strategy_for "${run_id}")"
-  current_phase="$(jq -r '.current_phase // "unknown"' <<<"${json}")"
-  resume_phase="${current_phase}"
+
+  local current_phase tmux_session codex_thread_title mode runtime session_fingerprint next_action active_models updated_at
+  {
+    IFS= read -r current_phase
+    IFS= read -r tmux_session
+    IFS= read -r codex_thread_title
+    IFS= read -r mode
+    IFS= read -r runtime
+    IFS= read -r session_fingerprint
+    IFS= read -r next_action
+    IFS= read -r active_models
+    IFS= read -r updated_at
+  } < <(jq -r '
+      (.current_phase // "unknown"),
+      (.tmux_session // ""),
+      (.codex_thread_title // (.project + ":" + .purpose)),
+      (.mode // "unknown"),
+      (.runtime // "kernel"),
+      (.session_fingerprint // ""),
+      ((.next_action // [])[0] // ""),
+      ((.active_models // []) | join(",")),
+      (.updated_at // "")
+    ' <<<"${json}"
+  )
+
+  local resume_phase="${current_phase}"
   if [[ "${strategy}" == "phase-entry" ]]; then
     resume_phase="$(phase_entry_for "${current_phase}")"
   fi
-  tmux_session="$(jq -r '.tmux_session // ""' <<<"${json}")"
-  codex_thread_title="$(jq -r '.codex_thread_title // (.project + ":" + .purpose)' <<<"${json}")"
-  mode="$(jq -r '.mode // "unknown"' <<<"${json}")"
-  runtime="$(jq -r '.runtime // "kernel"' <<<"${json}")"
-  session_fingerprint="$(jq -r '.session_fingerprint // ""' <<<"${json}")"
-  next_action="$(jq -r '(.next_action // [])[0] // ""' <<<"${json}")"
-  active_models="$(jq -r '(.active_models // []) | join(",")' <<<"${json}")"
-  updated_at="$(jq -r '.updated_at // ""' <<<"${json}")"
 
   printf 'kernel run recovery:\n'
   printf '  - run id: %s\n' "${run_id}"
@@ -187,11 +227,20 @@ cmd_recover() {
     echo "compact artifact missing for run: ${run_id}" >&2
     exit 1
   }
-  tmux_session="$(jq -r '.tmux_session // ""' <<<"${json}")"
-  session_fingerprint="$(jq -r '.session_fingerprint // ""' <<<"${json}")"
-  runtime="$(jq -r '.runtime // "kernel"' <<<"${json}")"
-  project="$(jq -r '.project // "kernel-workspace"' <<<"${json}")"
-  purpose="$(jq -r '.purpose // "unspecified"' <<<"${json}")"
+  {
+    IFS= read -r tmux_session
+    IFS= read -r session_fingerprint
+    IFS= read -r runtime
+    IFS= read -r project
+    IFS= read -r purpose
+  } < <(jq -r '
+      (.tmux_session // ""),
+      (.session_fingerprint // ""),
+      (.runtime // "kernel"),
+      (.project // "kernel-workspace"),
+      (.purpose // "unspecified")
+    ' <<<"${json}"
+  )
   session_state="$(ensure_session "${run_id}" "${tmux_session}" "${session_fingerprint}")"
   if [[ "${session_state}" == "created" ]]; then
     launch_runtime_thread "${run_id}" "${tmux_session}" "${runtime}" "${project}" "${purpose}"
