@@ -395,10 +395,12 @@ write_meta() {
   local exit_code="$2"
   local message="$3"
   local receipt_json="${4:-}"
+  local write_disposition
   if [[ -z "${receipt_json}" ]]; then
     receipt_json='{}'
   fi
   [[ -n "${meta_output_path}" ]] || return 0
+  write_disposition="$(determine_write_disposition "${status}")"
   jq -n \
     --arg action "${action}" \
     --arg status "${status}" \
@@ -412,6 +414,7 @@ write_meta() {
     --arg ok_to_execute "${ok_to_execute}" \
     --arg human_approved "${human_approved}" \
     --arg write_action "${write_action}" \
+    --arg write_disposition "${write_disposition}" \
     --argjson exit_code "${exit_code}" \
     --argjson receipt "${receipt_json}" \
     '{
@@ -427,9 +430,40 @@ write_meta() {
       ok_to_execute:($ok_to_execute == "true"),
       human_approved:($human_approved == "true"),
       side_effect:($write_action == "true"),
+      write_disposition:$write_disposition,
       exit_code:$exit_code,
       receipt:$receipt
     }' > "${meta_output_path}"
+}
+
+determine_write_disposition() {
+  local status="${1:-unknown}"
+  if [[ "${write_action}" != "true" ]]; then
+    printf 'readonly'
+    return 0
+  fi
+
+  if [[ "${resolve_only}" == "true" ]]; then
+    printf 'resolved'
+    return 0
+  fi
+
+  if [[ "${dry_run}" == "true" ]]; then
+    printf 'preview'
+    return 0
+  fi
+
+  if [[ "${status}" == "skipped" ]]; then
+    printf 'blocked'
+    return 0
+  fi
+
+  if [[ "${ok_to_execute}" == "true" && "${human_approved}" == "true" ]]; then
+    printf 'applied'
+    return 0
+  fi
+
+  printf 'write'
 }
 
 extract_receipt() {
@@ -442,18 +476,108 @@ extract_receipt() {
     printf '{}'
     return 0
   fi
-  jq -c '
-    if type == "object" then
-      {
-        id: (.id // null),
-        documentId: (.documentId // null),
-        spreadsheetId: (.spreadsheetId // null),
-        updatedRange: (.updatedRange // .updates.updatedRange // null)
-      } | with_entries(select(.value != null and .value != ""))
-    else
-      {}
-    end
-  ' "${output_file}"
+  case "${action}" in
+    gmail-send)
+      jq -c '
+        if type == "object" then
+          {
+            action: "gmail-send",
+            artifact_type: "gmail-message",
+            primary_id: (.id // null),
+            message_id: (.id // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+    drive-upload)
+      jq -c '
+        if type == "object" then
+          {
+            action: "drive-upload",
+            artifact_type: "drive-file",
+            primary_id: (.id // null),
+            file_id: (.id // null),
+            name: (.name // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+    calendar-insert)
+      jq -c '
+        if type == "object" then
+          {
+            action: "calendar-insert",
+            artifact_type: "calendar-event",
+            primary_id: (.id // null),
+            event_id: (.id // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+    docs-create|docs-insert-text)
+      jq -c --arg action_name "${action}" '
+        if type == "object" then
+          {
+            action: $action_name,
+            artifact_type: "google-doc",
+            primary_id: (.documentId // null),
+            document_id: (.documentId // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+    sheets-create)
+      jq -c '
+        if type == "object" then
+          {
+            action: "sheets-create",
+            artifact_type: "google-sheet",
+            primary_id: (.spreadsheetId // null),
+            spreadsheet_id: (.spreadsheetId // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+    sheets-append)
+      jq -c '
+        if type == "object" then
+          {
+            action: "sheets-append",
+            artifact_type: "google-sheet-range",
+            primary_id: (.spreadsheetId // .updates.updatedRange // .updatedRange // null),
+            spreadsheet_id: (.spreadsheetId // null),
+            updated_range: (.updatedRange // .updates.updatedRange // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+    *)
+      jq -c '
+        if type == "object" then
+          {
+            id: (.id // null),
+            documentId: (.documentId // null),
+            spreadsheetId: (.spreadsheetId // null),
+            updatedRange: (.updatedRange // .updates.updatedRange // null)
+          } | with_entries(select(.value != null and .value != ""))
+        else
+          {}
+        end
+      ' "${output_file}"
+      ;;
+  esac
 }
 
 if [[ "${resolve_only}" == "true" ]]; then
