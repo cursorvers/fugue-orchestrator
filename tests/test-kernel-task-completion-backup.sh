@@ -6,8 +6,7 @@ RUNNER="${ROOT_DIR}/scripts/local/run-kernel-task-completion-backup.sh"
 BOOTSTRAP="${ROOT_DIR}/scripts/local/bootstrap-kernel-task-completion-backup-agent.sh"
 WORKFLOW_FILE="${ROOT_DIR}/.github/workflows/kernel-task-completion-backup.yml"
 
-mkdir -p "/Users/masayuki/Dev/tmp"
-TMP_DIR="$(mktemp -d "/Users/masayuki/Dev/tmp/kernel-task-completion-backup.XXXXXX")"
+TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 TOOLS_ROOT="${TMP_DIR}/codex-kernel-guard"

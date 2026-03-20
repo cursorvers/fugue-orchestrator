@@ -57,8 +57,7 @@ grep -q 'kernel-mobile-progress' "${RUNBOOK}" || {
   exit 1
 }
 
-TMP_ROOT="/Users/masayuki/Dev/tmp"
-mkdir -p "${TMP_ROOT}"
+TMP_ROOT="${TMPDIR:-/tmp}"
 TMP_DIR="$(mktemp -d "${TMP_ROOT%/}/kernel-recovery-console.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
