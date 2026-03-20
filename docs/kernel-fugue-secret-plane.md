@@ -47,8 +47,8 @@ This is a hard rule, not a convenience preference:
                                  v
                      +-------------------------+
                      | Local Bootstrap Plane   |
-                     | process env or explicit |
-                     | external env file only  |
+                     | encrypted bundle ->     |
+                     | Keychain / process env  |
                      +-------------------------+
 ```
 
@@ -86,6 +86,7 @@ Example:
 Allowed:
 
 - sourcing an external env file into the current shell
+- one-shot hydrate into Keychain / process env
 - one-shot sync into GitHub or platform secret stores
 - local-only `.env.example` templates with dummy values
 
@@ -201,7 +202,19 @@ cp .env.example .env
 For this workspace, the best default is:
 
 - no live `.env` in the repo
+- one shared encrypted bundle for bootstrap / restore
+- Keychain as the default local execution layer
 - GitHub Org/Repo/Environment Secrets for CI
 - Supabase/Cloudflare/Vercel/Fly secrets for runtime
-- external env file or process env only for one-shot bootstrap
+- external env file only as explicit fallback
 - same secret contract for `Kernel` and `FUGUE`
+
+## Shared Local Resolver
+
+`Kernel` and `FUGUE` should converge on one local resolution order for shared secrets:
+
+1. process env
+2. Keychain
+3. explicit external env file
+
+Routine runtime should not decrypt the shared bundle on every invocation. Decryption belongs to bootstrap / restore.

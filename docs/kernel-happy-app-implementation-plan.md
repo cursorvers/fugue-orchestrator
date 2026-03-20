@@ -1,6 +1,6 @@
 # Plan
 
-Build the outer all-in-one mobile web app with `Happy.app` as the inner conversational surface, while keeping `Kernel` sovereign routing, `GHA` continuity, and `FUGUE` rollback unchanged behind it. The approach is to ship a narrow mobile-first slice first, prove that progress and outputs are visible without exposing infrastructure sprawl, then widen the surface only after the shared state adapters are stable.
+Build the outer all-in-one mobile web app with `Happy.app` as the inner conversational surface, while keeping `Kernel` sovereign routing, `GHA` continuity, and legacy Claude-side rollback unchanged behind it. The approach is to ship a narrow mobile-first slice first, prove that progress and outputs are visible without exposing infrastructure sprawl, then widen the surface only after the shared state adapters are stable.
 
 ## Scope
 - In: mobile web/PWA front, `Happy` conversational tab, `Now/Tasks/Alerts/Recover`, normalized task/output state adapters, bounded recovery controls
@@ -17,7 +17,7 @@ Build the outer all-in-one mobile web app with `Happy.app` as the inner conversa
 [x] Add `local-first / remote-ready` runtime config and endpoint adapter seams to `happy-web`
 [ ] Verify the design contract with at least three parallel simulation lanes on every design-affecting change
 [ ] Run production-like smoke checks for progress visibility, output visibility, and recovery actions before any live cutover
-[ ] Keep `FUGUE` rollback and `GHA` continuity paths visible in the state model but secondary in the mobile UX
+[ ] Keep legacy Claude-side rollback and `GHA` continuity paths visible in the state model but secondary in the mobile UX
 
 ## Prototype seed
 

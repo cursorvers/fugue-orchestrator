@@ -26,8 +26,12 @@ Platform Runtime Secrets                   <- runtime systems of record
 +-- Cloudflare Workers secrets
 +-- Vercel / Fly / Railway runtime secrets
 
-Local Process Environment                  <- bootstrap only, never source of truth
-+-- one-shot import into GitHub/platform secret stores
+Local Process Environment                  <- runtime override only, never source of truth
++-- ephemeral shell/session override
+
+Local Keychain / Secret Cache              <- local execution layer
++-- shared canonical names resolved for Mac mini / MBP runs
++-- hydrated from encrypted bundle during bootstrap / restore
 ```
 
 ## Decision Criteria
@@ -56,7 +60,15 @@ export ZAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 ```
 
-Do not treat `.env` inside the workspace as a trusted storage layer. Any agent or tool with file-read access may inspect repository files. If you must use an env file locally, keep it outside the repo and use it only to bootstrap GitHub/platform secret stores.
+Do not treat `.env` inside the workspace as a trusted storage layer. Any agent or tool with file-read access may inspect repository files. If you must use an env file locally, keep it outside the repo and use it only to bootstrap Keychain/GitHub/platform secret stores.
+
+Preferred local resolution order for shared secrets:
+
+1. process env override
+2. local Keychain/shared secret cache
+3. explicit external env file
+
+The encrypted shared bundle is for bootstrap / restore, not for routine runtime reads.
 
 ## Workspace Rule
 
@@ -70,6 +82,7 @@ Do not treat `.env` inside the workspace as a trusted storage layer. Any agent o
 - Secret **names** are the contract. Orchestrator choice must not require renaming secrets.
 - `Kernel` and `FUGUE` should both resolve the same canonical names (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `TARGET_REPO_PAT`, `FUGUE_OPS_PAT`, etc.).
 - Provider-specific adapters may be optional, but secret naming stays stable so rollback from `Kernel` to `FUGUE` does not require secret migration.
+- Shared local resolution should happen through a common loader, not by each orchestrator inventing its own lookup order.
 
 ## Prohibitions
 

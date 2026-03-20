@@ -9,7 +9,7 @@ This design should make three things true at the same time:
 
 - `mac mini` remains the primary local execution host
 - `GitHub Actions` remains the warm-standby continuity plane
-- `FUGUE` remains the rollback sovereign adapter
+- the legacy Claude-side path remains the rollback sovereign adapter
 
 `Tailscale` and `Railway` are both support layers around that model:
 
@@ -54,7 +54,7 @@ plane. `Tailscale` and `Railway` belong below that core.
   - uses `Railway` services as bounded gateways or protected external surfaces
 - `Verification + Rollback`
   - must still validate `Kernel -> GitHub continuity`
-  - must still validate `Kernel -> FUGUE`
+  - must still validate `Kernel -> legacy Claude-side rollback`
   - may smoke-test Tailscale/Railway adapters, but neither one replaces the
     rollback contract
 
@@ -318,7 +318,7 @@ This creates a clean split:
 Because neither Tailscale nor Railway becomes sovereign truth:
 
 - `Kernel -> GitHub continuity` still works
-- `Kernel -> FUGUE` rollback still works
+- `Kernel -> legacy Claude-side rollback` still works
 - host or platform changes do not force orchestration redesign
 
 ## Kernel Phase Mapping
@@ -380,7 +380,7 @@ Practical consequences:
 
 - `Railway` may store service-local runtime variables for public edge services
 - `Tailscale` identity policy controls who may reach private admin surfaces
-- neither one changes canonical secret names used by `Kernel` and `FUGUE`
+- neither one changes canonical secret names used by `Kernel` and the legacy Claude-side path
 
 ## Failure Model
 
@@ -454,7 +454,7 @@ This is the desired resilience property:
 - [Kernel Mini/MBP Operations Topology](./kernel-mini-mbp-ops-topology.md)
 - [Kernel Recovery Runbook](./kernel-recovery-runbook.md)
 - [Kernel Peripheral Adapter Contract](./kernel-peripheral-adapter-contract.md)
-- [Kernel / FUGUE Secret Plane Design](./kernel-fugue-secret-plane.md)
+- [Kernel / legacy Claude Secret Plane Design](./kernel-fugue-secret-plane.md)
 - [Kernel Happy.app Single-Front Architecture](./kernel-happy-app-single-front-architecture.md)
 
 ## External Capability References

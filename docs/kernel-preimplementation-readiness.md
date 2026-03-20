@@ -2,16 +2,16 @@
 
 ## Goal
 
-Define the point at which `Kernel` can begin implementation as a credible replacement path for FUGUE without regressing governance, speed, or peripheral compatibility.
+Define the point at which `Kernel` can begin implementation as a credible replacement path for the legacy Claude orchestration plane without regressing governance, speed, or peripheral compatibility.
 
 `Kernel` in this document means:
 
-- `FUGUE` lineage preserved
+- legacy Claude-side lineage preserved
 - `gpt-5.4` intended as the default future control-plane owner
 - `Codex multi-agent` and `gpt-5.3-codex-spark` as the default speed engine
 - `Claude` retained as executor / adapter / council participant by default, with future sovereign restoration possible only through a Kernel adapter
 
-## What Must Be Preserved From FUGUE
+## What Must Be Preserved From The Legacy Claude Orchestration Plane
 
 1. `Governance-first`
    - execution permission lives in orchestration, not in ad hoc scripts
@@ -58,8 +58,8 @@ Define the point at which `Kernel` can begin implementation as a credible replac
 
 Validated in the current workspace:
 
-1. FUGUE linked-system integrity check passes.
-2. FUGUE orchestration simulation runs from script-relative paths.
+1. Legacy Claude-side linked-system integrity check passes.
+2. Legacy Claude-side orchestration simulation runs from script-relative paths.
 3. Mocked linked-system smoke completes successfully across all configured adapters.
 4. Cloudflare Discord regression subset passes `129/129`.
 5. Cursorvers LINE full function suite passes `506` tests with `0` failures and `2` ignored.
@@ -73,7 +73,7 @@ Validated in the current workspace:
 8. Peripheral systems are now modeled under an explicit adapter contract:
    - `docs/kernel-peripheral-adapter-contract.md`
    - `config/integrations/peripheral-adapters.json`
-9. FUGUE policy regressions remain green:
+9. Claude-side policy regressions remain green:
    - `tests/test-model-policy.sh`
    - `tests/test-execution-profile-policy.sh`
    - `tests/test-workflow-risk-policy.sh`
@@ -81,12 +81,12 @@ Validated in the current workspace:
 
 ## What This Proves
 
-1. FUGUE's peripheral story is not fundamentally tied to a Claude-led control plane.
+1. The existing peripheral story is not fundamentally tied to a Claude-led control plane.
 2. The strongest business-critical exception is `Cursorvers LINE`, and it can be validated as an external protected contract.
 3. Kernel can preserve the current Discord/LINE/Supabase/Vercel shape without flattening everything into one runtime.
 4. A PDCA-first verification loop can be made part of the product itself, not left as manual operator knowledge.
 5. A future `Claude main` path can be supported without rebuilding the architecture if Kernel formalizes the sovereign adapter contract.
-6. Re-switch to legacy FUGUE is now defined as an explicit bridge contract instead of an undocumented fallback.
+6. Re-switch to the legacy Claude-side path is now defined as an explicit bridge contract instead of an undocumented fallback.
 
 ## Remaining Blockers Before Real Implementation
 
@@ -104,7 +104,7 @@ Validated in the current workspace:
 
 Kernel implementation should begin only when the following statement is true:
 
-> The design is fixed, the preserved FUGUE doctrines are explicit, peripheral and business contracts are verified, and the remaining work is primarily control-plane implementation rather than discovery.
+> The design is fixed, the preserved Claude-side doctrines are explicit, peripheral and business contracts are verified, and the remaining work is primarily control-plane implementation rather than discovery.
 
 That condition is now substantially met.
 
@@ -118,3 +118,7 @@ That condition is now substantially met.
 6. Define `codex-sovereign` and `claude-sovereign-compat` against the same adapter interface before any future provider re-switch.
 7. Keep `fugue-bridge` as the only allowed live rollback path before claiming runtime-perfect reversibility.
 8. Implement the unattended runtime substrate as an execution layer under the sovereign core, not as a replacement for it.
+9. Resume Google Workspace as a bounded adapter pilot through the readonly evidence lane first:
+   - `docs/kernel-googleworkspace-integration-design.md`
+   - `docs/kernel-googleworkspace-resume-plan-2026-03-20.md`
+   - `docs/kernel-googleworkspace-implementation-todo.md`

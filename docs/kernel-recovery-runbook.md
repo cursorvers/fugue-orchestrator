@@ -62,7 +62,7 @@ This runs the existing canary path with continuity forced from the recovery cons
 
 ### `rollback-canary`
 
-Use when you need to verify the `Kernel -> FUGUE` rollback path while the local machine is unavailable.
+Use when you need to verify the `Kernel -> legacy Claude rollback` path while the local machine is unavailable.
 
 Recommended inputs:
 
@@ -168,5 +168,5 @@ Validated behaviors:
 
 - GitHub Mobile compatible `workflow_dispatch`
 - continuity canary on GitHub-hosted runner
-- `Kernel -> FUGUE` rollback verification without local shell
+- `Kernel -> legacy Claude rollback` verification without local shell
 - live reroute from the same console into `fugue-tutti-caller`

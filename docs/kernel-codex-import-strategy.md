@@ -123,7 +123,7 @@ These should not be imported into Kernel as governing logic.
    - Examples:
      - `--force-claude`
      - `orchestrator-force:claude`
-   - These may remain only for legacy FUGUE compatibility.
+   - These may remain only for legacy Claude-side compatibility.
 
 ## Kernel Import Set
 

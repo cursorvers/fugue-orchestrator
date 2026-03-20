@@ -8,14 +8,14 @@
 - Cloudflare production Cockpit auth route probe: passed
 - Cursorvers LINE production deploy and authenticated health-check: passed
 - Cloudflare production D1 Kernel runtime schema patch: applied
-- Kernel -> FUGUE rollback simulation: passed
+- Kernel -> legacy Claude rollback simulation: passed
 - GitHub live canary: passed
 - Cursorvers LINE manual CI rerun on current head: passed
 - Cursorvers LINE manual production audit rerun: passed
 
 ## Verified Today
 
-### 1. Kernel / FUGUE local verification
+### 1. Kernel / legacy Claude local verification
 
 - `bash scripts/sim-kernel-peripherals.sh`
   - Result: pass
@@ -131,7 +131,7 @@
     - latest issue `316`
     - `handoff_target=kernel`
     - result: `Canary pass (force)`
-  - rollback legacy FUGUE path:
+  - rollback legacy Claude path:
     - prior issue `312`
     - latest issue `317`
     - `handoff_target=fugue-bridge`
@@ -156,5 +156,5 @@
 
 - Kernel implementation is ready to continue as the primary control plane.
 - Cloudflare production runtime is in a usable state.
-- FUGUE rollback is verified live through `fugue-bridge`, not only in simulation/runtime contract terms.
+- Legacy Claude rollback is verified live through `fugue-bridge`, not only in simulation/runtime contract terms.
 - End-to-end production cutover prerequisites are satisfied for Kernel orchestration and rollback validation.
