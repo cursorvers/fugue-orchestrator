@@ -6,6 +6,8 @@ GLM_FAILURE_THRESHOLD="${KERNEL_GLM_FAILURE_THRESHOLD:-2}"
 LOCK_DIR="${KERNEL_GLM_RUN_STATE_LOCK_DIR:-${STATE_FILE}.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 LOCK_HELD=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/kernel-lock.sh"
 
 repo_slug() {
   if [[ -n "${KERNEL_REPO_SLUG:-}" ]]; then
@@ -54,46 +56,7 @@ Usage:
 EOF
 }
 
-cleanup_lock() {
-  if [[ "${LOCK_HELD}" == "1" ]]; then
-    rm -rf "${LOCK_DIR}" 2>/dev/null || true
-    LOCK_HELD=0
-  fi
-}
-
 trap cleanup_lock EXIT INT TERM
-
-stale_lock_owner_dead() {
-  [[ -f "${LOCK_OWNER_FILE}" ]] || return 1
-  local owner_pid=""
-  owner_pid="$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)"
-  [[ -n "${owner_pid}" ]] || return 1
-  kill -0 "${owner_pid}" 2>/dev/null && return 1
-  return 0
-}
-
-acquire_lock() {
-  local attempts=0
-  mkdir -p "$(dirname "${LOCK_DIR}")"
-  while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
-    if stale_lock_owner_dead; then
-      rm -rf "${LOCK_DIR}" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    if (( attempts >= 200 )); then
-      echo "glm state lock timeout: ${LOCK_DIR}" >&2
-      exit 1
-    fi
-    sleep 0.05
-  done
-  printf '%s\n' "$$" >"${LOCK_OWNER_FILE}"
-  LOCK_HELD=1
-}
-
-release_lock() {
-  cleanup_lock
-}
 
 ensure_state() {
   mkdir -p "$(dirname "${STATE_FILE}")"
@@ -128,7 +91,7 @@ cmd_fail() {
   ensure_state
   local note="${1:-glm-failure}"
   local tmp_file
-  acquire_lock
+  acquire_lock "glm state"
   tmp_file="${STATE_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg run_id "${RUN_ID}" \
@@ -155,7 +118,7 @@ cmd_recover() {
   local mode
   local tmp_file
   mode="$(current_mode)"
-  acquire_lock
+  acquire_lock "glm state"
   tmp_file="${STATE_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg run_id "${RUN_ID}" \
@@ -182,7 +145,7 @@ cmd_reset() {
   ensure_state
   local note="${1:-glm-reset}"
   local tmp_file
-  acquire_lock
+  acquire_lock "glm state"
   tmp_file="${STATE_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg run_id "${RUN_ID}" \

@@ -13,6 +13,8 @@ LOCK_DIR="${KERNEL_OPTIONAL_LANE_LOCK_DIR:-${LEDGER_FILE}.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 LOCK_HELD=0
 ALLOW_NONATOMIC_BUDGET="${KERNEL_ALLOW_NONATOMIC_BUDGET:-false}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/kernel-lock.sh"
 
 repo_slug() {
   if [[ -n "${KERNEL_REPO_SLUG:-}" ]]; then
@@ -80,46 +82,7 @@ ensure_ledger() {
   fi
 }
 
-cleanup_lock() {
-  if [[ "${LOCK_HELD}" == "1" ]]; then
-    rm -rf "${LOCK_DIR}" 2>/dev/null || true
-    LOCK_HELD=0
-  fi
-}
-
 trap cleanup_lock EXIT INT TERM
-
-stale_lock_owner_dead() {
-  [[ -f "${LOCK_OWNER_FILE}" ]] || return 1
-  local owner_pid=""
-  owner_pid="$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)"
-  [[ -n "${owner_pid}" ]] || return 1
-  kill -0 "${owner_pid}" 2>/dev/null && return 1
-  return 0
-}
-
-acquire_lock() {
-  local attempts=0
-  mkdir -p "$(dirname "${LOCK_DIR}")"
-  while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
-    if stale_lock_owner_dead; then
-      rm -rf "${LOCK_DIR}" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    if (( attempts >= 200 )); then
-      echo "budget ledger lock timeout: ${LOCK_DIR}" >&2
-      exit 1
-    fi
-    sleep 0.05
-  done
-  printf '%s\n' "$$" >"${LOCK_OWNER_FILE}"
-  LOCK_HELD=1
-}
-
-release_lock() {
-  cleanup_lock
-}
 
 today_key() {
   date '+%Y-%m-%d'
@@ -208,20 +171,30 @@ cmd_status() {
   printf 'run id: %s\n' "${RUN_ID}"
   printf 'usage status:\n'
 
-  local provider period_type cap run_cap used run_used key
-  for provider in gemini-cli cursor-cli copilot-cli; do
-    period_type="$(provider_cap_period "${provider}")"
+  local stats_tsv
+  stats_tsv="$(jq -r --arg day "${day}" --arg month "${month}" --arg run_id "${RUN_ID}" '
+    .events as $ev |
+    def period_usage(prov; ptype; key):
+      [$ev[] | select(.provider == prov)
+        | select((ptype == "day" and (.day // "") == key)
+                or (ptype == "month" and (.month // "") == key))
+        | (.units // 0)] | add // 0;
+    def run_usage(prov):
+      [$ev[] | select(.provider == prov and (.run_id // "") == $run_id)
+        | (.units // 0)] | add // 0;
+    [
+      ["gemini-cli",  "day",   (period_usage("gemini-cli";  "day";   $day)   | tostring), (run_usage("gemini-cli")  | tostring)],
+      ["cursor-cli",  "month", (period_usage("cursor-cli";  "month"; $month) | tostring), (run_usage("cursor-cli")  | tostring)],
+      ["copilot-cli", "month", (period_usage("copilot-cli"; "month"; $month) | tostring), (run_usage("copilot-cli") | tostring)]
+    ] | .[] | @tsv
+  ' "${LEDGER_FILE}")"
+
+  local provider period_type used run_used cap run_cap
+  while IFS=$'\t' read -r provider period_type used run_used; do
     cap="$(provider_soft_cap "${provider}")"
     run_cap="$(provider_run_cap "${provider}")"
-    if [[ "${period_type}" == "day" ]]; then
-      key="${day}"
-    else
-      key="${month}"
-    fi
-    used="$(provider_period_usage "${provider}" "${period_type}" "${key}")"
-    run_used="$(provider_run_usage "${provider}" "${RUN_ID}")"
     printf '  - %s: %s %s/%s, run %s/%s\n' "${provider}" "${period_type}" "${used}" "${cap}" "${run_used}" "${run_cap}"
-  done
+  done <<<"${stats_tsv}"
 }
 
 cmd_can_use() {
@@ -269,12 +242,13 @@ cmd_record() {
   fi
   ensure_ledger
 
-  local provider units note
+  local provider units note tmp_file
   provider="$(canonical_provider "${1:-}")"
   units="${2:-1}"
   note="${3:-manual}"
 
-  acquire_lock
+  acquire_lock "budget ledger"
+  tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg provider "${provider}" \
     --arg run_id "${RUN_ID}" \
@@ -293,8 +267,8 @@ cmd_record() {
         month: $month,
         note: $note
       }]
-    ' "${LEDGER_FILE}" >"${LEDGER_FILE}.tmp"
-  mv "${LEDGER_FILE}.tmp" "${LEDGER_FILE}"
+    ' "${LEDGER_FILE}" >"${tmp_file}"
+  mv "${tmp_file}" "${LEDGER_FILE}"
   release_lock
 
   cmd_status
@@ -308,7 +282,7 @@ cmd_consume() {
   units="${2:-1}"
   note="${3:-consume}"
 
-  acquire_lock
+  acquire_lock "budget ledger"
 
   period_type="$(provider_cap_period "${provider}")"
   cap="$(provider_soft_cap "${provider}")"
@@ -318,47 +292,76 @@ cmd_consume() {
   else
     key="$(month_key)"
   fi
-  used="$(provider_period_usage "${provider}" "${period_type}" "${key}")"
-  run_used="$(provider_run_usage "${provider}" "${RUN_ID}")"
 
-  if (( used + units > cap )); then
-    release_lock
-    printf 'deny %s: %s cap exceeded (%s + %s > %s)\n' "${provider}" "${period_type}" "${used}" "${units}" "${cap}"
-    return 1
-  fi
-  if (( run_used + units > run_cap )); then
-    release_lock
-    printf 'deny %s: run cap exceeded (%s + %s > %s) [run_id=%s]\n' "${provider}" "${run_used}" "${units}" "${run_cap}" "${RUN_ID}"
-    return 1
-  fi
-
-  jq \
+  local consume_result
+  consume_result="$(jq -r \
     --arg provider "${provider}" \
     --arg run_id "${RUN_ID}" \
     --arg recorded_at "$(utc_timestamp)" \
     --arg day "$(today_key)" \
     --arg month "$(month_key)" \
     --arg note "${note}" \
+    --arg period_type "${period_type}" \
+    --arg key "${key}" \
     --argjson units "${units}" \
+    --argjson cap "${cap}" \
+    --argjson run_cap "${run_cap}" \
     '
-      .events += [{
-        provider: $provider,
-        units: $units,
-        run_id: $run_id,
-        recorded_at: $recorded_at,
-        day: $day,
-        month: $month,
-        note: $note
-      }]
-    ' "${LEDGER_FILE}" >"${LEDGER_FILE}.tmp"
-  mv "${LEDGER_FILE}.tmp" "${LEDGER_FILE}"
-  release_lock
+      .events as $ev |
+      ([$ev[] | select(.provider == $provider)
+        | select(($period_type == "day" and (.day // "") == $key)
+                or ($period_type == "month" and (.month // "") == $key))
+        | (.units // 0)] | add // 0) as $used |
+      ([$ev[] | select(.provider == $provider and (.run_id // "") == $run_id)
+        | (.units // 0)] | add // 0) as $run_used |
+      if ($used + $units) > $cap then
+        "DENY_PERIOD\t\($used)\t\($run_used)"
+      elif ($run_used + $units) > $run_cap then
+        "DENY_RUN\t\($used)\t\($run_used)"
+      else
+        (.events += [{
+          provider: $provider,
+          units: $units,
+          run_id: $run_id,
+          recorded_at: $recorded_at,
+          day: $day,
+          month: $month,
+          note: $note
+        }]) | "OK\t\($used)\t\($run_used)\n\(. | tojson)"
+      end
+    ' "${LEDGER_FILE}")"
 
-  printf 'consumed %s: %s %s/%s after request, run %s/%s [run_id=%s]\n' \
-    "${provider}" \
-    "${period_type}" "$((used + units))" "${cap}" \
-    "$((run_used + units))" "${run_cap}" \
-    "${RUN_ID}"
+  local verdict
+  verdict="$(head -1 <<<"${consume_result}")"
+  local v_status v_used v_run_used
+  IFS=$'\t' read -r v_status v_used v_run_used <<<"${verdict}"
+  used="${v_used}"
+  run_used="${v_run_used}"
+
+  case "${v_status}" in
+    DENY_PERIOD)
+      release_lock
+      printf 'deny %s: %s cap exceeded (%s + %s > %s)\n' "${provider}" "${period_type}" "${used}" "${units}" "${cap}"
+      return 1
+      ;;
+    DENY_RUN)
+      release_lock
+      printf 'deny %s: run cap exceeded (%s + %s > %s) [run_id=%s]\n' "${provider}" "${run_used}" "${units}" "${run_cap}" "${RUN_ID}"
+      return 1
+      ;;
+    OK)
+      # Second line onward is the updated JSON
+      local tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+      tail -n +2 <<<"${consume_result}" >"${tmp_file}"
+      mv "${tmp_file}" "${LEDGER_FILE}"
+      release_lock
+      printf 'consumed %s: %s %s/%s after request, run %s/%s [run_id=%s]\n' \
+        "${provider}" \
+        "${period_type}" "$((used + units))" "${cap}" \
+        "$((run_used + units))" "${run_cap}" \
+        "${RUN_ID}"
+      ;;
+  esac
 }
 
 cmd="${1:-status}"

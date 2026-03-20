@@ -4,11 +4,13 @@ set -euo pipefail
 COMPACT_DIR="${KERNEL_COMPACT_DIR:-$HOME/.config/kernel/compact}"
 LOCK_DIR="${KERNEL_COMPACT_LOCK_DIR:-${COMPACT_DIR}/.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 SESSION_NAME_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-session-name.sh"
 LOCK_HELD=0
+source "${SCRIPT_DIR}/kernel-lock.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -29,42 +31,7 @@ Usage:
 EOF
 }
 
-cleanup_lock() {
-  if [[ "${LOCK_HELD}" == "1" ]]; then
-    rm -rf "${LOCK_DIR}" 2>/dev/null || true
-    LOCK_HELD=0
-  fi
-}
-
 trap cleanup_lock EXIT INT TERM
-
-stale_lock_owner_dead() {
-  [[ -f "${LOCK_OWNER_FILE}" ]] || return 1
-  local owner_pid=""
-  owner_pid="$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)"
-  [[ -n "${owner_pid}" ]] || return 1
-  kill -0 "${owner_pid}" 2>/dev/null && return 1
-  return 0
-}
-
-acquire_lock() {
-  local attempts=0
-  mkdir -p "${COMPACT_DIR}"
-  while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
-    if stale_lock_owner_dead; then
-      rm -rf "${LOCK_DIR}" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    if (( attempts >= 200 )); then
-      echo "compact artifact lock timeout: ${LOCK_DIR}" >&2
-      exit 1
-    fi
-    sleep 0.05
-  done
-  printf '%s\n' "$$" >"${LOCK_OWNER_FILE}"
-  LOCK_HELD=1
-}
 
 utc_timestamp() {
   date -u '+%Y-%m-%dT%H:%M:%SZ'
@@ -296,8 +263,10 @@ cmd_update() {
   path="$(artifact_path_for "${RUN_ID}")"
   if [[ -f "${path}" ]]; then
     existing_json="$(jq -c '.' "${path}")"
-    existing_project="$(jq -r '.project // ""' <<<"${existing_json}")"
-    existing_purpose="$(jq -r '.purpose // ""' <<<"${existing_json}")"
+    local _ep _eu
+    IFS=$'\t' read -r _ep _eu < <(jq -r '[(.project // ""), (.purpose // "")] | @tsv' <<<"${existing_json}")
+    existing_project="${_ep}"
+    existing_purpose="${_eu}"
   else
     existing_json=""
     existing_project=""
@@ -337,9 +306,11 @@ cmd_update() {
   fi
 
   if ledger_compact="$(ledger_json 2>/dev/null)"; then
-    mode="$(jq -r '.state // "unknown"' <<<"${ledger_compact}")"
+    local _lstate _lreason
+    IFS=$'\t' read -r _lstate _lreason < <(jq -r '[(.state // "unknown"), (.reason // "")] | @tsv' <<<"${ledger_compact}")
+    mode="${_lstate}"
     if [[ -z "${blocking_reason}" ]]; then
-      blocking_reason="$(jq -r '.reason // ""' <<<"${ledger_compact}")"
+      blocking_reason="${_lreason}"
     fi
   else
     mode="${KERNEL_MODE:-unknown}"
@@ -363,7 +334,7 @@ cmd_update() {
   fi
   normalized_summary="$(normalize_summary "${summary}")"
 
-  acquire_lock
+  acquire_lock "compact artifact"
   tmp_file="${path}.tmp.$$.$RANDOM"
   jq -n \
     --arg run_id "${RUN_ID}" \

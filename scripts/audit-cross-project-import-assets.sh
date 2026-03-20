@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="${1:-/Users/masayuki/Dev}"
+ROOT_DIR="${1:-${HOME}/Dev}"
 FORMAT="${FORMAT:-table}" # table|json|paths
 
 usage() {

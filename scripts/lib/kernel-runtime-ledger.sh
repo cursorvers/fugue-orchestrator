@@ -5,6 +5,8 @@ LEDGER_FILE="${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.j
 LOCK_DIR="${KERNEL_RUNTIME_LEDGER_LOCK_DIR:-${LEDGER_FILE}.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 LOCK_HELD=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/kernel-lock.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -49,46 +51,7 @@ maybe_auto_compact() {
   KERNEL_RUN_ID="${RUN_ID}" bash "${script}" update "${event}" "${summary}" >/dev/null 2>&1 || true
 }
 
-cleanup_lock() {
-  if [[ "${LOCK_HELD}" == "1" ]]; then
-    rm -rf "${LOCK_DIR}" 2>/dev/null || true
-    LOCK_HELD=0
-  fi
-}
-
 trap cleanup_lock EXIT INT TERM
-
-stale_lock_owner_dead() {
-  [[ -f "${LOCK_OWNER_FILE}" ]] || return 1
-  local owner_pid=""
-  owner_pid="$(cat "${LOCK_OWNER_FILE}" 2>/dev/null || true)"
-  [[ -n "${owner_pid}" ]] || return 1
-  kill -0 "${owner_pid}" 2>/dev/null && return 1
-  return 0
-}
-
-acquire_lock() {
-  local attempts=0
-  mkdir -p "$(dirname "${LOCK_DIR}")"
-  while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
-    if stale_lock_owner_dead; then
-      rm -rf "${LOCK_DIR}" 2>/dev/null || true
-      continue
-    fi
-    attempts=$((attempts + 1))
-    if (( attempts >= 200 )); then
-      echo "runtime ledger lock timeout: ${LOCK_DIR}" >&2
-      exit 1
-    fi
-    sleep 0.05
-  done
-  printf '%s\n' "$$" >"${LOCK_OWNER_FILE}"
-  LOCK_HELD=1
-}
-
-release_lock() {
-  cleanup_lock
-}
 
 ensure_ledger() {
   mkdir -p "$(dirname "${LEDGER_FILE}")"
@@ -104,27 +67,24 @@ utc_timestamp() {
 cmd_status() {
   ensure_ledger
   local run_id="${1:-${RUN_ID}}"
-  local state reason receipt updated_at
-  state="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].state // "unknown"' "${LEDGER_FILE}")"
-  reason="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].reason // ""' "${LEDGER_FILE}")"
-  receipt="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].receipt_path // ""' "${LEDGER_FILE}")"
-  updated_at="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].updated_at // ""' "${LEDGER_FILE}")"
   printf 'runtime ledger:\n'
   printf '  - run id: %s\n' "${run_id}"
-  printf '  - state: %s\n' "${state}"
-  printf '  - reason: %s\n' "${reason}"
-  printf '  - receipt path: %s\n' "${receipt}"
-  printf '  - updated at: %s\n' "${updated_at}"
   jq -r --arg run_id "${run_id}" '
-    (.runs[$run_id].provider_usage // {}) as $usage
-    | ($usage | to_entries | map(select(.value.success_count > 0) | .key) | join(",")) as $successes
-    | ($usage | to_entries | map("\(.key): success \(.value.success_count // 0), failure \(.value.failure_count // 0)") | .[])?
-    | "  - successful providers: " + (if $successes == "" then "none" else $successes end),
-      .
-  ' "${LEDGER_FILE}"
-  jq -r --arg run_id "${run_id}" '
-    (.runs[$run_id].events // []) as $events
-    | "  - recent events: " + (if ($events | length) == 0 then "none" else (($events | length) | tostring) end)
+    (.runs[$run_id] // {}) as $run |
+    ($run.provider_usage // {}) as $usage |
+    ($usage | to_entries | map(select(.value.success_count > 0) | .key) | join(",")) as $successes |
+    ($run.events // []) as $events |
+    "  - state: \($run.state // "unknown")",
+    "  - reason: \($run.reason // "")",
+    "  - receipt path: \($run.receipt_path // "")",
+    "  - updated at: \($run.updated_at // "")",
+    (if ($usage | length) > 0 then
+      "  - successful providers: \(if $successes == "" then "none" else $successes end)",
+      ($usage | to_entries[] | "  - \(.key): success \(.value.success_count // 0), failure \(.value.failure_count // 0)")
+    else
+      "  - successful providers: none"
+    end),
+    "  - recent events: \(if ($events | length) == 0 then "none" else (($events | length) | tostring) end)"
   ' "${LEDGER_FILE}"
 }
 
@@ -139,7 +99,7 @@ cmd_transition() {
     exit 2
   fi
 
-  acquire_lock
+  acquire_lock "runtime ledger"
   tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg run_id "${RUN_ID}" \
@@ -183,7 +143,7 @@ cmd_record_provider() {
       ;;
   esac
 
-  acquire_lock
+  acquire_lock "runtime ledger"
   tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg run_id "${RUN_ID}" \
@@ -230,7 +190,7 @@ cmd_record_event() {
   host="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf 'unknown-host')"
   node_role="${KERNEL_NODE_ROLE:-unknown}"
 
-  acquire_lock
+  acquire_lock "runtime ledger"
   tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
   jq \
     --arg run_id "${RUN_ID}" \

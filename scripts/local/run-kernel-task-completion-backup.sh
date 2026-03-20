@@ -3,9 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-TOOLS_ROOT="${TOOLS_ROOT:-/Users/masayuki/Dev/tools/codex-kernel-guard}"
-STATE_ROOT="${STATE_ROOT:-/Users/masayuki/Dev/kernel-orchestration-tools/state}"
-CODEX_HOME="${CODEX_HOME:-/Users/masayuki/.codex}"
+TOOLS_ROOT="${TOOLS_ROOT:-${HOME}/Dev/tools/codex-kernel-guard}"
+STATE_ROOT="${STATE_ROOT:-${HOME}/Dev/kernel-orchestration-tools/state}"
+CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 GHA_REPO="${GHA_REPO:-cursorvers/fugue-orchestrator}"
 GHA_WORKFLOW="${GHA_WORKFLOW:-kernel-task-completion-backup.yml}"
 GHA_REF="${GHA_REF:-}"

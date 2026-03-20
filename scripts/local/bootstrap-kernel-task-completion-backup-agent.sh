@@ -4,9 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNNER="${RUNNER:-${REPO_ROOT}/scripts/local/run-kernel-task-completion-backup.sh}"
-PLIST_PATH="${PLIST_PATH:-/Users/masayuki/Library/LaunchAgents/com.cursorvers.kernel-task-completion-backup.plist}"
+PLIST_PATH="${PLIST_PATH:-${HOME}/Library/LaunchAgents/com.cursorvers.kernel-task-completion-backup.plist}"
 AGENT_LABEL="${AGENT_LABEL:-com.cursorvers.kernel-task-completion-backup}"
-LOG_DIR="${LOG_DIR:-/Users/masayuki/Dev/kernel-orchestration-tools/logs}"
+LOG_DIR="${LOG_DIR:-${HOME}/Dev/kernel-orchestration-tools/logs}"
 INTERVAL_SECONDS="${INTERVAL_SECONDS:-30}"
 dry_run="false"
 

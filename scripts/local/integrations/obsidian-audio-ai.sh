@@ -3,8 +3,8 @@ set -euo pipefail
 
 MODE="smoke"
 RUN_DIR=""
-MIC_TRANSCRIBER_DIR="${OBSIDIAN_AUDIO_TRANSCRIBER_DIR:-/Users/masayuki/mic_transcriber}"
-VAULT_PATH="${OBSIDIAN_VAULT_PATH:-/Users/masayuki/Obsidian Pro Kit for market}"
+MIC_TRANSCRIBER_DIR="${OBSIDIAN_AUDIO_TRANSCRIBER_DIR:-${HOME}/mic_transcriber}"
+VAULT_PATH="${OBSIDIAN_VAULT_PATH:-${HOME}/Obsidian Pro Kit for market}"
 NOTE_SUBDIR="${OBSIDIAN_AUDIO_NOTE_SUBDIR:-99_Inbox/FUGUE}"
 ENABLE_TRANSCRIBE="${OBSIDIAN_AUDIO_ENABLE_TRANSCRIBE:-false}"
 
