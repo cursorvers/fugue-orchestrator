@@ -2,7 +2,7 @@
 # import-to-keychain.sh — Decrypt fugue-secrets.enc and import into macOS Keychain
 # Usage: ./import-to-keychain.sh [path-to-enc-file]
 # Requires: sops, age keypair at ~/.config/sops/age/keys.txt
-set -eo pipefail
+set -euo pipefail
 
 ENC_FILE="${1:-$(cd "$(dirname "$0")/../.." && pwd)/secrets/fugue-secrets.enc}"
 SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
@@ -67,7 +67,7 @@ echo "$DECRYPTED" | while IFS= read -r line; do
 
   # Special: FUGUE_QUEUE_API_KEY (different service name)
   if [ "$KEY" = "FUGUE_QUEUE_API_KEY" ]; then
-    security add-generic-password -a "masayuki" -s "FUGUE_QUEUE_API_KEY" -w "$VALUE" -U 2>/dev/null || true
+    printf '%s' "$VALUE" | security add-generic-password -a "masayuki" -s "FUGUE_QUEUE_API_KEY" -w - -U 2>/dev/null || true
     echo "  imported: $KEY (service: FUGUE_QUEUE_API_KEY)"
     continue
   fi
@@ -75,7 +75,7 @@ echo "$DECRYPTED" | while IFS= read -r line; do
   # Special: SUPABASE_ACCESS_TOKEN (go-keyring-base64 format)
   if [ "$KEY" = "SUPABASE_ACCESS_TOKEN" ]; then
     ENCODED="go-keyring-base64:$(printf '%s' "$VALUE" | base64)"
-    security add-generic-password -a "supabase" -s "Supabase CLI" -w "$ENCODED" -U 2>/dev/null || true
+    printf '%s' "$ENCODED" | security add-generic-password -a "supabase" -s "Supabase CLI" -w - -U 2>/dev/null || true
     echo "  imported: $KEY (service: Supabase CLI)"
     continue
   fi
@@ -87,7 +87,7 @@ echo "$DECRYPTED" | while IFS= read -r line; do
     continue
   fi
 
-  security add-generic-password -a "$ACCT" -s "fugue-secrets" -w "$VALUE" -U 2>/dev/null || true
+  printf '%s' "$VALUE" | security add-generic-password -a "$ACCT" -s "fugue-secrets" -w - -U 2>/dev/null || true
   echo "  imported: $KEY -> $ACCT"
 done
 

@@ -333,29 +333,29 @@ case "${action}" in
     ;;
   calendar-insert)
     require_non_empty "${event_json}" "--event-json"
-    cmd=(gws calendar events insert --params "{\"calendarId\":\"${calendar}\"}" --json "${event_json}" --format "${format}")
+    cmd=(gws calendar events insert --params "$(jq -cn --arg cal "${calendar}" '{"calendarId":$cal}')" --json "${event_json}" --format "${format}")
     if [[ "${dry_run}" == "true" ]]; then
       cmd+=(--dry-run)
     fi
     ;;
   docs-create)
     require_non_empty "${title}" "--title"
-    cmd=(gws docs documents create --json "{\"title\":\"${title}\"}" --format "${format}")
+    cmd=(gws docs documents create --json "$(jq -cn --arg t "${title}" '{"title":$t}')" --format "${format}")
     ;;
   docs-insert-text)
     require_non_empty "${document_id}" "--document-id"
     require_non_empty "${text}" "--text"
-    cmd=(gws docs documents batchUpdate --params "{\"documentId\":\"${document_id}\"}" --json "{\"requests\":[{\"insertText\":{\"location\":{\"index\":1},\"text\":\"${text}\"}}]}" --format "${format}")
+    cmd=(gws docs documents batchUpdate --params "$(jq -cn --arg did "${document_id}" '{"documentId":$did}')" --json "$(jq -cn --arg t "${text}" '{"requests":[{"insertText":{"location":{"index":1},"text":$t}}]}')" --format "${format}")
     ;;
   sheets-create)
     require_non_empty "${title}" "--title"
-    cmd=(gws sheets spreadsheets create --json "{\"properties\":{\"title\":\"${title}\"}}" --format "${format}")
+    cmd=(gws sheets spreadsheets create --json "$(jq -cn --arg t "${title}" '{"properties":{"title":$t}}')" --format "${format}")
     ;;
   sheets-append)
     require_non_empty "${spreadsheet_id}" "--spreadsheet-id"
     require_non_empty "${sheet_range}" "--range"
     require_non_empty "${values_json}" "--values-json"
-    cmd=(gws sheets spreadsheets values append --params "{\"spreadsheetId\":\"${spreadsheet_id}\",\"range\":\"${sheet_range}\",\"valueInputOption\":\"RAW\"}" --json "${values_json}" --format "${format}")
+    cmd=(gws sheets spreadsheets values append --params "$(jq -cn --arg sid "${spreadsheet_id}" --arg r "${sheet_range}" '{"spreadsheetId":$sid,"range":$r,"valueInputOption":"RAW"}')" --json "${values_json}" --format "${format}")
     ;;
   meeting-prep)
     cmd=(gws workflow +meeting-prep --calendar "${calendar}" --format "${format}")

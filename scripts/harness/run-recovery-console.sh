@@ -332,7 +332,11 @@ reroute_issue() {
       --ttl-seconds 1800 \
       --format env
   )"
-  eval "${claim_env}"
+  while IFS= read -r _line; do
+    case "$_line" in
+      dispatch_count=*|state_update_required=*|persist_state=*|next_state_json=*) eval "$_line" ;;
+    esac
+  done <<< "${claim_env}"
 
   if [[ "${dispatch_count}" == "0" ]]; then
     append_summary "- reconcile claim: active claim already exists; reroute skipped"
