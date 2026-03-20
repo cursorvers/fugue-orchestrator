@@ -146,7 +146,7 @@ fi
 echo "PASS [active-claim-skip]"
 
 run_case "claim-free-dispatch" '{}' '["fugue-task"]' "false"
-grep -Fq 'workflow run fugue-task-router.yml' "${FAKE_GH_LOG}" || {
+grep -Fq 'workflow run fugue-caller.yml' "${FAKE_GH_LOG}" || {
   echo "FAIL [claim-free-dispatch]: missing router dispatch" >&2
   exit 1
 }
@@ -158,7 +158,7 @@ jq -e '.claims["123"].issue_number == 123' "${CLAIM_STATE_FILE}" >/dev/null 2>&1
 echo "PASS [claim-free-dispatch]"
 
 run_case "dispatch-failure-releases-claim" '{}' '["fugue-task"]' "true"
-grep -Fq 'workflow run fugue-task-router.yml' "${FAKE_GH_LOG}" || {
+grep -Fq 'workflow run fugue-caller.yml' "${FAKE_GH_LOG}" || {
   echo "FAIL [dispatch-failure-releases-claim]: missing attempted router dispatch" >&2
   exit 1
 }
