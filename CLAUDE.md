@@ -219,6 +219,34 @@ node ~/.claude/skills/orchestra-delegator/scripts/delegate-gemini.js \
   -a [ui-reviewer] -t "[task]" -i [image]
 ```
 
+### Lane Bridge (v3.0)
+
+```bash
+# Unified dispatch with failover
+node ~/.claude/skills/orchestra-delegator/scripts/fugue-lane-bridge.mjs \
+  --lane codex:architect --task "[task]" --project /path
+
+# Pre-validate matrix (exit 2 on diversity violation)
+node ~/.claude/skills/orchestra-delegator/scripts/fugue-lane-bridge.mjs \
+  --validate matrix.json
+
+# Operations dashboard
+node ~/.claude/skills/orchestra-delegator/scripts/fugue-lane-bridge.mjs \
+  --dashboard --days 7
+```
+
+### Structured Execution (v3.0)
+
+```bash
+# Autonomous 9-step execution
+node ~/.claude/skills/orchestra-delegator/scripts/fugue-execute.mjs \
+  --task "[task]" --project /path --tier auto
+
+# Dry-run (no provider calls, for testing)
+node ~/.claude/skills/orchestra-delegator/scripts/fugue-execute.mjs \
+  --dry-run --task "fix typo" --tier 0
+```
+
 ---
 
 ## 9. Motto

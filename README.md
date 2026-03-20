@@ -454,6 +454,64 @@ Teams:  Claude × メンバー数（レートリミット消費: 大）
 
 Agent Teams はメンバー1人につきフルのコンテキストウィンドウを消費します。「サブエージェント原則禁止」と同じ注意が必要。週に1-2回の特殊タスクに限定するのが現実的です。
 
+## v3.0 新機能 (2026-03)
+
+### Lane Bridge (`fugue-lane-bridge.mjs`)
+
+統一ディスパッチ層。Provider state tracking, failover chain, diversity enforcement を提供。
+
+```bash
+# 単一レーン実行
+node fugue-lane-bridge.mjs --lane codex:architect --task "..." --project /path
+
+# マトリクス並列実行
+node fugue-lane-bridge.mjs --matrix matrix.json
+
+# 事前検証 (diversity violation → exit 2)
+node fugue-lane-bridge.mjs --validate matrix.json
+
+# 運用ダッシュボード (provider/agent 統計, p95 レイテンシ)
+node fugue-lane-bridge.mjs --dashboard --days 7
+```
+
+### Structured Execution (`fugue-execute.mjs`)
+
+9ステップの自律実行フロー: 分類 → Tier判定 → 要件定義 → 計画 → シミュレーション → 実装 → レビュー → 統合 → 記録。
+
+```bash
+node fugue-execute.mjs --task "description" --project /path --tier auto
+node fugue-execute.mjs --dry-run --task "fix typo" --tier 0  # テスト用
+node fugue-execute.mjs --resume <run-id>
+node fugue-execute.mjs --dashboard  # via bridge
+```
+
+| Tier | 内容 | Review |
+|------|------|--------|
+| 0-2 | 自動実行、review skip | なし |
+| 3+ | plan → simulate → implement → review cycle | GLM auto-review + Codex code-review |
+
+### Guard Enforcement (`lane-guard.json` v2)
+
+```json
+{
+  "validation": {
+    "pre_dispatch_check": true,
+    "hard_block_on_diversity_violation": true,
+    "exit_code_on_block": 2
+  }
+}
+```
+
+- `--validate`: マトリクスの diversity / schema / phase-evidence を事前検証
+- Diversity violation → exit 2 (hard block)
+- `role_weights`: security-analyst (2.0x), architect (1.5x) で合議投票を加重
+
+### Observability
+
+- `--dashboard`: provider 別成功率, 平均/p95 レイテンシ, agent 別統計
+- `lane-runs.jsonl`: 全 lane 実行のストリーム記録
+- `phase-evidence.jsonl`: plan/simulate/critique の証跡
+
 ## レートリミット戦略
 
 | モデル | 目標使用量 | 役割 |
