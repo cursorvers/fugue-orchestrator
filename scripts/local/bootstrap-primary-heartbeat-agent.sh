@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="${REPO:-cursorvers/fugue-orchestrator}"
-PLIST_PATH="${PLIST_PATH:-/Users/masayuki/Library/LaunchAgents/com.cursorvers.fugue-primary-heartbeat.plist}"
+PLIST_PATH="${PLIST_PATH:-${HOME}/Library/LaunchAgents/com.cursorvers.fugue-primary-heartbeat.plist}"
 AGENT_LABEL="${AGENT_LABEL:-com.cursorvers.fugue-primary-heartbeat}"
 SOURCE_NAME="${SOURCE_NAME:-bootstrap}"
 STATE_NAME="${STATE_NAME:-online}"
