@@ -110,7 +110,7 @@ write_receipt() {
     created_at="$(jq -r '.created_at // empty' "${receipt_path}")"
     [[ -n "${created_at}" ]] || created_at="${now}"
   fi
-  tmp_file="${receipt_path}.tmp.$$.$RANDOM"
+  tmp_file="$(umask 077 && mktemp "${receipt_path}.tmp.XXXXXXXXXX")"
   jq -n \
     --arg version "1" \
     --arg run_id "${run_id}" \

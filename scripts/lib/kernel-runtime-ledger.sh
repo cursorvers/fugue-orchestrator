@@ -104,7 +104,7 @@ cmd_transition() {
   fi
 
   acquire_lock "runtime ledger"
-  tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+  tmp_file="$(umask 077 && mktemp "${LEDGER_FILE}.tmp.XXXXXXXXXX")"
   jq \
     --arg run_id "${RUN_ID}" \
     --arg state "${state}" \
@@ -141,7 +141,7 @@ cmd_scheduler_state() {
   esac
 
   acquire_lock "runtime ledger"
-  tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+  tmp_file="$(umask 077 && mktemp "${LEDGER_FILE}.tmp.XXXXXXXXXX")"
   jq \
     --arg run_id "${RUN_ID}" \
     --arg scheduler_state "${scheduler_state}" \
@@ -185,7 +185,7 @@ cmd_record_provider() {
   esac
 
   acquire_lock "runtime ledger"
-  tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+  tmp_file="$(umask 077 && mktemp "${LEDGER_FILE}.tmp.XXXXXXXXXX")"
   jq \
     --arg run_id "${RUN_ID}" \
     --arg provider "${provider}" \
@@ -232,7 +232,7 @@ cmd_record_event() {
   node_role="${KERNEL_NODE_ROLE:-unknown}"
 
   acquire_lock "runtime ledger"
-  tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+  tmp_file="$(umask 077 && mktemp "${LEDGER_FILE}.tmp.XXXXXXXXXX")"
   jq \
     --arg run_id "${RUN_ID}" \
     --arg actor "${actor}" \

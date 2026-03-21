@@ -19,7 +19,7 @@
 
 cleanup_lock() {
   if [[ "${LOCK_HELD}" == "1" ]]; then
-    rm -rf "${LOCK_DIR}" 2>/dev/null || true
+    rm -rf "${LOCK_DIR:?}" 2>/dev/null || true
     LOCK_HELD=0
   fi
 }
@@ -39,7 +39,7 @@ acquire_lock() {
   mkdir -p "$(dirname "${LOCK_DIR}")"
   while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
     if stale_lock_owner_dead; then
-      rm -rf "${LOCK_DIR}" 2>/dev/null || true
+      rm -rf "${LOCK_DIR:?}" 2>/dev/null || true
       continue
     fi
     attempts=$((attempts + 1))
