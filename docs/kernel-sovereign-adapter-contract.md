@@ -8,7 +8,7 @@ This contract allows:
 
 - `codex-sovereign` as the default main orchestrator
 - future `claude-sovereign-compat` if needed
-- `fugue-bridge` when Kernel must hand control back to legacy FUGUE
+- `fugue-bridge` when Kernel must hand control back to the legacy Claude orchestration plane
 
 It avoids:
 
@@ -125,7 +125,7 @@ interface.
 
 - `fugue-bridge`
 
-`fugue-bridge` is the explicit rollback adapter that maps Kernel protocol packets into the existing legacy FUGUE control plane.
+`fugue-bridge` is the explicit rollback adapter that maps Kernel protocol packets into the existing legacy Claude-side control plane.
 
 ## Claude-Specific Rule
 
@@ -135,19 +135,19 @@ If `claude-sovereign-compat` is implemented:
 - Claude Agent Teams limits stay inside the adapter
 - no Kernel core module should branch on `Claude` as architecture
 
-This preserves reversibility without repeating legacy FUGUE coupling.
+This preserves reversibility without repeating legacy Claude-side coupling.
 
-## Legacy FUGUE Bridge Rule
+## Legacy Claude Bridge Rule
 
 If `fugue-bridge` is activated:
 
 - Kernel emits the same protocol packets up to the handoff boundary
-- the bridge maps those packets into legacy FUGUE-compatible inputs
-- legacy FUGUE takes ownership only after the explicit handoff point
+- the bridge maps those packets into legacy Claude-side compatible inputs
+- the legacy Claude-side path takes ownership only after the explicit handoff point
 - council math and peripheral dispatch schema stay unchanged
 - the rollback remains visible in the run trace
 
-This keeps `switch back to FUGUE` explicit, typed, and auditable.
+This keeps rollback to the legacy Claude-side path explicit, typed, and auditable.
 
 ## Migration Rule
 
@@ -156,7 +156,7 @@ During the Codex-first phase:
 - keep Kernel defaulting to `codex-sovereign`
 - keep Claude in executor/reviewer lanes
 - develop future provider reversibility only against this contract
-- route any rollback to legacy FUGUE through `fugue-bridge`, never through hidden branching
+- route any rollback to the legacy Claude-side path through `fugue-bridge`, never through hidden branching
 
 ## Acceptance Test
 

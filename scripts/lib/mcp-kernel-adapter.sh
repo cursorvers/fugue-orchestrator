@@ -5,8 +5,8 @@ provider=""
 session_provider=""
 format="env"
 
-PENCIL_WRAPPER_DEFAULT="/Users/masayuki/Dev/cursorvers/claude-config/scripts/pencil-mcp-wrapper.sh"
-EXCALIDRAW_ROOT_DEFAULT="/Users/masayuki/Dev/tmp/mcp_excalidraw/skills/excalidraw-skill/scripts"
+PENCIL_WRAPPER_DEFAULT="${HOME}/Dev/cursorvers/claude-config/scripts/pencil-mcp-wrapper.sh"
+EXCALIDRAW_ROOT_DEFAULT="${HOME}/Dev/tmp/mcp_excalidraw/skills/excalidraw-skill/scripts"
 
 usage() {
   cat <<'EOF'

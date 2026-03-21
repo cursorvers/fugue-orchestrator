@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOC="/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-context-governor.md"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOC="${ROOT_DIR}/docs/kernel-context-governor.md"
 
 test -f "${DOC}"
 
@@ -16,7 +17,7 @@ for pattern in \
   "claude-reviewer" \
   "glm-reviewer" \
   "## 7. Mobile rules" \
-  "## 8. FUGUE compatibility" \
+  "## 8. Legacy Claude-side compatibility" \
   "handoff_target=fugue-bridge" \
   "## 11. Acceptance criteria"
 do

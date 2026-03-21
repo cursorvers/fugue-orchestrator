@@ -7,7 +7,7 @@ Goal:
 - `mac mini` becomes the always-on `Kernel primary`
 - `MBP` becomes the human-operated high-power workstation
 - `GitHub Actions` remains a warm standby continuity plane
-- `FUGUE` remains the rollback path
+- the legacy Claude rollback path remains available
 
 This is the recommended production layout once the new MBP arrives and the current `mac mini` can be dedicated to 24/7 orchestration.
 
@@ -22,15 +22,15 @@ Related front-door design:
 
 ## Plasticity Rule
 
-This topology must preserve reversibility back to `FUGUE`.
+This topology must preserve reversibility back to the legacy Claude rollback path.
 
 That means:
 
 - `Kernel` is the default sovereign path
-- `FUGUE` remains a first-class rollback sovereign adapter
+- the legacy Claude rollback path remains a first-class rollback sovereign adapter
 - host placement must not hard-code one irreversible orchestrator choice
 - the same mobile and GitHub entry points should continue to work even if the sovereign path changes
-- the same secret plane should remain valid for both `Kernel` and `FUGUE`
+- the same secret plane should remain valid for both `Kernel` and the legacy Claude rollback path
 
 ## Role Assignment
 
@@ -84,9 +84,9 @@ Responsibilities:
 - mobile-accessible recovery
 - progress snapshots into `fugue-status`
 
-### 4. `FUGUE` = Rollback
+### 4. Legacy Claude Rollback
 
-`FUGUE` remains the rollback and legacy continuity path.
+The legacy Claude path remains the rollback and legacy continuity path.
 
 Use it when:
 
@@ -94,7 +94,7 @@ Use it when:
 - a legacy-compatible route is safer
 - rollback verification is required
 
-`FUGUE` should be treated as a live compatibility path, not dead legacy.
+The legacy Claude path should be treated as a live compatibility path, not dead legacy.
 
 It remains:
 
@@ -120,7 +120,7 @@ It remains:
             │                       │                        │
             v                       v                        v
 ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
-│ mac mini             │  │ GitHub Actions       │  │ FUGUE rollback       │
+│ mac mini             │  │ GitHub Actions       │  │ Claude rollback      │
 │ Kernel primary       │  │ warm standby         │  │ legacy path          │
 │ local daemon         │  │ continuity/canary    │  │ fugue-bridge         │
 │ runtime substrate    │  │ recovery substrate   │  │                      │
@@ -203,7 +203,7 @@ MBP should be treated as:
 - `mac mini` healthy
 - `Kernel primary = local`
 - `GitHub Actions = standby`
-- `FUGUE = rollback only`
+- legacy Claude rollback path only
 
 ### Local degraded
 
@@ -216,11 +216,11 @@ MBP should be treated as:
 
 - if continuity through `Kernel` is not desirable
 - use `rollback-canary` or `handoff_target=fugue-bridge`
-- `FUGUE` becomes temporary execution path
+- the legacy Claude path becomes the temporary execution path
 
-### Re-promotion to `FUGUE`
+### Re-promotion to Legacy Claude Rollback
 
-If `FUGUE` ever needs to become more than a temporary rollback path:
+If the legacy Claude rollback path ever needs to become more than a temporary rollback path:
 
 - keep the same GitHub / mobile entry points
 - keep the same host plane
@@ -228,7 +228,7 @@ If `FUGUE` ever needs to become more than a temporary rollback path:
 - keep the same progress and recovery surfaces
 - switch the active sovereign path from `kernel` to `fugue-bridge`
 
-The system should never require a full infrastructure redesign just to re-promote `FUGUE`.
+The system should never require a full infrastructure redesign just to re-promote the legacy Claude rollback path.
 
 ## State and Progress Rules
 
@@ -244,7 +244,7 @@ That means:
 - `kernel-mobile-progress` continues posting snapshots
 - `kernel-recovery-console` remains the emergency control surface
 
-These progress surfaces must stay `Kernel/FUGUE` neutral.
+These progress surfaces must stay neutral between `Kernel` and the legacy Claude rollback path.
 
 ## Service Model on `mac mini`
 
@@ -299,7 +299,7 @@ The correct long-term split is:
 - `mode=rollback-canary`
 - `mode=reroute-issue`
 
-If `FUGUE` must be reactivated from phone:
+If the legacy Claude rollback path must be reactivated from phone:
 
 - keep the same workflow
 - change `handoff_target` to `fugue-bridge`
@@ -313,7 +313,7 @@ Recommended order once the new MBP arrives:
 2. dedicate `mac mini` to always-on `Kernel primary`
 3. move long-running local execution to `mac mini`
 4. keep `GHA` as warm standby
-5. continue validating `FUGUE` rollback
+5. continue validating legacy Claude rollback
 
 ## Success Criteria
 
@@ -324,5 +324,5 @@ This topology is considered complete when:
 - normal execution happens on `mac mini`
 - operator intervention happens from `MBP`
 - `GHA` can continue when `mac mini` fails
-- `FUGUE` remains a valid rollback path
-- `FUGUE` can be re-promoted without redesigning the host or secret plane
+- the legacy Claude rollback path remains valid
+- the legacy Claude rollback path can be re-promoted without redesigning the host or secret plane

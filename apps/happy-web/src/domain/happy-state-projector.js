@@ -17,7 +17,7 @@ import {
   nowIso,
   primaryFromRoute,
   safeIso,
-  stableTaskId,
+  taskIdentityFromRecord,
 } from "./happy-event-normalizers.js";
 
 const MAX_ALERTS = 6;
@@ -111,6 +111,24 @@ function seedTask(task) {
   };
 }
 
+function runtimeIdentityForRecord(record) {
+  return record.run_id || record.tmux_session || record.session_id || "";
+}
+
+function resolveTaskId(record) {
+  return taskIdentityFromRecord(record);
+}
+
+function findTask(tasksMap, record) {
+  const taskId = resolveTaskId(record);
+  if (tasksMap.has(taskId)) return tasksMap.get(taskId);
+
+  const runtimeIdentity = runtimeIdentityForRecord(record);
+  if (!runtimeIdentity) return null;
+
+  return Array.from(tasksMap.values()).find((task) => runtimeIdentityForRecord(task) === runtimeIdentity) || null;
+}
+
 function createProjectionSeed(record, config) {
   const baseSnapshot = record.baseSnapshot ? normalizeState(record.baseSnapshot, config) : null;
   const state = {
@@ -143,7 +161,10 @@ function createProjectionSeed(record, config) {
 }
 
 function ensureTask(tasksMap, event, runtimeNowMs) {
-  const taskId = event.task_id || stableTaskId(event.title || "Untitled task");
+  const existingTask = findTask(tasksMap, event);
+  if (existingTask) return existingTask;
+
+  const taskId = resolveTaskId(event);
   if (!tasksMap.has(taskId)) {
     tasksMap.set(taskId, {
       id: taskId,
@@ -162,6 +183,10 @@ function ensureTask(tasksMap, event, runtimeNowMs) {
       latest_step: "Waiting for the next event.",
       last_event_at: event.at,
       sync_status: "synced",
+      run_id: event.run_id || "",
+      session_id: event.session_id || "",
+      tmux_session: event.tmux_session || "",
+      codex_thread_title: event.codex_thread_title || "",
     });
   }
   return tasksMap.get(taskId);
@@ -193,6 +218,10 @@ function applyTaskEvent(state, tasksMap, event, runtime) {
   if (event.decision) task.decision = event.decision;
   if (event.latest_step) task.latest_step = event.latest_step;
   if (event.route) task.route = event.route;
+  if (event.run_id) task.run_id = event.run_id;
+  if (event.session_id) task.session_id = event.session_id;
+  if (event.tmux_session) task.tmux_session = event.tmux_session;
+  if (event.codex_thread_title) task.codex_thread_title = event.codex_thread_title;
 
   if (event.type === "accepted") {
     task.status = "queued";
@@ -429,8 +458,13 @@ export function buildEventsFromRemoteSnapshot(snapshot, currentState, config, ru
   snapshot.tasks.forEach((remoteTask) => {
     const localTask =
       currentState.tasks.find((task) => task.id === remoteTask.id) ||
-      currentState.tasks.find((task) => task.title === remoteTask.title);
-    const taskId = localTask?.id || remoteTask.id || stableTaskId(remoteTask.title);
+      currentState.tasks.find(
+        (task) => runtimeIdentityForRecord(task) && runtimeIdentityForRecord(task) === runtimeIdentityForRecord(remoteTask)
+      ) ||
+      (!runtimeIdentityForRecord(remoteTask)
+        ? currentState.tasks.find((task) => task.title === remoteTask.title)
+        : null);
+    const taskId = localTask?.id || resolveTaskId(remoteTask);
     const remoteEventType = taskStatusToEventType(remoteTask.status);
 
     if (!localTask) {
@@ -447,6 +481,10 @@ export function buildEventsFromRemoteSnapshot(snapshot, currentState, config, ru
         progress_confidence: remoteTask.progress_confidence,
         latest_step: remoteTask.latest_step || remoteTask.summary,
         decision: remoteTask.decision,
+        run_id: remoteTask.run_id,
+        session_id: remoteTask.session_id,
+        tmux_session: remoteTask.tmux_session,
+        codex_thread_title: remoteTask.codex_thread_title,
         at: remoteTask.last_event_at || eventAt,
         dedupe_key: `remote-accepted:${taskId}`,
       });
@@ -466,6 +504,10 @@ export function buildEventsFromRemoteSnapshot(snapshot, currentState, config, ru
         progress_confidence: remoteTask.progress_confidence,
         latest_step: remoteTask.latest_step || remoteTask.summary,
         decision: remoteTask.decision,
+        run_id: remoteTask.run_id,
+        session_id: remoteTask.session_id,
+        tmux_session: remoteTask.tmux_session,
+        codex_thread_title: remoteTask.codex_thread_title,
         at: remoteTask.last_event_at || eventAt,
         dedupe_key: `remote-status:${taskId}:${remoteTask.status}:${remoteTask.phase_index}:${remoteTask.current_phase}`,
       });
@@ -485,6 +527,10 @@ export function buildEventsFromRemoteSnapshot(snapshot, currentState, config, ru
         progress_confidence: remoteTask.progress_confidence,
         latest_step: remoteTask.latest_step || remoteTask.summary,
         decision: remoteTask.decision,
+        run_id: remoteTask.run_id,
+        session_id: remoteTask.session_id,
+        tmux_session: remoteTask.tmux_session,
+        codex_thread_title: remoteTask.codex_thread_title,
         at: remoteTask.last_event_at || eventAt,
         dedupe_key: `remote-route:${taskId}:${remoteTask.route}:${remoteTask.phase_index}:${remoteTask.current_phase}`,
       });
@@ -506,6 +552,10 @@ export function buildEventsFromRemoteSnapshot(snapshot, currentState, config, ru
           phase_total: remoteTask.phase_total,
           progress_confidence: remoteTask.progress_confidence,
           latest_step: remoteTask.latest_step || remoteTask.summary,
+          run_id: remoteTask.run_id,
+          session_id: remoteTask.session_id,
+          tmux_session: remoteTask.tmux_session,
+          codex_thread_title: remoteTask.codex_thread_title,
           output,
           at: output.created_at || remoteTask.last_event_at || eventAt,
           dedupe_key: `remote-output:${taskId}:${output.output_id || output.title}:${output.created_at}`,

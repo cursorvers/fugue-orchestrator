@@ -12,7 +12,7 @@ The durable path is:
 4. generate implementation-ready fragments
 5. review and merge only the durable parts
 
-This keeps `Kernel` sovereignty intact and preserves `FUGUE` reversibility.
+This keeps `Kernel` sovereignty intact and preserves Claude-side reversibility.
 
 ## Semi-Automatic Boundary
 
@@ -32,7 +32,7 @@ Human review required:
 - move only durable governance into `AGENTS.md`
 - move only Codex-facing operator behavior into `CODEX.md`
 - decide whether the GPT should become a reusable skill
-- resolve conflicts with `Kernel` / `FUGUE` doctrine
+- resolve conflicts with `Kernel` / Claude-side doctrine
 
 ## Command
 
@@ -114,5 +114,5 @@ ChatGPT GPT config
   -> Happy.app inbox preset
   -> Kernel intake packet
   -> Codex sovereign routing
-  -> optional FUGUE rollback
+  -> optional Claude-side rollback
 ```

@@ -10,7 +10,7 @@ The guiding decision is:
 - that mobile app contains the `Happy.app` experience inside it
 - `Cockpit` stays a deep-debug admin surface
 - `GitHub Actions` stays an execution, continuity, and recovery substrate
-- `FUGUE` remains the rollback sovereign path
+- the legacy Claude-side path remains the rollback sovereign path
 
 This document is written as an implementation-prep spec, not a loose concept
 note.
@@ -115,7 +115,7 @@ The target user experience is:
    - execute locally on the primary host
    - continue through GitHub-hosted continuity
    - hand off to specialist workflows
-   - fall back to `FUGUE`
+   - fall back to the legacy Claude-side path
 6. the user sees progress and alerts elsewhere in the same mobile app
 
 The complementary desktop experience is:
@@ -148,7 +148,7 @@ That means:
 - orchestration is centralized in `Kernel`
 - execution may fan out
 - recovery may move to `GitHub Actions`
-- rollback may move to `FUGUE`
+- rollback may move to the legacy Claude-side path
 - the user still sees a single thread of control
 
 The front-end code should also remain singular.
@@ -167,7 +167,7 @@ That means:
 
 - one canonical packet model
 - one budget band model
-- one compression policy across `Kernel`, `Happy`, `GHA`, and `FUGUE`
+- one compression policy across `Kernel`, `Happy`, `GHA`, and the legacy Claude-side path
 - no screen should depend on raw long-thread replay
 
 ## 3. Top-Level Model
@@ -180,7 +180,7 @@ All-in-one mobile web app / PWA
   -> Kernel sovereign routing
        -> local primary host
        -> GitHub continuity
-       -> FUGUE rollback
+       -> legacy Claude-side rollback
   -> progress/event bus
   -> outer mobile app status surfaces
 ```
@@ -209,7 +209,7 @@ More explicitly:
                v
 ┌─────────────────────────────────────────────┐
 │ Kernel sovereign routing                    │
-│ local-primary / GHA-continuity / FUGUE      │
+│ local-primary / GHA-continuity / Claude-side │
 └───────┬───────────────────┬─────────────────┘
         │                   │
         v                   v
@@ -273,7 +273,7 @@ Primary actions:
 
 Important rule:
 
-- do not ask the user to choose `Kernel` vs `FUGUE`
+- do not ask the user to choose `Kernel` vs the legacy Claude-side path
 - do not expose provider choice here
 
 ### 4.2 Now
@@ -378,7 +378,7 @@ Sections:
     - slide deck
     - artifact
 - `Decision`
-  - whether `Kernel`, `GHA continuity`, or `FUGUE` is active
+  - whether `Kernel`, `GHA continuity`, or the legacy Claude-side path is active
 - `Recover`
   - if this task alone needs reroute or rollback
 
@@ -461,7 +461,7 @@ Every mobile command should normalize to a compact packet.
 This packet must be acceptable to both:
 
 - `Kernel`
-- `FUGUE` via `fugue-bridge`
+- legacy Claude-side rollback via `fugue-bridge`
 
 That is the main plasticity constraint.
 
@@ -1048,7 +1048,7 @@ This design does not require:
 
 - replacing GitHub as the execution substrate
 - replacing Cockpit
-- replacing FUGUE rollback
+- replacing legacy Claude-side rollback
 - forcing all runtime state into Happy.app
 - building separate iOS and Android product logic
 
@@ -1063,13 +1063,13 @@ The correct architecture is:
 - `Kernel` as the sovereign brain
 - `GitHub Actions` as execution/recovery substrate
 - `Cockpit` as secondary admin surface
-- `FUGUE` as reversible rollback path
+- the legacy Claude-side path as the reversible rollback path
 
 This preserves:
 
 - single-front user experience
 - multi-plane resilience
-- `Kernel/FUGUE` plasticity
+- `Kernel` / legacy Claude-side plasticity
 - future host migration from `MBP` temporary primary to `mac mini` primary
 - mobile-visible progress and outputs without exposing infrastructure sprawl
 - desktop productivity by keeping the existing Codex-centric operator workflow

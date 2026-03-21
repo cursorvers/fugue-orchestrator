@@ -22,7 +22,7 @@ Therefore:
 - `Kernel` never treats the full window as a target
 - `Kernel` prefers compact state packets over long transcripts
 - `Kernel` splits, summarizes, and retrieves instead of piling on history
-- `FUGUE` compatibility must survive the same compression rules
+- legacy Claude-side compatibility must survive the same compression rules
 
 ## 2. Budget bands
 
@@ -141,9 +141,9 @@ This prevents summary drift from becoming summary bloat.
 - if a user requests deeper detail, the system returns a short summary plus a
   link to deeper evidence
 
-## 8. FUGUE compatibility
+## 8. Legacy Claude-side compatibility
 
-The context governor must not make `FUGUE` fallback impossible.
+The context governor must not make legacy Claude-side rollback impossible.
 
 Therefore:
 
@@ -154,7 +154,7 @@ Therefore:
   - current phase
   - blockers
   - last known output
-- summary compression must be deterministic enough that `Kernel -> FUGUE`
+- summary compression must be deterministic enough that `Kernel -> legacy Claude-side`
   rollback does not lose operational meaning
 
 ## 9. Failure modes and controls
@@ -186,4 +186,4 @@ The first implementation slice should wire this into:
 - no lane defaults to full-thread replay
 - `amber` and above always produce compressed packets
 - `hard-stop` always splits or restarts from compressed state
-- `Kernel -> FUGUE` rollback still preserves task meaning
+- `Kernel -> legacy Claude-side` rollback still preserves task meaning

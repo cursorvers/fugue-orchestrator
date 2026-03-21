@@ -1,8 +1,8 @@
 # Kernel Mobile Content Workflow
 
 This runbook defines how to submit and monitor content-oriented tasks from a
-smartphone while keeping `Kernel` as the default sovereign path and `FUGUE`
-available as the rollback path.
+smartphone while keeping `Kernel` as the default sovereign path and the legacy
+Claude-side path available as the rollback path.
 
 ## Goal
 

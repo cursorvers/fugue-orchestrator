@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOC="/Users/masayuki/Dev/fugue-orchestrator/docs/kernel-happy-app-single-front-architecture.md"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOC="${ROOT_DIR}/docs/kernel-happy-app-single-front-architecture.md"
 
 test -f "${DOC}"
 

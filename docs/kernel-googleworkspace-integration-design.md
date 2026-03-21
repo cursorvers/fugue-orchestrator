@@ -123,6 +123,29 @@ Allowed baseline:
 | Post-execute sync | task completed and deliverables exist | write | `docs-create`, `docs-insert-text`, `sheets-append`, `drive-upload`, `gmail-send` | user write | already approved | generated artifact ids |
 | Recovery rehydrate | stale issue or interrupted run | readonly | `meeting-prep`, `weekly-digest`, `gmail-triage` | user read-only | none | refreshed context summary |
 
+## Function-Scoped Auth Profiles
+
+Broad discovery auth such as `gws auth login --full` is acceptable as temporary
+operator exploration, but it is not the mature `Kernel` operating baseline.
+
+`Kernel` should use the smallest profile that matches the active lane:
+
+| Profile | Intended lane | Auth mode | Recommended operator command | Notes |
+|---|---|---|---|---|
+| shared/service-account readonly baseline | `meeting-prep`, `standup-report` | service account | n/a | Preferred CI and shared readonly baseline; keeps Phase 1 useful without mailbox access |
+| core readonly operator profile | `meeting-prep`, `standup-report` | user OAuth readonly | `gws auth login --readonly -s calendar,drive` | Mature Phase 1 operator fallback; do not add mailbox scopes by default |
+| mailbox readonly operator profile | `weekly-digest`, `gmail-triage` | user OAuth readonly | `gws auth login --readonly -s calendar,gmail,drive` | Phase 2 only; keep separate from the mature core lane |
+| bounded write operator profile | `gmail-send`, `docs-create`, `docs-insert-text`, `sheets-append`, `drive-upload`, `calendar-insert` | user OAuth write | `gws auth login -s calendar,gmail,drive,docs,sheets` | Only for previewing or applying approved side effects |
+| extension-only profile | `tasks`, `pubsub`, `presentations` | explicit per lane | no default command | Add only while that extension lane is under active validation |
+
+Rules:
+
+- do not treat the recovered March `--full` grant as steady-state policy
+- do not mix mailbox scopes into the Phase 1 core profile by default
+- do not mix extension scopes into readonly core or bounded-write defaults
+- if a narrower profile fails, capture the exact action and missing scope before
+  broadening the auth shape
+
 ## Evidence Envelope
 
 `Kernel` should never ingest full Workspace payloads into the main prompt by
@@ -151,6 +174,93 @@ Rules:
 - `raw_output_path` points to local evidence, not active prompt context
 - write actions must add a receipt field such as `message_id`, `file_id`, or
   `event_id`
+
+## Workspace Write Receipt Contract
+
+Operator-approved or dry-run-validated write helpers must emit a normalized
+receipt contract so `Kernel` can persist evidence without treating Workspace as
+task-state authority.
+
+Required common metadata fields in `*-meta.json`:
+
+- `side_effect`
+- `write_disposition`
+- `ok_to_execute`
+- `human_approved`
+- `receipt`
+
+Machine-readable contract source:
+
+- `config/integrations/googleworkspace-kernel-policy.json`
+
+Required common receipt fields:
+
+- `action`
+- `artifact_type`
+- `primary_id`
+
+Per-action normalized receipt fields:
+
+| Action | Artifact type | Required receipt fields |
+|---|---|---|
+| `gmail-send` | `gmail-message` | `primary_id`, `message_id` |
+| `drive-upload` | `drive-file` | `primary_id`, `file_id` |
+| `calendar-insert` | `calendar-event` | `primary_id`, `event_id` |
+| `docs-create` | `google-doc` | `primary_id`, `document_id` |
+| `docs-insert-text` | `google-doc` | `primary_id`, `document_id` |
+| `sheets-create` | `google-sheet` | `primary_id`, `spreadsheet_id` |
+| `sheets-append` | `google-sheet-range` | `primary_id`, `spreadsheet_id`, `updated_range` |
+
+Rules:
+
+- previews and applied writes both use the same normalized receipt shape when
+  the underlying helper returns stable ids
+- `write_disposition=preview` means a dry-run side-effect preview was recorded
+- `write_disposition=applied` means a write ran with both Kernel approval and
+  explicit human approval
+- `write_disposition=blocked` means a write action was requested without the
+  required approval gate
+- receipt fields live in run evidence and `*-meta.json`, not in the main prompt
+- raw Workspace output may be retained on disk for audit, but success claims use
+  the normalized receipt only
+- write receipt logging policy must stay explicit in machine-readable policy so
+  control-plane checks can validate it without rereading prose docs
+
+## Extension Lane Triage
+
+Extension lanes stay out of the mature core path unless they have an explicit
+product reason, a narrow auth story, and a bounded validation path.
+
+| Lane | Decision | Reason | Auth profile | Validation path |
+|---|---|---|---|---|
+| `tasks` | `defer` | Future email-to-task or follow-up capture may be useful, but it is not required for the mature readonly or bounded-write lane. | `extension-only` | operator-invoked only; do not add to default loops |
+| `pubsub` | `drop` | No current Kernel or FUGUE production need justifies expanding into event-watch infrastructure. | `extension-only` | none until a concrete product reason exists |
+| `presentations` | `defer` | Possible future digest publishing helper, but not part of the mature lane. | `extension-only` | operator-invoked only after a concrete publishing scenario is defined |
+
+Rules:
+
+- extension decisions must not block Phase 1 or Phase 2 readonly lanes
+- extension scopes must not be mixed into the core readonly or bounded-write
+  auth profiles
+- a deferred lane stays out of default loops until its own validation path is
+  active
+- machine-readable policy must keep extension actions out of default core phases
+  and out of non-extension auth profiles
+
+## FUGUE Compatibility Boundary
+
+Kernel-side Google Workspace work must not break the cached feed evidence path
+that legacy `FUGUE` still relies on.
+
+Compatibility rules:
+
+- keep shared readonly feed profiles and personal readonly feed profiles
+  separate
+- do not rename or remove the shared readonly feed path used by `FUGUE`
+- preserve the `Kernel/FUGUE` cached evidence reflection described in
+  `docs/googleworkspace-feed-sync-design.md`
+- keep Workspace credentials out of the main implementation job for both Kernel
+  and legacy FUGUE-compatible paths
 
 ## Approval Model
 
@@ -273,7 +383,14 @@ Kernel admission rules:
 
 1. Add optional read helpers for `drive search`, `docs read`, and `sheets read`
    to reduce fallback raw API usage.
-2. Add an approval receipt log for Workspace write actions.
-3. Tune phase-specific reinjection rules so only the minimum fresh feed summary
+2. Tune phase-specific reinjection rules so only the minimum fresh feed summary
    returns to each prompt.
-4. Expand live smoke coverage when new scheduled feed profiles are introduced.
+3. Expand live smoke coverage when new scheduled feed profiles are introduced.
+
+## Resume Note
+
+For the recovered March local OAuth context and the recommended `Kernel` resume
+sequence, see:
+
+- `docs/kernel-googleworkspace-resume-plan-2026-03-20.md`
+- `docs/kernel-googleworkspace-implementation-todo.md`

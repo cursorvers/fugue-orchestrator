@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 grep -q '"display": "standalone"' "$ROOT/manifest.webmanifest"
 grep -q 'serviceWorker.register' "$ROOT/src/app.js"

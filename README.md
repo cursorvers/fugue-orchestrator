@@ -536,14 +536,54 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - repo root で新規に開いた Codex セッションから `/kernel`
 - chat 欄から 1語で起動したい場合の local alias は `/k`
 - ローカルでの推奨実行経路は `kernel` または `codex-prompt-launch kernel`
-- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki/Dev/tmp/fugue-pr424/.codex/prompts/k.md)
+- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki_otawara/fugue-orchestrator/.codex/prompts/k.md)
 - ローカル実行契約の authority は shell wrapper ではなく `codex-kernel-guard launch`
 - hot reload は保証しません
 - bare `/kernel` は Codex chat UI の upstream 実装に依存
 - RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh
+- この repo では非自明な要件定義 / 計画 / 実装 / レビューを Kernel work として扱い、plain Codex-only work に落とさない
 - 最低 6 本の active lane
 - 6 列以上の並列を最低形
+- normal minimum shape は `codex` + `glm` + `specialist`
+- `codex` は sovereign なので代替不可
+- `gemini-cli` / `cursor-cli` / `copilot-cli` は free-tier or quota-limited な specialist 候補
+- normal minimum shape では specialist 1本が必須。1本も確保できない場合は fail-closed
+- optional specialist は固定優先順を持たず、quota と可用性が最も健全なものを動的に選ぶ
+- `kernel-optional-lane-exec.sh auto ...` はその動的選択を使う
+- `copilot-cli` は scarce な free-tier 月次予算として one-shot 限定で扱う
+- optional specialist は通常 `kgemini` / `kcursor` / `kcopilot` 経由で使い、手動計上は `codex-kernel-guard budget-consume` を使う
+- GLM は通常 `kglm` 経由で実行し、failure / recovery を run state に反映する
+- `glm` が同一 run で2回失敗したら `degraded-allowed` に入り、`codex + specialist + specialist` で継続しつつ `glm` 復旧 lane を並行で回す
+- 計画段階では `glm` と specialist pool（`gemini-cli` / `cursor-cli` / `copilot-cli`）を明示的に織り込む
+- Codex 側の simulation レーンは、利用可能なら dedicated な 1 列だけを `gpt-5.3-codex-spark` で走らせる
+- 他の Codex-family subagent は役割別に選び、全部を `gpt-5.3-codex-spark` に固定しない
+- 要件凍結後は routine な中間報告を出さず、`BLOCKED` / 外部承認待ち / 明示要求 / 最終完了 の時だけ報告する
+- 進行中の依頼に対して、部分マイルストーンや途中スライスの総括で処理を止めない
+- 1つの stage / track / 実装スライスが終わっただけでは止まらず、凍結済みの依頼全体が終わるまで続ける
+- 完了調の総括は、その依頼が本当に完了した時か、真に blocked の時だけにする
+- `degraded-allowed` は run 単位。`codex-kernel-guard launch` は `KERNEL_RUN_ID` 未指定時に新しい run id を払い出す
+- `codex-kernel-guard doctor` は active run を `updated_at` 降順で表示する
+- `codex-kernel-guard doctor --all-runs` は stale run を含む read-only 一覧を出す
+- `codex-kernel-guard doctor --run <run_id>` は bounded run detail を出す
+- `codex-kernel-guard recover-run <run_id>` は compact artifact から heavy-profile tmux session を再生成する
+- `1 tmux session = 1 Kernel run = 1 Codex thread` を Kernel handoff 契約にする
+- `recover-run` は再生成した `main` window で、その run 専用の Codex thread を立ち上げる
+- `doctor -> doctor --run -> recover-run` が `MBP` degraded continuation の最小経路
+- `cc pocket` は `doctor --all-runs -> doctor --run` を使う mobile degraded continuation node として扱う
+- `k` は人間向けの短縮入口で、`k`, `k all`, `k latest`, `k run-id`, `k new <purpose> [focus]`, `k adopt <session:window> [purpose]`, `k <run_id>`, `k show <run_id>`, `k open [run_id]`, `k phase <phase>`, `k done <summary...>` を使う
+- `codex-kernel-guard adopt-run <session:window> [purpose]` は unmanaged な live tmux window を Kernel run に昇格し、専用 heavy-profile session へ移す
+- `Mac mini` では repo 内で bare `codex` を打つと `Kernelを起動しますか? [Y/n]` を確認し、`yes` なら `kernel`、`no` なら raw Codex に留まる
+- `Mac mini` では `kernel` を引数なしで打つと最新の active run を開き、active run が無ければ通常の guarded launch に落ちる
+- `purpose` は run ごとに固定し、目的が変わるなら新しい run を切る
+- `codex-kernel-guard phase-check <phase>` は phase 完了前の required model evidence を検査する
+- `codex-kernel-guard phase-complete <phase>` は phase evidence を通した上で compact に `phase_completed` を記録する
+- `codex-kernel-guard run-complete --summary <text>` は verify gate を通した上で completion backup と `run_completed` compact を記録する
+- unattended health のため、最初の acknowledgement 前に bootstrap receipt を書き、mode 変化時にも更新する
+- bootstrap receipt には provider 数だけでなく `Active models`、manifest lane count、agent/subagent label 有無も入れて live manifest evidence を残す
+- `Active models:` 行で、その run で実際に稼働している model だけを明示する
 - Lane manifest:
+- 各 lane は provider に加えて agent と `subagent1` / `subagent2` / ... / `none` を明示する
+- planned / pending / failed lane は数えない
 - Bootstrap target: 6+ lanes (minimum 6).
 - Codex の `/vote` はローカル継続用の slash prompt
 - vote-gh

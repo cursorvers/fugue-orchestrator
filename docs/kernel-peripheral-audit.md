@@ -2,7 +2,7 @@
 
 ## Goal
 
-Validate whether FUGUE peripherals can survive a transition to a Codex-first `Kernel` without breaking orchestration integrity.
+Validate whether the legacy Claude-side peripherals can survive a transition to a Codex-first `Kernel` without breaking orchestration integrity.
 
 ## Current Result
 

@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 WORKERS_HUB_ROOT="${WORKERS_HUB_ROOT:-${ROOT_DIR}/../cloudflare-workers-hub-deploy}"
 CURSORVERS_LINE_ROOT="${CURSORVERS_LINE_ROOT:-${ROOT_DIR}/../cursorvers_line_free_dev}"
-OUT_DIR="${OUT_DIR:-/Users/masayuki/Dev/tmp/kernel-peripheral-verification}"
+OUT_DIR="${OUT_DIR:-${HOME}/Dev/tmp/kernel-peripheral-verification}"
 ISSUE_NUMBER="${ISSUE_NUMBER:-123}"
 ISSUE_REPO="${ISSUE_REPO:-cursorvers/fugue-orchestrator}"
 ISSUE_TITLE="${ISSUE_TITLE:-Kernel peripheral smoke}"
@@ -20,7 +20,7 @@ Usage:
 Options:
   --workers-hub-root <path>      Path to cloudflare-workers-hub-deploy
   --cursorvers-line-root <path>  Path to cursorvers_line_free_dev
-  --out-dir <path>               Output directory (default: /Users/masayuki/Dev/tmp/kernel-peripheral-verification)
+  --out-dir <path>               Output directory (default: \$HOME/Dev/tmp/kernel-peripheral-verification)
   --issue-number <n>             Mock issue number for linked-system smoke (default: 123)
   --issue-repo <owner/repo>      Mock issue repo for linked-system smoke
   --issue-title <text>           Mock issue title

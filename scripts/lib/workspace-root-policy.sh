@@ -3,7 +3,7 @@ set -euo pipefail
 
 fugue_default_workspace_roots() {
   local root_dir="${1:?root_dir is required}"
-  local approved_tmp_root="/Users/masayuki/Dev/tmp"
+  local approved_tmp_root="${HOME}/Dev/tmp"
   if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     approved_tmp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fugue-approved-workspaces"
   fi

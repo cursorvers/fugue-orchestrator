@@ -1,8 +1,8 @@
 # Kernel Structure
 
-`Kernel` is the Codex-first successor to FUGUE.
+`Kernel` is the Codex-first successor to the legacy Claude orchestration plane.
 
-It keeps FUGUE's governance model, but centralizes sovereignty in the `gpt-5.4` Kernel while treating Claude, GLM, Gemini, Manus, MCPs, and linked systems as bounded adapters.
+It keeps the inherited governance model, but centralizes sovereignty in the `gpt-5.4` Kernel while treating Claude, GLM, Gemini, Manus, MCPs, and linked systems as bounded adapters.
 
 ## Layered View
 
@@ -118,7 +118,7 @@ flowchart TD
     E --> SP[Specialists / Manus]
 
     G --> F[fugue-bridge]
-    F --> LF[Legacy FUGUE]
+    F --> LF[Legacy Claude Orchestration]
 ```
 
 ## Reading Guide

@@ -90,7 +90,7 @@ classify_result() {
     return 0
   fi
 
-  if rg -q 'serviceusage\\.services\\.use|serviceUsageConsumer' "${output_file}"; then
+  if rg -q 'serviceusage\.services\.use|serviceUsageConsumer' "${output_file}"; then
     printf 'blocked\n'
     return 0
   fi
@@ -131,7 +131,7 @@ extract_reason() {
     printf 'permission_denied\n'
     return 0
   fi
-  if rg -q 'serviceusage\\.services\\.use|serviceUsageConsumer' "${output_file}"; then
+  if rg -q 'serviceusage\.services\.use|serviceUsageConsumer' "${output_file}"; then
     printf 'serviceusage_consumer_missing\n'
     return 0
   fi

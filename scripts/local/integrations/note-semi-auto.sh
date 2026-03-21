@@ -3,7 +3,7 @@ set -euo pipefail
 
 MODE="smoke"
 RUN_DIR=""
-WORK_DIR="${NOTE_MANUSCRIPT_DIR:-/Users/masayuki/note-manuscript}"
+WORK_DIR="${NOTE_MANUSCRIPT_DIR:-${HOME}/note-manuscript}"
 TEMPLATE_REL="${NOTE_MANUSCRIPT_TEMPLATE_REL:-templates/article-template.md}"
 DRAFTS_REL="${NOTE_MANUSCRIPT_DRAFTS_REL:-drafts}"
 

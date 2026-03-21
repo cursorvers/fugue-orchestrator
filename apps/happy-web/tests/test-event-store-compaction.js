@@ -1,7 +1,9 @@
 const crypto = require("crypto");
 const { pathToFileURL } = require("url");
 
-const root = "/Users/masayuki/Dev/fugue-orchestrator/apps/happy-web";
+const path = require("path");
+
+const root = path.resolve(__dirname, "..");
 const EVENT_STORE_KEY = "happy-web-event-store-v2";
 const EVENT_LOG_BUDGET = 480;
 

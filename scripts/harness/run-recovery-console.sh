@@ -332,7 +332,11 @@ reroute_issue() {
       --ttl-seconds 1800 \
       --format env
   )"
-  eval "${claim_env}"
+  while IFS= read -r _line; do
+    case "$_line" in
+      dispatch_count=*|state_update_required=*|persist_state=*|next_state_json=*) eval "$_line" ;;
+    esac
+  done <<< "${claim_env}"
 
   if [[ "${dispatch_count}" == "0" ]]; then
     append_summary "- reconcile claim: active claim already exists; reroute skipped"
@@ -340,32 +344,16 @@ reroute_issue() {
   fi
 
   failed_issue_numbers_json='[]'
-  if [[ "${has_tutti}" == "true" || "${has_processing}" == "true" ]]; then
+  if [[ "${has_tutti}" == "true" || "${has_processing}" == "true" || "${has_fugue}" == "true" ]]; then
     if ! dispatch_workflow \
-      "fugue-tutti-caller.yml" \
+      "fugue-caller.yml" \
       -f issue_number="${issue_number}" \
+      -f trigger_event_name=issues \
+      -f trigger_label_name=tutti \
       -f trust_subject="${trust_subject}" \
       -f allow_processing_rerun=true \
       -f subscription_offline_policy_override="${offline_policy}" \
-      -f handoff_target="${handoff_target}" \
-      -f dispatch_nonce="${dispatch_nonce}"; then
-      failed_issue_numbers_json="[${issue_number}]"
-    fi
-    if [[ "${state_update_required}" == "true" && "${persist_state}" == "true" ]]; then
-      persist_json="$(jq -cn \
-        --argjson state "${next_state_json}" \
-        --argjson failed "${failed_issue_numbers_json}" '
-          reduce $failed[] as $issue ($state; .claims |= (del(.[($issue|tostring)])))
-        ')"
-      persist_reconcile_claim_state "${persist_json}"
-    fi
-    return 0
-  fi
-
-  if [[ "${has_fugue}" == "true" ]]; then
-    if ! dispatch_workflow \
-      "fugue-task-router.yml" \
-      -f issue_number="${issue_number}"; then
+      -f handoff_target="${handoff_target}"; then
       failed_issue_numbers_json="[${issue_number}]"
     fi
     if [[ "${state_update_required}" == "true" && "${persist_state}" == "true" ]]; then

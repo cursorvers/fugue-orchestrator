@@ -3,7 +3,7 @@ set -euo pipefail
 
 MODE="smoke"
 RUN_DIR=""
-PROJECT_DIR="${AUTO_VIDEO_PROJECT_DIR:-/Users/masayuki/Dev/telop-pack-srt-02}"
+PROJECT_DIR="${AUTO_VIDEO_PROJECT_DIR:-${HOME}/Dev/telop-pack-srt-02}"
 SMOKE_COMMAND="${AUTO_VIDEO_SMOKE_COMMAND:-npm run -s test:smoke}"
 EXECUTE_COMMAND="${AUTO_VIDEO_EXECUTE_COMMAND:-npm run -s test:smoke}"
 

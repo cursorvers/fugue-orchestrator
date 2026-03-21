@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SHARED_SECRETS_LOADER="${ROOT_DIR}/scripts/lib/load-shared-secrets.sh"
 ORG="cursorvers"
 REPO="cursorvers/fugue-orchestrator"
 ENV_FILE=""
@@ -91,6 +93,23 @@ elif [[ -n "${ENV_FILE}" ]]; then
   set +a
 else
   echo "Info: no env file specified; using current process environment only."
+fi
+
+if [[ -n "${ENV_FILE}" ]]; then
+  export SHARED_SECRETS_ENV_FILE="${ENV_FILE}"
+fi
+
+if [[ -f "${SHARED_SECRETS_LOADER}" ]]; then
+  eval "$(
+    bash "${SHARED_SECRETS_LOADER}" export \
+      OPENAI_API_KEY \
+      ZAI_API_KEY \
+      ANTHROPIC_API_KEY \
+      GEMINI_API_KEY \
+      XAI_API_KEY \
+      TARGET_REPO_PAT \
+      FUGUE_OPS_PAT
+  )"
 fi
 
 normalize_repo_csv() {
@@ -247,7 +266,7 @@ apply_secret repo TARGET_REPO_PAT optional TARGET_REPO_PAT
 # Optional providers
 apply_secret org ANTHROPIC_API_KEY optional ANTHROPIC_API_KEY
 apply_secret org GEMINI_API_KEY optional GEMINI_API_KEY
-apply_secret org XAI_API_KEY optional XAI_API_KEY
+apply_secret org XAI_API_KEY optional XAI_API_KEY XAI_API
 
 # Ops and notification lifelines
 apply_secret org FUGUE_OPS_PAT optional FUGUE_OPS_PAT

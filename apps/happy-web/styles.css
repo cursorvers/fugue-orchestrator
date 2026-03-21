@@ -702,6 +702,11 @@ details summary:focus-visible {
   border-color: rgba(255, 77, 54, 0.22);
 }
 
+.tag.session-tag {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .output-list {
   display: grid;
   gap: 10px;

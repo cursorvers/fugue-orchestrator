@@ -161,6 +161,19 @@ function statusTone(status) {
   return "info";
 }
 
+function taskSessionMeta(task) {
+  const parts = [];
+  if (task.tmux_session) {
+    parts.push(task.tmux_session);
+  } else if (task.codex_thread_title) {
+    parts.push(task.codex_thread_title);
+  } else if (task.session_id) {
+    parts.push(`session ${task.session_id}`);
+  }
+  if (task.run_id) parts.push(`run ${task.run_id}`);
+  return parts.join(" / ");
+}
+
 function activateScreen(target) {
   switchScreen(target);
   renderNavState();
@@ -383,7 +396,7 @@ function renderHappy() {
     ...live,
   ].filter((task, index, tasks) => tasks.findIndex((item) => item.id === task.id) === index).slice(0, 3);
   const laneSignature = JSON.stringify(
-    previewTasks.map((task) => [task.id, task.status, task.last_update, task.sync_status])
+    previewTasks.map((task) => [task.id, task.status, task.last_update, task.sync_status, taskSessionMeta(task)])
   );
   if (!previewTasks.length) {
     renderEmptyState(lane, "No live tasks", "Queued, active, and blocked work will float here first.");
@@ -403,6 +416,7 @@ function renderHappy() {
       meta.appendChild(create("span", `tag ${statusTone(task.status)}`, task.status));
       meta.appendChild(create("span", "tag", task.route));
       meta.appendChild(create("span", "tag", task.last_update));
+      if (taskSessionMeta(task)) meta.appendChild(create("span", "tag session-tag", taskSessionMeta(task)));
       button.appendChild(copy);
       button.appendChild(meta);
       button.addEventListener("click", () => openTaskSheet(task.id));
@@ -508,6 +522,7 @@ function renderTasks() {
       task.sync_status,
       task.outputs.length,
       task.events.length,
+      taskSessionMeta(task),
     ])
   );
   if (hasRenderSignature(list, signature)) return;
@@ -538,6 +553,7 @@ function renderTasks() {
     meta.appendChild(create("span", "tag", task.last_update));
     meta.appendChild(create("span", "tag", task.sync_status));
     meta.appendChild(create("span", "tag", `${task.events.length} events`));
+    if (taskSessionMeta(task)) meta.appendChild(create("span", "tag session-tag", taskSessionMeta(task)));
     card.appendChild(meta);
 
     const progress = create("div", "task-progress");
@@ -659,6 +675,7 @@ function renderTaskSheet() {
   sheet.querySelector(".sheet")?.setAttribute("aria-busy", detailSyncInFlight ? "true" : "false");
   setText("sheet-title", task.title);
   setText("sheet-summary", `${task.summary} / last update: ${task.last_update}`);
+  setText("sheet-session", taskSessionMeta(task) || "session pending");
   setText(
     "sheet-progress",
     `${task.current_phase} (${task.phase_index}/${task.phase_total}) / ${task.progress_confidence} confidence / ${task.sync_status}`
