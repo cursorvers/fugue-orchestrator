@@ -167,7 +167,7 @@ grep -Fq "tmux session: ${SESSION_NAME}" <<<"${out}"
 grep -Fq 'codex thread: fugue-orchestrator:tmux-handoff' <<<"${out}"
 grep -Fq 'strategy: continue-phase' <<<"${out}"
 grep -Fq 'runtime: kernel' <<<"${out}"
-grep -Fq "${SESSION_NAME}:main | bash '${ROOT_DIR}/scripts/lib/kernel-codex-thread.sh' launch 'run-dr' C-m" "${FAKE_TMUX_LOG}"
+grep -Fq "${SESSION_NAME}:main | bash ${ROOT_DIR}/scripts/lib/kernel-codex-thread.sh launch run-dr C-m" "${FAKE_TMUX_LOG}"
 
 windows="$(tmux list-windows -t "=${SESSION_NAME}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 [[ "${windows}" == "main logs review ops" ]]

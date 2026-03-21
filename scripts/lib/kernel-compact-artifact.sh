@@ -160,6 +160,8 @@ resolve_codex_thread_title() {
       printf '%s\n' "${existing_title}"
       return 0
     fi
+    jq -r '(.project // "kernel-workspace") + ":" + (.purpose // "unspecified")' <<<"${existing_json}"
+    return 0
   fi
   session_short_id="$(default_session_short_id)"
   if [[ -f "${SESSION_NAME_SCRIPT}" ]]; then
@@ -252,6 +254,7 @@ cmd_update() {
   local path tmp_file existing_json existing_project existing_purpose
   local tmux_session phase project purpose owner blocking_reason codex_thread_title
   local mode runtime active_models_json decisions_json next_actions_json ledger_compact receipt_compact
+  local existing_mode existing_blocking_reason
   local session_fingerprint
   local summary normalized_summary
 
@@ -271,6 +274,14 @@ cmd_update() {
     existing_json=""
     existing_project=""
     existing_purpose=""
+  fi
+  existing_mode="${KERNEL_MODE:-}"
+  existing_blocking_reason=""
+  if [[ -n "${existing_json}" ]]; then
+    if [[ -z "${existing_mode}" ]]; then
+      existing_mode="$(jq -r '.mode // "unknown"' <<<"${existing_json}")"
+    fi
+    existing_blocking_reason="$(jq -r '.blocking_reason // ""' <<<"${existing_json}")"
   fi
 
   project="${KERNEL_PROJECT:-${existing_project:-kernel-workspace}}"
@@ -307,13 +318,20 @@ cmd_update() {
 
   if ledger_compact="$(ledger_json 2>/dev/null)"; then
     local _lstate _lreason
-    IFS=$'\t' read -r _lstate _lreason < <(jq -r '[(.state // "unknown"), (.reason // "")] | @tsv' <<<"${ledger_compact}")
-    mode="${_lstate}"
-    if [[ -z "${blocking_reason}" ]]; then
+    IFS=$'\t' read -r _lstate _lreason < <(jq -r '[(.state // ""), (.reason // "")] | @tsv' <<<"${ledger_compact}")
+    if [[ -n "${_lstate}" && "${_lstate}" != "unknown" ]]; then
+      mode="${_lstate}"
+    else
+      mode="${existing_mode:-unknown}"
+    fi
+    if [[ -z "${blocking_reason}" && -n "${_lreason}" ]]; then
       blocking_reason="${_lreason}"
     fi
   else
-    mode="${KERNEL_MODE:-unknown}"
+    mode="${existing_mode:-unknown}"
+  fi
+  if [[ -z "${blocking_reason}" ]]; then
+    blocking_reason="${existing_blocking_reason}"
   fi
 
   if receipt_compact="$(receipt_json 2>/dev/null)"; then

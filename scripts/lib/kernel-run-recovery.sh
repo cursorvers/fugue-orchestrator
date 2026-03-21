@@ -52,6 +52,34 @@ tmux_session_option() {
   tmux show-options -t "${session_name}" -v "${option_name}" 2>/dev/null || true
 }
 
+tmux_window_names() {
+  local session_name="${1:-}"
+  [[ -n "${session_name}" ]] || return 1
+  command -v tmux >/dev/null 2>&1 || return 1
+  tmux list-windows -t "=${session_name}" -F '#W' 2>/dev/null || return 1
+}
+
+tmux_window_exists() {
+  local session_name="${1:-}"
+  local window_name="${2:-}"
+  [[ -n "${session_name}" && -n "${window_name}" ]] || return 1
+  tmux_window_names "${session_name}" | grep -Fxq "${window_name}"
+}
+
+ensure_session_windows() {
+  local session_name="${1:-}"
+  [[ -n "${session_name}" ]] || return 1
+  command -v tmux >/dev/null 2>&1 || return 1
+  tmux has-session -t "=${session_name}" 2>/dev/null || return 1
+
+  if ! tmux_window_exists "${session_name}" "main"; then
+    tmux rename-window -t "=${session_name}:0" main >/dev/null 2>&1 || true
+  fi
+  tmux_window_exists "${session_name}" "logs" || tmux new-window -t "=${session_name}" -n logs >/dev/null 2>&1 || true
+  tmux_window_exists "${session_name}" "review" || tmux new-window -t "=${session_name}" -n review >/dev/null 2>&1 || true
+  tmux_window_exists "${session_name}" "ops" || tmux new-window -t "=${session_name}" -n ops >/dev/null 2>&1 || true
+}
+
 phase_entry_for() {
   local phase="${1:-unknown}"
   case "${phase}" in
@@ -83,6 +111,7 @@ ensure_session() {
     exit 2
   }
   if tmux_session_exists "${session_name}"; then
+    ensure_session_windows "${session_name}"
     actual_run_id="$(tmux_session_option "${session_name}" "@kernel_run_id")"
     actual_fingerprint="$(tmux_session_option "${session_name}" "@kernel_session_fingerprint")"
     if [[ -n "${actual_run_id}" && "${actual_run_id}" != "${run_id}" ]]; then
@@ -92,6 +121,10 @@ ensure_session() {
     if [[ -n "${expected_fingerprint}" && -n "${actual_fingerprint}" && "${actual_fingerprint}" != "${expected_fingerprint}" ]]; then
       echo "existing tmux session ${session_name} fingerprint mismatch for run ${run_id}" >&2
       exit 2
+    fi
+    if [[ -z "${actual_run_id}" || -z "${actual_fingerprint}" ]]; then
+      printf 'needs-init\n'
+      return 0
     fi
     printf 'existing\n'
     return 0
@@ -116,6 +149,9 @@ launch_runtime_thread() {
   command -v tmux >/dev/null 2>&1 || return 0
   [[ -f "${RUNTIME_LAUNCH_SCRIPT}" ]] || return 0
   launch_command="$(bash "${RUNTIME_LAUNCH_SCRIPT}" command resume "${runtime}" "${run_id}" "${project}" "${purpose}" "${session_name}")"
+  if [[ "${runtime}" == "fugue" ]]; then
+    tmux send-keys -t "=${session_name}:main" "printf '%s\n' 'Resume FUGUE orchestration for Kernel run ${run_id}.'" C-m
+  fi
   tmux send-keys -t "=${session_name}:main" "${launch_command}" C-m
 }
 
@@ -242,7 +278,7 @@ cmd_recover() {
     ' <<<"${json}"
   )
   session_state="$(ensure_session "${run_id}" "${tmux_session}" "${session_fingerprint}")"
-  if [[ "${session_state}" == "created" ]]; then
+  if [[ "${session_state}" == "created" || "${session_state}" == "needs-init" ]]; then
     launch_runtime_thread "${run_id}" "${tmux_session}" "${runtime}" "${project}" "${purpose}"
   fi
   refresh_compact_artifact "${run_id}"

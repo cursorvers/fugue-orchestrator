@@ -31,6 +31,7 @@ usage() {
 Usage:
   kernel-runtime-ledger.sh status [run_id]
   kernel-runtime-ledger.sh transition <state> [reason] [receipt_path]
+  kernel-runtime-ledger.sh scheduler-state <claimed|running|retry_queued|continuity_degraded|awaiting_human|terminal> [reason] [workspace_receipt_path]
   kernel-runtime-ledger.sh record-provider <provider> [success|failure] [note]
   kernel-runtime-ledger.sh record-event <actor> <command> [summary]
 EOF
@@ -77,6 +78,9 @@ cmd_status() {
     "  - state: \($run.state // "unknown")",
     "  - reason: \($run.reason // "")",
     "  - receipt path: \($run.receipt_path // "")",
+    "  - scheduler state: \($run.scheduler_state // "unknown")",
+    "  - scheduler reason: \($run.scheduler_reason // "")",
+    "  - workspace receipt path: \($run.workspace_receipt_path // "")",
     "  - updated at: \($run.updated_at // "")",
     (if ($usage | length) > 0 then
       "  - successful providers: \(if $successes == "" then "none" else $successes end)",
@@ -117,6 +121,43 @@ cmd_transition() {
   mv "${tmp_file}" "${LEDGER_FILE}"
   release_lock
   maybe_auto_compact "status_changed" "state=${state}; reason=${reason}"
+  cmd_status "${RUN_ID}"
+}
+
+cmd_scheduler_state() {
+  ensure_ledger
+  local scheduler_state="${1:-}"
+  local reason="${2:-runtime-loop}"
+  local workspace_receipt_path="${3:-}"
+  local tmp_file
+
+  case "${scheduler_state}" in
+    claimed|running|retry_queued|continuity_degraded|awaiting_human|terminal)
+      ;;
+    *)
+      echo "scheduler state must be one of claimed, running, retry_queued, continuity_degraded, awaiting_human, terminal" >&2
+      exit 2
+      ;;
+  esac
+
+  acquire_lock "runtime ledger"
+  tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+  jq \
+    --arg run_id "${RUN_ID}" \
+    --arg scheduler_state "${scheduler_state}" \
+    --arg reason "${reason}" \
+    --arg workspace_receipt_path "${workspace_receipt_path}" \
+    --arg updated_at "$(utc_timestamp)" \
+    '
+      .runs[$run_id] = ((.runs[$run_id] // {}) + {
+        scheduler_state: $scheduler_state,
+        scheduler_reason: $reason,
+        updated_at: $updated_at
+      } + (if $workspace_receipt_path == "" then {} else {workspace_receipt_path: $workspace_receipt_path} end))
+    ' "${LEDGER_FILE}" >"${tmp_file}"
+  mv "${tmp_file}" "${LEDGER_FILE}"
+  release_lock
+  maybe_auto_compact "scheduler_state_changed" "scheduler_state=${scheduler_state}; reason=${reason}"
   cmd_status "${RUN_ID}"
 }
 
@@ -228,6 +269,10 @@ case "${cmd}" in
   transition)
     shift || true
     cmd_transition "$@"
+    ;;
+  scheduler-state)
+    shift || true
+    cmd_scheduler_state "$@"
     ;;
   record-provider)
     shift || true

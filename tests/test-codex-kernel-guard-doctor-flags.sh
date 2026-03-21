@@ -65,8 +65,12 @@ grep -Fq 'codex_thread_title: fugue-orchestrator:secret-plane' <<<"${out}"
 grep -Fq 'summary: line1 || line2' <<<"${out}"
 
 KERNEL_RUN_ID=run-old bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-event cc-pocket "kn select" "interactive-selector" >/dev/null
+KERNEL_RUN_ID=run-old bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" scheduler-state retry_queued "awaiting-recovery" "/tmp/run-old-workspace.json" >/dev/null
 out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor --run run-old)"
 grep -Fq 'recent events:' <<<"${out}"
+grep -Fq 'scheduler_state: retry_queued' <<<"${out}"
+grep -Fq 'scheduler_reason: awaiting-recovery' <<<"${out}"
+grep -Fq 'workspace_receipt_path: /tmp/run-old-workspace.json' <<<"${out}"
 grep -Fq 'actor=cc-pocket' <<<"${out}"
 grep -Fq 'command=kn select' <<<"${out}"
 grep -Fq 'summary=interactive-selector' <<<"${out}"

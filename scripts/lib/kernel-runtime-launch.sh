@@ -77,11 +77,7 @@ command_for() {
       fi
       printf 'env %s %q' "$(shell_join_quoted "${env_args[@]}")" "${FUGUE_BIN}"
       if [[ "${launch_mode}" == "resume" ]]; then
-        if (($#)); then
-          printf ' %s' "$(shell_join_quoted "Resume FUGUE orchestration for Kernel run ${run_id}. Project: ${project}. Purpose: ${purpose}. Session: ${tmux_session}. Current focus: $*")"
-        else
-          printf ' %s' "$(shell_join_quoted "Resume FUGUE orchestration for Kernel run ${run_id}. Project: ${project}. Purpose: ${purpose}. Session: ${tmux_session}.")"
-        fi
+        printf ' %s' "$(shell_join_quoted "Resume FUGUE orchestration for Kernel run ${run_id}.")"
       elif (($#)); then
         printf ' %s' "$(shell_join_quoted "$@")"
       fi

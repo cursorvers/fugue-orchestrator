@@ -77,6 +77,7 @@ export KERNEL_RECOVERY_LAUNCH_CODEX_THREAD=true
 out="$(bash "${RECOVERY_SCRIPT}" recover run-stale)"
 grep -Fq 'strategy: phase-entry' <<<"${out}"
 grep -Fq "tmux session: ${SESSION_STALE}" <<<"${out}"
+grep -Fq 'mode: degraded' <<<"${out}"
 sleep 0.3
 pane_out="$(tmux capture-pane -p -t "=${SESSION_STALE}:main")"
 grep -Fq 'Resume FUGUE orchestration for Kernel run run-stale.' <<<"${pane_out}"
@@ -89,6 +90,14 @@ if [[ "${updated_at}" == "2026-03-20T00:05:00Z" ]]; then
   echo "recover should refresh compact updated_at for stale runs" >&2
   exit 1
 fi
+
+tmux kill-session -t "${SESSION_STALE}" >/dev/null 2>&1 || true
+tmux new-session -d -s "${SESSION_STALE}" -n main >/dev/null 2>&1 || true
+out="$(bash "${RECOVERY_SCRIPT}" recover run-stale)"
+grep -Fq "tmux session: ${SESSION_STALE}" <<<"${out}"
+sleep 0.3
+pane_out="$(tmux capture-pane -p -t "=${SESSION_STALE}:main")"
+grep -Fq 'Resume FUGUE orchestration for Kernel run run-stale.' <<<"${pane_out}"
 
 out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor)"
 grep -Fq 'purpose=auto-compact' <<<"${out}"
