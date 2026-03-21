@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
+RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
+LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 SESSION_A="fugue-orchestrator__alpha"
 SESSION_B="fugue-orchestrator__beta"
 trap 'tmux kill-session -t "${SESSION_A}" >/dev/null 2>&1 || true; tmux kill-session -t "${SESSION_B}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
@@ -29,21 +31,38 @@ mkdir -p "${KERNEL_COMPACT_DIR}"
 NEWER_TS="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 OLDER_TS="$(date -u -v-1M '+%Y-%m-%dT%H:%M:%SZ')"
 cat >"${KERNEL_COMPACT_DIR}/run-alpha.json" <<EOF
-{"run_id":"run-alpha","project":"fugue-orchestrator","purpose":"alpha","current_phase":"plan","mode":"healthy","runtime":"kernel","tmux_session":"${SESSION_A}","owner":"codex","active_models":["codex","glm","gemini-cli"],"blocking_reason":"","next_action":["implement-a"],"decisions":["d1"],"summary":["s1"],"last_event":"status_changed","updated_at":"${OLDER_TS}"}
+{"run_id":"run-alpha","project":"fugue-orchestrator","purpose":"alpha","current_phase":"plan","mode":"healthy","runtime":"kernel","tmux_session":"${SESSION_A}","owner":"codex","active_models":["codex","glm","gemini-cli"],"blocking_reason":"","scheduler_state":"retry_queued","scheduler_reason":"doctor-alpha","workspace_receipt_path":"/tmp/run-alpha-workspace.json","next_action":["implement-a"],"decisions":["d1"],"summary":["s1"],"last_event":"status_changed","updated_at":"${OLDER_TS}"}
 EOF
 cat >"${KERNEL_COMPACT_DIR}/run-beta.json" <<EOF
-{"run_id":"run-beta","project":"fugue-orchestrator","purpose":"beta","current_phase":"implement","mode":"degraded","runtime":"fugue","tmux_session":"${SESSION_B}","owner":"codex","active_models":["codex","cursor-cli"],"blocking_reason":"","next_action":["implement-b"],"decisions":["d1"],"summary":["s1"],"last_event":"status_changed","updated_at":"${NEWER_TS}"}
+{"run_id":"run-beta","project":"fugue-orchestrator","purpose":"beta","current_phase":"implement","mode":"degraded","runtime":"fugue","tmux_session":"${SESSION_B}","owner":"codex","active_models":["codex","cursor-cli"],"blocking_reason":"","scheduler_state":"running","scheduler_reason":"doctor-beta","workspace_receipt_path":"/tmp/run-beta-workspace.json","next_action":["implement-b"],"decisions":["d1"],"summary":["s1"],"last_event":"status_changed","updated_at":"${NEWER_TS}"}
 EOF
+
+KERNEL_RUN_ID="run-alpha" bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
+KERNEL_RUN_ID="run-alpha" bash "${LEDGER_SCRIPT}" scheduler-state retry_queued "doctor-alpha" "/tmp/run-alpha-workspace.json" >/dev/null
 
 out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor)"
 grep -Fq 'active runs:' <<<"${out}"
-first_active_line="$(printf '%s\n' "${out}" | awk '/^  - run_id=/{print; exit}')"
-grep -Fq 'run_id=run-beta' <<<"${first_active_line}"
-grep -Fq 'purpose=beta' <<<"${first_active_line}"
-grep -Fq 'runtime=fugue' <<<"${first_active_line}"
+beta_line="$(printf '%s\n' "${out}" | awk '/^  - run_id=run-beta /{print; exit}')"
+grep -Fq 'purpose=beta' <<<"${beta_line}"
+grep -Fq 'runtime=fugue' <<<"${beta_line}"
+grep -Fq 'scheduler_state=running' <<<"${beta_line}"
+grep -Fq 'workspace_receipt=true' <<<"${beta_line}"
 grep -Fq 'bootstrap receipt status:' <<<"${out}"
 grep -Fq 'present: false' <<<"${out}"
 grep -Fq 'runtime health status:' <<<"${out}"
 grep -Fq 'compact artifact status:' <<<"${out}"
+
+out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor --run run-alpha)"
+grep -Fq 'doctor scope run id: run-alpha' <<<"${out}"
+grep -Fq 'run detail:' <<<"${out}"
+grep -Fq 'scheduler_state_compact: retry_queued' <<<"${out}"
+grep -Fq 'workspace_receipt_path_compact: /tmp/run-alpha-workspace.json' <<<"${out}"
+grep -Fq 'bootstrap receipt:' <<<"${out}"
+grep -Fq '  - run id: run-alpha' <<<"${out}"
+grep -Fq 'runtime ledger:' <<<"${out}"
+grep -Fq 'scheduler state: retry_queued' <<<"${out}"
+grep -Fq 'workspace receipt path: /tmp/run-alpha-workspace.json' <<<"${out}"
+grep -Fq 'compact artifact:' <<<"${out}"
+grep -Fq 'project: fugue-orchestrator' <<<"${out}"
 
 echo "codex kernel guard doctor check passed"

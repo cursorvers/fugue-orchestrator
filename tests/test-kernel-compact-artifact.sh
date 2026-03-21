@@ -26,6 +26,7 @@ export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
+bash "${LEDGER_SCRIPT}" scheduler-state running "bootstrap-valid" "/tmp/compact-test-workspace.json" >/dev/null
 
 out="$(bash "${COMPACT_SCRIPT}" status)"
 grep -Fq 'present: true' <<<"${out}"
@@ -36,6 +37,9 @@ grep -Fq 'mode: healthy' <<<"${out}"
 grep -Fq 'runtime: kernel' <<<"${out}"
 grep -Fq 'session fingerprint:' <<<"${out}"
 grep -Fq 'codex thread: fugue-orchestrator:secret-plane' <<<"${out}"
+grep -Fq 'scheduler state: running' <<<"${out}"
+grep -Fq 'scheduler reason: bootstrap-valid' <<<"${out}"
+grep -Fq 'workspace receipt path: /tmp/compact-test-workspace.json' <<<"${out}"
 grep -Fq 'next action: implement-loader' <<<"${out}"
 grep -Fq 'decisions: use-keychain | mirror-github | keep-fugue-untouched' <<<"${out}"
 
@@ -95,5 +99,21 @@ if [[ "${session_c}" == "current-shared-session" ]]; then
 fi
 [[ "${session_c}" == fugue-orchestrator__secret-plane__* ]]
 unset TMUX
+
+export KERNEL_RUN_ID="compact-preserve"
+export KERNEL_SCHEDULER_STATE="retry_queued"
+export KERNEL_SCHEDULER_REASON="awaiting-recovery"
+export KERNEL_WORKSPACE_RECEIPT_PATH="/tmp/preserve-workspace.json"
+bash "${COMPACT_SCRIPT}" update status_changed "preserve once" >/dev/null
+unset KERNEL_SCHEDULER_STATE
+unset KERNEL_SCHEDULER_REASON
+unset KERNEL_WORKSPACE_RECEIPT_PATH
+bash "${COMPACT_SCRIPT}" update status_changed "preserve twice" >/dev/null
+preserve_scheduler_state="$(jq -r '.scheduler_state' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
+preserve_scheduler_reason="$(jq -r '.scheduler_reason' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
+preserve_workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
+[[ "${preserve_scheduler_state}" == "retry_queued" ]]
+[[ "${preserve_scheduler_reason}" == "awaiting-recovery" ]]
+[[ "${preserve_workspace_receipt_path}" == "/tmp/preserve-workspace.json" ]]
 
 echo "kernel compact artifact check passed"

@@ -254,7 +254,8 @@ cmd_update() {
   local path tmp_file existing_json existing_project existing_purpose
   local tmux_session phase project purpose owner blocking_reason codex_thread_title
   local mode runtime active_models_json decisions_json next_actions_json ledger_compact receipt_compact
-  local existing_mode existing_blocking_reason
+  local existing_mode existing_blocking_reason existing_scheduler_state existing_scheduler_reason
+  local existing_workspace_receipt_path scheduler_state scheduler_reason workspace_receipt_path
   local session_fingerprint
   local summary normalized_summary
 
@@ -277,11 +278,24 @@ cmd_update() {
   fi
   existing_mode="${KERNEL_MODE:-}"
   existing_blocking_reason=""
+  existing_scheduler_state=""
+  existing_scheduler_reason=""
+  existing_workspace_receipt_path=""
   if [[ -n "${existing_json}" ]]; then
     if [[ -z "${existing_mode}" ]]; then
       existing_mode="$(jq -r '.mode // "unknown"' <<<"${existing_json}")"
     fi
-    existing_blocking_reason="$(jq -r '.blocking_reason // ""' <<<"${existing_json}")"
+    local _eb _ess _esr _ewp
+    IFS=$'\t' read -r _eb _ess _esr _ewp < <(jq -r '[
+      (.blocking_reason // ""),
+      (.scheduler_state // ""),
+      (.scheduler_reason // ""),
+      (.workspace_receipt_path // "")
+    ] | @tsv' <<<"${existing_json}")
+    existing_blocking_reason="${_eb}"
+    existing_scheduler_state="${_ess}"
+    existing_scheduler_reason="${_esr}"
+    existing_workspace_receipt_path="${_ewp}"
   fi
 
   project="${KERNEL_PROJECT:-${existing_project:-kernel-workspace}}"
@@ -301,6 +315,9 @@ cmd_update() {
   runtime="$(resolve_runtime "${existing_json}")"
   session_fingerprint="$(session_fingerprint_for "${RUN_ID}" "${project}" "${purpose}" "${runtime}" "${tmux_session}")"
   blocking_reason="${KERNEL_BLOCKING_REASON:-}"
+  scheduler_state="${KERNEL_SCHEDULER_STATE:-}"
+  scheduler_reason="${KERNEL_SCHEDULER_REASON:-}"
+  workspace_receipt_path="${KERNEL_WORKSPACE_RECEIPT_PATH:-}"
   if [[ -n "${KERNEL_DECISIONS:-}" ]]; then
     decisions_json="$(json_array_from_pipe_csv "${KERNEL_DECISIONS}")"
   elif [[ -n "${existing_json}" ]]; then
@@ -317,8 +334,14 @@ cmd_update() {
   fi
 
   if ledger_compact="$(ledger_json 2>/dev/null)"; then
-    local _lstate _lreason
-    IFS=$'\t' read -r _lstate _lreason < <(jq -r '[(.state // ""), (.reason // "")] | @tsv' <<<"${ledger_compact}")
+    local _lstate _lreason _lscheduler_state _lscheduler_reason _lworkspace_receipt_path
+    IFS=$'\t' read -r _lstate _lreason _lscheduler_state _lscheduler_reason _lworkspace_receipt_path < <(jq -r '[
+      (.state // ""),
+      (.reason // ""),
+      (.scheduler_state // ""),
+      (.scheduler_reason // ""),
+      (.workspace_receipt_path // "")
+    ] | @tsv' <<<"${ledger_compact}")
     if [[ -n "${_lstate}" && "${_lstate}" != "unknown" ]]; then
       mode="${_lstate}"
     else
@@ -327,11 +350,29 @@ cmd_update() {
     if [[ -z "${blocking_reason}" && -n "${_lreason}" ]]; then
       blocking_reason="${_lreason}"
     fi
+    if [[ -z "${scheduler_state}" && -n "${_lscheduler_state}" && "${_lscheduler_state}" != "unknown" ]]; then
+      scheduler_state="${_lscheduler_state}"
+    fi
+    if [[ -z "${scheduler_reason}" && -n "${_lscheduler_reason}" ]]; then
+      scheduler_reason="${_lscheduler_reason}"
+    fi
+    if [[ -z "${workspace_receipt_path}" && -n "${_lworkspace_receipt_path}" ]]; then
+      workspace_receipt_path="${_lworkspace_receipt_path}"
+    fi
   else
     mode="${existing_mode:-unknown}"
   fi
   if [[ -z "${blocking_reason}" ]]; then
     blocking_reason="${existing_blocking_reason}"
+  fi
+  if [[ -z "${scheduler_state}" ]]; then
+    scheduler_state="${existing_scheduler_state}"
+  fi
+  if [[ -z "${scheduler_reason}" ]]; then
+    scheduler_reason="${existing_scheduler_reason}"
+  fi
+  if [[ -z "${workspace_receipt_path}" ]]; then
+    workspace_receipt_path="${existing_workspace_receipt_path}"
   fi
 
   if receipt_compact="$(receipt_json 2>/dev/null)"; then
@@ -366,6 +407,9 @@ cmd_update() {
     --arg codex_thread_title "${codex_thread_title}" \
     --arg owner "${owner}" \
     --arg blocking_reason "${blocking_reason}" \
+    --arg scheduler_state "${scheduler_state}" \
+    --arg scheduler_reason "${scheduler_reason}" \
+    --arg workspace_receipt_path "${workspace_receipt_path}" \
     --arg event "${event}" \
     --arg updated_at "$(utc_timestamp)" \
     --arg summary "${normalized_summary}" \
@@ -386,6 +430,9 @@ cmd_update() {
         owner: $owner,
         active_models: $active_models,
         blocking_reason: $blocking_reason,
+        scheduler_state: $scheduler_state,
+        scheduler_reason: $scheduler_reason,
+        workspace_receipt_path: $workspace_receipt_path,
         next_action: $next_action,
         decisions: $decisions,
         summary: ($summary | split("\n") | map(select(length > 0)) | .[:3]),
@@ -426,6 +473,9 @@ cmd_status() {
     "  - owner: \(.owner)",
     "  - active models: \(.active_models | join(","))",
     "  - blocking reason: \(.blocking_reason)",
+    "  - scheduler state: \(.scheduler_state // "unknown")",
+    "  - scheduler reason: \(.scheduler_reason // "")",
+    "  - workspace receipt path: \(.workspace_receipt_path // "")",
     "  - next action: \(.next_action | join(" | "))",
     "  - decisions: \(.decisions | join(" | "))",
     "  - summary: \(.summary | join(" || "))",
