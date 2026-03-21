@@ -6,7 +6,7 @@
 
 ## Delegation Targets
 
-### Cost Priority (Lightweight Tasks) -> GLM-4.7
+### Cost Priority (Lightweight Tasks) -> GLM-5
 
 | Trigger | Agent | Purpose | Parallel Limit |
 |---------|-------|---------|----------------|
@@ -113,7 +113,7 @@ Task received
 | Target | Layer | Cost | Criteria | Target Usage |
 |--------|-------|------|----------|-------------|
 | **Codex** | **Layer 1** | **$200/mo (fixed)** | **All code + design + complex** | **120-150/week** |
-| **GLM-4.7** | **Layer 2** | **$15/mo (fixed)** | **All non-code + review + classify** | **120-150/week** |
+| **GLM-5** | **Layer 2** | **$15/mo (fixed)** | **All non-code + review + classify** | **120-150/week** |
 | ~~Subagent(haiku)~~ | ~~Layer 3~~ | ~~Claude MAX~~ | **Prohibited** (Explore only) | **<=5/week** |
 | ~~Subagent(sonnet)~~ | ~~Layer 4~~ | ~~Claude MAX~~ | **Prohibited** (migrated to Codex) | **0/week** |
 | Claude Opus | Orchestrator | Claude MAX | **Routing/integration/reporting only** | **Minimal** |

@@ -62,7 +62,7 @@ Claude (Orchestrator)
 +-------------------------------------+
 | Execution Tier                      |
 | +-> Codex (design, code, security)  |
-| +-> GLM-4.7 (lightweight review)    |
+| +-> GLM-5 (lightweight review)      |
 | +-> Gemini (UI/UX, image analysis)  |
 | +-> Pencil MCP (.pen UI dev)        |
 | +-> MCP Tools (Stripe, Supabase...) |
@@ -86,8 +86,9 @@ Claude (integrate & report)
 |----------|-------|---------|
 | `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` | `claude` | Claude is the main orchestrator |
 | `FUGUE_CLAUDE_ROLE_POLICY` | `flex` | Claude can act as both orchestrator and assist |
-| `FUGUE_EXECUTION_PROVIDER` | `codex` | Codex handles execution tasks |
+| `FUGUE_EXECUTION_PROVIDER` | `cursor` | Cursor CLI (composer-2) handles execution tasks |
 
+Execution engine: `agent --model composer-2` (Cursor CLI). Fallback: `codex` CLI.
 Rollback: set provider back to `codex`, role policy to `sub-only`, delete execution provider.
 
 ### Core Behavior (2-Layer Orchestration v2)
@@ -120,7 +121,7 @@ Rollback: set provider back to `codex`, role policy to `sub-only`, delete execut
 
 | Task Type | Delegate To | Reason |
 |-----------|-------------|--------|
-| Lightweight (review, math) | GLM-4.7 | Cost priority |
+| Lightweight (review, math) | GLM-5 | Cost priority |
 | Critical (design, security) | Codex | Accuracy priority |
 | UI/UX evaluation | Gemini | Visual judgment |
 | X/Twitter/realtime | Grok | Required |
@@ -206,11 +207,14 @@ CLAUDE.md (this file) <- entry point
 ### Delegation Scripts
 
 ```bash
-# Codex
+# Cursor CLI (composer-2) -- Primary execution engine
+agent --model composer-2 -p --workspace /path "[task prompt]"
+
+# Codex (fallback)
 node ~/.claude/skills/orchestra-delegator/scripts/delegate.js \
   -a [architect|code-reviewer|security-analyst] -t "[task]"
 
-# GLM (cost priority)
+# GLM-5 (cost priority)
 node ~/.claude/skills/orchestra-delegator/scripts/delegate-glm.js \
   -a [code-reviewer] -t "[task]"
 

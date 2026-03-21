@@ -8,7 +8,7 @@
 
 | Model | Use Case | Cost | Characteristics |
 |-------|----------|------|----------------|
-| **GLM-4.7** | Code review, light analysis, math | Lowest ($15/mo) | Stable up to 7 parallel |
+| **GLM-5** | Code review, light analysis, math | Lowest ($15/mo) | Stable up to 7 parallel |
 | **Haiku** | Pair programming, light agents | Low | 90% of Sonnet, 3x cost reduction |
 | **Sonnet** | Main development, complex coding | Medium | Standard model |
 | **Opus** | Deep reasoning, architecture design | High | Accuracy priority |
