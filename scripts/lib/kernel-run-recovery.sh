@@ -150,7 +150,7 @@ launch_runtime_thread() {
   [[ -f "${RUNTIME_LAUNCH_SCRIPT}" ]] || return 0
   launch_command="$(bash "${RUNTIME_LAUNCH_SCRIPT}" command resume "${runtime}" "${run_id}" "${project}" "${purpose}" "${session_name}")"
   if [[ "${runtime}" == "fugue" ]]; then
-    local safe_run_id="${run_id//\'/\'\\\'\'}"
+    local safe_run_id="${run_id//"'"/"'\\''"}"
     tmux send-keys -t "=${session_name}:main" "printf '%s\n' 'Resume FUGUE orchestration for Kernel run ${safe_run_id}.'" C-m
   fi
   tmux send-keys -t "=${session_name}:main" "${launch_command}" C-m
