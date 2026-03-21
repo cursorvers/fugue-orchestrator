@@ -86,9 +86,9 @@ Claude (integrate & report)
 |----------|-------|---------|
 | `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` | `claude` | Claude is the main orchestrator |
 | `FUGUE_CLAUDE_ROLE_POLICY` | `flex` | Claude can act as both orchestrator and assist |
-| `FUGUE_EXECUTION_PROVIDER` | `cursor` | Cursor CLI (composer-2) handles execution tasks |
+| `FUGUE_EXECUTION_PROVIDER` | `codex` | Codex CLI handles execution tasks (primary) |
 
-Execution engine: `agent --model composer-2` (Cursor CLI). Fallback: `codex` CLI.
+Execution engine: `codex` CLI (GPT-5.4, $200/mo subscription). Supplementary: `agent --model auto` (Cursor CLI, `FUGUE_EXECUTION_PROVIDER=cursor`).
 Rollback: set provider back to `codex`, role policy to `sub-only`, delete execution provider.
 
 ### Core Behavior (2-Layer Orchestration v2)
@@ -207,12 +207,12 @@ CLAUDE.md (this file) <- entry point
 ### Delegation Scripts
 
 ```bash
-# Cursor CLI (composer-2) -- Primary execution engine
-agent --model composer-2 -p --workspace /path "[task prompt]"
-
-# Codex (fallback)
+# Codex (primary execution engine)
 node ~/.claude/skills/orchestra-delegator/scripts/delegate.js \
   -a [architect|code-reviewer|security-analyst] -t "[task]"
+
+# Cursor CLI (supplementary, FUGUE_EXECUTION_PROVIDER=cursor)
+agent --model auto -p --workspace /path "[task prompt]"
 
 # GLM-5 (cost priority)
 node ~/.claude/skills/orchestra-delegator/scripts/delegate-glm.js \
