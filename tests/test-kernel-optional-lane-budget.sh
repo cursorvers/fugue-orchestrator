@@ -38,4 +38,11 @@ bash "${SCRIPT}" record cursor 1 smoke >/dev/null
 out="$(bash "${SCRIPT}" can-use cursor 1 || true)"
 grep -Fq 'deny cursor-cli: run cap exceeded' <<<"${out}"
 
+export KERNEL_RUN_ID="refund-run"
+bash "${SCRIPT}" consume gemini 1 smoke >/dev/null
+out="$(bash "${SCRIPT}" refund gemini 1 failure)"
+grep -Fq 'refunded gemini-cli' <<<"${out}"
+out="$(bash "${SCRIPT}" status)"
+grep -Fq 'gemini-cli: day 1/2, run 0/1' <<<"${out}"
+
 echo "kernel optional lane budget check passed"

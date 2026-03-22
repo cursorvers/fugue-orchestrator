@@ -91,18 +91,50 @@ export KERNEL_K_NO_ATTACH=true
 export TMUX_RECOVERED_FILE="${TMP_DIR}/log/recovered-sessions.log"
 export TMUX_ACTION_LOG="${TMP_DIR}/log/tmux-actions.log"
 
+iso_hours_ago() {
+  python3 - "$1" <<'PY'
+import datetime
+import sys
+
+hours = int(sys.argv[1])
+ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+print(ts.strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+}
+
+FRESH_TS="$(iso_hours_ago 1)"
+OLDER_TS="$(iso_hours_ago 2)"
+STALE_TS="$(iso_hours_ago 30)"
+
 cat > "${TMP_DIR}/compact/run-1.json" <<'EOF'
 {"run_id":"run-1","tmux_session":"proj__purpose","project":"proj","purpose":"purpose","session_fingerprint":"fingerprint-run-1"}
 EOF
 cat > "${TMP_DIR}/compact/run-2.json" <<'EOF'
-{"run_id":"run-2","tmux_session":"proj__second","project":"proj","purpose":"second","updated_at":"2026-03-20T00:00:00Z"}
+{"run_id":"run-2","tmux_session":"proj__second","project":"proj","purpose":"second","updated_at":"OLDER_TS_PLACEHOLDER"}
 EOF
 cat > "${TMP_DIR}/compact/run-3.json" <<'EOF'
-{"run_id":"run-3","tmux_session":"proj__latest","project":"proj","purpose":"latest","updated_at":"2026-03-20T01:00:00Z"}
+{"run_id":"run-3","tmux_session":"proj__latest","project":"proj","purpose":"latest","updated_at":"FRESH_TS_PLACEHOLDER"}
 EOF
 cat > "${TMP_DIR}/compact/run-old.json" <<'EOF'
-{"run_id":"run-old","tmux_session":"proj__old","project":"proj","purpose":"old","updated_at":"2026-03-18T01:00:00Z"}
+{"run_id":"run-old","tmux_session":"proj__old","project":"proj","purpose":"old","updated_at":"STALE_TS_PLACEHOLDER"}
 EOF
+
+python3 - "${TMP_DIR}" "${OLDER_TS}" "${FRESH_TS}" "${STALE_TS}" <<'PY'
+import pathlib
+import sys
+
+tmp_dir = pathlib.Path(sys.argv[1])
+replacements = {
+    "OLDER_TS_PLACEHOLDER": sys.argv[2],
+    "FRESH_TS_PLACEHOLDER": sys.argv[3],
+    "STALE_TS_PLACEHOLDER": sys.argv[4],
+}
+for path in tmp_dir.joinpath("compact").glob("*.json"):
+    text = path.read_text(encoding="utf-8")
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8")
+PY
 
 /Users/masayuki_otawara/bin/k >/dev/null
 grep -Fq 'doctor' "${K_TEST_LOG}"

@@ -93,6 +93,14 @@ ensure_provider_command() {
   printf '%s\n' "${cmd}"
 }
 
+ensure_provider_ready() {
+  local provider="$1"
+  bash "${PICKER_SCRIPT}" ready "${provider}" >/dev/null 2>&1 || {
+    echo "optional lane provider not ready: ${provider}" >&2
+    return 1
+  }
+}
+
 maybe_reject_copilot_autopilot() {
   local arg
   [[ "$1" == "copilot-cli" ]] || return 0
@@ -148,6 +156,7 @@ main() {
   fi
 
   ensure_provider_command "${provider}" >/dev/null
+  ensure_provider_ready "${provider}" || exit 1
   KERNEL_RUN_ID="${RUN_ID}" bash "${BUDGET_SCRIPT}" consume "${provider}" 1 "${note}" >/dev/null
 
   set +e
@@ -158,6 +167,7 @@ main() {
   if [[ "${rc}" -eq 0 ]]; then
     KERNEL_RUN_ID="${RUN_ID}" bash "${LEDGER_SCRIPT}" record-provider "${provider}" success "${note}" >/dev/null
   else
+    KERNEL_RUN_ID="${RUN_ID}" bash "${BUDGET_SCRIPT}" refund "${provider}" 1 "${note}:failure" >/dev/null
     KERNEL_RUN_ID="${RUN_ID}" bash "${LEDGER_SCRIPT}" record-provider "${provider}" failure "${note}" >/dev/null
   fi
 

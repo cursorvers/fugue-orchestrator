@@ -572,12 +572,15 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - `cc pocket` は `doctor --all-runs -> doctor --run` を使う mobile degraded continuation node として扱う
 - `k` は人間向けの短縮入口で、`k`, `k all`, `k latest`, `k run-id`, `k new <purpose> [focus]`, `k adopt <session:window> [purpose]`, `k <run_id>`, `k show <run_id>`, `k open [run_id]`, `k phase <phase>`, `k done <summary...>` を使う
 - `codex-kernel-guard adopt-run <session:window> [purpose]` は unmanaged な live tmux window を Kernel run に昇格し、専用 heavy-profile session へ移す
-- `Mac mini` では repo 内で bare `codex` を打つと `Kernelを起動しますか? [Y/n]` を確認し、`yes` なら `kernel`、`no` なら raw Codex に留まる
+- `Mac mini` では repo 内で bare `codex` を打った時の既定を `kernel` とし、raw Codex は明示的な opt-out に限る。repo context が明確な通常起動で毎回 `Kernelを起動しますか? [Y/n]` を聞かない
 - `Mac mini` では `kernel` を引数なしで打つと最新の active run を開き、active run が無ければ通常の guarded launch に落ちる
+- Kernel 起動アダプタは、Codex の初回表示に出る bootstrap 文面を最小限に保つ
+- 初回表示では full prompt を inline せず、`.codex/prompts/kernel.md` への短い参照と run metadata を優先する
 - `purpose` は run ごとに固定し、目的が変わるなら新しい run を切る
 - `codex-kernel-guard phase-check <phase>` は phase 完了前の required model evidence を検査する
 - `codex-kernel-guard phase-complete <phase>` は phase evidence を通した上で compact に `phase_completed` を記録する
 - `codex-kernel-guard run-complete --summary <text>` は verify gate を通した上で completion backup と `run_completed` compact を記録する
+- Kernel の自動記録は既定で節目だけに寄せる。`plan` / `implement` / `verify` 完了と `run-complete` を自動記録し、background completion scan は必要時だけ明示 opt-in にする
 - unattended health のため、最初の acknowledgement 前に bootstrap receipt を書き、mode 変化時にも更新する
 - bootstrap receipt には provider 数だけでなく `Active models`、manifest lane count、agent/subagent label 有無も入れて live manifest evidence を残す
 - `Active models:` 行で、その run で実際に稼働している model だけを明示する

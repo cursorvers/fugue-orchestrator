@@ -58,6 +58,7 @@ map_to_acct() {
     FREEE_CLIENT_SECRET) echo "freee-client-secret" ;;
     FREEE_ENCRYPTION_KEY) echo "freee-encryption-key" ;;
     FREEE_COMPANY_ID)   echo "freee-company-id" ;;
+    LINE_CHANNEL_ACCESS_TOKEN) echo "line-channel-access-token" ;;
     SLACK_BOT_TOKEN)    echo "slack-bot-token" ;;
     SLACK_TEAM_ID)      echo "slack-team-id" ;;
     VERCEL_AI_GATEWAY_KEY) echo "vercel-ai-gateway-key" ;;

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPACT_DIR="${KERNEL_COMPACT_DIR:-$HOME/.config/kernel/compact}"
-LOCK_DIR="${KERNEL_COMPACT_LOCK_DIR:-${COMPACT_DIR}/.lock}"
-LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+COMPACT_DIR="${KERNEL_COMPACT_DIR:-$(bash "${STATE_PATH_SCRIPT}" compact-dir)}"
+LOCK_DIR="${KERNEL_COMPACT_LOCK_DIR:-${COMPACT_DIR}/.lock}"
+LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 SESSION_NAME_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-session-name.sh"
@@ -199,7 +200,7 @@ receipt_path() {
 
 ledger_json() {
   KERNEL_RUN_ID="${RUN_ID}" bash "${LEDGER_SCRIPT}" status >/dev/null 2>&1 || true
-  local ledger_file="${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.json}"
+  local ledger_file="${KERNEL_RUNTIME_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" runtime-ledger-file)}"
   [[ -f "${ledger_file}" ]] || return 1
   jq -c --arg run_id "${RUN_ID}" '.runs[$run_id] // {}' "${ledger_file}"
 }

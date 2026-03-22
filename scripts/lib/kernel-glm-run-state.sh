@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE_FILE="${KERNEL_GLM_RUN_STATE_FILE:-$HOME/.config/kernel/glm-run-state.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+STATE_FILE="${KERNEL_GLM_RUN_STATE_FILE:-$(bash "${STATE_PATH_SCRIPT}" glm-run-state-file)}"
 GLM_FAILURE_THRESHOLD="${KERNEL_GLM_FAILURE_THRESHOLD:-2}"
 LOCK_DIR="${KERNEL_GLM_RUN_STATE_LOCK_DIR:-${STATE_FILE}.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 LOCK_HELD=0
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/kernel-lock.sh"
 
 repo_slug() {

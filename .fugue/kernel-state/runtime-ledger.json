@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "runs": {
+    "matrix-normal": {
+      "state": "running",
+      "reason": "bootstrap-receipt",
+      "updated_at": "2026-03-22T11:11:14Z",
+      "receipt_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.ycclsfTEwZ/receipts/matrix-normal.json",
+      "scheduler_state": "claimed",
+      "scheduler_reason": "guard-launch",
+      "provider_usage": {
+        "codex": {
+          "success_count": 15,
+          "failure_count": 0,
+          "last_result": "success",
+          "last_note": "guard-launch",
+          "last_at": "2026-03-22T11:11:14Z"
+        }
+      }
+    },
+    "matrix-degraded": {
+      "state": "running",
+      "reason": "bootstrap-receipt",
+      "updated_at": "2026-03-22T11:11:17Z",
+      "receipt_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.ycclsfTEwZ/receipts/matrix-degraded.json",
+      "scheduler_state": "claimed",
+      "scheduler_reason": "guard-launch",
+      "provider_usage": {
+        "codex": {
+          "success_count": 8,
+          "failure_count": 0,
+          "last_result": "success",
+          "last_note": "guard-launch",
+          "last_at": "2026-03-22T11:11:17Z"
+        }
+      }
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:55977:run:20260322T143016:56716": {
+      "updated_at": "2026-03-22T06:07:23Z",
+      "provider_usage": {
+        "cursor-cli": {
+          "success_count": 0,
+          "failure_count": 1,
+          "last_result": "failure",
+          "last_note": "exec:cursor-cli:--help",
+          "last_at": "2026-03-22T05:31:46Z"
+        },
+        "glm": {
+          "success_count": 1,
+          "failure_count": 1,
+          "last_result": "success",
+          "last_note": "kernel-bootstrap-glm",
+          "last_at": "2026-03-22T05:38:35Z"
+        },
+        "codex": {
+          "success_count": 3,
+          "failure_count": 0,
+          "last_result": "success",
+          "last_note": "kernel-rebootstrap-main",
+          "last_at": "2026-03-22T06:07:23Z"
+        },
+        "gemini-cli": {
+          "success_count": 1,
+          "failure_count": 0,
+          "last_result": "success",
+          "last_note": "kernel-bootstrap-gemini",
+          "last_at": "2026-03-22T05:38:40Z"
+        }
+      }
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:8199:run:20260322T131834:10793": {
+      "state": "running",
+      "reason": "bootstrap-receipt",
+      "updated_at": "2026-03-22T06:40:07Z",
+      "receipt_path": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-state/bootstrap-receipts/adhoc_Mac-mini-M1-for-Otawara-M-5_kernel-workspace_8199_run_20260322T131834_10793.json",
+      "provider_usage": {
+        "glm": {
+          "success_count": 0,
+          "failure_count": 1,
+          "last_result": "failure",
+          "last_note": "glm-command-missing",
+          "last_at": "2026-03-22T06:01:40Z"
+        },
+        "cursor-cli": {
+          "success_count": 0,
+          "failure_count": 1,
+          "last_result": "failure",
+          "last_note": "exec:cursor-cli:--print",
+          "last_at": "2026-03-22T06:02:21Z"
+        }
+      }
+    },
+    "wrapper-smoke": {
+      "updated_at": "2026-03-22T06:41:19Z",
+      "provider_usage": {
+        "gemini-cli": {
+          "success_count": 2,
+          "failure_count": 0,
+          "last_result": "success",
+          "last_note": "exec:gemini-cli:test",
+          "last_at": "2026-03-22T06:41:14Z"
+        },
+        "cursor-cli": {
+          "success_count": 2,
+          "failure_count": 0,
+          "last_result": "success",
+          "last_note": "exec:cursor-cli:--print",
+          "last_at": "2026-03-22T06:41:19Z"
+        }
+      }
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:28511:run:20260322T205524:29160": {
+      "state": "running",
+      "reason": "bootstrap-receipt",
+      "updated_at": "2026-03-22T11:55:49Z",
+      "receipt_path": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-state/bootstrap-receipts/adhoc_Mac-mini-M1-for-Otawara-M-5_kernel-workspace_28511_run_20260322T205524_29160.json"
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:37600:run:20260322T205943:38342": {
+      "updated_at": "2026-03-22T12:01:23Z",
+      "provider_usage": {
+        "cursor-cli": {
+          "success_count": 0,
+          "failure_count": 1,
+          "last_result": "failure",
+          "last_note": "exec:cursor-cli:--print",
+          "last_at": "2026-03-22T12:01:23Z"
+        }
+      }
+    }
+  }
+}

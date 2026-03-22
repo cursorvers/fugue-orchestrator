@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RECEIPT_DIR="${KERNEL_BOOTSTRAP_RECEIPT_DIR:-$HOME/.config/kernel/bootstrap-receipts}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+RECEIPT_DIR="${KERNEL_BOOTSTRAP_RECEIPT_DIR:-$(bash "${STATE_PATH_SCRIPT}" bootstrap-receipt-dir)}"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 
 default_run_id() {

@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 source "${SCRIPT_DIR}/workspace-root-policy.sh"
 
 default_run_id() {
@@ -78,18 +79,18 @@ receipt_path_for() {
 
 compact_artifact_path_for() {
   local run_id="${1:-${RUN_ID}}"
-  local compact_dir="${KERNEL_COMPACT_DIR:-$HOME/.config/kernel/compact}"
+  local compact_dir="${KERNEL_COMPACT_DIR:-$(bash "${STATE_PATH_SCRIPT}" compact-dir)}"
   printf '%s/%s.json\n' "${compact_dir}" "$(printf '%s' "${run_id}" | tr '/:' '__')"
 }
 
 bootstrap_receipt_path_for() {
   local run_id="${1:-${RUN_ID}}"
-  local dir="${KERNEL_BOOTSTRAP_RECEIPT_DIR:-$HOME/.config/kernel/bootstrap-receipts}"
+  local dir="${KERNEL_BOOTSTRAP_RECEIPT_DIR:-$(bash "${STATE_PATH_SCRIPT}" bootstrap-receipt-dir)}"
   printf '%s/%s.json\n' "${dir}" "$(printf '%s' "${run_id}" | tr '/:' '__')"
 }
 
 ledger_path_for() {
-  printf '%s\n' "${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.json}"
+  printf '%s\n' "${KERNEL_RUNTIME_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" runtime-ledger-file)}"
 }
 
 write_receipt() {

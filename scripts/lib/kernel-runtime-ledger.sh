@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LEDGER_FILE="${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+LEDGER_FILE="${KERNEL_RUNTIME_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" runtime-ledger-file)}"
 LOCK_DIR="${KERNEL_RUNTIME_LEDGER_LOCK_DIR:-${LEDGER_FILE}.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 LOCK_HELD=0
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/kernel-lock.sh"
 
 default_run_id() {
@@ -38,9 +40,7 @@ EOF
 }
 
 compact_script_path() {
-  local root_dir
-  root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-  printf '%s\n' "${root_dir}/scripts/lib/kernel-compact-artifact.sh"
+  printf '%s\n' "${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 }
 
 maybe_auto_compact() {

@@ -3,25 +3,144 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUDGET_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-optional-lane-budget.sh"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+AUTH_TTL_SEC="${KERNEL_AUTH_EVIDENCE_TTL_SEC:-300}"
+READY_TIMEOUT_SEC="${KERNEL_PROVIDER_READY_TIMEOUT_SEC:-5}"
 
 usage() {
   cat <<'EOF'
 Usage:
   kernel-specialist-picker.sh pick
   kernel-specialist-picker.sh status
+  kernel-specialist-picker.sh ready <provider>
 EOF
 }
 
+run_slug() {
+  printf '%s' "${KERNEL_RUN_ID:-unknown-run}" | tr -c '[:alnum:]._-=' '_'
+}
+
+auth_evidence_file() {
+  local provider="${1:?provider is required}"
+  local state_root
+  state_root="$(bash "${STATE_PATH_SCRIPT}" state-root)"
+  printf '%s/auth-evidence/%s/%s.status\n' "${state_root}" "$(run_slug)" "${provider}"
+}
+
+write_auth_evidence() {
+  local provider="${1:?provider is required}"
+  local state="${2:?state is required}"
+  local note="${3:-}"
+  local path
+  path="$(auth_evidence_file "${provider}")"
+  mkdir -p "$(dirname "${path}")"
+  printf '%s\t%s\t%s\n' "${state}" "$(date +%s)" "${note}" >"${path}"
+}
+
+read_auth_evidence() {
+  local provider="${1:?provider is required}"
+  local path state saved_at note now
+  path="$(auth_evidence_file "${provider}")"
+  [[ -f "${path}" ]] || return 1
+  IFS=$'\t' read -r state saved_at note <"${path}" || return 1
+  [[ -n "${state}" && -n "${saved_at}" ]] || return 1
+  now="$(date +%s)"
+  if (( now - saved_at > AUTH_TTL_SEC )); then
+    return 1
+  fi
+  printf '%s\t%s\n' "${state}" "${note}"
+}
+
+bounded_capture() {
+  local timeout_sec="${1:?timeout is required}"
+  shift
+  local tmp_dir output_file rc_file pid watcher rc
+  tmp_dir="$(mktemp -d)"
+  output_file="${tmp_dir}/output.txt"
+  rc_file="${tmp_dir}/rc.txt"
+  (
+    "$@" >"${output_file}" 2>&1
+    printf '%s\n' "$?" >"${rc_file}"
+  ) &
+  pid=$!
+  (
+    sleep "${timeout_sec}"
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      kill -TERM "${pid}" >/dev/null 2>&1 || true
+      sleep 1
+      kill -KILL "${pid}" >/dev/null 2>&1 || true
+      printf '124\n' >"${rc_file}"
+    fi
+  ) &
+  watcher=$!
+
+  wait "${pid}" >/dev/null 2>&1 || true
+  kill "${watcher}" >/dev/null 2>&1 || true
+  wait "${watcher}" >/dev/null 2>&1 || true
+
+  cat "${output_file}"
+  rc="$(cat "${rc_file}" 2>/dev/null || printf '1')"
+  rm -rf "${tmp_dir}"
+  return "${rc}"
+}
+
+cursor_status_probe() {
+  local bin="${1:?cursor bin is required}"
+  local output rc
+  output="$(bounded_capture "${READY_TIMEOUT_SEC}" "${bin}" agent status)"
+  rc=$?
+  printf '%s' "${output}"
+  return "${rc}"
+}
+
+canonical_provider() {
+  case "${1:-}" in
+    gemini|gemini-cli) printf 'gemini-cli\n' ;;
+    cursor|cursor-cli) printf 'cursor-cli\n' ;;
+    copilot|copilot-cli) printf 'copilot-cli\n' ;;
+    *)
+      printf 'unknown\n'
+      return 1
+      ;;
+  esac
+}
+
 cursor_ready() {
+  local cached_state cached_note output rc
   if [[ -n "${KERNEL_CURSOR_READY:-}" ]]; then
     [[ "${KERNEL_CURSOR_READY}" == "true" ]]
     return
   fi
+
+  if read -r cached_state cached_note < <(read_auth_evidence cursor-cli); then
+    [[ "${cached_state}" == "ready" ]]
+    return
+  fi
+
   local bin="${KERNEL_CURSOR_BIN:-cursor}"
   command -v "${bin}" >/dev/null 2>&1 || return 1
-  local output=""
-  output="$("${bin}" agent status 2>/dev/null || true)"
-  grep -Fq 'Logged in as' <<<"${output}"
+  set +e
+  output="$(cursor_status_probe "${bin}")"
+  rc=$?
+  set -e
+  if grep -Fq 'Logged in as' <<<"${output}"; then
+    write_auth_evidence cursor-cli ready logged-in
+    return 0
+  fi
+  if grep -Fq 'Workspace Trust Required' <<<"${output}"; then
+    write_auth_evidence cursor-cli not-ready workspace-trust-required
+    return 1
+  fi
+  if grep -Fqi 'keychain is locked' <<<"${output}"; then
+    write_auth_evidence cursor-cli not-ready keychain-locked
+    return 1
+  fi
+  if [[ "${rc}" -eq 124 ]]; then
+    write_auth_evidence cursor-cli not-ready status-timeout
+    return 1
+  fi
+  write_auth_evidence cursor-cli not-ready status-unready
+  return 1
 }
 
 provider_ready() {
@@ -60,7 +179,7 @@ provider_caps() {
 
 provider_usage() {
   local provider="${1:-}"
-  local ledger_file="${KERNEL_OPTIONAL_LANE_LEDGER_FILE:-$HOME/.config/kernel/optional-lane-usage.json}"
+  local ledger_file="${KERNEL_OPTIONAL_LANE_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" optional-lane-ledger-file)}"
   local run_id="${KERNEL_RUN_ID:-unknown-run}"
   [[ -f "${ledger_file}" ]] || {
     printf '0 0\n'
@@ -140,14 +259,36 @@ PY
 }
 
 cmd_status() {
-  local provider
+  local provider cached
   for provider in gemini-cli cursor-cli copilot-cli; do
     if provider_ready "${provider}"; then
       printf '%s\tready\t%s\n' "${provider}" "$(provider_score "${provider}")"
     else
-      printf '%s\tnot-ready\n' "${provider}"
+      if cached="$(read_auth_evidence "${provider}" 2>/dev/null)"; then
+        printf '%s\tnot-ready\t%s\n' "${provider}" "${cached#*$'\t'}"
+      else
+        printf '%s\tnot-ready\n' "${provider}"
+      fi
     fi
   done
+}
+
+cmd_ready() {
+  local provider
+  provider="$(canonical_provider "${1:-}")" || {
+    usage >&2
+    exit 2
+  }
+  [[ "${provider}" != "auto" ]] || {
+    echo "ready requires a concrete provider" >&2
+    exit 2
+  }
+  if provider_ready "${provider}"; then
+    printf 'ready\n'
+  else
+    printf 'not-ready\n'
+    exit 1
+  fi
 }
 
 cmd="${1:-pick}"
@@ -159,6 +300,10 @@ case "${cmd}" in
   status)
     shift || true
     cmd_status "$@"
+    ;;
+  ready)
+    shift || true
+    cmd_ready "$@"
     ;;
   help|-h|--help)
     usage

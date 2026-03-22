@@ -87,7 +87,7 @@ bash "${RUNNER_SCRIPT}" \
   --summary "${summary}" \
   --cwd "${ROOT_DIR}" \
   --title "${title}" \
-  "${runner_flags[@]}" \
+  "${runner_flags[@]+"${runner_flags[@]}"}" \
   >/dev/null
 
 KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="verify" KERNEL_SUMMARY="${summary}" \

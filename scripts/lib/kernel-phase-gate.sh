@@ -6,6 +6,8 @@ RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+MILESTONE_RECORD_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-milestone-record.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -59,7 +61,7 @@ compact_json() {
 }
 
 ledger_file() {
-  printf '%s\n' "${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.json}"
+  printf '%s\n' "${KERNEL_RUNTIME_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" runtime-ledger-file)}"
 }
 
 provider_success_count() {
@@ -241,6 +243,9 @@ complete_phase() {
   check_phase >/dev/null
   check_completion_artifact >/dev/null
   KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="${PHASE}" bash "${COMPACT_SCRIPT}" update phase_completed "phase=${PHASE} completed" >/dev/null
+  if [[ -f "${MILESTONE_RECORD_SCRIPT}" ]]; then
+    KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="${PHASE}" bash "${MILESTONE_RECORD_SCRIPT}" phase "${PHASE}" "phase=${PHASE} completed"
+  fi
   pass_gate
 }
 

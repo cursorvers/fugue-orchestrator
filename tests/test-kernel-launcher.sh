@@ -50,4 +50,12 @@ export KERNEL_NODE_ROLE=primary
 grep -Fq 'k latest' "${KERNEL_TEST_LOG}"
 grep -Fq 'k open run-primary' "${KERNEL_TEST_LOG}"
 
+rm -f "${HOME}/bin/kernel-root"
+set +e
+out="$(/Users/masayuki_otawara/bin/kernel 2>&1)"
+rc=$?
+set -e
+[[ "${rc}" -ne 0 ]]
+grep -Fq 'kernel-root unavailable' <<<"${out}"
+
 echo "kernel launcher check passed"

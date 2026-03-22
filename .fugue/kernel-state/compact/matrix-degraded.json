@@ -1,0 +1,29 @@
+{
+  "run_id": "matrix-degraded",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "current_phase": "unknown",
+  "mode": "running",
+  "runtime": "kernel",
+  "tmux_session": "kernel-workspace__unspecified__degraded",
+  "session_fingerprint": "c09afa9c7fce0f5a69385f79a342bcb5ec26421fe1ac59957bd2facfb69b4919",
+  "codex_thread_title": "kernel-workspace:unspecified:degraded",
+  "owner": "local-operator",
+  "active_models": [
+    "gpt-5.3-codex",
+    "gemini-cli",
+    "cursor-cli"
+  ],
+  "blocking_reason": "bootstrap-receipt",
+  "scheduler_state": "claimed",
+  "scheduler_reason": "guard-launch",
+  "workspace_receipt_path": "",
+  "next_action": [],
+  "decisions": [],
+  "phase_artifacts": {},
+  "summary": [
+    "scheduler_state=claimed; reason=guard-launch"
+  ],
+  "last_event": "scheduler_state_changed",
+  "updated_at": "2026-03-22T11:11:17Z"
+}

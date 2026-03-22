@@ -70,8 +70,21 @@ Primary policy source:
 - Rejected ownership transfer includes:
   - control-plane sovereignty
   - council math
-  - `ok_to_execute`
-  - provider-neutral adapter contract
+- `ok_to_execute`
+- provider-neutral adapter contract
+
+## Operator Friction
+
+- Kernel should minimize user-auth and operator-auth friction; do not turn routine local authentication or trust setup into repeated user homework when the system can drive or verify it itself.
+- Prefer non-interactive checks, existing local credentials, recorded run evidence, and bounded local artifacts before asking the user to paste command output or manually relay state.
+- Once unlock, trust, or login recovery succeeds for a run, treat that local result as shared run evidence for all active lanes instead of asking the user to restate or re-paste the same proof.
+- If one-time human interaction is truly required, ask for the smallest concrete action, then resume autonomously from the resulting local evidence instead of re-asking for equivalent confirmation.
+- Do not ask the user to repeat unlock, trust, login, or approval steps that Kernel can verify directly after the first attempt.
+- Keep the recovery split explicit: `launch` may fail closed on readiness, but `doctor`, `doctor --run`, and `recover-run` are the non-interactive-first surfaces for diagnosis and continuation.
+- When a specialist or adapter is blocked on auth, perform one bounded non-interactive recovery sweep per run (`--trust`, keychain status checks, bounded wrapper probes, `doctor`, `doctor --run`, `recover-run`) before escalating; if that sweep fails, ask the user once, not once per lane.
+- Reducing auth friction must not bypass `ok_to_execute`, human approval, billing, or trust-boundary controls; optimize retries and evidence reuse without weakening the safety contract.
+- Treat operator time as a constrained resource: spend Codex effort on removing repetitive auth chores, caching successful local state, and documenting the recovery path when automation still cannot fully absorb the step.
+- If a flow still requires unavoidable human auth, update the repository contract so future runs can reach the minimum healthy shape with less manual intervention.
 
 ## Slash Prompt Contract
 
@@ -110,12 +123,15 @@ Primary policy source:
 - `cc pocket` uses `doctor --all-runs -> doctor --run` as the mobile degraded-continuation path and should stay focused on lightweight work.
 - `k` is the human-facing shortcut surface: `k`, `k all`, `k latest`, `k run-id`, `k new <purpose> [focus]`, `k adopt <session:window> [purpose]`, `k <run_id>`, `k show <run_id>`, `k open [run_id]`, `k phase <phase>`, `k done <summary...>`.
 - `codex-kernel-guard adopt-run <session:window> [purpose]` is the path for turning a live unmanaged tmux window into a Kernel run and moving it into a dedicated heavy-profile session.
-- On `Mac mini`, bare `codex` inside the Kernel repo should ask `Kernelを起動しますか? [Y/n]`; `yes` routes to `kernel`, `no` stays on raw Codex.
+- On `Mac mini`, bare `codex` inside the Kernel repo should default to `kernel` and only offer raw Codex as an explicit opt-out; routine startup should not require a repeated `Kernelを起動しますか? [Y/n]` prompt once repo context is clear.
 - On `Mac mini`, `kernel` with no arguments should reopen the latest active run by default; if no active run exists, it should fall through to guarded launch.
+- Kernel startup adapters should keep the initial Codex-visible bootstrap text minimal.
+- Prefer a short pointer to `.codex/prompts/kernel.md` plus run metadata over inlining the full Kernel prompt into the first visible Codex message.
 - `purpose` is fixed per run; if it drifts materially, create a new run instead of mutating the existing handoff identity.
 - `codex-kernel-guard phase-check <phase>` is the required-model evidence gate before phase completion.
 - `codex-kernel-guard phase-complete <phase>` records `phase_completed` only after the evidence gate passes.
 - `codex-kernel-guard run-complete --summary <text>` records `run_completed` only after verify evidence passes and the backup path succeeds.
+- Kernel should auto-record only at milestone boundaries by default: `plan`, `implement`, `verify`, and `run-complete`. Background completion scanning may stay available as an explicit opt-in, but routine launch should not create fine-grained recording noise.
 - If no valid three-voice shape can be established, Kernel must fail closed instead of reporting healthy multi-model orchestration.
 - Kernel work must stay simple-first: do not broaden scope or attach unrequested functionality while satisfying the diversity contract.
 - Kernel work must also stay one-pass: perform investigation, revised planning, implementation, and verification as a single continuous flow unless a hard blocker forces a pause.
@@ -157,6 +173,7 @@ For `/kernel` prompt verification:
 - static contract check: `bash tests/test-codex-kernel-prompt.sh`
 - runtime smoke on a fresh session: `RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh`
 - runtime smoke passes only when the acknowledgement includes `Kernel orchestration is active ...`, `Bootstrap target: 6+ lanes (minimum 6).`, and a lane manifest with at least 6 active lanes
+- CI static enforcement: the orchestration gate workflow runs `bash scripts/check-codex-kernel-prompt.sh`
 
 For `/vote` prompt verification:
 

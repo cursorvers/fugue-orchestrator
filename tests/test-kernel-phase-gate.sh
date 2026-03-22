@@ -10,11 +10,24 @@ COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+MILESTONE_RUNNER="${TMP_DIR}/milestone-runner.sh"
+MILESTONE_LOG="${TMP_DIR}/milestone.log"
+cat > "${MILESTONE_RUNNER}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${KERNEL_MILESTONE_RECORD_LOG}"
+EOF
+chmod +x "${MILESTONE_RUNNER}"
+
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${MILESTONE_RUNNER}"
+export KERNEL_MILESTONE_RECORD_LOG="${MILESTONE_LOG}"
+export KERNEL_AUTO_RECORD_NO_GHA=true
+export KERNEL_AUTO_RECORD_DRY_RUN=true
 
 run_requirements_normal() {
   export KERNEL_RUN_ID="phase-req"
@@ -100,6 +113,8 @@ run_implementation_uiux_gate() {
   printf '## Round 1\n### Implementer Proposal\nx\n### Critic Challenge\ny\n### Integrator Decision\nz\n### Applied Change\na\n### Verification\nb\n' >"${IMPLEMENTATION_REPORT_PATH}"
   out="$(bash "${PHASE_GATE_SCRIPT}" complete implement --uiux)"
   grep -Fq 'passed: true' <<<"${out}"
+  grep -Fq -- '--source kernel-phase-complete' "${MILESTONE_LOG}"
+  grep -Fq -- '--summary phase=implement completed' "${MILESTONE_LOG}"
   compact_out="$(bash "${COMPACT_SCRIPT}" status phase-impl-uiux)"
   grep -Fq 'last event: phase_completed' <<<"${compact_out}"
   grep -Fq 'phase: implement' <<<"${compact_out}"

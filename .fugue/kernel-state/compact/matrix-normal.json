@@ -1,0 +1,29 @@
+{
+  "run_id": "matrix-normal",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "current_phase": "unknown",
+  "mode": "running",
+  "runtime": "kernel",
+  "tmux_session": "kernel-workspace__unspecified__ixnormal",
+  "session_fingerprint": "199e9d6735f61dffac5f4bbe40ec72021e14eff60be3df4b1a0bfbaf0c5a18e4",
+  "codex_thread_title": "kernel-workspace:unspecified:ixnormal",
+  "owner": "local-operator",
+  "active_models": [
+    "gpt-5.3-codex",
+    "glm",
+    "gemini-cli"
+  ],
+  "blocking_reason": "bootstrap-receipt",
+  "scheduler_state": "claimed",
+  "scheduler_reason": "guard-launch",
+  "workspace_receipt_path": "",
+  "next_action": [],
+  "decisions": [],
+  "phase_artifacts": {},
+  "summary": [
+    "scheduler_state=claimed; reason=guard-launch"
+  ],
+  "last_event": "scheduler_state_changed",
+  "updated_at": "2026-03-22T11:11:14Z"
+}

@@ -11,6 +11,8 @@ mkdir -p "${FAKE_BIN}"
 export PATH="${FAKE_BIN}:$PATH"
 export KERNEL_OPTIONAL_LANE_LEDGER_FILE="${TMP_DIR}/ledger.json"
 export KERNEL_RUN_ID="pick-test"
+export KERNEL_STATE_ROOT="${TMP_DIR}/state"
+export KERNEL_PROVIDER_READY_TIMEOUT_SEC=1
 
 cat >"${FAKE_BIN}/gemini" <<'EOF'
 #!/usr/bin/env bash
@@ -21,6 +23,23 @@ cat >"${FAKE_BIN}/copilot" <<'EOF'
 exit 0
 EOF
 chmod +x "${FAKE_BIN}/gemini" "${FAKE_BIN}/copilot"
+
+CURSOR_STATUS_COUNT="${TMP_DIR}/cursor-status-count"
+cat >"${FAKE_BIN}/cursor" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "agent" && "\${2:-}" == "status" ]]; then
+  count=0
+  if [[ -f "${CURSOR_STATUS_COUNT}" ]]; then
+    count="\$(cat "${CURSOR_STATUS_COUNT}")"
+  fi
+  count=\$((count + 1))
+  printf '%s\n' "\${count}" >"${CURSOR_STATUS_COUNT}"
+  echo "Error: Your macOS login keychain is locked."
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "${FAKE_BIN}/cursor"
 
 export KERNEL_CURSOR_READY=false
 
@@ -42,5 +61,12 @@ status="$(bash "${SCRIPT}" status)"
 grep -Fq $'gemini-cli\tready\t' <<<"${status}"
 grep -Fq $'cursor-cli\tnot-ready' <<<"${status}"
 grep -Fq $'copilot-cli\tready\t' <<<"${status}"
+
+unset KERNEL_CURSOR_READY
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+[[ "$(cat "${CURSOR_STATUS_COUNT}")" == "1" ]]
 
 echo "kernel specialist picker check passed"

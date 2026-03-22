@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 MUTATE_LEDGER="${KERNEL_RUNTIME_HEALTH_MUTATE:-true}"
 
 default_run_id() {
@@ -55,7 +56,7 @@ cmd_status() {
     has_subagent_labels=false
   fi
   glm_mode="$(KERNEL_RUN_ID="${run_id}" bash "${GLM_STATE_SCRIPT}" status | sed -n 's/  - mode: //p' | head -n 1)"
-  ledger_file="${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.json}"
+  ledger_file="${KERNEL_RUNTIME_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" runtime-ledger-file)}"
   if [[ -f "${ledger_file}" ]]; then
     codex_success="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].provider_usage.codex.success_count // 0' "${ledger_file}")"
     glm_success="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].provider_usage.glm.success_count // 0' "${ledger_file}")"

@@ -1,0 +1,29 @@
+{
+  "run_id": "receipt-test",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "current_phase": "unknown",
+  "mode": "running",
+  "runtime": "kernel",
+  "tmux_session": "kernel-workspace__unspecified__eipttest",
+  "session_fingerprint": "97c121f88da3fdf1a3782768dea2e867600c5e7792e8770b01dd13f1887da236",
+  "codex_thread_title": "kernel-workspace:unspecified:eipttest",
+  "owner": "local-operator",
+  "active_models": [
+    "codex",
+    "glm",
+    "gemini-cli"
+  ],
+  "blocking_reason": "bootstrap-receipt",
+  "scheduler_state": "",
+  "scheduler_reason": "",
+  "workspace_receipt_path": "",
+  "next_action": [],
+  "decisions": [],
+  "phase_artifacts": {},
+  "summary": [
+    "state=running; reason=bootstrap-receipt"
+  ],
+  "last_event": "status_changed",
+  "updated_at": "2026-03-22T05:25:06Z"
+}

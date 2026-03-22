@@ -1,0 +1,20 @@
+{
+  "run_id": "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:28511:run:20260322T205524:29160",
+  "recorded_at": "2026-03-22T11:55:49Z",
+  "lane_count": 0,
+  "providers": [
+    "bootstrapping"
+  ],
+  "active_models": [
+    "bootstrapping"
+  ],
+  "active_model_count": 1,
+  "manifest_lane_count": 0,
+  "has_agent_labels": true,
+  "has_subagent_labels": true,
+  "mode": "degraded-allowed",
+  "note": "bootstrap-receipt",
+  "has_codex": false,
+  "has_glm": false,
+  "specialist_count": 1
+}

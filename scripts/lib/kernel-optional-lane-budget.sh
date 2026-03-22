@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LEDGER_FILE="${KERNEL_OPTIONAL_LANE_LEDGER_FILE:-$HOME/.config/kernel/optional-lane-usage.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+LEDGER_FILE="${KERNEL_OPTIONAL_LANE_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" optional-lane-ledger-file)}"
 
 GEMINI_DAILY_SOFT_CAP="${KERNEL_GEMINI_DAILY_SOFT_CAP:-200}"
 GEMINI_PER_RUN_SOFT_CAP="${KERNEL_GEMINI_PER_RUN_SOFT_CAP:-20}"
@@ -13,7 +16,6 @@ LOCK_DIR="${KERNEL_OPTIONAL_LANE_LOCK_DIR:-${LEDGER_FILE}.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 LOCK_HELD=0
 ALLOW_NONATOMIC_BUDGET="${KERNEL_ALLOW_NONATOMIC_BUDGET:-false}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/kernel-lock.sh"
 
 repo_slug() {
@@ -60,6 +62,7 @@ Usage:
   kernel-optional-lane-budget.sh can-use <provider> [units]
   kernel-optional-lane-budget.sh record <provider> [units] [note]
   kernel-optional-lane-budget.sh consume <provider> [units] [note]
+  kernel-optional-lane-budget.sh refund <provider> [units] [note]
 EOF
 }
 
@@ -364,6 +367,64 @@ cmd_consume() {
   esac
 }
 
+cmd_refund() {
+  ensure_ledger
+
+  local provider units note period_type cap run_cap key used run_used
+  provider="$(canonical_provider "${1:-}")"
+  units="${2:-1}"
+  note="${3:-refund}"
+
+  acquire_lock "budget ledger"
+
+  period_type="$(provider_cap_period "${provider}")"
+  cap="$(provider_soft_cap "${provider}")"
+  run_cap="$(provider_run_cap "${provider}")"
+  if [[ "${period_type}" == "day" ]]; then
+    key="$(today_key)"
+  else
+    key="$(month_key)"
+  fi
+
+  used="$(provider_period_usage "${provider}" "${period_type}" "${key}")"
+  run_used="$(provider_run_usage "${provider}" "${RUN_ID}")"
+  if (( used < units || run_used < units )); then
+    release_lock
+    printf 'deny refund %s: insufficient recorded usage (%s, run %s, refund %s) [run_id=%s]\n' \
+      "${provider}" "${used}" "${run_used}" "${units}" "${RUN_ID}"
+    return 1
+  fi
+
+  local tmp_file="${LEDGER_FILE}.tmp.$$.$RANDOM"
+  jq \
+    --arg provider "${provider}" \
+    --arg run_id "${RUN_ID}" \
+    --arg recorded_at "$(utc_timestamp)" \
+    --arg day "$(today_key)" \
+    --arg month "$(month_key)" \
+    --arg note "${note}" \
+    --argjson units "${units}" \
+    '
+      .events += [{
+        provider: $provider,
+        units: (-$units),
+        run_id: $run_id,
+        recorded_at: $recorded_at,
+        day: $day,
+        month: $month,
+        note: $note
+      }]
+    ' "${LEDGER_FILE}" >"${tmp_file}"
+  mv "${tmp_file}" "${LEDGER_FILE}"
+  release_lock
+
+  printf 'refunded %s: %s %s/%s after refund, run %s/%s [run_id=%s]\n' \
+    "${provider}" \
+    "${period_type}" "$((used - units))" "${cap}" \
+    "$((run_used - units))" "${run_cap}" \
+    "${RUN_ID}"
+}
+
 cmd="${1:-status}"
 case "${cmd}" in
   status)
@@ -381,6 +442,10 @@ case "${cmd}" in
   consume)
     shift || true
     cmd_consume "$@"
+    ;;
+  refund)
+    shift || true
+    cmd_refund "$@"
     ;;
   help|-h|--help)
     usage
