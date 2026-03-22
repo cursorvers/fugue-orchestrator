@@ -1,89 +1,243 @@
-name: Send undelivered note article via LINE
+name: LINE Send Note Article
 
 on:
   schedule:
-    # March 1, 2026 06:00 UTC (15:00 JST) — after LINE monthly quota reset
-    - cron: '0 6 1 3 *'
+    - cron: '0 0 * * 1'
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
+concurrency:
+  group: line-send-note-article
+  cancel-in-progress: false
+
 jobs:
   send-article:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Send note article via LINE push
-        env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TO: ${{ secrets.LINE_TO }}
-        run: |
-          set -euo pipefail
-
-          ARTICLE_TITLE="【医療AIにおけるHuman-in-the-Loopの再定義】音声を介するAI-電子カルテの直結を徹底検証"
-          ARTICLE_URL="https://note.com/nice_wren7963/n/n8fcfa0ffb50a"
-
-          MESSAGE=$(cat <<'MSG'
-          📝 note新着記事のお知らせ
-
-          【医療AIにおけるHuman-in-the-Loopの再定義】
-          音声を介するAI-電子カルテの直結を徹底検証
-
-          https://note.com/nice_wren7963/n/n8fcfa0ffb50a
-          MSG
-          )
-          # Remove leading whitespace from heredoc
-          MESSAGE=$(echo "$MESSAGE" | sed 's/^          //')
-
-          echo "Sending article: ${ARTICLE_TITLE}"
-
-          HTTP_CODE=$(curl -s -o /tmp/line-response.json -w "%{http_code}" \
-            -X POST "https://api.line.me/v2/bot/message/push" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
-            -d "{
-              \"to\": \"${LINE_TO}\",
-              \"messages\": [{
-                \"type\": \"text\",
-                \"text\": $(echo "$MESSAGE" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')
-              }]
-            }")
-
-          echo "HTTP status: ${HTTP_CODE}"
-          cat /tmp/line-response.json || true
-
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "Article sent successfully"
-          else
-            echo "Failed to send article (HTTP ${HTTP_CODE})"
-            exit 1
-          fi
-
-      - name: Update articles table (mark as notified)
-        if: success()
+      - name: Resolve latest unpublished article
+        id: article
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           set -euo pipefail
 
-          # Skip if Supabase secrets not available in this repo
           if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
-            echo "Supabase secrets not available — update articles table manually"
-            echo "SQL: UPDATE articles SET is_notified = true WHERE id = 'e6fff88f-40de-4ba7-b4ce-45986c257fa3';"
+            echo "::notice::SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set. Skipping gracefully."
+            {
+              echo "skip=true"
+              echo "skip_reason=missing_supabase_credentials"
+            } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          curl -s -X PATCH \
-            "${SUPABASE_URL}/rest/v1/articles?id=eq.e6fff88f-40de-4ba7-b4ce-45986c257fa3" \
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-response.headers"
+
+          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published=eq.true&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
+
+          HTTP_STATUS="$(curl -sS \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Accept: application/json" \
+            "${REQUEST_URL}")"
+
+          echo "Supabase select HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
+
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "::error::Failed to query Supabase articles table."
+            exit 1
+          fi
+
+          ARTICLE_COUNT="$(jq 'length' "${RESPONSE_BODY}")"
+          if [ "${ARTICLE_COUNT}" = "0" ]; then
+            echo "No unnotified published article found. Exiting successfully."
+            {
+              echo "skip=true"
+              echo "skip_reason=no_unnotified_article"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          ARTICLE_ID="$(jq -r '.[0].id' "${RESPONSE_BODY}")"
+          ARTICLE_TITLE="$(jq -r '.[0].title // "note記事"' "${RESPONSE_BODY}")"
+          ARTICLE_URL="$(jq -r '.[0].url // empty' "${RESPONSE_BODY}")"
+          ARTICLE_PUBLISHED_AT="$(jq -r '.[0].published_at // empty' "${RESPONSE_BODY}")"
+
+          if [ -z "${ARTICLE_ID}" ] || [ "${ARTICLE_ID}" = "null" ]; then
+            echo "::error::Article id is missing."
+            exit 1
+          fi
+
+          if [ -z "${ARTICLE_URL}" ] || [ "${ARTICLE_URL}" = "null" ]; then
+            echo "::error::Article url is missing."
+            exit 1
+          fi
+
+          MESSAGE_TEXT="$(
+            ARTICLE_TITLE="${ARTICLE_TITLE}" \
+            ARTICLE_URL="${ARTICLE_URL}" \
+            ARTICLE_PUBLISHED_AT="${ARTICLE_PUBLISHED_AT}" \
+            python3 - <<'PY'
+import os
+
+title = os.environ["ARTICLE_TITLE"].strip()
+url = os.environ["ARTICLE_URL"].strip()
+published_at = os.environ.get("ARTICLE_PUBLISHED_AT", "").strip()
+
+lines = [
+    "note新着記事のお知らせ",
+    "",
+    title,
+]
+
+if published_at:
+    lines.append(f"公開日時: {published_at}")
+
+lines.extend([
+    "",
+    url,
+])
+
+print("\n".join(lines))
+PY
+          )"
+
+          {
+            echo "skip=false"
+            echo "article_id=${ARTICLE_ID}"
+            echo "article_title<<EOF"
+            printf '%s\n' "${ARTICLE_TITLE}"
+            echo "EOF"
+            echo "article_url=${ARTICLE_URL}"
+            echo "message_text<<EOF"
+            printf '%s\n' "${MESSAGE_TEXT}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Send LINE push message
+        if: ${{ steps.article.outputs.skip != 'true' }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+          MESSAGE_TEXT: ${{ steps.article.outputs.message_text }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::error::LINE_CHANNEL_ACCESS_TOKEN is required."
+            exit 1
+          fi
+
+          if [ -z "${LINE_TO:-}" ]; then
+            echo "::error::LINE_TO is required for push delivery."
+            exit 1
+          fi
+
+          REQUEST_BODY="${RUNNER_TEMP}/line-push-request.json"
+          RESPONSE_BODY="${RUNNER_TEMP}/line-push-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/line-push-response.headers"
+
+          jq -n \
+            --arg to "${LINE_TO}" \
+            --arg text "${MESSAGE_TEXT}" \
+            '{to: $to, messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
+
+          HTTP_STATUS="$(curl -sS \
+            -X POST "https://api.line.me/v2/bot/message/push" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+            --data @"${REQUEST_BODY}")"
+
+          echo "LINE push HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
+
+          LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+          if [ -n "${LINE_REQUEST_ID:-}" ]; then
+            echo "LINE request id: ${LINE_REQUEST_ID}"
+          fi
+
+          case "${HTTP_STATUS}" in
+            2*)
+              echo "LINE push sent successfully."
+              ;;
+            *)
+              echo "::error::LINE push failed."
+              exit 1
+              ;;
+          esac
+
+      - name: Mark article as notified in Supabase
+        if: ${{ success() && steps.article.outputs.skip != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-update-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-update-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X PATCH "${SUPABASE_URL}/rest/v1/articles?id=eq.${ARTICLE_ID}" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
             -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d '{"is_notified": true}'
+            --data '{"is_notified":true}')"
 
-          echo "Articles table updated (is_notified = true)"
+          echo "Supabase update HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+          case "${HTTP_STATUS}" in
+            2*)
+              echo "Article marked as notified."
+              ;;
+            *)
+              echo "::error::Failed to mark article as notified."
+              exit 1
+              ;;
+          esac
+
+      - name: Observe LINE quota and consumption
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::notice::LINE_CHANNEL_ACCESS_TOKEN is not set. Skipping quota observation."
+            exit 0
+          fi
+
+          for ENDPOINT in quota quota/consumption; do
+            RESPONSE_BODY="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.json"
+            RESPONSE_HEADERS="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.headers"
+
+            HTTP_STATUS="$(curl -sS \
+              -X GET "https://api.line.me/v2/bot/message/${ENDPOINT}" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}")"
+
+            echo "LINE ${ENDPOINT} HTTP status: ${HTTP_STATUS}"
+            cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+          done

@@ -1,0 +1,170 @@
+name: LINE Value Share
+
+on:
+  schedule:
+    - cron: '0 2 * * 4'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: line-value-share
+  cancel-in-progress: false
+
+jobs:
+  broadcast-value:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve rotation message
+        id: rotation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          CONFIG_FILE="config/line-value-messages.json"
+
+          if [ ! -f "${CONFIG_FILE}" ]; then
+            echo "::error::${CONFIG_FILE} not found."
+            exit 1
+          fi
+
+          TOTAL_MESSAGES="$(jq 'length' "${CONFIG_FILE}")"
+          if ! [[ "${TOTAL_MESSAGES}" =~ ^[0-9]+$ ]] || [ "${TOTAL_MESSAGES}" -le 0 ]; then
+            echo "::error::${CONFIG_FILE} must contain a non-empty JSON array."
+            exit 1
+          fi
+
+          RAW_INDEX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" --jq '.value' 2>/dev/null || printf '0')"
+          if ! [[ "${RAW_INDEX}" =~ ^[0-9]+$ ]]; then
+            echo "::warning::LINE_VALUE_SHARE_INDEX is not an integer. Resetting to 0."
+            RAW_INDEX="0"
+          fi
+
+          CURRENT_INDEX=$(( RAW_INDEX % TOTAL_MESSAGES ))
+          NEXT_INDEX=$(( CURRENT_INDEX + 1 ))
+          if [ "${NEXT_INDEX}" -ge "${TOTAL_MESSAGES}" ]; then
+            NEXT_INDEX=0
+          fi
+
+          MESSAGE_JSON="$(jq -c --argjson idx "${CURRENT_INDEX}" '.[$idx]' "${CONFIG_FILE}")"
+          MESSAGE_LABEL="$(printf '%s' "${MESSAGE_JSON}" | jq -r '.label')"
+          MESSAGE_TEXT="$(printf '%s' "${MESSAGE_JSON}" | jq -r '.text')"
+
+          if [ -z "${MESSAGE_TEXT}" ] || [ "${MESSAGE_TEXT}" = "null" ]; then
+            echo "::error::Message text is empty at index ${CURRENT_INDEX}."
+            exit 1
+          fi
+
+          {
+            echo "current_index=${CURRENT_INDEX}"
+            echo "next_index=${NEXT_INDEX}"
+            echo "total_messages=${TOTAL_MESSAGES}"
+            echo "message_label<<EOF"
+            printf '%s\n' "${MESSAGE_LABEL}"
+            echo "EOF"
+            echo "message_text<<EOF"
+            printf '%s\n' "${MESSAGE_TEXT}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Selected message index: ${CURRENT_INDEX}"
+          echo "Selected message label: ${MESSAGE_LABEL}"
+
+      - name: Broadcast LINE value message
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          MESSAGE_TEXT: ${{ steps.rotation.outputs.message_text }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::error::LINE_CHANNEL_ACCESS_TOKEN is required."
+            exit 1
+          fi
+
+          REQUEST_BODY="${RUNNER_TEMP}/line-broadcast-request.json"
+          RESPONSE_BODY="${RUNNER_TEMP}/line-broadcast-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/line-broadcast-response.headers"
+
+          jq -n \
+            --arg text "${MESSAGE_TEXT}" \
+            '{messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
+
+          HTTP_STATUS="$(curl -sS \
+            -X POST "https://api.line.me/v2/bot/message/broadcast" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+            --data @"${REQUEST_BODY}")"
+
+          echo "LINE broadcast HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
+
+          LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+          if [ -n "${LINE_REQUEST_ID:-}" ]; then
+            echo "LINE request id: ${LINE_REQUEST_ID}"
+          fi
+
+          case "${HTTP_STATUS}" in
+            2*)
+              echo "LINE broadcast sent successfully."
+              ;;
+            *)
+              echo "::error::LINE broadcast failed."
+              exit 1
+              ;;
+          esac
+
+      - name: Persist next rotation index
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
+        run: |
+          set -euo pipefail
+
+          gh api \
+            -X PATCH \
+            "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
+            -f name="LINE_VALUE_SHARE_INDEX" \
+            -f value="${NEXT_INDEX}" >/dev/null
+
+          echo "Persisted LINE_VALUE_SHARE_INDEX=${NEXT_INDEX}"
+
+      - name: Observe LINE quota and consumption
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::notice::LINE_CHANNEL_ACCESS_TOKEN is not set. Skipping quota observation."
+            exit 0
+          fi
+
+          for ENDPOINT in quota quota/consumption; do
+            RESPONSE_BODY="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.json"
+            RESPONSE_HEADERS="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.headers"
+
+            HTTP_STATUS="$(curl -sS \
+              -X GET "https://api.line.me/v2/bot/message/${ENDPOINT}" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}")"
+
+            echo "LINE ${ENDPOINT} HTTP status: ${HTTP_STATUS}"
+            cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+          done
