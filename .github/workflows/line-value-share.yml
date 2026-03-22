@@ -25,7 +25,7 @@ jobs:
       - name: Resolve rotation message
         id: rotation
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
         run: |
           set -euo pipefail
 
@@ -128,7 +128,7 @@ jobs:
       - name: Persist next rotation index
         if: ${{ success() }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
           NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
         run: |
           set -euo pipefail
