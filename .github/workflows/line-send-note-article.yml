@@ -38,7 +38,7 @@ jobs:
           RESPONSE_BODY="${RUNNER_TEMP}/articles-response.json"
           RESPONSE_HEADERS="${RUNNER_TEMP}/articles-response.headers"
 
-          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published=eq.true&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
+          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published_at=not.is.null&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
 
           HTTP_STATUS="$(curl -sS \
             -D "${RESPONSE_HEADERS}" \
