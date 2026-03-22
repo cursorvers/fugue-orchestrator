@@ -87,28 +87,28 @@ jobs:
             ARTICLE_URL="${ARTICLE_URL}" \
             ARTICLE_PUBLISHED_AT="${ARTICLE_PUBLISHED_AT}" \
             python3 - <<'PY'
-import os
+          import os
 
-title = os.environ["ARTICLE_TITLE"].strip()
-url = os.environ["ARTICLE_URL"].strip()
-published_at = os.environ.get("ARTICLE_PUBLISHED_AT", "").strip()
+          title = os.environ["ARTICLE_TITLE"].strip()
+          url = os.environ["ARTICLE_URL"].strip()
+          published_at = os.environ.get("ARTICLE_PUBLISHED_AT", "").strip()
 
-lines = [
-    "note新着記事のお知らせ",
-    "",
-    title,
-]
+          lines = [
+              "note新着記事のお知らせ",
+              "",
+              title,
+          ]
 
-if published_at:
-    lines.append(f"公開日時: {published_at}")
+          if published_at:
+              lines.append(f"公開日時: {published_at}")
 
-lines.extend([
-    "",
-    url,
-])
+          lines.extend([
+              "",
+              url,
+          ])
 
-print("\n".join(lines))
-PY
+          print("\n".join(lines))
+          PY
           )"
 
           {
