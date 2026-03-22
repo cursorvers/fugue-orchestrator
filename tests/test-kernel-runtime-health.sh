@@ -5,13 +5,29 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 HEALTH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-health.sh"
 GLM_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
+GUARD_BIN="/Users/masayuki_otawara/bin/codex-kernel-guard"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
+
+mkdir -p "${TMP_DIR}/bin"
+cat >"${TMP_DIR}/bin/codex" <<'EOF'
+#!/usr/bin/env bash
+echo "codex-stub $*"
+EOF
+cat >"${TMP_DIR}/bin/gemini" <<'EOF'
+#!/usr/bin/env bash
+echo "gemini-stub $*"
+EOF
+chmod +x "${TMP_DIR}/bin/codex" "${TMP_DIR}/bin/gemini"
 
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export CODEX_BIN="${TMP_DIR}/bin/codex"
+export GEMINI_BIN="${TMP_DIR}/bin/gemini"
+export KERNEL_BOOTSTRAP_PROVIDERS_CSV="codex,glm,gemini-cli"
+export ZAI_API_KEY="glm-present"
 export KERNEL_RUN_ID="health-test"
 export KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="codex,glm,gemini-cli"
 export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
@@ -73,5 +89,18 @@ if KERNEL_RUNTIME_HEALTH_MUTATE=false bash "${HEALTH_SCRIPT}" status >/tmp/kerne
 fi
 grep -Fq 'codex-provider-evidence-missing' /tmp/kernel-health-check.$$ || grep -Fq 'glm-provider-evidence-missing' /tmp/kernel-health-check.$$
 rm -f /tmp/kernel-health-check.$$
+
+export ORCH_DRY_RUN=1
+export KERNEL_RUN_ID="health-guard-launch"
+bash "${GLM_SCRIPT}" reset launch-ready >/dev/null
+bash "${GUARD_BIN}" launch smoke >/dev/null
+bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider glm success guard-test >/dev/null
+bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider gemini-cli success guard-test >/dev/null
+out="$(bash "${HEALTH_SCRIPT}" status)"
+grep -Fq 'state: healthy' <<<"${out}"
+if grep -Fq 'bootstrap-receipt-missing' <<<"${out}"; then
+  echo "guard launch should create bootstrap receipt before health check" >&2
+  exit 1
+fi
 
 echo "kernel runtime health check passed"

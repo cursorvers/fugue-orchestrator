@@ -51,6 +51,13 @@ receipt_json() {
   jq -c '.' "${path}"
 }
 
+compact_json() {
+  local path
+  path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${COMPACT_SCRIPT}" path "${RUN_ID}" 2>/dev/null || true)"
+  [[ -n "${path}" && -f "${path}" ]] || return 1
+  jq -c '.' "${path}"
+}
+
 ledger_file() {
   printf '%s\n' "${KERNEL_RUNTIME_LEDGER_FILE:-$HOME/.config/kernel/runtime-ledger.json}"
 }
@@ -105,6 +112,59 @@ receipt_active_models_include() {
   local json
   json="$(receipt_json)" || return 1
   jq -e --arg model "${model}" '.active_models | index($model) != null' <<<"${json}" >/dev/null
+}
+
+phase_artifact_env_path() {
+  case "${1:-}" in
+    plan_report_path)
+      printf '%s\n' "${KERNEL_PLAN_REPORT_PATH:-${PLAN_REPORT_PATH:-}}"
+      ;;
+    critic_report_path)
+      printf '%s\n' "${KERNEL_CRITIC_REPORT_PATH:-${CRITIC_REPORT_PATH:-}}"
+      ;;
+    implementation_report_path)
+      printf '%s\n' "${KERNEL_IMPLEMENTATION_REPORT_PATH:-${IMPLEMENTATION_REPORT_PATH:-}}"
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
+}
+
+compact_phase_artifact_path() {
+  local key="${1:-}"
+  local json
+  json="$(compact_json)" || return 1
+  jq -r --arg key "${key}" '.phase_artifacts[$key] // ""' <<<"${json}"
+}
+
+required_completion_artifact_key() {
+  case "${PHASE}" in
+    plan)
+      printf 'plan_report_path\n'
+      ;;
+    critique)
+      printf 'critic_report_path\n'
+      ;;
+    implement)
+      printf 'implementation_report_path\n'
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
+}
+
+check_completion_artifact() {
+  local key path
+  key="$(required_completion_artifact_key)"
+  [[ -n "${key}" ]] || return 0
+  path="$(phase_artifact_env_path "${key}")"
+  if [[ -z "${path}" ]]; then
+    path="$(compact_phase_artifact_path "${key}" 2>/dev/null || true)"
+  fi
+  [[ -n "${path}" ]] || fail_gate "phase-artifact-missing:${key}"
+  [[ -f "${path}" ]] || fail_gate "phase-artifact-path-missing:${key}"
 }
 
 glm_mode() {
@@ -179,6 +239,7 @@ check_phase() {
 
 complete_phase() {
   check_phase >/dev/null
+  check_completion_artifact >/dev/null
   KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="${PHASE}" bash "${COMPACT_SCRIPT}" update phase_completed "phase=${PHASE} completed" >/dev/null
   pass_gate
 }

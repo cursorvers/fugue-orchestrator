@@ -46,6 +46,7 @@ map_to_acct() {
     FREEE_COMPANY_ID)   echo "freee-company-id" ;;
     SLACK_BOT_TOKEN)    echo "slack-bot-token" ;;
     SLACK_TEAM_ID)      echo "slack-team-id" ;;
+    VERCEL_AI_GATEWAY_KEY) echo "vercel-ai-gateway-key" ;;
     *)                  echo "" ;;
   esac
 }
@@ -79,6 +80,15 @@ echo "$DECRYPTED" | while IFS= read -r line; do
     echo "  imported: $KEY (service: Supabase CLI)"
     continue
   fi
+
+  # Special: X keys (x-auto service, account = env var name)
+  case "$KEY" in
+    X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET)
+      printf '%s' "$VALUE" | security add-generic-password -a "$KEY" -s "x-auto" -w - -U 2>/dev/null || true
+      echo "  imported: $KEY (service: x-auto)"
+      continue
+      ;;
+  esac
 
   # Standard fugue-secrets entries
   ACCT=$(map_to_acct "$KEY")

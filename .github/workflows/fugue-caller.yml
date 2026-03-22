@@ -11,6 +11,11 @@ on:
         description: "Issue number to process"
         required: true
         type: string
+      kernel_run_id:
+        description: "Optional Kernel run id to forward into Tutti handoff"
+        required: false
+        type: string
+        default: ""
       trigger_event_name:
         description: "Optional upstream event name override (issues|issue_comment|workflow_dispatch)"
         required: false
@@ -60,6 +65,7 @@ jobs:
     uses: ./.github/workflows/fugue-task-router.yml
     with:
       issue_number: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+      kernel_run_id: ${{ github.event.inputs.kernel_run_id || '' }}
       trigger_event_name: ${{ github.event.inputs.trigger_event_name || github.event_name }}
       trigger_label_name: ${{ github.event.inputs.trigger_label_name || github.event.label.name || '' }}
       comment_body: ${{ github.event.comment.body || '' }}

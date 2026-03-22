@@ -213,7 +213,7 @@ cmd_status() {
 
   strategy="$(resume_strategy_for "${run_id}")"
 
-  local current_phase tmux_session codex_thread_title mode runtime session_fingerprint next_action active_models updated_at
+  local current_phase tmux_session codex_thread_title mode runtime session_fingerprint next_action active_models updated_at phase_artifacts phase_artifact_focus
   {
     IFS= read -r current_phase
     IFS= read -r tmux_session
@@ -224,6 +224,8 @@ cmd_status() {
     IFS= read -r next_action
     IFS= read -r active_models
     IFS= read -r updated_at
+    IFS= read -r phase_artifacts
+    IFS= read -r phase_artifact_focus
   } < <(jq -r '
       (.current_phase // "unknown"),
       (.tmux_session // ""),
@@ -233,7 +235,17 @@ cmd_status() {
       (.session_fingerprint // ""),
       ((.next_action // [])[0] // ""),
       ((.active_models // []) | join(",")),
-      (.updated_at // "")
+      (.updated_at // ""),
+      (if ((.phase_artifacts // {}) | length) == 0 then "none" else ((.phase_artifacts // {}) | to_entries | map("\(.key)=\(.value)") | join(" | ")) end),
+      (
+        (.phase_artifacts // {}) as $artifacts
+        | (if .current_phase == "plan" then "plan_report_path"
+           elif .current_phase == "critique" then "critic_report_path"
+           elif (.current_phase == "implement" or .current_phase == "implementation") then "implementation_report_path"
+           else "none"
+           end) as $focus_key
+        | if $focus_key == "none" then "none" else ($focus_key + "=" + ($artifacts[$focus_key] // "none")) end
+      )
     ' <<<"${json}"
   )
 
@@ -254,6 +266,8 @@ cmd_status() {
   printf '  - session fingerprint: %s\n' "${session_fingerprint}"
   printf '  - next action: %s\n' "${next_action}"
   printf '  - active models: %s\n' "${active_models}"
+  printf '  - phase artifacts: %s\n' "${phase_artifacts}"
+  printf '  - phase artifact focus: %s\n' "${phase_artifact_focus}"
   printf '  - updated at: %s\n' "${updated_at}"
 }
 

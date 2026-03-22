@@ -25,6 +25,16 @@ grep -Fq 'specialist count: 1' <<<"${out}"
 
 path="$(bash "${SCRIPT}" path)"
 test -f "${path}"
+jq -e '
+  .run_id == "receipt-test" and
+  .mode == "normal" and
+  .has_codex == true and
+  .has_glm == true and
+  .specialist_count == 1 and
+  .manifest_lane_count == 6 and
+  .has_agent_labels == true and
+  .has_subagent_labels == true
+' "${path}" >/dev/null
 
 ledger_out="$(bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" status)"
 grep -Fq 'state: running' <<<"${ledger_out}"

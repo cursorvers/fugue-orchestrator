@@ -34,6 +34,7 @@ handoff_target_input="$(printf '%s' "${HANDOFF_TARGET_INPUT:-}" | tr '[:upper:]'
 if [[ "${handoff_target_input}" != "kernel" && "${handoff_target_input}" != "fugue-bridge" ]]; then
   handoff_target_input=""
 fi
+kernel_run_id_input="$(printf '%s' "${KERNEL_RUN_ID_INPUT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 execution_mode_override="$(printf '%s' "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 case "${execution_mode_override}" in
   auto|primary|backup-safe|backup-heavy) ;;
@@ -509,6 +510,9 @@ if [[ -n "${trust_subject}" ]]; then
 fi
 if [[ -n "${vote_instruction_b64}" ]]; then
   dispatch_args+=(-f vote_instruction_b64="${vote_instruction_b64}")
+fi
+if [[ -n "${kernel_run_id_input}" ]]; then
+  dispatch_args+=(-f kernel_run_id="${kernel_run_id_input}")
 fi
 if [[ "${IS_VOTE_COMMAND}" == "true" || "${allow_processing_rerun_input}" == "true" ]]; then
   dispatch_args+=(-f allow_processing_rerun="true")

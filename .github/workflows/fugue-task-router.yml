@@ -7,6 +7,11 @@ on:
         description: "Issue number to process"
         required: true
         type: string
+      kernel_run_id:
+        description: "Optional Kernel run id to forward into Tutti handoff"
+        required: false
+        type: string
+        default: ""
       trigger_event_name:
         description: "Original upstream event name (issues|issue_comment|workflow_dispatch)"
         required: false
@@ -351,6 +356,7 @@ jobs:
           ALLOW_PROCESSING_RERUN_INPUT: ${{ inputs.allow_processing_rerun || 'false' }}
           SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ inputs.subscription_offline_policy_override || '' }}
           HANDOFF_TARGET_INPUT: ${{ inputs.handoff_target || '' }}
+          KERNEL_RUN_ID_INPUT: ${{ inputs.kernel_run_id || '' }}
           EXECUTION_MODE_OVERRIDE_INPUT: ${{ inputs.execution_mode_override || 'auto' }}
         run: bash scripts/harness/route-task-handoff.sh
 

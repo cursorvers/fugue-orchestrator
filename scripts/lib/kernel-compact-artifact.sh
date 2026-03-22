@@ -244,6 +244,40 @@ print(json.dumps(parts[:1]))
 PY
 }
 
+resolve_phase_artifacts_json() {
+  local existing_json="${1:-}"
+  local existing_phase_artifacts='{}'
+  local research_report_path="${KERNEL_RESEARCH_REPORT_PATH:-${RESEARCH_REPORT_PATH:-}}"
+  local plan_report_path="${KERNEL_PLAN_REPORT_PATH:-${PLAN_REPORT_PATH:-}}"
+  local critic_report_path="${KERNEL_CRITIC_REPORT_PATH:-${CRITIC_REPORT_PATH:-}}"
+  local preflight_report_path="${KERNEL_PREFLIGHT_REPORT_PATH:-${PREFLIGHT_REPORT_PATH:-}}"
+  local implementation_report_path="${KERNEL_IMPLEMENTATION_REPORT_PATH:-${IMPLEMENTATION_REPORT_PATH:-}}"
+  local todo_report_path="${KERNEL_TODO_REPORT_PATH:-${TODO_REPORT_PATH:-}}"
+  local lessons_report_path="${KERNEL_LESSONS_REPORT_PATH:-${LESSONS_REPORT_PATH:-}}"
+  if [[ -n "${existing_json}" ]]; then
+    existing_phase_artifacts="$(jq -c '.phase_artifacts // {}' <<<"${existing_json}")"
+  fi
+  jq -cn \
+    --argjson existing_phase_artifacts "${existing_phase_artifacts}" \
+    --arg research_report_path "${research_report_path}" \
+    --arg plan_report_path "${plan_report_path}" \
+    --arg critic_report_path "${critic_report_path}" \
+    --arg preflight_report_path "${preflight_report_path}" \
+    --arg implementation_report_path "${implementation_report_path}" \
+    --arg todo_report_path "${todo_report_path}" \
+    --arg lessons_report_path "${lessons_report_path}" \
+    '
+      $existing_phase_artifacts
+      + (if $research_report_path == "" then {} else {research_report_path: $research_report_path} end)
+      + (if $plan_report_path == "" then {} else {plan_report_path: $plan_report_path} end)
+      + (if $critic_report_path == "" then {} else {critic_report_path: $critic_report_path} end)
+      + (if $preflight_report_path == "" then {} else {preflight_report_path: $preflight_report_path} end)
+      + (if $implementation_report_path == "" then {} else {implementation_report_path: $implementation_report_path} end)
+      + (if $todo_report_path == "" then {} else {todo_report_path: $todo_report_path} end)
+      + (if $lessons_report_path == "" then {} else {lessons_report_path: $lessons_report_path} end)
+    '
+}
+
 cmd_path() {
   printf '%s\n' "$(artifact_path_for "${1:-${RUN_ID}}")"
 }
@@ -253,7 +287,7 @@ cmd_update() {
   local summary_input="${2:-${KERNEL_SUMMARY:-}}"
   local path tmp_file existing_json existing_project existing_purpose
   local tmux_session phase project purpose owner blocking_reason codex_thread_title
-  local mode runtime active_models_json decisions_json next_actions_json ledger_compact receipt_compact
+  local mode runtime active_models_json decisions_json next_actions_json phase_artifacts_json ledger_compact receipt_compact
   local existing_mode existing_blocking_reason existing_scheduler_state existing_scheduler_reason
   local existing_workspace_receipt_path scheduler_state scheduler_reason workspace_receipt_path
   local session_fingerprint
@@ -392,6 +426,7 @@ cmd_update() {
     summary="$(jq -r '(.summary // []) | join("\n")' <<<"${existing_json}")"
   fi
   normalized_summary="$(normalize_summary "${summary}")"
+  phase_artifacts_json="$(resolve_phase_artifacts_json "${existing_json}")"
 
   acquire_lock "compact artifact"
   tmp_file="${path}.tmp.$$.$RANDOM"
@@ -416,6 +451,7 @@ cmd_update() {
     --argjson active_models "${active_models_json}" \
     --argjson decisions "${decisions_json}" \
     --argjson next_action "${next_actions_json}" \
+    --argjson phase_artifacts "${phase_artifacts_json}" \
     '
       {
         run_id: $run_id,
@@ -435,6 +471,7 @@ cmd_update() {
         workspace_receipt_path: $workspace_receipt_path,
         next_action: $next_action,
         decisions: $decisions,
+        phase_artifacts: $phase_artifacts,
         summary: ($summary | split("\n") | map(select(length > 0)) | .[:3]),
         last_event: $event,
         updated_at: $updated_at
@@ -476,6 +513,7 @@ cmd_status() {
     "  - scheduler state: \(.scheduler_state // "unknown")",
     "  - scheduler reason: \(.scheduler_reason // "")",
     "  - workspace receipt path: \(.workspace_receipt_path // "")",
+    "  - phase artifacts: \(if ((.phase_artifacts // {}) | length) == 0 then "none" else ((.phase_artifacts // {}) | keys | join(" | ")) end)",
     "  - next action: \(.next_action | join(" | "))",
     "  - decisions: \(.decisions | join(" | "))",
     "  - summary: \(.summary | join(" || "))",

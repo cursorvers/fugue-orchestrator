@@ -14,6 +14,10 @@ Build a high-quality, low-touch development system where, after requirements are
 
 Kernel is complete for this refactor when it provides an artifact-first development system that, after requirements freeze, generally runs to completion without routine stops and can be continued from Mac mini, MBP, and cc pocket.
 
+この `requirements freeze v1` において、specialized requirement として参照する
+`docs/kernel/requirements-phase-artifact-contract-v1.md` は `v1 frozen` として扱う。
+その v2 候補は deferred であり、v1 完了判定を妨げない。
+
 ## Stop Conditions
 
 Execution may stop only for:
@@ -28,6 +32,11 @@ Execution may stop only for:
 - `MBP`: full continuation node via `tmux`
 - `cc pocket`: mobile degraded continuation node via CLI
 - `GHA`: backup, audit, milestone marker, and external mirror only
+
+`GHA` は primary state owner ではない。
+ただし、明示的な `kernel_run_id` が渡され、既存 compact artifact が存在する場合に限り、
+bounded な `phase_artifacts` path reference を milestone marker として追記してよい。
+この許可は run 生成、run id 推測、primary state mutation を含まない。
 
 ## Kernel Run Model
 
@@ -63,6 +72,7 @@ Execution may stop only for:
 
 - required model evidence is enforced at each phase-completion gate
 - runtime should not treat Codex-only execution as phase-complete where multi-model evidence is required
+- portable phase artifact visibility/validation requirements are defined separately in `docs/kernel/requirements-phase-artifact-contract-v1.md`
 
 ## Mandatory Gates
 
@@ -90,6 +100,7 @@ Every substantial run must pass:
 - `runtime ledger`: mutable run state
 - `compact artifact`: compressed handoff state
 - `doctor`: read-only display surface
+- phase artifact handoff uses the specialized contract in `docs/kernel/requirements-phase-artifact-contract-v1.md`
 
 ### Compact Limits
 

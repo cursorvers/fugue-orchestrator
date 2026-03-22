@@ -11,6 +11,7 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 export KERNEL_RUN_ID="compact-test"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
+export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
 export KERNEL_PROJECT="fugue-orchestrator"
 export KERNEL_PURPOSE="secret-plane"
@@ -19,6 +20,8 @@ export KERNEL_OWNER="codex"
 export KERNEL_TMUX_SESSION="fugue-orchestrator:secret-plane"
 export KERNEL_DECISIONS="use-keychain|mirror-github|keep-fugue-untouched|ignored"
 export KERNEL_NEXT_ACTIONS="implement-loader|add-tests|run-dry-run|ignored"
+export PLAN_REPORT_PATH="/tmp/kernel-plan.md"
+export CRITIC_REPORT_PATH="/tmp/kernel-critic.md"
 export KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="codex,glm,gemini-cli"
 export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
 export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
@@ -27,6 +30,7 @@ export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
 bash "${LEDGER_SCRIPT}" scheduler-state running "bootstrap-valid" "/tmp/compact-test-workspace.json" >/dev/null
+bash "${COMPACT_SCRIPT}" update manual_snapshot "bootstrap-valid" >/dev/null
 
 out="$(bash "${COMPACT_SCRIPT}" status)"
 grep -Fq 'present: true' <<<"${out}"
@@ -40,8 +44,13 @@ grep -Fq 'codex thread: fugue-orchestrator:secret-plane' <<<"${out}"
 grep -Fq 'scheduler state: running' <<<"${out}"
 grep -Fq 'scheduler reason: bootstrap-valid' <<<"${out}"
 grep -Fq 'workspace receipt path: /tmp/compact-test-workspace.json' <<<"${out}"
+grep -Fq 'phase artifacts: critic_report_path | plan_report_path' <<<"${out}"
 grep -Fq 'next action: implement-loader' <<<"${out}"
 grep -Fq 'decisions: use-keychain | mirror-github | keep-fugue-untouched' <<<"${out}"
+plan_report_path="$(jq -r '.phase_artifacts.plan_report_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
+critic_report_path="$(jq -r '.phase_artifacts.critic_report_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
+[[ "${plan_report_path}" == "/tmp/kernel-plan.md" ]]
+[[ "${critic_report_path}" == "/tmp/kernel-critic.md" ]]
 
 out="$(KERNEL_SUMMARY=$'line1\nline2\nline3\nline4' bash "${COMPACT_SCRIPT}" update manual_snapshot)"
 grep -Fq 'summary: line1 || line2 || line3' <<<"${out}"

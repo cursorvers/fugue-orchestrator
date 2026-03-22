@@ -9,6 +9,11 @@ on:
         description: "Issue number to process (used for automated handoff)"
         required: true
         type: string
+      kernel_run_id:
+        description: "Optional Kernel run id for compact artifact propagation"
+        required: false
+        type: string
+        default: ""
       trust_subject:
         description: "Optional trusted actor login for permission checks"
         required: false
@@ -736,6 +741,7 @@ jobs:
     uses: ./.github/workflows/fugue-codex-implement.yml
     with:
       issue_number: "${{ needs.ctx.outputs.issue_number }}"
+      kernel_run_id: "${{ github.event.inputs.kernel_run_id || '' }}"
       target_repo: "${{ needs.ctx.outputs.target_repo }}"
       refinement_cycles: "${{ needs.ctx.outputs.preflight_cycles }}"
       implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"

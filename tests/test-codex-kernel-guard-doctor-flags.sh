@@ -11,6 +11,7 @@ export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_OPTIONAL_LANE_LEDGER_FILE="${TMP_DIR}/optional-ledger.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_RUN_ID="doctor-flags"
 export GEMINI_BIN=printf
 export CODEX_BIN=printf
@@ -74,5 +75,27 @@ grep -Fq 'workspace_receipt_path: /tmp/run-old-workspace.json' <<<"${out}"
 grep -Fq 'actor=cc-pocket' <<<"${out}"
 grep -Fq 'command=kn select' <<<"${out}"
 grep -Fq 'summary=interactive-selector' <<<"${out}"
+
+FAKE_BIN_DIR="${TMP_DIR}/fake-bin"
+mkdir -p "${FAKE_BIN_DIR}"
+cat >"${FAKE_BIN_DIR}/bash" <<EOF
+#!/bin/sh
+if [ "\${1:-}" = "${ROOT_DIR}/tests/test-codex-kernel-prompt.sh" ]; then
+  sleep 3
+fi
+if [ "\${1:-}" = "${ROOT_DIR}/scripts/lib/kernel-runtime-health.sh" ]; then
+  sleep 3
+fi
+exec /bin/bash "\$@"
+EOF
+chmod +x "${FAKE_BIN_DIR}/bash"
+
+out="$(PATH="${FAKE_BIN_DIR}:$PATH" DOCTOR_STATIC_CHECK_TIMEOUT_SEC=1 KERNEL_DOCTOR_SUMMARY_TIMEOUT_SEC=1 /Users/masayuki_otawara/bin/codex-kernel-guard doctor --run run-old)"
+grep -Fq 'static contract: fail' <<<"${out}"
+grep -Fq 'shared secrets status:' <<<"${out}"
+grep -Fq '  - skipped (bounded mode)' <<<"${out}"
+grep -Fq 'runtime health status:' <<<"${out}"
+grep -Fq '  - timeout after 1s' <<<"${out}"
+grep -Fq 'run detail:' <<<"${out}"
 
 echo "codex kernel guard doctor flags check passed"

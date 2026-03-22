@@ -12,6 +12,7 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
+export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
 
@@ -83,6 +84,7 @@ run_implementation_uiux_gate() {
   export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
   export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
   export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
+  export IMPLEMENTATION_REPORT_PATH="${TMP_DIR}/phase-impl-uiux-implementation.md"
   bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider codex success launch >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider glm success implementation >/dev/null
@@ -91,11 +93,18 @@ run_implementation_uiux_gate() {
     exit 1
   fi
   bash "${LEDGER_SCRIPT}" record-provider gemini-cli success uiux >/dev/null
+  if bash "${PHASE_GATE_SCRIPT}" complete implement --uiux >/dev/null 2>&1; then
+    echo "expected implement completion to fail without implementation artifact" >&2
+    exit 1
+  fi
+  printf '## Round 1\n### Implementer Proposal\nx\n### Critic Challenge\ny\n### Integrator Decision\nz\n### Applied Change\na\n### Verification\nb\n' >"${IMPLEMENTATION_REPORT_PATH}"
   out="$(bash "${PHASE_GATE_SCRIPT}" complete implement --uiux)"
   grep -Fq 'passed: true' <<<"${out}"
   compact_out="$(bash "${COMPACT_SCRIPT}" status phase-impl-uiux)"
   grep -Fq 'last event: phase_completed' <<<"${compact_out}"
   grep -Fq 'phase: implement' <<<"${compact_out}"
+  implementation_report_path="$(jq -r '.phase_artifacts.implementation_report_path' "${KERNEL_COMPACT_DIR}/phase-impl-uiux.json")"
+  [[ "${implementation_report_path}" == "${IMPLEMENTATION_REPORT_PATH}" ]]
 }
 
 run_requirements_normal

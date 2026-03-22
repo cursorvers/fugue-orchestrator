@@ -21,6 +21,7 @@ Already frozen in:
 - `docs/kernel/interfaces/contracts.md`
 - `docs/kernel/interfaces/track-compat.md`
 - `docs/kernel/requirements-freeze-v1.md`
+- `docs/kernel/requirements-phase-artifact-contract-v1.md`
 
 No implementation track may change shared schemas without returning to replan.
 
@@ -77,6 +78,9 @@ Keep context pressure low by moving restart state into bounded artifacts.
 - max 3-line summary
 - max 3 decisions
 - exactly one executable `next_action` for restart
+- additive `phase_artifacts` references only; no artifact body inlining
+- explicit `kernel_run_id` caller boundary for workflow-side propagation
+- workflow-side single-writer propagation only
 - updates on `status_changed`, `phase_completed`, `run_completed`, and `manual_snapshot`
 
 ### Done when
@@ -84,6 +88,8 @@ Keep context pressure low by moving restart state into bounded artifacts.
 - compact artifact is regenerated from runtime transitions
 - summary remains bounded
 - restart-critical fields are preserved
+- required phase artifact references are visible without expanding execution context
+- workflow-side propagation is no-op when `kernel_run_id` is absent or the compact artifact does not exist
 
 ## Stage 3: Doctor + tmux Handoff
 

@@ -47,6 +47,7 @@ maybe_auto_compact() {
   local event="${1:-status_changed}"
   local summary="${2:-}"
   local script
+  [[ "${KERNEL_RUNTIME_LEDGER_AUTO_COMPACT:-true}" == "true" ]] || return 0
   script="$(compact_script_path)"
   [[ -f "${script}" ]] || return 0
   KERNEL_RUN_ID="${RUN_ID}" bash "${script}" update "${event}" "${summary}" >/dev/null 2>&1 || true

@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: "gpt-5-codex"
+      kernel_run_id:
+        description: "Optional Kernel run id for compact artifact propagation"
+        required: false
+        type: string
+        default: ""
       refinement_cycles:
         description: "Pre-implementation refinement cycles (Plan/Parallel Simulation/Critical Review/Fix/Replan)"
         required: false
@@ -609,6 +614,7 @@ jobs:
       - name: Run Codex CLI
         id: codex
         env:
+          KERNEL_RUN_ID: ${{ inputs.kernel_run_id }}
           ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
           ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
           CODEX_MODEL: ${{ inputs.codex_model }}
@@ -641,6 +647,40 @@ jobs:
           WORKSPACE_FEED_PROFILES: ${{ inputs.workspace_feed_profiles }}
           WORKSPACE_FEED_SUMMARY: ${{ inputs.workspace_feed_summary }}
         run: bash scripts/harness/codex-execute-validate.sh
+
+      - name: Update Kernel compact artifact
+        if: ${{ steps.codex.outputs.exit_code == '0' && inputs.kernel_run_id != '' }}
+        env:
+          KERNEL_RUN_ID: ${{ inputs.kernel_run_id }}
+          KERNEL_RUNTIME: fugue
+          KERNEL_PHASE: implement
+          KERNEL_RESEARCH_REPORT_PATH: ${{ steps.codex.outputs.research_report_path }}
+          KERNEL_PLAN_REPORT_PATH: ${{ steps.codex.outputs.plan_report_path }}
+          KERNEL_CRITIC_REPORT_PATH: ${{ steps.codex.outputs.critic_report_path }}
+          KERNEL_PREFLIGHT_REPORT_PATH: ${{ steps.codex.outputs.preflight_report_path }}
+          KERNEL_IMPLEMENTATION_REPORT_PATH: ${{ steps.codex.outputs.implementation_report_path }}
+          KERNEL_TODO_REPORT_PATH: ${{ steps.codex.outputs.todo_report_path }}
+          KERNEL_LESSONS_REPORT_PATH: ${{ steps.codex.outputs.lessons_report_path }}
+        run: |
+          set -euo pipefail
+
+          implementation_report_path="${KERNEL_IMPLEMENTATION_REPORT_PATH:-}"
+          if [[ -z "${implementation_report_path}" ]]; then
+            echo "Kernel implementation report path is empty; skipping workflow propagation."
+            exit 0
+          fi
+          if [[ ! -f "${implementation_report_path}" ]]; then
+            echo "Kernel implementation report path does not exist; skipping workflow propagation."
+            exit 0
+          fi
+
+          compact_path="$(bash scripts/lib/kernel-compact-artifact.sh path)"
+          if [[ ! -f "${compact_path}" ]]; then
+            echo "Kernel compact artifact not found for run ${KERNEL_RUN_ID}; skipping workflow propagation."
+            exit 0
+          fi
+
+          bash scripts/lib/kernel-compact-artifact.sh update manual_snapshot "implement artifact paths propagated" >/dev/null
 
       - name: Commit changes
         if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}

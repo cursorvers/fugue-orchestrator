@@ -45,6 +45,7 @@ assert_case() {
   local expect_implement_label="$7"
   local execution_mode_override="${8:-auto}"
   local expected_dispatch_override="${9:-${execution_mode_override}}"
+  local kernel_run_id_input="${10:-}"
   local out_file="${TMP_DIR}/${name}.out"
   local actual_mode=""
   local workflow_line=""
@@ -70,6 +71,7 @@ assert_case() {
       COMMENT_BODY="/vote" \
       IS_VOTE_COMMAND="true" \
       VOTE_INSTRUCTION="${vote_instruction}" \
+      KERNEL_RUN_ID_INPUT="${kernel_run_id_input}" \
       EXECUTION_MODE_OVERRIDE_INPUT="${execution_mode_override}" \
       TRUST_SUBJECT="masayuki" \
       DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
@@ -144,6 +146,18 @@ assert_case() {
     return
   fi
 
+  if [[ -n "${kernel_run_id_input}" ]]; then
+    if [[ "${workflow_line}" != *"-f kernel_run_id=${kernel_run_id_input}"* ]]; then
+      echo "FAIL [${name}]: workflow dispatch missing kernel_run_id=${kernel_run_id_input}"
+      failed=$((failed + 1))
+      return
+    fi
+  elif [[ "${workflow_line}" == *"-f kernel_run_id="* ]]; then
+    echo "FAIL [${name}]: workflow dispatch should not include kernel_run_id"
+    failed=$((failed + 1))
+    return
+  fi
+
   if ! grep -Fq 'GitHub-hosted Tutti consensus starts now and continues development from the current issue state.' "${ROOT_DIR}/handoff-comment.md"; then
     echo "FAIL [${name}]: handoff comment missing continuation UX note"
     failed=$((failed + 1))
@@ -161,6 +175,7 @@ assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "tr
 assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false" "auto" "primary"
 assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false" "auto" "primary"
 assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy" "backup-heavy"
+assert_case "kernel-run-id-passthrough" "通常タスク" "" "implement" "true" "true" "true" "auto" "primary" "run-kernel-123"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="
