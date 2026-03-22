@@ -19,6 +19,20 @@ if [ ! -f "$SOPS_AGE_KEY_FILE" ]; then
   exit 1
 fi
 
+import_secret() {
+  local account="$1"
+  local service="$2"
+  local value="$3"
+  local label="$4"
+
+  if printf '%s' "$value" | security add-generic-password -a "$account" -s "$service" -w - -U; then
+    echo "  imported: $label"
+  else
+    echo "ERROR: failed to import $label" >&2
+    exit 1
+  fi
+}
+
 # Map ENV_VAR to Keychain account name
 map_to_acct() {
   case "$1" in
@@ -54,9 +68,6 @@ map_to_acct() {
 echo "Decrypting: $ENC_FILE"
 DECRYPTED=$(sops decrypt --input-type dotenv --output-type dotenv "$ENC_FILE")
 
-IMPORTED=0
-SKIPPED=0
-
 echo "$DECRYPTED" | while IFS= read -r line; do
   # Skip comments and empty lines
   case "$line" in
@@ -68,24 +79,21 @@ echo "$DECRYPTED" | while IFS= read -r line; do
 
   # Special: FUGUE_QUEUE_API_KEY (different service name)
   if [ "$KEY" = "FUGUE_QUEUE_API_KEY" ]; then
-    printf '%s' "$VALUE" | security add-generic-password -a "masayuki" -s "FUGUE_QUEUE_API_KEY" -w - -U 2>/dev/null || true
-    echo "  imported: $KEY (service: FUGUE_QUEUE_API_KEY)"
+    import_secret "masayuki" "FUGUE_QUEUE_API_KEY" "$VALUE" "$KEY (service: FUGUE_QUEUE_API_KEY)"
     continue
   fi
 
   # Special: SUPABASE_ACCESS_TOKEN (go-keyring-base64 format)
   if [ "$KEY" = "SUPABASE_ACCESS_TOKEN" ]; then
     ENCODED="go-keyring-base64:$(printf '%s' "$VALUE" | base64)"
-    printf '%s' "$ENCODED" | security add-generic-password -a "supabase" -s "Supabase CLI" -w - -U 2>/dev/null || true
-    echo "  imported: $KEY (service: Supabase CLI)"
+    import_secret "supabase" "Supabase CLI" "$ENCODED" "$KEY (service: Supabase CLI)"
     continue
   fi
 
   # Special: X keys (x-auto service, account = env var name)
   case "$KEY" in
     X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET)
-      printf '%s' "$VALUE" | security add-generic-password -a "$KEY" -s "x-auto" -w - -U 2>/dev/null || true
-      echo "  imported: $KEY (service: x-auto)"
+      import_secret "$KEY" "x-auto" "$VALUE" "$KEY (service: x-auto)"
       continue
       ;;
   esac
@@ -97,8 +105,7 @@ echo "$DECRYPTED" | while IFS= read -r line; do
     continue
   fi
 
-  printf '%s' "$VALUE" | security add-generic-password -a "$ACCT" -s "fugue-secrets" -w - -U 2>/dev/null || true
-  echo "  imported: $KEY -> $ACCT"
+  import_secret "$ACCT" "fugue-secrets" "$VALUE" "$KEY -> $ACCT"
 done
 
 echo "---"
