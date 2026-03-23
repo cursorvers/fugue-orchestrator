@@ -25,6 +25,7 @@ export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export KERNEL_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_RUN_ID="run-complete-test"
 export KERNEL_PROJECT="fugue-orchestrator"
 export KERNEL_PURPOSE="doctor-handoff"
@@ -35,6 +36,9 @@ export KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="codex,glm,gemini-cli"
 export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
 export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
 export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
+export FUGUE_APPROVED_WORKSPACE_ROOTS="${ROOT_DIR}/.fugue:${TMP_DIR}/approved"
+export KERNEL_RUNTIME_WORKSPACE_ROOT="${TMP_DIR}/approved/runtime-workspaces"
+export KERNEL_RUNTIME_WORKSPACE_RECEIPT_DIR="${TMP_DIR}/approved/runtime-receipts"
 
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" record-provider codex success launch >/dev/null
@@ -48,5 +52,7 @@ grep -Fq 'title: fugue-orchestrator:doctor-handoff' <<<"${out}"
 compact_out="$(bash "${COMPACT_SCRIPT}" status)"
 grep -Fq 'last event: run_completed' <<<"${compact_out}"
 grep -Fq 'summary: Kernel run completed' <<<"${compact_out}"
+workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${KERNEL_COMPACT_DIR}/run-complete-test.json")"
+[[ -f "${workspace_receipt_path}" ]]
 
 echo "kernel run complete check passed"

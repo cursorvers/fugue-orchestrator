@@ -14,6 +14,7 @@ AUTO_RECORD_DRY_RUN="${KERNEL_AUTO_RECORD_DRY_RUN:-false}"
 ORCH_DRY_RUN_VALUE="${ORCH_DRY_RUN:-false}"
 CHECKPOINT_MIN_INTERVAL_SEC="${KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC:-900}"
 CHECKPOINT_SAVE_FORCE="${KERNEL_CHECKPOINT_SAVE_FORCE:-false}"
+CHECKPOINT_LOCK_DIR=""
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -57,6 +58,28 @@ checkpoint_stamp_path() {
   safe_run_id="$(printf '%s' "${run_id}" | tr '/:' '__')"
   mkdir -p "${state_root}/checkpoint-saves"
   printf '%s/checkpoint-saves/%s.last-save\n' "${state_root}" "${safe_run_id}"
+}
+
+checkpoint_lock_path() {
+  printf '%s.lock\n' "$(checkpoint_stamp_path)"
+}
+
+acquire_checkpoint_lock() {
+  local lock_dir
+  lock_dir="$(checkpoint_lock_path)"
+  mkdir -p "$(dirname "${lock_dir}")"
+  if ! mkdir "${lock_dir}" 2>/dev/null; then
+    echo "checkpoint save skipped: lock busy." >&2
+    return 1
+  fi
+  CHECKPOINT_LOCK_DIR="${lock_dir}"
+}
+
+release_checkpoint_lock() {
+  if [[ -n "${CHECKPOINT_LOCK_DIR}" ]]; then
+    rmdir "${CHECKPOINT_LOCK_DIR}" >/dev/null 2>&1 || true
+    CHECKPOINT_LOCK_DIR=""
+  fi
 }
 
 checkpoint_allowed() {
@@ -119,7 +142,12 @@ cmd_checkpoint() {
   local -a runner_flags=()
 
   checkpoint_skip && return 0
-  checkpoint_allowed || return 0
+  acquire_checkpoint_lock || return 0
+  if ! checkpoint_allowed; then
+    echo "checkpoint save skipped: throttled." >&2
+    release_checkpoint_lock
+    return 0
+  fi
 
   project="${KERNEL_PROJECT:-kernel-workspace}"
   purpose="${KERNEL_PURPOSE:-unspecified}"
@@ -148,10 +176,11 @@ cmd_checkpoint() {
       --cwd "${ROOT_DIR}" \
       --title "${title}" \
       "${runner_flags[@]+"${runner_flags[@]}"}" \
-      >/dev/null 2>&1 || true
+      >/dev/null
   fi
 
   write_checkpoint_stamp
+  release_checkpoint_lock
 }
 
 cmd="${1:-}"
