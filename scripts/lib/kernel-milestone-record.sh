@@ -153,12 +153,18 @@ cmd_checkpoint() {
   purpose="${KERNEL_PURPOSE:-unspecified}"
   title="${project}:${purpose}:checkpoint"
 
-  workspace_receipt_path="$(KERNEL_RUN_ID="${run_id}" bash "${WORKSPACE_SCRIPT}" write)"
+  if ! workspace_receipt_path="$(KERNEL_RUN_ID="${run_id}" bash "${WORKSPACE_SCRIPT}" write)"; then
+    release_checkpoint_lock
+    return 1
+  fi
   KERNEL_RUN_ID="${run_id}" \
   KERNEL_PHASE="${KERNEL_PHASE:-implement}" \
   KERNEL_WORKSPACE_RECEIPT_PATH="${workspace_receipt_path}" \
   KERNEL_SUMMARY="${summary}" \
-    bash "${COMPACT_SCRIPT}" update manual_snapshot "${summary}" >/dev/null
+    bash "${COMPACT_SCRIPT}" update manual_snapshot "${summary}" >/dev/null || {
+      release_checkpoint_lock
+      return 1
+    }
 
   if [[ "${AUTO_RECORD_NO_GHA}" == "true" ]]; then
     runner_flags+=(--no-gha)
@@ -168,7 +174,7 @@ cmd_checkpoint() {
   fi
 
   if [[ -f "${RUNNER_SCRIPT}" ]]; then
-    bash "${RUNNER_SCRIPT}" \
+    if ! bash "${RUNNER_SCRIPT}" \
       --assistant codex \
       --source kernel-progress-save \
       --session-id "${run_id}" \
@@ -176,7 +182,10 @@ cmd_checkpoint() {
       --cwd "${ROOT_DIR}" \
       --title "${title}" \
       "${runner_flags[@]+"${runner_flags[@]}"}" \
-      >/dev/null
+      >/dev/null; then
+      release_checkpoint_lock
+      return 1
+    fi
   fi
 
   write_checkpoint_stamp
