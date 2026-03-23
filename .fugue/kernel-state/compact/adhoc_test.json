@@ -1,0 +1,25 @@
+{
+  "run_id": "adhoc:test",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "current_phase": "unknown",
+  "mode": "invalid",
+  "runtime": "kernel",
+  "tmux_session": "kernel-workspace__unspecified__dhoctest",
+  "session_fingerprint": "0bb104c3bc19f44d1bda26cb812ff69a124272eb15406bcb2228db9e0cc1a765",
+  "codex_thread_title": "kernel-workspace:unspecified:dhoctest",
+  "owner": "local-operator",
+  "active_models": [],
+  "blocking_reason": "bootstrap-receipt-missing",
+  "scheduler_state": "",
+  "scheduler_reason": "",
+  "workspace_receipt_path": "",
+  "next_action": [],
+  "decisions": [],
+  "phase_artifacts": {},
+  "summary": [
+    "state=invalid; reason=bootstrap-receipt-missing"
+  ],
+  "last_event": "status_changed",
+  "updated_at": "2026-03-23T02:49:30Z"
+}

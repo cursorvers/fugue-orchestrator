@@ -1,0 +1,21 @@
+{
+  "run_id": "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:7143:run:20260323T015414Z:7143",
+  "recorded_at": "2026-03-23T01:56:22Z",
+  "lane_count": 6,
+  "providers": [
+    "codex"
+  ],
+  "active_models": [
+    "gpt-5.4-mini",
+    "gpt-5.3-codex-spark"
+  ],
+  "active_model_count": 2,
+  "manifest_lane_count": 6,
+  "has_agent_labels": true,
+  "has_subagent_labels": true,
+  "mode": "degraded-allowed",
+  "note": "kernel-bootstrap-blocked-no-second-specialist",
+  "has_codex": true,
+  "has_glm": false,
+  "specialist_count": 0
+}

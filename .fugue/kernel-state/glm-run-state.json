@@ -14,6 +14,27 @@
       "glm_recovered": false,
       "last_failure_note": "glm-command-missing",
       "last_failure_at": "2026-03-22T06:01:40Z"
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:90195:run:20260323T104430:90977": {
+      "glm_failures": 2,
+      "mode": "degraded-allowed",
+      "glm_recovered": false,
+      "last_failure_note": "glm-command-missing",
+      "last_failure_at": "2026-03-23T01:48:31Z"
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:7143:run:20260323T015414Z:7143": {
+      "glm_failures": 2,
+      "mode": "degraded-allowed",
+      "glm_recovered": false,
+      "last_failure_note": "glm-command-missing",
+      "last_failure_at": "2026-03-23T01:55:36Z"
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:16641:run:20260323T015945Z:16641": {
+      "glm_failures": 2,
+      "mode": "degraded-allowed",
+      "glm_recovered": false,
+      "last_failure_note": "glm-command-missing",
+      "last_failure_at": "2026-03-23T01:59:58Z"
     }
   }
 }

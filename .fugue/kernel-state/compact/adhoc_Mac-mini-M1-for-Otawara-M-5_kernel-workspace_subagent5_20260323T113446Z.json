@@ -1,0 +1,25 @@
+{
+  "run_id": "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:subagent5:20260323T113446Z",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "current_phase": "unknown",
+  "mode": "invalid",
+  "runtime": "kernel",
+  "tmux_session": "kernel-workspace__unspecified__t113446z",
+  "session_fingerprint": "1a688bc1c8f8e7285aefb5dff3d9285ebae58c63572b2421272c5689aa11a791",
+  "codex_thread_title": "kernel-workspace:unspecified:t113446z",
+  "owner": "local-operator",
+  "active_models": [],
+  "blocking_reason": "bootstrap-receipt-missing",
+  "scheduler_state": "",
+  "scheduler_reason": "",
+  "workspace_receipt_path": "",
+  "next_action": [],
+  "decisions": [],
+  "phase_artifacts": {},
+  "summary": [
+    "state=invalid; reason=bootstrap-receipt-missing"
+  ],
+  "last_event": "status_changed",
+  "updated_at": "2026-03-23T02:50:05Z"
+}
