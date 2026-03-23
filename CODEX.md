@@ -118,6 +118,7 @@ Primary policy source:
 - `degraded-allowed` is run-scoped. Guarded launch mints a fresh `KERNEL_RUN_ID` when none is supplied, so the next launch returns to normal evaluation by default.
 - `codex-kernel-guard doctor` is the read-only restart surface for active runs; use `--all-runs` only when stale runs must be inspected.
 - `codex-kernel-guard doctor --run <run_id>` is the bounded run-detail surface.
+- `bash scripts/local/kernel-handoff-summary.sh --run-id <run_id>` is the bounded operator handoff summary surface derived from compact state and workspace receipts.
 - `codex-kernel-guard recover-run <run_id>` is the handoff path for regenerating a heavy-profile tmux session from compact state.
 - `1 tmux session = 1 Kernel run = 1 Codex thread` is the Kernel handoff contract.
 - `recover-run` must recreate the heavy tmux session and relaunch the run-dedicated Codex thread in the `main` window.

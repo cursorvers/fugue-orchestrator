@@ -566,6 +566,7 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - `codex-kernel-guard doctor` は active run を `updated_at` 降順で表示する
 - `codex-kernel-guard doctor --all-runs` は stale run を含む read-only 一覧を出す
 - `codex-kernel-guard doctor --run <run_id>` は bounded run detail を出す
+- `bash scripts/local/kernel-handoff-summary.sh --run-id <run_id>` は compact artifact と workspace receipt から bounded な申し送り要約を出す
 - `codex-kernel-guard recover-run <run_id>` は compact artifact から heavy-profile tmux session を再生成する
 - `1 tmux session = 1 Kernel run = 1 Codex thread` を Kernel handoff 契約にする
 - `recover-run` は再生成した `main` window で、その run 専用の Codex thread を立ち上げる
