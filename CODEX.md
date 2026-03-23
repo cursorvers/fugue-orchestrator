@@ -132,6 +132,11 @@ Primary policy source:
 - `codex-kernel-guard phase-complete <phase>` records `phase_completed` only after the evidence gate passes.
 - `codex-kernel-guard run-complete --summary <text>` records `run_completed` only after verify evidence passes and the backup path succeeds.
 - Kernel should auto-record only at milestone boundaries by default: `plan`, `implement`, `verify`, and `run-complete`. Background completion scanning may stay available as an explicit opt-in, but routine launch should not create fine-grained recording noise.
+- Autosave should stay coarse-grained. Do not save on every tiny edit, file write, or partial thought.
+- During longer implementation, once a material chunk of work has landed, refresh local save state and attempt a bounded checkpoint mirror to GHA with `bash scripts/lib/kernel-milestone-record.sh checkpoint "<summary>"`.
+- Checkpoint saves are throttled by default and exist to protect in-flight work; they do not replace completion.
+- Phase completion and run completion must refresh local save state, not just remote backup metadata.
+- When the task is actually complete, always run `codex-kernel-guard run-complete --summary <text>` so completion is saved and durably mirrored.
 - If no valid three-voice shape can be established, Kernel must fail closed instead of reporting healthy multi-model orchestration.
 - Kernel work must stay simple-first: do not broaden scope or attach unrequested functionality while satisfying the diversity contract.
 - Kernel work must also stay one-pass: perform investigation, revised planning, implementation, and verification as a single continuous flow unless a hard blocker forces a pause.

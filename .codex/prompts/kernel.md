@@ -37,8 +37,10 @@ Procedure:
    - reserve the main thread for routing, synthesis, conflict resolution, and final integration
 3. Complete a pre-implementation cycle before editing or irreversible actions:
    - gather context thoroughly enough to expose likely blockers before implementation
+   - if uncertainty remains after context gathering, explicitly say that you do not have enough information instead of guessing
    - produce a concrete plan for the active request
    - planning diversity must explicitly account for `glm` and the specialist pool (`gemini-cli`, `cursor-cli`, `copilot-cli`) before implementation starts
+   - for long or source-grounded inputs, extract direct quotes first and analyze only those quotes
    - simulate or verify the plan with tests, dry-runs, static checks, or bounded command-level rehearsal whenever feasible
    - when Codex subagents are available, reserve exactly one dedicated Codex-family simulation lane in parallel on `gpt-5.3-codex-spark`
    - keep other Codex-family subagents role-specific; do not default every Codex subagent to `gpt-5.3-codex-spark`
@@ -48,6 +50,7 @@ Procedure:
    - define a receipt strategy for unattended visibility before implementation starts
 4. Enforce Kernel rules during execution:
    - parallel first: independent tasks must always run in parallel
+   - before finalizing a claim-heavy answer, verify each claim against available quotes or sources and remove unsupported claims
    - do not treat a rule as implemented when it exists only in prompt text, comments, or docs
    - a Kernel rule is incomplete until it is enforced by launch/guard or runtime code, reflected in receipt/health evidence, and covered by a regression test
    - treat `/kernel` bootstrap itself as non-trivial work, so the multi-agent minimum applies during startup as well

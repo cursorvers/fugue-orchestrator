@@ -93,6 +93,14 @@ cursor_status_probe() {
   return "${rc}"
 }
 
+copilot_status_probe() {
+  local output rc
+  output="$(bounded_capture "${READY_TIMEOUT_SEC}" gh copilot -- --help)"
+  rc=$?
+  printf '%s' "${output}"
+  return "${rc}"
+}
+
 canonical_provider() {
   case "${1:-}" in
     gemini|gemini-cli) printf 'gemini-cli\n' ;;
@@ -112,9 +120,15 @@ cursor_ready() {
     return
   fi
 
+  if [[ "${KERNEL_CURSOR_KEYCHAIN_LOCKED_OK:-false}" == "true" ]]; then
+    write_auth_evidence cursor-cli ready keychain-locked-ssh-ok
+    return 0
+  fi
+
   if read -r cached_state cached_note < <(read_auth_evidence cursor-cli); then
-    [[ "${cached_state}" == "ready" ]]
-    return
+    if [[ "${cached_state}" != "ready" ]]; then
+      return 1
+    fi
   fi
 
   local bin="${KERNEL_CURSOR_BIN:-cursor}"
@@ -143,6 +157,49 @@ cursor_ready() {
   return 1
 }
 
+copilot_ready() {
+  local cached_state cached_note output rc
+  if [[ -n "${KERNEL_COPILOT_READY:-}" ]]; then
+    [[ "${KERNEL_COPILOT_READY}" == "true" ]]
+    return
+  fi
+
+  if read -r cached_state cached_note < <(read_auth_evidence copilot-cli); then
+    [[ "${cached_state}" == "ready" ]]
+    return
+  fi
+
+  if command -v "${KERNEL_COPILOT_BIN:-copilot}" >/dev/null 2>&1; then
+    write_auth_evidence copilot-cli ready copilot-binary
+    return 0
+  fi
+
+  command -v gh >/dev/null 2>&1 || {
+    write_auth_evidence copilot-cli not-ready unavailable
+    return 1
+  }
+  gh auth status >/dev/null 2>&1 || {
+    write_auth_evidence copilot-cli not-ready gh-auth-missing
+    return 1
+  }
+
+  set +e
+  output="$(copilot_status_probe)"
+  rc=$?
+  set -e
+  if grep -Fq 'Copilot CLI not installed' <<<"${output}"; then
+    write_auth_evidence copilot-cli not-ready gh-copilot-missing
+    return 1
+  fi
+  if [[ "${rc}" -eq 0 ]]; then
+    write_auth_evidence copilot-cli ready gh-copilot
+    return 0
+  fi
+
+  write_auth_evidence copilot-cli not-ready gh-copilot-unready
+  return 1
+}
+
 provider_ready() {
   case "${1:-}" in
     gemini-cli)
@@ -152,7 +209,7 @@ provider_ready() {
       cursor_ready
       ;;
     copilot-cli)
-      command -v "${KERNEL_COPILOT_BIN:-copilot}" >/dev/null 2>&1
+      copilot_ready
       ;;
     *)
       return 1

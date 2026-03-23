@@ -167,6 +167,9 @@ ${ISSUE_BODY}
   - ### Integrator Decision
   - ### Applied Change
   - ### Verification
+  - ### Evidence Quotes
+  - ### Quote-Bounded Analysis
+  - ### Unsupported Claims Removed
 - Apply only integrator-approved changes for each round.
 - Final code must reflect the latest integrator decisions.
 
@@ -297,7 +300,10 @@ else
       "### Critic Challenge" \
       "### Integrator Decision" \
       "### Applied Change" \
-      "### Verification"; do
+      "### Verification" \
+      "### Evidence Quotes" \
+      "### Quote-Bounded Analysis" \
+      "### Unsupported Claims Removed"; do
       if ! printf '%s\n' "${block}" | grep -q "^${heading}$"; then
         echo "Round ${i} missing heading: ${heading}" | tee -a /tmp/codex-output.log
         EXIT_CODE=1

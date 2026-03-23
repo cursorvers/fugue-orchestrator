@@ -29,7 +29,23 @@ cat >"${TMP_DIR}/bin/copilot" <<'EOF'
 echo "copilot-wrapper:$*"
 EOF
 
-chmod +x "${TMP_DIR}/bin/gemini" "${TMP_DIR}/bin/cursor" "${TMP_DIR}/bin/copilot"
+cat >"${TMP_DIR}/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+  exit 0
+fi
+if [[ "${1:-}" == "copilot" ]]; then
+  shift
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+  fi
+  echo "gh-copilot-wrapper:$*"
+  exit 0
+fi
+exit 0
+EOF
+
+chmod +x "${TMP_DIR}/bin/gemini" "${TMP_DIR}/bin/cursor" "${TMP_DIR}/bin/copilot" "${TMP_DIR}/bin/gh"
 
 export PATH="${TMP_DIR}/bin:${PATH}"
 export KERNEL_ROOT="${ROOT_DIR}"
@@ -53,9 +69,12 @@ grep -Fq 'cursor-wrapper:--print test' <<<"${out}"
 out="$(bash /Users/masayuki_otawara/bin/kcopilot autopilot 2>&1 || true)"
 grep -Fq 'copilot-cli autopilot/agent mode is disabled' <<<"${out}"
 
+out="$(PATH="${TMP_DIR}/bin:/opt/homebrew/bin:/usr/bin:/bin" KERNEL_COPILOT_BIN=gh bash /Users/masayuki_otawara/bin/kcopilot -p test)"
+grep -Fq 'gh-copilot-wrapper:-p test' <<<"${out}"
+
 status="$(bash "${ROOT_DIR}/scripts/lib/kernel-optional-lane-budget.sh" status)"
 grep -Fq 'gemini-cli: day 1/5, run 1/1' <<<"${status}"
 grep -Fq 'cursor-cli: month 1/5, run 1/1' <<<"${status}"
-grep -Fq 'copilot-cli: month 0/5, run 0/1' <<<"${status}"
+grep -Fq 'copilot-cli: month 1/5, run 1/1' <<<"${status}"
 
 echo "kernel wrapper smoke check passed"

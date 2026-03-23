@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PHASE_GATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-phase-gate.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 RUNNER_SCRIPT="${ROOT_DIR}/scripts/local/run-kernel-task-completion-backup.sh"
+WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -80,6 +81,11 @@ if [[ -z "${title}" ]]; then
   title="${project}:${purpose}"
 fi
 
+workspace_receipt_path=""
+if [[ -f "${WORKSPACE_SCRIPT}" ]]; then
+  workspace_receipt_path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${WORKSPACE_SCRIPT}" write)"
+fi
+
 bash "${RUNNER_SCRIPT}" \
   --assistant codex \
   --source kernel-run-complete \
@@ -90,7 +96,10 @@ bash "${RUNNER_SCRIPT}" \
   "${runner_flags[@]+"${runner_flags[@]}"}" \
   >/dev/null
 
-KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="verify" KERNEL_SUMMARY="${summary}" \
+KERNEL_RUN_ID="${RUN_ID}" \
+KERNEL_PHASE="verify" \
+KERNEL_SUMMARY="${summary}" \
+KERNEL_WORKSPACE_RECEIPT_PATH="${workspace_receipt_path}" \
   bash "${COMPACT_SCRIPT}" update run_completed "${summary}" >/dev/null
 
 printf 'kernel run completion:\n'

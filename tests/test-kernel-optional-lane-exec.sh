@@ -45,7 +45,7 @@ export KERNEL_GEMINI_PER_RUN_SOFT_CAP=2
 export KERNEL_CURSOR_MONTHLY_SOFT_CAP=3
 export KERNEL_CURSOR_PER_RUN_SOFT_CAP=2
 export KERNEL_COPILOT_MONTHLY_SOFT_CAP=3
-export KERNEL_COPILOT_PER_RUN_SOFT_CAP=1
+export KERNEL_COPILOT_PER_RUN_SOFT_CAP=3
 export KERNEL_COPILOT_AUTOPILOT_ALLOWED=false
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_STATE_ROOT="${TMP_DIR}/state"
@@ -69,8 +69,15 @@ grep -Fq 'cursor-cli: success 1, failure 0' <<<"${ledger_out}"
 out="$(bash "${SCRIPT}" auto -p auto-choice)"
 grep -Fq 'copilot-ok -p auto-choice' <<<"${out}"
 
+# Default is blocked — verify autopilot is denied when not explicitly enabled
+unset KERNEL_COPILOT_AUTOPILOT_ALLOWED
 out="$(bash "${SCRIPT}" copilot-cli autopilot 2>&1 || true)"
 grep -Fq 'copilot-cli autopilot/agent mode is disabled' <<<"${out}"
+
+# Explicit enable allows autopilot
+export KERNEL_COPILOT_AUTOPILOT_ALLOWED=true
+out="$(bash "${SCRIPT}" copilot-cli autopilot)"
+grep -Fq 'copilot-ok autopilot' <<<"${out}"
 
 out="$(bash "${SCRIPT}" gemini-cli --fail 2>&1 || true)"
 grep -Fq 'gemini-fail' <<<"${out}"
@@ -78,6 +85,9 @@ out="$(bash "${STATUS_SCRIPT}" status)"
 grep -Fq 'gemini-cli: day 1/3, run 1/2' <<<"${out}"
 
 unset KERNEL_CURSOR_READY
+unset SSH_CONNECTION 2>/dev/null || true
+unset SSH_TTY 2>/dev/null || true
+unset KERNEL_CURSOR_KEYCHAIN_LOCKED_OK 2>/dev/null || true
 export CURSOR_STATUS_MODE=locked
 out="$(bash "${SCRIPT}" cursor-cli --print hello 2>&1 || true)"
 grep -Fq 'optional lane provider not ready: cursor-cli' <<<"${out}"

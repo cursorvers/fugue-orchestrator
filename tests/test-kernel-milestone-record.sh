@@ -21,6 +21,13 @@ export KERNEL_RUN_ID="milestone-run"
 export KERNEL_PROJECT="fugue-orchestrator"
 export KERNEL_PURPOSE="milestone-check"
 export KERNEL_MILESTONE_RECORD_LOG="${LOG_FILE}"
+export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
+export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/bootstrap"
+export KERNEL_STATE_ROOT="${TMP_DIR}/state"
+export FUGUE_APPROVED_WORKSPACE_ROOTS="${ROOT_DIR}/.fugue:${TMP_DIR}/approved"
+export KERNEL_RUNTIME_WORKSPACE_ROOT="${TMP_DIR}/approved/runtime-workspaces"
+export KERNEL_RUNTIME_WORKSPACE_RECEIPT_DIR="${TMP_DIR}/approved/runtime-receipts"
 
 KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \
 bash "${SCRIPT}" phase plan
@@ -75,6 +82,57 @@ grep -Fq -- '--no-gha' "${LOG_FILE}" || {
 }
 grep -Fq -- '--dry-run' "${LOG_FILE}" || {
   echo "milestone recording should forward dry-run when requested" >&2
+  exit 1
+}
+
+rm -f "${LOG_FILE}"
+KERNEL_AUTO_RECORD_NO_GHA=true \
+KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC=900 \
+KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \
+bash "${SCRIPT}" checkpoint "checkpoint summary"
+
+grep -Fq -- '--source kernel-progress-save' "${LOG_FILE}" || {
+  echo "checkpoint save should mirror through backup runner" >&2
+  exit 1
+}
+grep -Fq -- '--title fugue-orchestrator:milestone-check:checkpoint' "${LOG_FILE}" || {
+  echo "checkpoint save should include checkpoint title" >&2
+  exit 1
+}
+grep -Fq -- '--summary checkpoint summary' "${LOG_FILE}" || {
+  echo "checkpoint save should preserve summary" >&2
+  exit 1
+}
+
+compact_path="${KERNEL_COMPACT_DIR}/milestone-run.json"
+workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${compact_path}")"
+[[ -f "${workspace_receipt_path}" ]] || {
+  echo "checkpoint save should refresh workspace receipt" >&2
+  exit 1
+}
+grep -Fq 'checkpoint summary' "${compact_path}" || {
+  echo "checkpoint save should update compact summary" >&2
+  exit 1
+}
+
+before_lines="$(wc -l < "${LOG_FILE}" | tr -d ' ')"
+KERNEL_AUTO_RECORD_NO_GHA=true \
+KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC=900 \
+KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \
+bash "${SCRIPT}" checkpoint "checkpoint summary ignored"
+after_lines="$(wc -l < "${LOG_FILE}" | tr -d ' ')"
+[[ "${before_lines}" == "${after_lines}" ]] || {
+  echo "checkpoint save should be throttled by default" >&2
+  exit 1
+}
+
+KERNEL_AUTO_RECORD_NO_GHA=true \
+KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC=900 \
+KERNEL_CHECKPOINT_SAVE_FORCE=true \
+KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \
+bash "${SCRIPT}" checkpoint "checkpoint summary forced"
+grep -Fq -- '--summary checkpoint summary forced' "${LOG_FILE}" || {
+  echo "forced checkpoint save should bypass throttle" >&2
   exit 1
 }
 

@@ -18,11 +18,14 @@ cat >"${FAKE_BIN}/gemini" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-cat >"${FAKE_BIN}/copilot" <<'EOF'
+cat >"${FAKE_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+  exit 0
+fi
 exit 0
 EOF
-chmod +x "${FAKE_BIN}/gemini" "${FAKE_BIN}/copilot"
+chmod +x "${FAKE_BIN}/gemini" "${FAKE_BIN}/gh"
 
 CURSOR_STATUS_COUNT="${TMP_DIR}/cursor-status-count"
 cat >"${FAKE_BIN}/cursor" <<EOF
@@ -62,11 +65,27 @@ grep -Fq $'gemini-cli\tready\t' <<<"${status}"
 grep -Fq $'cursor-cli\tnot-ready' <<<"${status}"
 grep -Fq $'copilot-cli\tready\t' <<<"${status}"
 
+# Keychain locked without SSH → not-ready
 unset KERNEL_CURSOR_READY
+unset SSH_CONNECTION 2>/dev/null || true
+unset SSH_TTY 2>/dev/null || true
+unset KERNEL_CURSOR_KEYCHAIN_LOCKED_OK 2>/dev/null || true
 out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
 grep -Fq 'not-ready' <<<"${out}"
 out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
 grep -Fq 'not-ready' <<<"${out}"
 [[ "$(cat "${CURSOR_STATUS_COUNT}")" == "1" ]]
+
+# Explicit override is required for keychain-locked cursor readiness
+rm -f "${CURSOR_STATUS_COUNT}"
+rm -rf "${TMP_DIR}/state/auth-evidence"
+export SSH_CONNECTION="127.0.0.1 12345 127.0.0.1 22"
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+export KERNEL_CURSOR_KEYCHAIN_LOCKED_OK=true
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1)"
+grep -Fq 'ready' <<<"${out}"
+unset SSH_CONNECTION
+unset KERNEL_CURSOR_KEYCHAIN_LOCKED_OK
 
 echo "kernel specialist picker check passed"

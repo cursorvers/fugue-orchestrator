@@ -24,10 +24,14 @@ export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export KERNEL_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${MILESTONE_RUNNER}"
 export KERNEL_MILESTONE_RECORD_LOG="${MILESTONE_LOG}"
 export KERNEL_AUTO_RECORD_NO_GHA=true
 export KERNEL_AUTO_RECORD_DRY_RUN=true
+export FUGUE_APPROVED_WORKSPACE_ROOTS="${ROOT_DIR}/.fugue:${TMP_DIR}/approved"
+export KERNEL_RUNTIME_WORKSPACE_ROOT="${TMP_DIR}/approved/runtime-workspaces"
+export KERNEL_RUNTIME_WORKSPACE_RECEIPT_DIR="${TMP_DIR}/approved/runtime-receipts"
 
 run_requirements_normal() {
   export KERNEL_RUN_ID="phase-req"
@@ -111,6 +115,11 @@ run_implementation_uiux_gate() {
     exit 1
   fi
   printf '## Round 1\n### Implementer Proposal\nx\n### Critic Challenge\ny\n### Integrator Decision\nz\n### Applied Change\na\n### Verification\nb\n' >"${IMPLEMENTATION_REPORT_PATH}"
+  if bash "${PHASE_GATE_SCRIPT}" complete implement --uiux >/dev/null 2>&1; then
+    echo "expected implement completion to fail without grounding sections" >&2
+    exit 1
+  fi
+  printf '\n### Evidence Quotes\nq\n### Quote-Bounded Analysis\nqa\n### Unsupported Claims Removed\nnone\n' >>"${IMPLEMENTATION_REPORT_PATH}"
   out="$(bash "${PHASE_GATE_SCRIPT}" complete implement --uiux)"
   grep -Fq 'passed: true' <<<"${out}"
   grep -Fq -- '--source kernel-phase-complete' "${MILESTONE_LOG}"
@@ -118,6 +127,8 @@ run_implementation_uiux_gate() {
   compact_out="$(bash "${COMPACT_SCRIPT}" status phase-impl-uiux)"
   grep -Fq 'last event: phase_completed' <<<"${compact_out}"
   grep -Fq 'phase: implement' <<<"${compact_out}"
+  workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${KERNEL_COMPACT_DIR}/phase-impl-uiux.json")"
+  [[ -f "${workspace_receipt_path}" ]]
   implementation_report_path="$(jq -r '.phase_artifacts.implementation_report_path' "${KERNEL_COMPACT_DIR}/phase-impl-uiux.json")"
   [[ "${implementation_report_path}" == "${IMPLEMENTATION_REPORT_PATH}" ]]
 }

@@ -86,6 +86,9 @@ ensure_provider_command() {
   local provider="$1"
   local cmd
   cmd="$(provider_command "${provider}")"
+  if [[ "${provider}" == "copilot-cli" && "${cmd}" == "copilot" ]] && ! command -v "${cmd}" >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; then
+    cmd="gh"
+  fi
   command -v "${cmd}" >/dev/null 2>&1 || {
     echo "optional lane command missing: ${cmd}" >&2
     return 127
@@ -109,7 +112,7 @@ maybe_reject_copilot_autopilot() {
   for arg in "$@"; do
     case "${arg}" in
       autopilot|--autopilot|agent|--agent-mode)
-        echo "copilot-cli autopilot/agent mode is disabled by Kernel free-tier policy." >&2
+        echo "copilot-cli autopilot/agent mode is disabled (KERNEL_COPILOT_AUTOPILOT_ALLOWED=false)." >&2
         return 1
         ;;
     esac
@@ -131,7 +134,15 @@ invoke_command() {
       "${cmd}" agent "$@"
       ;;
     copilot-cli)
-      "${cmd}" "$@"
+      if [[ "${cmd}" == "gh" ]]; then
+        if (($# > 0)); then
+          "${cmd}" copilot -- "$@"
+        else
+          "${cmd}" copilot
+        fi
+      else
+        "${cmd}" "$@"
+      fi
       ;;
   esac
 }

@@ -581,6 +581,11 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - `codex-kernel-guard phase-complete <phase>` は phase evidence を通した上で compact に `phase_completed` を記録する
 - `codex-kernel-guard run-complete --summary <text>` は verify gate を通した上で completion backup と `run_completed` compact を記録する
 - Kernel の自動記録は既定で節目だけに寄せる。`plan` / `implement` / `verify` 完了と `run-complete` を自動記録し、background completion scan は必要時だけ明示 opt-in にする
+- 自動 save は coarse-grained に保ち、細かな編集や partial thought ごとに打たない
+- 実装がある程度進んだ checkpoint では `bash scripts/lib/kernel-milestone-record.sh checkpoint "<summary>"` を使い、local save state を更新しつつ bounded な GHA mirror を試みる
+- checkpoint save は in-flight work 保護用で、完了記録の代わりにはしない
+- phase 完了と run 完了では remote backup だけでなく local save state も更新する
+- タスク完了と判断したら必ず `codex-kernel-guard run-complete --summary <text>` を実行して completion を保存し、durable mirror まで通す
 - unattended health のため、最初の acknowledgement 前に bootstrap receipt を書き、mode 変化時にも更新する
 - bootstrap receipt には provider 数だけでなく `Active models`、manifest lane count、agent/subagent label 有無も入れて live manifest evidence を残す
 - `Active models:` 行で、その run で実際に稼働している model だけを明示する

@@ -8,6 +8,7 @@ COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 MILESTONE_RECORD_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-milestone-record.sh"
+WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -167,6 +168,19 @@ check_completion_artifact() {
   fi
   [[ -n "${path}" ]] || fail_gate "phase-artifact-missing:${key}"
   [[ -f "${path}" ]] || fail_gate "phase-artifact-path-missing:${key}"
+  check_grounding_sections "${path}"
+}
+
+check_grounding_sections() {
+  local path="${1:-}"
+  local heading
+  [[ "${PHASE}" == "implement" ]] || return 0
+  for heading in \
+    "### Evidence Quotes" \
+    "### Quote-Bounded Analysis" \
+    "### Unsupported Claims Removed"; do
+    grep -Fxq "${heading}" "${path}" || fail_gate "phase-artifact-grounding-section-missing:${heading#\#\#\# }"
+  done
 }
 
 glm_mode() {
@@ -240,9 +254,16 @@ check_phase() {
 }
 
 complete_phase() {
+  local workspace_receipt_path=""
   check_phase >/dev/null
   check_completion_artifact >/dev/null
-  KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="${PHASE}" bash "${COMPACT_SCRIPT}" update phase_completed "phase=${PHASE} completed" >/dev/null
+  if [[ -f "${WORKSPACE_SCRIPT}" ]]; then
+    workspace_receipt_path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${WORKSPACE_SCRIPT}" write)"
+  fi
+  KERNEL_RUN_ID="${RUN_ID}" \
+  KERNEL_PHASE="${PHASE}" \
+  KERNEL_WORKSPACE_RECEIPT_PATH="${workspace_receipt_path}" \
+    bash "${COMPACT_SCRIPT}" update phase_completed "phase=${PHASE} completed" >/dev/null
   if [[ -f "${MILESTONE_RECORD_SCRIPT}" ]]; then
     KERNEL_RUN_ID="${RUN_ID}" KERNEL_PHASE="${PHASE}" bash "${MILESTONE_RECORD_SCRIPT}" phase "${PHASE}" "phase=${PHASE} completed"
   fi
