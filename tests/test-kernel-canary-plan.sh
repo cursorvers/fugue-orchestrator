@@ -137,10 +137,10 @@ grep -q 'canary_issue_marker="true"' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should require canary issue markers before bypass" >&2
   exit 1
 }
-grep -q '"\${GITHUB_EVENT_NAME}" == "workflow_call"' "${ROUTER_WORKFLOW}" || {
-  echo "FAIL: router trust step should restrict canary bypass to workflow_call provenance" >&2
-  exit 1
-}
+# workflow_call event check removed: reusable workflows inherit caller's
+# event_name (workflow_dispatch), not workflow_call. Remaining conditions
+# (canary_dispatch_owned, run_id, trust_subject, author, issue_marker +
+# API verification) provide sufficient trust guarantees.
 grep -q 'normalize_canary_actor()' "${ROUTER_WORKFLOW}" || {
   echo "FAIL: router trust step should normalize GitHub Actions actor aliases" >&2
   exit 1
