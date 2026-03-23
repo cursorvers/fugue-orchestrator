@@ -54,29 +54,7 @@ Distributed Autonomy x Unified Convergence = FUGUE
 
 ### System Architecture
 
-```
-User
-    | instruction
-Claude (Orchestrator)
-    | planning & routing
-+-------------------------------------+
-| Execution Tier                      |
-| +-> Codex (design, code, security)  |
-| +-> GLM-5 (lightweight review)      |
-| +-> Gemini (UI/UX, image analysis)  |
-| +-> Pencil MCP (.pen UI dev)        |
-| +-> MCP Tools (Stripe, Supabase...) |
-+-------------------------------------+
-    | artifacts
-+-------------------------------------+
-| Evaluation Tier [auto]              |
-| +-> Gemini (UI/UX evaluation)       |
-| +-> GLM (code quality)              |
-| +-> Codex (security audit)          |
-+-------------------------------------+
-    | feedback
-Claude (integrate & report)
-```
+> See `docs/agents/quick-reference.md` for full diagram and script examples.
 
 ### Hybrid Conductor Mode (v8)
 
@@ -96,20 +74,11 @@ Rollback: set provider back to `codex`, role policy to `sub-only`, delete execut
 > **Background**: Agent Teams rate limits are lower than GPT Pro thresholds.
 > Opus focuses on orchestration only. Individual tasks go to Codex/GLM.
 
-1. **Receive instruction -> 2-layer classification -> auto-delegate** (no confirmation needed)
-   ```
-   Receive instruction
-       |
-   2-layer classification
-   +- Layer 1: Codex (code + design + security + complex decisions)
-   +- Layer 2: GLM (non-code + light review + summary + classification)
-       |
-   Immediate delegation (minimize subagent usage)
-   ```
-2. Integrate delegation results -> report to user
-3. When uncertain -> consult Codex (no subagent)
-4. Critical decisions -> 3-party consensus (Claude + Codex + GLM/Gemini)
-5. **Orchestration review** -> Claude Opus participates directly (required)
+1. Receive → 2-layer classify (L1: Codex, L2: GLM) → auto-delegate
+2. Integrate results → report
+3. Uncertain → Codex consult
+4. Critical → 3-party consensus (Claude + Codex + GLM/Gemini)
+5. Orchestration review → Claude Opus direct (required)
 
 **Subagent (Haiku/Sonnet) prohibited by default**: Consumes Claude rate limit. File exploration only as exception.
 
@@ -133,7 +102,27 @@ Rollback: set provider back to `codex`, role policy to `sub-only`, delete execut
 
 ---
 
-## 5. Quality Principles
+## 5. Auto-save & GHA Reflection
+
+### Memory Auto-save Rule
+
+Save to memory **at milestones and on completion**, not after every small change:
+- **Milestone save**: After a significant batch of work (e.g., multi-file fix, new feature integrated)
+- **Completion save**: Always save when a task or request is judged complete
+- **Skip**: Trivial changes, mid-investigation reads, single-line edits
+
+### GHA Reflection (Stop hook)
+
+`claude-config-auto-commit.sh` runs at session end:
+1. Auto-commits all `~/.claude/` changes (hooks, settings, memories, skills) to `claude-config.git`
+2. Pushes to `origin` — GHA workflows in `cursorvers/claude-config` receive the changes
+3. Zero stdout (context pollution prevention)
+
+> Hook/settings changes are version-controlled automatically. No manual git needed.
+
+---
+
+## 6. Quality Principles
 
 ### Incremental Verification (MVP First)
 
@@ -151,7 +140,7 @@ MVP -> User validation -> Impact check -> Extend
 
 ---
 
-## 6. Prohibitions
+## 7. Prohibitions
 
 ### Absolute
 
@@ -169,7 +158,7 @@ MVP -> User validation -> Impact check -> Extend
 
 ---
 
-## 7. Rule Navigation
+## 8. Rule Navigation
 
 ```
 CLAUDE.md (this file) <- entry point
@@ -193,7 +182,7 @@ CLAUDE.md (this file) <- entry point
 
 ---
 
-## 8. Quick Reference
+## 9. Quick Reference
 
 ### Commands
 
@@ -204,56 +193,13 @@ CLAUDE.md (this file) <- entry point
 | `/review` | Code review |
 | `/sync` | Check progress |
 
-### Delegation Scripts
+### Delegation Scripts / Lane Bridge / Structured Execution
 
-```bash
-# Codex (primary execution engine)
-node ~/.claude/skills/orchestra-delegator/scripts/delegate.js \
-  -a [architect|code-reviewer|security-analyst] -t "[task]"
-
-# Cursor CLI (supplementary, FUGUE_EXECUTION_PROVIDER=cursor)
-agent --model auto -p --workspace /path "[task prompt]"
-
-# GLM-5 (cost priority)
-node ~/.claude/skills/orchestra-delegator/scripts/delegate-glm.js \
-  -a [code-reviewer] -t "[task]"
-
-# Gemini (UI/UX)
-node ~/.claude/skills/orchestra-delegator/scripts/delegate-gemini.js \
-  -a [ui-reviewer] -t "[task]" -i [image]
-```
-
-### Lane Bridge (v3.0)
-
-```bash
-# Unified dispatch with failover
-node ~/.claude/skills/orchestra-delegator/scripts/fugue-lane-bridge.mjs \
-  --lane codex:architect --task "[task]" --project /path
-
-# Pre-validate matrix (exit 2 on diversity violation)
-node ~/.claude/skills/orchestra-delegator/scripts/fugue-lane-bridge.mjs \
-  --validate matrix.json
-
-# Operations dashboard
-node ~/.claude/skills/orchestra-delegator/scripts/fugue-lane-bridge.mjs \
-  --dashboard --days 7
-```
-
-### Structured Execution (v3.0)
-
-```bash
-# Autonomous 9-step execution
-node ~/.claude/skills/orchestra-delegator/scripts/fugue-execute.mjs \
-  --task "[task]" --project /path --tier auto
-
-# Dry-run (no provider calls, for testing)
-node ~/.claude/skills/orchestra-delegator/scripts/fugue-execute.mjs \
-  --dry-run --task "fix typo" --tier 0
-```
+> On-demand: `docs/agents/quick-reference.md`
 
 ---
 
-## 9. Motto
+## 10. Motto
 
 > **"The orchestrator is the conductor, not the performer."**
 >
