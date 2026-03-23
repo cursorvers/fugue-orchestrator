@@ -410,7 +410,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}
-          token: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          token: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
           ref: ${{ inputs.target_branch }}
           fetch-depth: 1
 
@@ -697,7 +697,7 @@ jobs:
       - name: Push branch
         if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
         env:
-          GH_TOKEN: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          GH_TOKEN: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
         run: |
           git push origin "${{ needs.prepare.outputs.branch_name }}"
 
@@ -705,7 +705,7 @@ jobs:
         id: create-pr
         if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
         env:
-          GH_TOKEN: ${{ secrets.TARGET_REPO_PAT || github.token }}
+          GH_TOKEN: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
         run: |
           set -euo pipefail
 
