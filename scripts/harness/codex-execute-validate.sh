@@ -217,7 +217,7 @@ echo "${INSTRUCTION}" > /tmp/codex-instruction.md
 EXIT_CODE=0
 codex exec \
   --model "${CODEX_MODEL}" \
-  --full-auto \
+  --full-auto --dangerously-bypass-approvals-and-sandbox \
   "$(cat /tmp/codex-instruction.md)" \
   2>&1 | tee /tmp/codex-output.log || EXIT_CODE=$?
 

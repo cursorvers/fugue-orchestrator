@@ -564,12 +564,12 @@ jobs:
               if command -v timeout >/dev/null 2>&1; then
                 timeout "${timeout_sec}" codex exec \
                   --model "${CODEX_MODEL}" \
-                  --full-auto \
+                  --full-auto --dangerously-bypass-approvals-and-sandbox \
                   "$(cat "${prompt_file}")" > "${log_dir}/${node}.log" 2>&1
               else
                 codex exec \
                   --model "${CODEX_MODEL}" \
-                  --full-auto \
+                  --full-auto --dangerously-bypass-approvals-and-sandbox \
                   "$(cat "${prompt_file}")" > "${log_dir}/${node}.log" 2>&1
               fi
               rc=$?
