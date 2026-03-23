@@ -37,20 +37,35 @@ ensure_glm_api_key() {
   [[ -n "${ZAI_API_KEY:-}" ]]
 }
 
-glm_api_supported_args() {
-  [[ "${1:-}" == "-p" || "${1:-}" == "--prompt" ]] || return 1
-  [[ -n "${2:-}" ]]
+glm_api_extract_prompt() {
+  # Extract prompt from various argument patterns:
+  #   -p "prompt"  / --prompt "prompt"  (standard)
+  #   "raw text"                         (single positional arg)
+  #   -m model -p "prompt"              (mixed flags)
+  local prompt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p|--prompt) shift; prompt="${1:-}"; shift ;;
+      -m|--model)  shift; shift ;;  # skip model flag (we use our own)
+      -t|--temperature) shift; shift ;;
+      -h|--help)   return 1 ;;
+      --version)   return 1 ;;
+      -*)          shift ;;  # skip unknown flags
+      *)           [[ -z "${prompt}" ]] && prompt="$1"; shift ;;
+    esac
+  done
+  [[ -n "${prompt}" ]] || return 1
+  printf '%s' "${prompt}"
 }
 
 run_glm_api_fallback() {
-  local prompt="${2:-}"
-  local tmp_dir out_file req http_code content rc model
-  local -a candidates=()
-
-  glm_api_supported_args "$@" || {
-    echo "glm api fallback only supports: -p <prompt>" >&2
+  local prompt
+  prompt="$(glm_api_extract_prompt "$@")" || {
+    echo "glm api fallback: could not extract prompt from args" >&2
     return 64
   }
+  local tmp_dir out_file req http_code content rc model
+  local -a candidates=()
 
   ensure_glm_api_key || {
     echo "glm api fallback requires ZAI_API_KEY" >&2
