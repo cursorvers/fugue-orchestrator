@@ -407,6 +407,7 @@ jobs:
             echo "intake_source=${intake_source}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
+            echo "canary_dispatch_owned=${canary_dispatch_owned}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Check author trust
