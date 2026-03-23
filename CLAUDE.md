@@ -163,19 +163,19 @@ MVP -> User validation -> Impact check -> Extend
 ```
 CLAUDE.md (this file) <- entry point
     |
-    +-> delegation-matrix.md (SSOT) <- delegation details
+    +-> ~/.claude/docs/delegation-matrix.md (SSOT)
     |
     +-> Core (read on demand)
-    |   +-- auto-execution.md
-    |   +-- delegation-flow.md
-    |   +-- codex-usage.md
-    |   +-- dangerous-permission-consensus.md
+    |   +-- ~/.claude/docs/auto-execution.md
+    |   +-- ~/.claude/docs/delegation-flow.md
+    |   +-- ~/.claude/docs/codex-usage.md
+    |   +-- ~/.claude/rules/dangerous-permission-consensus.md
     |
     +-> Quality Gates (read on demand)
-        +-- testing.md
-        +-- security.md
-        +-- coding-style.md
-        +-- performance.md
+        +-- ~/.claude/docs/testing.md
+        +-- ~/.claude/rules/security.md
+        +-- ~/.claude/docs/coding-style.md
+        +-- ~/.claude/docs/performance.md
 ```
 
 **Context optimization**: Strict lazy loading (load rules only when needed)
