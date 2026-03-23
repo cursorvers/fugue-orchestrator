@@ -855,10 +855,25 @@ if [[ -z "${multi_agent_mode_override}" && "${multi_agent_mode_lock}" != "true" 
   multi_agent_mode_override="$(normalize_multi_agent_mode "${multi_agent_mode_hint:-}")"
 fi
 
-# 1) Prefer fully-qualified owner/repo found inside backticks.
-target_repo="$(printf '%s\n' "${body}" \
-  | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
-  | head -n1)"
+# 0) Prefer explicit "## Target repo" section (handles blank lines in templates).
+target_repo="$(extract_body_section "${body}" "target[[:space:]]+repo" "##")"
+if [[ -n "${target_repo}" ]]; then
+  # extract_body_section returns lowercased; accept owner/repo or bare repo
+  if [[ "${target_repo}" =~ ^[a-z0-9_.-]+/[a-z0-9_.-]+$ ]]; then
+    : # already owner/repo
+  elif [[ "${target_repo}" =~ ^[a-z0-9_.-]+$ ]]; then
+    target_repo="${owner}/${target_repo}"
+  else
+    target_repo=""  # invalid value, fall through
+  fi
+fi
+
+# 1) Fallback: fully-qualified owner/repo found inside backticks.
+if [[ -z "${target_repo}" ]]; then
+  target_repo="$(printf '%s\n' "${body}" \
+    | sed -nE 's/.*`([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)`.*/\1/p' \
+    | head -n1)"
+fi
 
 # 1b) Also accept plain "owner/repo" (common on mobile forms).
 if [[ -z "${target_repo}" ]]; then
