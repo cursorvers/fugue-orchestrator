@@ -478,7 +478,6 @@ jobs:
             canary_issue_marker="true"
           fi
           if [[ "${canary_dispatch_owned}" == "true" \
-            && "${GITHUB_EVENT_NAME}" == "workflow_call" \
             && -n "${canary_dispatch_run_id}" \
             && "${trust_subject_normalized}" == "github-actions" \
             && "${author_normalized}" == "github-actions" \
