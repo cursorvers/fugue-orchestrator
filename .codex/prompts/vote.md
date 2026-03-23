@@ -17,6 +17,7 @@ Procedure:
 2. Reframe the current task as a Kernel-guided continuation:
    - preserve the current repo, task, and unfinished next step
    - continue implementation or analysis from the current state
+   - for non-critical work, record local consensus evidence for the current run before phase completion proceeds
    - do not end with a summary-only response when concrete next work remains
    - use available subagents when they help reduce context load or parallelize work
    - keep the main thread concise and operational
@@ -35,6 +36,7 @@ Procedure:
 Constraints:
 - Keep output concise and operational.
 - Treat `/vote` as local continuation, not GitHub handoff.
+- Reuse successful local auth or trust evidence across the run; do not re-request equivalent user auth for non-critical work.
 - Do not post to GitHub or any external service.
 - Do not summarize repository state, CI state, or production state unless asked.
 - Do not ask for confirmation just to start local consensus mode.

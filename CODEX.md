@@ -53,6 +53,7 @@ Primary policy source:
 - Do not stop at "one issue remains" if more likely failure modes can still be found cheaply.
 - Default to one-pass delivery: after the revised plan is coherent, continue through implementation and verification without asking the user for routine confirmation.
 - Only pause for the user when the next step is destructive, requires external credentials or approval, or is materially ambiguous.
+- Non-critical Kernel work should run under local `/vote` consensus by default; critical issues are the only exemption to that default.
 - Do not emit routine intermediate progress reports or midpoint summaries during execution.
 - After requirements are frozen, report only when blocked, when external approval is required, when the user explicitly asks, or when final completion is reached.
 - Do not stop to summarize partial milestones, sub-slices, or intermediate checkpoints while the active request is still in progress.
@@ -82,6 +83,7 @@ Primary policy source:
 - Do not ask the user to repeat unlock, trust, login, or approval steps that Kernel can verify directly after the first attempt.
 - Keep the recovery split explicit: `launch` may fail closed on readiness, but `doctor`, `doctor --run`, and `recover-run` are the non-interactive-first surfaces for diagnosis and continuation.
 - When a specialist or adapter is blocked on auth, perform one bounded non-interactive recovery sweep per run (`--trust`, keychain status checks, bounded wrapper probes, `doctor`, `doctor --run`, `recover-run`) before escalating; if that sweep fails, ask the user once, not once per lane.
+- After one successful local auth, unlock, or trust proof in a run, continue all non-critical work without re-requesting equivalent user auth.
 - Reducing auth friction must not bypass `ok_to_execute`, human approval, billing, or trust-boundary controls; optimize retries and evidence reuse without weakening the safety contract.
 - Treat operator time as a constrained resource: spend Codex effort on removing repetitive auth chores, caching successful local state, and documenting the recovery path when automation still cannot fully absorb the step.
 - If a flow still requires unavoidable human auth, update the repository contract so future runs can reach the minimum healthy shape with less manual intervention.
@@ -148,6 +150,7 @@ Primary policy source:
 - Unlabeled, pending, failed, or merely planned lanes do not count toward the Kernel minimum.
 - The first valid acknowledgement must also include `Bootstrap target: 6+ lanes (minimum 6).`
 - `/vote` and `/v` are local continuation prompts in this repository. They must not post to GitHub or hand off to issue-comment workflows.
+- For non-critical work, `/vote` should record local consensus evidence for the current run before phase completion proceeds.
 - GitHub `/vote` workflow triggering remains an explicit issue-comment path (`gh issue comment ... --body '/vote'` or `vote-gh ...`), not a Codex slash prompt.
 - Hot reload is not guaranteed for `.codex/prompts/vote.md` and `.codex/prompts/v.md` either. Restart the session after changing them.
 

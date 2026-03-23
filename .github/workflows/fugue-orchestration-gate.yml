@@ -11,6 +11,7 @@ on:
       - '.github/workflows/fugue-task-router.yml'
       - '.github/workflows/kernel-decision-journal.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/kernel-auth-evidence.sh'
       - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
@@ -29,8 +30,10 @@ on:
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-auth-evidence.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
+      - 'tests/test-local-orchestration-consensus-bridge.sh'
       - 'tests/test-task-router-start-signal.sh'
       - 'tests/test-parallel-floor-policy.sh'
       - 'tests/test-recovery-reroute-claim-gate.sh'
@@ -69,6 +72,7 @@ on:
       - '.github/workflows/fugue-task-router.yml'
       - '.github/workflows/kernel-decision-journal.yml'
       - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/kernel-auth-evidence.sh'
       - 'scripts/lib/canary-trust-policy.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
@@ -87,8 +91,10 @@ on:
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-auth-evidence.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
+      - 'tests/test-local-orchestration-consensus-bridge.sh'
       - 'tests/test-task-router-start-signal.sh'
       - 'tests/test-parallel-floor-policy.sh'
       - 'tests/test-recovery-reroute-claim-gate.sh'
@@ -139,6 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/lib/kernel-auth-evidence.sh
           bash -n scripts/lib/execution-profile-policy.sh
           bash -n scripts/lib/orchestrator-policy.sh
           bash -n scripts/local/run-local-orchestration.sh
@@ -154,8 +161,10 @@ jobs:
           bash -n scripts/check-codex-kernel-prompt.sh
           bash -n scripts/check-codex-vote-prompt.sh
           bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-kernel-auth-evidence.sh
           bash -n tests/test-publish-decision-journal.sh
           bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash -n tests/test-local-orchestration-consensus-bridge.sh
           bash -n tests/test-task-router-start-signal.sh
           bash -n tests/test-parallel-floor-policy.sh
           bash -n tests/test-recovery-reroute-claim-gate.sh
@@ -174,6 +183,7 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/test-codex-vote-prompt.sh
+          bash tests/test-kernel-auth-evidence.sh
 
       - name: Local orchestration boundary tests
         run: |
@@ -185,6 +195,7 @@ jobs:
           bash tests/test-primary-heartbeat-state.sh
           bash tests/test-publish-decision-journal.sh
           bash tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash tests/test-local-orchestration-consensus-bridge.sh
           bash tests/test-task-router-start-signal.sh
           bash tests/test-parallel-floor-policy.sh
           bash tests/test-recovery-reroute-claim-gate.sh

@@ -561,6 +561,7 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - 進行中の依頼に対して、部分マイルストーンや途中スライスの総括で処理を止めない
 - 1つの stage / track / 実装スライスが終わっただけでは止まらず、凍結済みの依頼全体が終わるまで続ける
 - 完了調の総括は、その依頼が本当に完了した時か、真に blocked の時だけにする
+- non-critical な Kernel work は既定で local `/vote` 合議で進め、critical issue だけを例外にする
 - `degraded-allowed` は run 単位。`codex-kernel-guard launch` は `KERNEL_RUN_ID` 未指定時に新しい run id を払い出す
 - `codex-kernel-guard doctor` は active run を `updated_at` 降順で表示する
 - `codex-kernel-guard doctor --all-runs` は stale run を含む read-only 一覧を出す
@@ -586,6 +587,7 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - checkpoint save は in-flight work 保護用で、完了記録の代わりにはしない
 - phase 完了と run 完了では remote backup だけでなく local save state も更新する
 - タスク完了と判断したら必ず `codex-kernel-guard run-complete --summary <text>` を実行して completion を保存し、durable mirror まで通す
+- 一度通った local auth / unlock / trust 証跡は run 全体の shared evidence として再利用し、non-critical work で同じ認証を繰り返し要求しない
 - unattended health のため、最初の acknowledgement 前に bootstrap receipt を書き、mode 変化時にも更新する
 - bootstrap receipt には provider 数だけでなく `Active models`、manifest lane count、agent/subagent label 有無も入れて live manifest evidence を残す
 - `Active models:` 行で、その run で実際に稼働している model だけを明示する
@@ -594,5 +596,6 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - planned / pending / failed lane は数えない
 - Bootstrap target: 6+ lanes (minimum 6).
 - Codex の `/vote` はローカル継続用の slash prompt
+- non-critical work の `/vote` は current run に local consensus evidence を残してから先へ進む
 - vote-gh
 - RUN_CODEX_VOTE_SMOKE=1 bash tests/test-codex-vote-prompt.sh

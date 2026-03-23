@@ -10,15 +10,15 @@
   "codex_thread_title": "kernel-workspace:unspecified:59z88504",
   "owner": "local-operator",
   "active_models": [
-    "GPT-5",
-    "gpt-5.3-codex-spark",
-    "glm-4.5",
+    "codex",
+    "glm",
     "gemini-cli"
   ],
   "blocking_reason": "bootstrap-valid",
   "scheduler_state": "",
   "scheduler_reason": "",
   "workspace_receipt_path": "",
+  "consensus_receipt_path": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-state/consensus-receipts/adhoc_Mac-mini-M1-for-Otawara-M-5_kernel-workspace_88504_run_20260323T023159Z_88504.json",
   "next_action": [],
   "decisions": [],
   "phase_artifacts": {},
@@ -26,5 +26,5 @@
     "state=healthy; reason=bootstrap-valid"
   ],
   "last_event": "status_changed",
-  "updated_at": "2026-03-23T03:03:02Z"
+  "updated_at": "2026-03-23T03:52:01Z"
 }

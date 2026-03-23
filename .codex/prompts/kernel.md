@@ -18,6 +18,7 @@ Procedure:
    - in this repository, treat non-trivial requirement definition, planning, implementation, and review as Kernel work by default; do not continue them as plain Codex-only work
    - treat requirement definition as critical work; if the goal, acceptance criteria, or non-goals are not yet sharp, wall-bat with the user first and freeze them before implementation
    - use early clarification to prevent goal drift, not as a substitute for implementation
+   - for non-critical work, continue under local `/vote` consensus by default; critical issues are the only exemption to that default
    - do not label a plan as a Kernel plan unless the required diverse voices for that plan are actually active in the current run
    - decompose the work into independent lanes before proceeding
    - launch at least 6 materially distinct subagents immediately before any substantive analysis
@@ -101,6 +102,7 @@ Constraints:
 - Default to one-pass delivery: complete investigation, revised planning, implementation, and verification in one flow unless blocked by destructive risk, missing credentials, or external approval.
 - Front-load user interaction into requirement definition: clarify the goal rigorously at the start, then avoid routine confirmation churn after the target is aligned.
 - Do not ask the user to confirm routine progress between planning and implementation.
+- Once a successful local auth, unlock, or trust proof exists in the run, reuse it across lanes and do not re-request equivalent user auth for non-critical work.
 - Do not emit routine intermediate progress reports or midpoint summaries during execution.
 - After requirements are frozen, report only when blocked, when external approval is required, when the user explicitly asks, or when final completion is reached.
 - Do not pause execution to summarize a partial milestone, sub-slice, or intermediate checkpoint while the active request is still in progress.

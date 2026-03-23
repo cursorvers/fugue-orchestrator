@@ -14,6 +14,7 @@
   "scheduler_state": "",
   "scheduler_reason": "",
   "workspace_receipt_path": "",
+  "consensus_receipt_path": "",
   "next_action": [],
   "decisions": [],
   "phase_artifacts": {},
@@ -21,5 +22,5 @@
     "state=invalid; reason=bootstrap-receipt-missing"
   ],
   "last_event": "status_changed",
-  "updated_at": "2026-03-23T03:04:46Z"
+  "updated_at": "2026-03-23T05:25:43Z"
 }

@@ -1,20 +1,19 @@
 {
   "run_id": "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:88504:run:20260323T023159Z:88504",
-  "recorded_at": "2026-03-23T02:34:48Z",
-  "lane_count": 9,
+  "recorded_at": "2026-03-23T03:29:29Z",
+  "lane_count": 8,
   "providers": [
     "codex",
     "glm",
     "gemini-cli"
   ],
   "active_models": [
-    "GPT-5",
-    "gpt-5.3-codex-spark",
-    "glm-4.5",
+    "codex",
+    "glm",
     "gemini-cli"
   ],
-  "active_model_count": 4,
-  "manifest_lane_count": 9,
+  "active_model_count": 3,
+  "manifest_lane_count": 8,
   "has_agent_labels": true,
   "has_subagent_labels": true,
   "mode": "normal",
