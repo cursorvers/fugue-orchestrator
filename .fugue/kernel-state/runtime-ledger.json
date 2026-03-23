@@ -225,7 +225,7 @@
       }
     },
     "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:88504:run:20260323T023159Z:88504": {
-      "updated_at": "2026-03-23T02:50:49Z",
+      "updated_at": "2026-03-23T03:03:02Z",
       "provider_usage": {
         "codex": {
           "success_count": 1,
@@ -256,13 +256,13 @@
     "adhoc:test": {
       "state": "invalid",
       "reason": "bootstrap-receipt-missing",
-      "updated_at": "2026-03-23T02:49:30Z",
+      "updated_at": "2026-03-23T03:04:46Z",
       "receipt_path": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-state/bootstrap-receipts/adhoc_test.json"
     },
     "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:subagent5:20260323T113446Z": {
       "state": "invalid",
       "reason": "bootstrap-receipt-missing",
-      "updated_at": "2026-03-23T02:50:05Z",
+      "updated_at": "2026-03-23T03:02:18Z",
       "receipt_path": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-state/bootstrap-receipts/adhoc_Mac-mini-M1-for-Otawara-M-5_kernel-workspace_subagent5_20260323T113446Z.json"
     }
   }

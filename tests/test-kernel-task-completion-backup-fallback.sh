@@ -31,5 +31,18 @@ grep -Fq '"record_id"' "${journal}"
 grep -Fq '"assistant":"codex"' "${journal}"
 grep -Fq '"summary_text":"Kernel fallback backup smoke"' "${journal}"
 grep -Fq '"gha_mirror_path":"backups/task-completion/' "${journal}"
+grep -Fq '"orchestration_compliance":"kernel-run-complete"' "${journal}"
+
+bash "${RUNNER}" \
+  --assistant codex \
+  --source kernel-progress-save \
+  --session-id record-session \
+  --summary "Kernel progress backup smoke" \
+  --cwd "${ROOT_DIR}" \
+  --title "Fallback Progress" \
+  --no-gha \
+  --dry-run
+
+grep -Fq '"orchestration_compliance":"kernel-progress-save"' "${journal}"
 
 echo "kernel task completion backup fallback check passed"

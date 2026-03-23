@@ -64,8 +64,19 @@ fallback_observed_models_json() {
   fi
 }
 
+fallback_orchestration_compliance() {
+  case "${source_name}" in
+    kernel-progress-save|kernel-phase-complete|kernel-run-complete)
+      printf '%s\n' "${source_name}"
+      ;;
+    *)
+      printf 'kernel-run-complete\n'
+      ;;
+  esac
+}
+
 fallback_write_record() {
-  local record_id dispatch_token mirror_path receipt_path payload_path payload_b64 observed_models_json
+  local record_id dispatch_token mirror_path receipt_path payload_path payload_b64 observed_models_json orchestration_compliance
   local completed_value="${completed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
   record_id="$(fallback_record_id)"
@@ -74,10 +85,11 @@ fallback_write_record() {
   receipt_path="backups/task-completion-receipts/${record_id}/${dispatch_token}.json"
   payload_path="${STATE_ROOT}/${record_id}.payload.json"
   observed_models_json="$(fallback_observed_models_json "${session_id}")"
+  orchestration_compliance="$(fallback_orchestration_compliance)"
 
-  python3 - "$record_id" "$assistant" "$source_name" "$session_id" "$completed_value" "$summary" "$cwd" "$title" "$GHA_REPO" "$GHA_WORKFLOW" "$dispatch_token" "$mirror_path" "$receipt_path" "$observed_models_json" "$payload_path" <<'PY'
+  python3 - "$record_id" "$assistant" "$source_name" "$session_id" "$completed_value" "$summary" "$cwd" "$title" "$GHA_REPO" "$GHA_WORKFLOW" "$dispatch_token" "$mirror_path" "$receipt_path" "$observed_models_json" "$payload_path" "$orchestration_compliance" <<'PY'
 import json, sys
-record_id, assistant, source_name, session_id, completed_at, summary, cwd, title, gha_repo, gha_workflow, token, mirror_path, receipt_path, observed_models_json, payload_path = sys.argv[1:]
+record_id, assistant, source_name, session_id, completed_at, summary, cwd, title, gha_repo, gha_workflow, token, mirror_path, receipt_path, observed_models_json, payload_path, orchestration_compliance = sys.argv[1:]
 payload = {
     "record_id": record_id,
     "assistant": assistant,
@@ -92,7 +104,7 @@ payload = {
     "gha_dispatch_token": token,
     "gha_mirror_path": mirror_path,
     "gha_receipt_path": receipt_path,
-    "orchestration_compliance": "kernel-run-complete",
+    "orchestration_compliance": orchestration_compliance,
     "observed_models": json.loads(observed_models_json),
 }
 with open(payload_path, "w", encoding="utf-8") as fh:

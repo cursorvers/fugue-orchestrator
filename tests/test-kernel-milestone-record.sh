@@ -136,4 +136,32 @@ grep -Fq -- '--summary checkpoint summary forced' "${LOG_FILE}" || {
   exit 1
 }
 
+: > "${LOG_FILE}"
+FAILING_RUNNER="${TMP_DIR}/failing-runner.sh"
+cat > "${FAILING_RUNNER}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 9
+EOF
+chmod +x "${FAILING_RUNNER}"
+
+if KERNEL_AUTO_RECORD_NO_GHA=true \
+  KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC=900 \
+  KERNEL_CHECKPOINT_SAVE_FORCE=true \
+  KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${FAILING_RUNNER}" \
+  bash "${SCRIPT}" checkpoint "checkpoint should fail"; then
+  echo "checkpoint save should fail when mirror runner fails" >&2
+  exit 1
+fi
+
+KERNEL_AUTO_RECORD_NO_GHA=true \
+KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC=900 \
+KERNEL_CHECKPOINT_SAVE_FORCE=true \
+KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \
+bash "${SCRIPT}" checkpoint "checkpoint after failure"
+grep -Fq -- '--summary checkpoint after failure' "${LOG_FILE}" || {
+  echo "checkpoint failure should not advance throttle stamp" >&2
+  exit 1
+}
+
 echo "kernel milestone record check passed"
