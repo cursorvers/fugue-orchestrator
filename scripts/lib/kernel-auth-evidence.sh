@@ -37,7 +37,7 @@ state_root() {
 }
 
 run_slug() {
-  printf '%s' "${1:-${RUN_ID}}" | tr -c '[:alnum:]._-=' '_'
+  printf '%s' "${1:-${RUN_ID}}" | tr -c '[:alnum:].=_-' '_'
 }
 
 path_for() {
