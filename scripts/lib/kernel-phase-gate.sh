@@ -9,6 +9,7 @@ GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 MILESTONE_RECORD_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-milestone-record.sh"
 WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
+CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -59,6 +60,37 @@ compact_json() {
   path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${COMPACT_SCRIPT}" path "${RUN_ID}" 2>/dev/null || true)"
   [[ -n "${path}" && -f "${path}" ]] || return 1
   jq -c '.' "${path}"
+}
+
+consensus_json() {
+  local path
+  path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${CONSENSUS_SCRIPT}" path 2>/dev/null || true)"
+  [[ -n "${path}" && -f "${path}" ]] || return 1
+  jq -c '.' "${path}"
+}
+
+task_size_tier() {
+  if [[ -n "${KERNEL_TASK_SIZE_TIER:-}" ]]; then
+    printf '%s\n' "${KERNEL_TASK_SIZE_TIER}" | tr '[:upper:]' '[:lower:]'
+    return 0
+  fi
+  if consensus_json >/dev/null 2>&1; then
+    jq -r '.task_size_tier // "medium"' <<<"$(consensus_json)"
+    return 0
+  fi
+  printf 'medium\n'
+}
+
+local_consensus_required() {
+  [[ "$(task_size_tier)" != "critical" ]]
+}
+
+check_local_consensus() {
+  local json
+  local_consensus_required || return 0
+  json="$(consensus_json)" || fail_gate "local-consensus-evidence-missing"
+  [[ "$(jq -r '.decision // "unknown"' <<<"${json}")" == "approved" ]] || fail_gate "local-consensus-not-approved"
+  [[ "$(jq -r '.ok_to_execute // false' <<<"${json}")" == "true" ]] || fail_gate "local-consensus-not-executable"
 }
 
 ledger_file() {
@@ -218,6 +250,7 @@ check_common_runtime() {
 }
 
 check_phase() {
+  check_local_consensus || return 1
   case "${PHASE}" in
     requirements|plan|critique)
       check_common_runtime || return 1

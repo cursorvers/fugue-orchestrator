@@ -13,6 +13,7 @@ export KERNEL_OPTIONAL_LANE_LEDGER_FILE="${TMP_DIR}/ledger.json"
 export KERNEL_RUN_ID="pick-test"
 export KERNEL_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_PROVIDER_READY_TIMEOUT_SEC=1
+export KERNEL_AUTH_EVIDENCE_TTL_SEC=0
 
 cat >"${FAKE_BIN}/gemini" <<'EOF'
 #!/usr/bin/env bash
@@ -87,5 +88,26 @@ out="$(bash "${SCRIPT}" ready cursor-cli 2>&1)"
 grep -Fq 'ready' <<<"${out}"
 unset SSH_CONNECTION
 unset KERNEL_CURSOR_KEYCHAIN_LOCKED_OK
+
+# TTL=0 keeps per-run auth evidence indefinitely and avoids repeat probes.
+rm -f "${CURSOR_STATUS_COUNT}"
+rm -rf "${TMP_DIR}/state/auth-evidence"
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+sleep 2
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+[[ "$(cat "${CURSOR_STATUS_COUNT}")" == "1" ]]
+
+# Positive TTL still allows explicit expiry when requested.
+rm -f "${CURSOR_STATUS_COUNT}"
+rm -rf "${TMP_DIR}/state/auth-evidence"
+export KERNEL_AUTH_EVIDENCE_TTL_SEC=1
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+sleep 2
+out="$(bash "${SCRIPT}" ready cursor-cli 2>&1 || true)"
+grep -Fq 'not-ready' <<<"${out}"
+[[ "$(cat "${CURSOR_STATUS_COUNT}")" == "2" ]]
 
 echo "kernel specialist picker check passed"

@@ -36,10 +36,24 @@ grep -Fq -- '--source kernel-phase-complete' "${LOG_FILE}" || {
   echo "plan phase should be auto-recorded" >&2
   exit 1
 }
+grep -Fq -- '--no-gha' "${LOG_FILE}" || {
+  echo "non-critical phase auto-record should default to local-only" >&2
+  exit 1
+}
 grep -Fq -- '--title fugue-orchestrator:milestone-check:plan' "${LOG_FILE}" || {
   echo "plan phase should include milestone title" >&2
   exit 1
 }
+
+: > "${LOG_FILE}"
+KERNEL_TASK_SIZE_TIER=critical \
+KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \
+bash "${SCRIPT}" phase verify
+
+if grep -Fq -- '--no-gha' "${LOG_FILE}"; then
+  echo "critical phase auto-record should not force local-only mode" >&2
+  exit 1
+fi
 
 : > "${LOG_FILE}"
 KERNEL_MILESTONE_RECORD_RUNNER_SCRIPT="${RUNNER_SCRIPT}" \

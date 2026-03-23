@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 source "${SCRIPT_DIR}/workspace-root-policy.sh"
 
 default_run_id() {
@@ -93,6 +94,16 @@ ledger_path_for() {
   printf '%s\n' "${KERNEL_RUNTIME_LEDGER_FILE:-$(bash "${STATE_PATH_SCRIPT}" runtime-ledger-file)}"
 }
 
+consensus_receipt_path_for() {
+  local run_id="${1:-${RUN_ID}}"
+  local path
+  [[ -f "${CONSENSUS_SCRIPT}" ]] || return 0
+  path="$(KERNEL_RUN_ID="${run_id}" bash "${CONSENSUS_SCRIPT}" path 2>/dev/null || true)"
+  if [[ -n "${path}" && -f "${path}" ]]; then
+    printf '%s\n' "${path}"
+  fi
+}
+
 write_receipt() {
   local run_id="${1:-${RUN_ID}}"
   local workspace_dir receipt_path artifacts_dir logs_dir traces_dir workspace_key
@@ -126,6 +137,7 @@ write_receipt() {
     --arg compact_artifact_path "$(compact_artifact_path_for "${run_id}")" \
     --arg bootstrap_receipt_path "$(bootstrap_receipt_path_for "${run_id}")" \
     --arg runtime_ledger_path "$(ledger_path_for)" \
+    --arg consensus_receipt_path "$(consensus_receipt_path_for "${run_id}")" \
     --arg created_at "${created_at}" \
     --arg updated_at "${now}" \
     '{
@@ -142,6 +154,7 @@ write_receipt() {
       compact_artifact_path: $compact_artifact_path,
       bootstrap_receipt_path: $bootstrap_receipt_path,
       runtime_ledger_path: $runtime_ledger_path,
+      consensus_receipt_path: $consensus_receipt_path,
       created_at: $created_at,
       updated_at: $updated_at
     }' >"${tmp_file}"
@@ -195,6 +208,7 @@ cmd_status() {
     "  - compact artifact path: \(.compact_artifact_path)",
     "  - bootstrap receipt path: \(.bootstrap_receipt_path)",
     "  - runtime ledger path: \(.runtime_ledger_path)",
+    "  - consensus receipt path: \(.consensus_receipt_path // "")",
     "  - created at: \(.created_at)",
     "  - updated at: \(.updated_at)"
   ' "${receipt_path}"

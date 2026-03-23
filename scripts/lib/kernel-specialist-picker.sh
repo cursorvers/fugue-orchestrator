@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUDGET_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-optional-lane-budget.sh"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
-AUTH_TTL_SEC="${KERNEL_AUTH_EVIDENCE_TTL_SEC:-300}"
+AUTH_EVIDENCE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-auth-evidence.sh"
+AUTH_TTL_SEC="${KERNEL_AUTH_EVIDENCE_TTL_SEC:-0}"
 READY_TIMEOUT_SEC="${KERNEL_PROVIDER_READY_TIMEOUT_SEC:-5}"
 
 usage() {
@@ -16,36 +17,24 @@ Usage:
 EOF
 }
 
-run_slug() {
-  printf '%s' "${KERNEL_RUN_ID:-unknown-run}" | tr -c '[:alnum:]._-=' '_'
-}
-
-auth_evidence_file() {
-  local provider="${1:?provider is required}"
-  local state_root
-  state_root="$(bash "${STATE_PATH_SCRIPT}" state-root)"
-  printf '%s/auth-evidence/%s/%s.status\n' "${state_root}" "$(run_slug)" "${provider}"
-}
-
 write_auth_evidence() {
   local provider="${1:?provider is required}"
   local state="${2:?state is required}"
   local note="${3:-}"
-  local path
-  path="$(auth_evidence_file "${provider}")"
-  mkdir -p "$(dirname "${path}")"
-  printf '%s\t%s\t%s\n' "${state}" "$(date +%s)" "${note}" >"${path}"
+  bash "${AUTH_EVIDENCE_SCRIPT}" record "${provider}" "${state}" "${note}" >/dev/null
 }
 
 read_auth_evidence() {
   local provider="${1:?provider is required}"
   local path state saved_at note now
-  path="$(auth_evidence_file "${provider}")"
+  path="$(KERNEL_RUN_ID="${KERNEL_RUN_ID:-unknown-run}" bash "${AUTH_EVIDENCE_SCRIPT}" path "${provider}" 2>/dev/null || true)"
   [[ -f "${path}" ]] || return 1
-  IFS=$'\t' read -r state saved_at note <"${path}" || return 1
+  state="$(jq -r '.state // ""' "${path}")"
+  saved_at="$(jq -r '.updated_at_epoch // 0' "${path}")"
+  note="$(jq -r '.note // ""' "${path}")"
   [[ -n "${state}" && -n "${saved_at}" ]] || return 1
   now="$(date +%s)"
-  if (( now - saved_at > AUTH_TTL_SEC )); then
+  if (( AUTH_TTL_SEC > 0 && now - saved_at > AUTH_TTL_SEC )); then
     return 1
   fi
   printf '%s\t%s\n' "${state}" "${note}"

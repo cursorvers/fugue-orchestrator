@@ -35,6 +35,58 @@ passed=0
 failed=0
 total=0
 
+assert_content_label_case() {
+  local name="$1"
+  local body="$2"
+  local expected_label="$3"
+  local out_file="${TMP_DIR}/${name}.out"
+
+  total=$((total + 1))
+  : > "${FAKE_GH_LOG}"
+  jq -Rn --arg body "${body}" '{title:"Task", body:$body, labels:[]}' > "${FAKE_ISSUE_JSON}"
+
+  if ! (
+    cd "${ROOT_DIR}"
+    env \
+      PATH="${FAKE_BIN}:${PATH}" \
+      FAKE_GH_LOG="${FAKE_GH_LOG}" \
+      FAKE_ISSUE_JSON="${FAKE_ISSUE_JSON}" \
+      GH_TOKEN="test-token" \
+      GITHUB_OUTPUT="${out_file}" \
+      GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
+      GITHUB_RUN_ID="101" \
+      GITHUB_RUN_ATTEMPT="1" \
+      ISSUE_NUMBER="1" \
+      ISSUE_TITLE="Task" \
+      ISSUE_BODY="${body}" \
+      COMMENT_BODY="/vote" \
+      IS_VOTE_COMMAND="true" \
+      VOTE_INSTRUCTION="" \
+      EXECUTION_MODE_OVERRIDE_INPUT="auto" \
+      TRUST_SUBJECT="masayuki" \
+      DEFAULT_MAIN_ORCHESTRATOR_PROVIDER="codex" \
+      DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER="claude" \
+      CLAUDE_RATE_LIMIT_STATE="ok" \
+      CLAUDE_MAIN_ASSIST_POLICY="codex" \
+      CLAUDE_ROLE_POLICY="flex" \
+      CLAUDE_DEGRADED_ASSIST_POLICY="claude" \
+      bash "${SCRIPT}" >/dev/null 2>"${TMP_DIR}/${name}.stderr"
+  ); then
+    echo "FAIL [${name}]: script exited with error"
+    failed=$((failed + 1))
+    return
+  fi
+
+  if ! grep -Eq -- "--add-label ${expected_label}([[:space:]]|$)" "${FAKE_GH_LOG}"; then
+    echo "FAIL [${name}]: missing ${expected_label}"
+    failed=$((failed + 1))
+    return
+  fi
+
+  echo "PASS [${name}]"
+  passed=$((passed + 1))
+}
+
 assert_case() {
   local name="$1"
   local body="$2"
@@ -176,6 +228,7 @@ assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution 
 assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false" "auto" "primary"
 assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy" "backup-heavy"
 assert_case "kernel-run-id-passthrough" "通常タスク" "" "implement" "true" "true" "true" "auto" "primary" "run-kernel-123"
+assert_content_label_case "company-deck-content-label" "外出先から会社紹介スライドを作って" "content-action:company-deck"
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

@@ -10,6 +10,7 @@ STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 AUTO_RECORD="${KERNEL_AUTO_MILESTONE_RECORDING:-true}"
 AUTO_RECORD_PHASES="${KERNEL_AUTO_RECORD_PHASES:-plan,implement,verify}"
 AUTO_RECORD_NO_GHA="${KERNEL_AUTO_RECORD_NO_GHA:-false}"
+ALLOW_GHA_NONCRITICAL="${KERNEL_ALLOW_GHA_NONCRITICAL:-false}"
 AUTO_RECORD_DRY_RUN="${KERNEL_AUTO_RECORD_DRY_RUN:-false}"
 ORCH_DRY_RUN_VALUE="${ORCH_DRY_RUN:-false}"
 CHECKPOINT_MIN_INTERVAL_SEC="${KERNEL_CHECKPOINT_SAVE_MIN_INTERVAL_SEC:-900}"
@@ -33,6 +34,21 @@ EOF
 }
 
 run_id="$(default_run_id)"
+
+task_size_tier() {
+  local tier="${KERNEL_TASK_SIZE_TIER:-medium}"
+  tier="$(printf '%s' "${tier}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  case "${tier}" in
+    critical) printf 'critical\n' ;;
+    *) printf 'medium\n' ;;
+  esac
+}
+
+default_no_gha() {
+  [[ "${AUTO_RECORD_NO_GHA}" == "true" ]] && return 0
+  [[ "${ALLOW_GHA_NONCRITICAL}" == "true" ]] && return 1
+  [[ "$(task_size_tier)" != "critical" ]]
+}
 
 should_skip() {
   [[ "${AUTO_RECORD}" == "false" ]] && return 0
@@ -118,7 +134,7 @@ cmd_phase() {
   purpose="${KERNEL_PURPOSE:-unspecified}"
   title="${project}:${purpose}:${phase}"
 
-  if [[ "${AUTO_RECORD_NO_GHA}" == "true" ]]; then
+  if default_no_gha; then
     runner_flags+=(--no-gha)
   fi
   if [[ "${AUTO_RECORD_DRY_RUN}" == "true" ]]; then
@@ -166,7 +182,7 @@ cmd_checkpoint() {
       return 1
     }
 
-  if [[ "${AUTO_RECORD_NO_GHA}" == "true" ]]; then
+  if default_no_gha; then
     runner_flags+=(--no-gha)
   fi
   if [[ "${AUTO_RECORD_DRY_RUN}" == "true" ]]; then

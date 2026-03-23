@@ -259,8 +259,12 @@ assert_workspace "workspace-doc-sheet-domain-only" \
 
 # --- Group 13: Content route hints ---
 assert_content "content-slide" \
-  "slide-deck" "slide" "true" \
+  "slide-deck,company-deck" "slide" "true" \
   --text "外出先から会社紹介スライドを作って"
+
+assert_content "content-slide-generic" \
+  "slide-deck" "slide" "true" \
+  --text "営業資料のスライドを作って"
 
 assert_content "content-academic-slide" \
   "slide-deck,academic-slide" "slide,academic-two-stage-slide" "true" \

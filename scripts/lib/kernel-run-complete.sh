@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PHASE_GATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-phase-gate.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
-RUNNER_SCRIPT="${ROOT_DIR}/scripts/local/run-kernel-task-completion-backup.sh"
+RUNNER_SCRIPT="${KERNEL_RUN_COMPLETE_RUNNER_SCRIPT:-${ROOT_DIR}/scripts/local/run-kernel-task-completion-backup.sh}"
 WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
+ALLOW_GHA_NONCRITICAL="${KERNEL_ALLOW_GHA_NONCRITICAL:-false}"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -16,6 +17,15 @@ default_run_id() {
 }
 
 RUN_ID="$(default_run_id)"
+
+task_size_tier() {
+  local tier="${KERNEL_TASK_SIZE_TIER:-medium}"
+  tier="$(printf '%s' "${tier}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]*$//g')"
+  case "${tier}" in
+    critical) printf 'critical\n' ;;
+    *) printf 'medium\n' ;;
+  esac
+}
 
 usage() {
   cat <<'EOF'
@@ -79,6 +89,21 @@ project="${KERNEL_PROJECT:-kernel-workspace}"
 purpose="${KERNEL_PURPOSE:-unspecified}"
 if [[ -z "${title}" ]]; then
   title="${project}:${purpose}"
+fi
+
+if [[ "${ALLOW_GHA_NONCRITICAL}" != "true" && "$(task_size_tier)" != "critical" ]]; then
+  has_no_gha=false
+  if ((${#runner_flags[@]} > 0)); then
+    for flag in "${runner_flags[@]}"; do
+      if [[ "${flag}" == "--no-gha" ]]; then
+        has_no_gha=true
+        break
+      fi
+    done
+  fi
+  if [[ "${has_no_gha}" != "true" ]]; then
+    runner_flags+=(--no-gha)
+  fi
 fi
 
 workspace_receipt_path=""

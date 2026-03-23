@@ -7,6 +7,7 @@ RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
+CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
@@ -44,10 +45,16 @@ run_requirements_normal() {
   export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
   export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
   export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
+  export KERNEL_TASK_SIZE_TIER="medium"
   bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider codex success launch >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider glm success critique >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider gemini-cli success specialist >/dev/null
+  if bash "${PHASE_GATE_SCRIPT}" check requirements >/dev/null 2>&1; then
+    echo "expected requirements gate to fail without local consensus evidence" >&2
+    exit 1
+  fi
+  bash "${CONSENSUS_SCRIPT}" record approved vote "requirements consensus" >/dev/null
   out="$(bash "${PHASE_GATE_SCRIPT}" check requirements)"
   grep -Fq 'passed: true' <<<"${out}"
 }
@@ -63,6 +70,7 @@ run_critique_degraded() {
   export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
   export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
   export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
+  export KERNEL_TASK_SIZE_TIER="critical"
   bash "${GLM_STATE_SCRIPT}" fail one >/dev/null
   bash "${GLM_STATE_SCRIPT}" fail two >/dev/null
   bash "${RECEIPT_SCRIPT}" write 6 codex,gemini-cli,cursor-cli degraded-allowed >/dev/null
@@ -84,8 +92,10 @@ run_simulation_gate() {
   export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
   export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
   export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
+  export KERNEL_TASK_SIZE_TIER="medium"
   bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider codex success simulation >/dev/null
+  bash "${CONSENSUS_SCRIPT}" record approved vote "simulation consensus" >/dev/null
   out="$(bash "${PHASE_GATE_SCRIPT}" check simulate)"
   grep -Fq 'passed: true' <<<"${out}"
 }
@@ -101,10 +111,12 @@ run_implementation_uiux_gate() {
   export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
   export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
   export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
+  export KERNEL_TASK_SIZE_TIER="medium"
   export IMPLEMENTATION_REPORT_PATH="${TMP_DIR}/phase-impl-uiux-implementation.md"
   bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider codex success launch >/dev/null
   bash "${LEDGER_SCRIPT}" record-provider glm success implementation >/dev/null
+  bash "${CONSENSUS_SCRIPT}" record approved vote "implementation consensus" >/dev/null
   if bash "${PHASE_GATE_SCRIPT}" check implement --uiux >/dev/null 2>&1; then
     echo "expected uiux gate to fail without gemini evidence" >&2
     exit 1

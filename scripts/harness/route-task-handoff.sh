@@ -364,7 +364,7 @@ fugue_gh_retry 4 gh label create "${assist_orchestrator_label}" \
   --color "0052CC" >/dev/null 2>&1 || true
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator:claude" --remove-label "orchestrator:codex" >/dev/null 2>&1 || true
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "orchestrator-assist:claude" --remove-label "orchestrator-assist:codex" --remove-label "orchestrator-assist:none" >/dev/null 2>&1 || true
-fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content-action:slide-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" >/dev/null 2>&1 || true
+fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "content-task" --remove-label "content:slide" --remove-label "content:academic-slide" --remove-label "content:note" --remove-label "content-action:slide-deck" --remove-label "content-action:company-deck" --remove-label "content-action:academic-slide" --remove-label "content-action:note-manuscript" >/dev/null 2>&1 || true
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "fugue-task" >/dev/null
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${orchestrator_label}" >/dev/null
 fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${assist_orchestrator_label}" >/dev/null
@@ -391,6 +391,9 @@ if [[ "${content_hint_applied}" == "true" ]]; then
   case "${content_action_hint}" in
     *academic-slide*)
       content_action_label="content-action:academic-slide"
+      ;;
+    *company-deck*)
+      content_action_label="content-action:company-deck"
       ;;
     *slide-deck*)
       content_action_label="content-action:slide-deck"

@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
+CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
@@ -13,6 +14,7 @@ export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
+export KERNEL_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_PROJECT="fugue-orchestrator"
 export KERNEL_PURPOSE="secret-plane"
 export KERNEL_PHASE="plan"
@@ -27,6 +29,7 @@ export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
 export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
 export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 
+KERNEL_TASK_SIZE_TIER="medium" bash "${CONSENSUS_SCRIPT}" record approved vote "compact receipt consensus" >/dev/null
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
 bash "${LEDGER_SCRIPT}" scheduler-state running "bootstrap-valid" "/tmp/compact-test-workspace.json" >/dev/null
@@ -44,6 +47,7 @@ grep -Fq 'codex thread: fugue-orchestrator:secret-plane' <<<"${out}"
 grep -Fq 'scheduler state: running' <<<"${out}"
 grep -Fq 'scheduler reason: bootstrap-valid' <<<"${out}"
 grep -Fq 'workspace receipt path: /tmp/compact-test-workspace.json' <<<"${out}"
+grep -Fq "consensus receipt path: ${TMP_DIR}/state/consensus-receipts/compact-test.json" <<<"${out}"
 grep -Fq 'phase artifacts: critic_report_path | plan_report_path' <<<"${out}"
 grep -Fq 'next action: implement-loader' <<<"${out}"
 grep -Fq 'decisions: use-keychain | mirror-github | keep-fugue-untouched' <<<"${out}"
@@ -113,6 +117,7 @@ export KERNEL_RUN_ID="compact-preserve"
 export KERNEL_SCHEDULER_STATE="retry_queued"
 export KERNEL_SCHEDULER_REASON="awaiting-recovery"
 export KERNEL_WORKSPACE_RECEIPT_PATH="/tmp/preserve-workspace.json"
+KERNEL_TASK_SIZE_TIER="medium" bash "${CONSENSUS_SCRIPT}" record approved vote "compact preserve consensus" >/dev/null
 bash "${COMPACT_SCRIPT}" update status_changed "preserve once" >/dev/null
 unset KERNEL_SCHEDULER_STATE
 unset KERNEL_SCHEDULER_REASON
@@ -121,8 +126,10 @@ bash "${COMPACT_SCRIPT}" update status_changed "preserve twice" >/dev/null
 preserve_scheduler_state="$(jq -r '.scheduler_state' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
 preserve_scheduler_reason="$(jq -r '.scheduler_reason' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
 preserve_workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
+preserve_consensus_receipt_path="$(jq -r '.consensus_receipt_path' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
 [[ "${preserve_scheduler_state}" == "retry_queued" ]]
 [[ "${preserve_scheduler_reason}" == "awaiting-recovery" ]]
 [[ "${preserve_workspace_receipt_path}" == "/tmp/preserve-workspace.json" ]]
+[[ "${preserve_consensus_receipt_path}" == "${TMP_DIR}/state/consensus-receipts/compact-preserve.json" ]]
 
 echo "kernel compact artifact check passed"

@@ -292,6 +292,7 @@ WORKFLOW_RISK_POLICY="${ROOT_DIR}/scripts/lib/workflow-risk-policy.sh"
 CLAUDE_TEAMS_POLICY="${ROOT_DIR}/scripts/lib/claude-teams-policy.sh"
 LINKED_RUNNER="${ROOT_DIR}/scripts/local/run-linked-systems.sh"
 ORCHESTRATOR_NL_HINTS="${ROOT_DIR}/scripts/lib/orchestrator-nl-hints.sh"
+CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 GOOGLEWORKSPACE_KERNEL_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-kernel-policy.json"
 PRIMARY_HEARTBEAT_SCRIPT="${ROOT_DIR}/scripts/local/pulse-primary-heartbeat.sh"
 GOOGLEWORKSPACE_FEED_POLICY="${ROOT_DIR}/config/integrations/googleworkspace-feed-policy.json"
@@ -752,6 +753,7 @@ if [[ "${claude_session_count}" -gt 0 ]]; then
 fi
 
 integrated_json="${RUN_DIR}/integrated.json"
+consensus_receipt_path=""
 high_risk_count="$(jq '[.[] | select(.skipped != true and (.risk|ascii_upcase) == "HIGH")] | length' "${all_results}")"
 high_risk="false"
 if [[ "${high_risk_count}" -gt 0 ]]; then
@@ -1057,6 +1059,16 @@ jq -n \
     workspace_context_file:$workspace_context_file
   }' > "${integrated_json}"
 
+if [[ -n "${KERNEL_RUN_ID:-}" && -f "${CONSENSUS_SCRIPT}" ]]; then
+  KERNEL_TASK_SIZE_TIER="${issue_task_size_tier}" \
+    bash "${CONSENSUS_SCRIPT}" from-local-orchestration \
+      "${integrated_json}" \
+      "${KERNEL_LOCAL_CONSENSUS_SOURCE:-local-vote}" \
+      "${KERNEL_LOCAL_CONSENSUS_SUMMARY:-local orchestration integrated consensus}" \
+      >/dev/null
+  consensus_receipt_path="$(KERNEL_RUN_ID="${KERNEL_RUN_ID}" bash "${CONSENSUS_SCRIPT}" path 2>/dev/null || true)"
+fi
+
 summary_md="${RUN_DIR}/summary.md"
 cat > "${summary_md}" <<EOF
 ## Local Tutti Integrated Review
@@ -1091,6 +1103,7 @@ cat > "${summary_md}" <<EOF
 - workspace action hint: ${workspace_action_hint}
 - workspace domain hint: ${workspace_domain_hint}
 - workspace context file: ${workspace_context_file}
+- local consensus receipt: ${consensus_receipt_path:-not-recorded}
 - ok_to_execute: ${ok_to_execute}
 - run dir: ${RUN_DIR}
 EOF

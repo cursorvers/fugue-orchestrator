@@ -10,6 +10,7 @@ LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 SESSION_NAME_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-session-name.sh"
+CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 LOCK_HELD=0
 source "${SCRIPT_DIR}/kernel-lock.sh"
 
@@ -212,6 +213,15 @@ receipt_json() {
   jq -c '.' "${path}"
 }
 
+consensus_receipt_path() {
+  local path
+  [[ -f "${CONSENSUS_SCRIPT}" ]] || return 0
+  path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${CONSENSUS_SCRIPT}" path 2>/dev/null || true)"
+  if [[ -n "${path}" && -f "${path}" ]]; then
+    printf '%s\n' "${path}"
+  fi
+}
+
 normalize_summary() {
   local raw="${1:-}"
   printf '%s\n' "${raw}" | awk 'NF {print}' | sed -n '1,3p'
@@ -290,7 +300,7 @@ cmd_update() {
   local tmux_session phase project purpose owner blocking_reason codex_thread_title
   local mode runtime active_models_json decisions_json next_actions_json phase_artifacts_json ledger_compact receipt_compact
   local existing_mode existing_blocking_reason existing_scheduler_state existing_scheduler_reason
-  local existing_workspace_receipt_path scheduler_state scheduler_reason workspace_receipt_path
+  local existing_workspace_receipt_path existing_consensus_receipt_path scheduler_state scheduler_reason workspace_receipt_path consensus_receipt_path_value
   local session_fingerprint
   local summary normalized_summary
 
@@ -316,11 +326,12 @@ cmd_update() {
   existing_scheduler_state=""
   existing_scheduler_reason=""
   existing_workspace_receipt_path=""
+  existing_consensus_receipt_path=""
   if [[ -n "${existing_json}" ]]; then
     if [[ -z "${existing_mode}" ]]; then
       existing_mode="$(jq -r '.mode // "unknown"' <<<"${existing_json}")"
     fi
-    local _eb _ess _esr _ewp
+    local _eb _ess _esr _ewp _ecrp
     IFS=$'\t' read -r _eb _ess _esr _ewp < <(jq -r '[
       (.blocking_reason // ""),
       (.scheduler_state // ""),
@@ -331,6 +342,8 @@ cmd_update() {
     existing_scheduler_state="${_ess}"
     existing_scheduler_reason="${_esr}"
     existing_workspace_receipt_path="${_ewp}"
+    _ecrp="$(jq -r '.consensus_receipt_path // ""' <<<"${existing_json}")"
+    existing_consensus_receipt_path="${_ecrp}"
   fi
 
   project="${KERNEL_PROJECT:-${existing_project:-kernel-workspace}}"
@@ -353,6 +366,7 @@ cmd_update() {
   scheduler_state="${KERNEL_SCHEDULER_STATE:-}"
   scheduler_reason="${KERNEL_SCHEDULER_REASON:-}"
   workspace_receipt_path="${KERNEL_WORKSPACE_RECEIPT_PATH:-}"
+  consensus_receipt_path_value="${KERNEL_CONSENSUS_RECEIPT_PATH:-}"
   if [[ -n "${KERNEL_DECISIONS:-}" ]]; then
     decisions_json="$(json_array_from_pipe_csv "${KERNEL_DECISIONS}")"
   elif [[ -n "${existing_json}" ]]; then
@@ -409,6 +423,12 @@ cmd_update() {
   if [[ -z "${workspace_receipt_path}" ]]; then
     workspace_receipt_path="${existing_workspace_receipt_path}"
   fi
+  if [[ -z "${consensus_receipt_path_value}" ]]; then
+    consensus_receipt_path_value="$(consensus_receipt_path)"
+  fi
+  if [[ -z "${consensus_receipt_path_value}" ]]; then
+    consensus_receipt_path_value="${existing_consensus_receipt_path}"
+  fi
 
   if receipt_compact="$(receipt_json 2>/dev/null)"; then
     active_models_json="$(jq -c '.active_models // []' <<<"${receipt_compact}")"
@@ -446,6 +466,7 @@ cmd_update() {
     --arg scheduler_state "${scheduler_state}" \
     --arg scheduler_reason "${scheduler_reason}" \
     --arg workspace_receipt_path "${workspace_receipt_path}" \
+    --arg consensus_receipt_path "${consensus_receipt_path_value}" \
     --arg event "${event}" \
     --arg updated_at "$(utc_timestamp)" \
     --arg summary "${normalized_summary}" \
@@ -470,6 +491,7 @@ cmd_update() {
         scheduler_state: $scheduler_state,
         scheduler_reason: $scheduler_reason,
         workspace_receipt_path: $workspace_receipt_path,
+        consensus_receipt_path: $consensus_receipt_path,
         next_action: $next_action,
         decisions: $decisions,
         phase_artifacts: $phase_artifacts,
@@ -514,6 +536,7 @@ cmd_status() {
     "  - scheduler state: \(.scheduler_state // "unknown")",
     "  - scheduler reason: \(.scheduler_reason // "")",
     "  - workspace receipt path: \(.workspace_receipt_path // "")",
+    "  - consensus receipt path: \(.consensus_receipt_path // "")",
     "  - phase artifacts: \(if ((.phase_artifacts // {}) | length) == 0 then "none" else ((.phase_artifacts // {}) | keys | join(" | ")) end)",
     "  - next action: \(.next_action | join(" | "))",
     "  - decisions: \(.decisions | join(" | "))",

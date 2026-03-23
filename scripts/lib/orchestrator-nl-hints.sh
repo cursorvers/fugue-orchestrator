@@ -255,6 +255,12 @@ if contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド|資�
   content_reason="$(append_csv_unique "${content_reason}" "slide-request")"
 fi
 
+if contains '(company profile|company intro|company introduction|company overview|corporate deck|sales deck|会社紹介|企業紹介|会社概要|事業紹介)' \
+  && contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド|資料作成)'; then
+  content_action_hint="$(append_csv_unique "${content_action_hint}" "company-deck")"
+  content_reason="$(append_csv_unique "${content_reason}" "company-deck-request")"
+fi
+
 if contains '(academic|学術|学会|研究発表|講義資料)' && contains '(slide|slides|deck|pptx|presentation|プレゼン|スライド)'; then
   content_action_hint="$(append_csv_unique "${content_action_hint}" "academic-slide")"
   content_skill_hint="$(append_csv_unique "${content_skill_hint}" "academic-two-stage-slide")"

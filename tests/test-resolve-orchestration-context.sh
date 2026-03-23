@@ -124,7 +124,7 @@ assert_output "workspace-phase-hint" "123" "workspace_suggested_phases" "preflig
 assert_output "workspace-readonly-actions" "123" "workspace_readonly_actions" "meeting-prep,gmail-triage"
 assert_output "workspace-none" "124" "workspace_hint_applied" "false"
 assert_output "content-hint-applied" "125" "content_hint_applied" "true"
-assert_output "content-action-hint" "125" "content_action_hint" "slide-deck"
+assert_output "content-action-hint" "125" "content_action_hint" "slide-deck,company-deck"
 assert_output "content-skill-hint" "125" "content_skill_hint" "slide"
 assert_output "review-heading-clears-implement" "126" "has_implement_request" "false"
 assert_output "review-heading-clears-confirm" "126" "has_implement_confirmed" "false"
