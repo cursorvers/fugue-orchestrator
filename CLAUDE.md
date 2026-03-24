@@ -6,51 +6,17 @@
 
 ## 1. Profile
 
-<!-- [CONFIGURE] Replace with your own profile -->
-
-| Attribute | Details |
-|-----------|---------|
-| Role | Your role / expertise |
-| Organization | Your org name |
-| Focus | Your primary focus area |
-
-**Communication**:
-- Concise and direct (no "May I...?" confirmations -- just execute)
-- Critical feedback welcome
-- Primary language: your choice. Code comments in English.
-
----
+Solo developer (Cursorvers Inc.), FUGUE orchestrator. Concise, direct, no confirmations. Code comments in English.
 
 ## 2. Core Philosophy
 
-### Human-AI Collaboration
-
-```
-Notify -> Question -> Review
-Always build in human intervention points.
-```
-
-- Guard against AI over-autonomy eroding human roles
-- Human remains the "conductor"
-- AI augments, never replaces, human judgment
-
-### Orchestration Mindset
-
-> Elevate AI from an external tool to the OS of your brain.
-
-- Minimize thought I/O latency
-- Train AI management skills ("orchestration")
-- The orchestrator conducts; the orchestrator does not play.
+Human = conductor, AI = augment. Notify → Question → Review. See `~/AGENTS.md` for full principles.
 
 ---
 
 ## 3. FUGUE Architecture
 
 > **FUGUE** -- Federated Unified Governance for Universal Execution
-
-```
-Distributed Autonomy x Unified Convergence = FUGUE
-```
 
 ### System Architecture
 
@@ -150,63 +116,12 @@ MVP -> User validation -> Impact check -> Extend
 - UI development without Pencil MCP
 - Storing credentials in plaintext
 
-### Dangerous Operations (3-party consensus required)
+### Dangerous Operations
 
-- `sudo`, `rm -rf`, `chmod 777`
-- Git force push
-- Production environment changes -> require user confirmation
+See `~/.claude/rules/dangerous-permission-consensus.md` (3-party consensus required).
 
 ---
 
 ## 8. Rule Navigation
 
-```
-CLAUDE.md (this file) <- entry point
-    |
-    +-> ~/.claude/docs/delegation-matrix.md (SSOT)
-    |
-    +-> Core (read on demand)
-    |   +-- ~/.claude/docs/auto-execution.md
-    |   +-- ~/.claude/docs/delegation-flow.md
-    |   +-- ~/.claude/docs/codex-usage.md
-    |   +-- ~/.claude/rules/dangerous-permission-consensus.md
-    |
-    +-> Quality Gates (read on demand)
-        +-- ~/.claude/docs/testing.md
-        +-- ~/.claude/rules/security.md
-        +-- ~/.claude/docs/coding-style.md
-        +-- ~/.claude/docs/performance.md
-```
-
-**Context optimization**: Strict lazy loading (load rules only when needed)
-
----
-
-## 9. Quick Reference
-
-### Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/plan` | Create implementation plan |
-| `/work` | Execute tasks |
-| `/review` | Code review |
-| `/sync` | Check progress |
-
-### Delegation Scripts / Lane Bridge / Structured Execution
-
-> On-demand: `docs/agents/quick-reference.md`
-
----
-
-## 10. Motto
-
-> **"The orchestrator is the conductor, not the performer."**
->
-> Never implement yourself. Delegate to the best specialist and integrate results.
-> When uncertain, gather multiple perspectives and reach consensus.
-
----
-
-*Template version: 2026-02-28*
-*Based on FUGUE Orchestrator v8 (Hybrid Conductor Mode)*
+Entry: this file. SSOT: `~/.claude/docs/delegation-matrix.md`. Core/Quality rules: `~/.claude/docs/` and `~/.claude/rules/` (lazy-loaded on demand).
