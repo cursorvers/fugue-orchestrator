@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "run_id": "thread-test",
+  "project": "fugue-orchestrator",
+  "purpose": "thread separation",
+  "runtime": "fugue",
+  "workspace_key": "fugue-orchestrator--thread-test",
+  "workspace_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/fugue-orchestrator/fugue-orchestrator--thread-test",
+  "artifacts_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/fugue-orchestrator/fugue-orchestrator--thread-test/artifacts",
+  "logs_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/fugue-orchestrator/fugue-orchestrator--thread-test/logs",
+  "traces_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/fugue-orchestrator/fugue-orchestrator--thread-test/traces",
+  "compact_artifact_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.7m2tHXJkJJ/compact/thread-test.json",
+  "bootstrap_receipt_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.7m2tHXJkJJ/receipts/thread-test.json",
+  "runtime_ledger_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.7m2tHXJkJJ/runtime-ledger.json",
+  "consensus_receipt_path": "",
+  "created_at": "2026-03-24T15:31:17Z",
+  "updated_at": "2026-03-24T15:31:17Z"
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "run_id": "health-guard-launch",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "runtime": "kernel",
+  "workspace_key": "kernel-workspace--health-guard-launch",
+  "workspace_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/kernel-workspace/kernel-workspace--health-guard-launch",
+  "artifacts_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/kernel-workspace/kernel-workspace--health-guard-launch/artifacts",
+  "logs_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/kernel-workspace/kernel-workspace--health-guard-launch/logs",
+  "traces_dir": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-workspaces/kernel-workspace/kernel-workspace--health-guard-launch/traces",
+  "compact_artifact_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.VFom020wAX/compact/health-guard-launch.json",
+  "bootstrap_receipt_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.VFom020wAX/receipts/health-guard-launch.json",
+  "runtime_ledger_path": "/var/folders/s_/rhy4jb750b708mv233kj55980000gn/T/tmp.VFom020wAX/runtime-ledger.json",
+  "consensus_receipt_path": "",
+  "created_at": "2026-03-24T15:20:22Z",
+  "updated_at": "2026-03-24T17:04:44Z"
+}

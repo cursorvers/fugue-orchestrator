@@ -1,0 +1,33 @@
+{
+  "run_id": "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:99906:run:20260324T235811:4009",
+  "project": "kernel-workspace",
+  "purpose": "unspecified",
+  "current_phase": "unknown",
+  "mode": "healthy",
+  "runtime": "kernel",
+  "tmux_session": "kernel-workspace__unspecified__58114009",
+  "session_fingerprint": "376677cc2469ed3c4e6294c58f78306d3a5acc00f9b9bf2f8a7801adcf43c1da",
+  "codex_thread_title": "kernel-workspace:unspecified:58114009",
+  "owner": "local-operator",
+  "active_models": [
+    "gpt-5.3-codex",
+    "gpt-5.3-codex-spark",
+    "gpt-5.4-mini",
+    "glm-5.0",
+    "gemini-cli"
+  ],
+  "blocking_reason": "bootstrap-valid",
+  "lifecycle_state": "bootstrap-valid",
+  "scheduler_state": "claimed",
+  "scheduler_reason": "guard-launch",
+  "workspace_receipt_path": "/Users/masayuki_otawara/fugue-orchestrator/.fugue/kernel-runtime-workspaces/adhoc_Mac-mini-M1-for-Otawara-M-5_kernel-workspace_99906_run_20260324T235811_4009.json",
+  "consensus_receipt_path": "",
+  "next_action": [],
+  "decisions": [],
+  "phase_artifacts": {},
+  "summary": [
+    "state=healthy; reason=bootstrap-valid"
+  ],
+  "last_event": "status_changed",
+  "updated_at": "2026-03-24T17:05:52Z"
+}

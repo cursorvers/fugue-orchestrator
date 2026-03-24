@@ -15,3 +15,5 @@ node_modules/
 .fugue/dev-tmp-root/
 #...but encrypted secrets are safe to commit
 !.env.enc
+excalidraw.log
+tmp/

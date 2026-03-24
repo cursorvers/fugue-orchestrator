@@ -42,6 +42,13 @@
       "glm_recovered": false,
       "last_failure_note": "glm-command-missing",
       "last_failure_at": "2026-03-23T03:16:33Z"
+    },
+    "adhoc:Mac-mini-M1-for-Otawara-M-5:kernel-workspace:99906:run:20260324T235811:4009": {
+      "glm_failures": 0,
+      "mode": "healthy",
+      "glm_recovered": true,
+      "last_recovery_note": "bootstrap-kglm-success",
+      "last_recovery_at": "2026-03-24T15:04:53Z"
     }
   }
 }

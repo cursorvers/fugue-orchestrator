@@ -11,6 +11,7 @@
   "owner": "local-operator",
   "active_models": [],
   "blocking_reason": "bootstrap-receipt-missing",
+  "lifecycle_state": "blocked",
   "scheduler_state": "",
   "scheduler_reason": "",
   "workspace_receipt_path": "",
@@ -22,5 +23,5 @@
     "state=invalid; reason=bootstrap-receipt-missing"
   ],
   "last_event": "status_changed",
-  "updated_at": "2026-03-24T12:03:16Z"
+  "updated_at": "2026-03-24T23:20:20Z"
 }
