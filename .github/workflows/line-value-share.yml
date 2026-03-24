@@ -98,32 +98,48 @@ jobs:
             --arg text "${MESSAGE_TEXT}" \
             '{messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
 
-          HTTP_STATUS="$(curl -sS \
-            -X POST "https://api.line.me/v2/bot/message/broadcast" \
-            -D "${RESPONSE_HEADERS}" \
-            -o "${RESPONSE_BODY}" \
-            -w "%{http_code}" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
-            --data @"${REQUEST_BODY}")"
+          RETRY_KEY="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "no-retry-key")"
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
 
-          echo "LINE broadcast HTTP status: ${HTTP_STATUS}"
-          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
+          while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
+            HTTP_STATUS="$(curl -sS \
+              -X POST "https://api.line.me/v2/bot/message/broadcast" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+              -H "X-Line-Retry-Key: ${RETRY_KEY}" \
+              --data @"${REQUEST_BODY}")" || true
 
-          LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
-          if [ -n "${LINE_REQUEST_ID:-}" ]; then
-            echo "LINE request id: ${LINE_REQUEST_ID}"
-          fi
+            echo "LINE broadcast HTTP status: ${HTTP_STATUS} (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
+            cat "${RESPONSE_BODY}" | jq . 2>/dev/null || cat "${RESPONSE_BODY}" || true
 
-          case "${HTTP_STATUS}" in
-            2*)
-              echo "LINE broadcast sent successfully."
-              ;;
-            *)
-              echo "::error::LINE broadcast failed."
-              exit 1
-              ;;
-          esac
+            LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+            if [ -n "${LINE_REQUEST_ID:-}" ]; then
+              echo "LINE request id: ${LINE_REQUEST_ID}"
+            fi
+
+            case "${HTTP_STATUS}" in
+              2*)
+                echo "LINE broadcast sent successfully."
+                exit 0
+                ;;
+              408|429|500|502|503|504)
+                if [ "${ATTEMPT}" -lt "${MAX_ATTEMPTS}" ]; then
+                  BACKOFF=$(( 1 << (ATTEMPT - 1) ))
+                  echo "::warning::Transient error ${HTTP_STATUS}; retrying in ${BACKOFF}s (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
+                  sleep "${BACKOFF}"
+                  ATTEMPT=$(( ATTEMPT + 1 ))
+                  continue
+                fi
+                ;;
+            esac
+
+            echo "::error::LINE broadcast failed with status ${HTTP_STATUS}."
+            exit 1
+          done
 
       - name: Persist next rotation index
         if: ${{ success() }}
@@ -168,3 +184,38 @@ jobs:
             echo "LINE ${ENDPOINT} HTTP status: ${HTTP_STATUS}"
             cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
           done
+
+          # Quota threshold check
+          QUOTA_FILE="${RUNNER_TEMP}/line-quota.json"
+          CONSUMPTION_FILE="${RUNNER_TEMP}/line-quota-consumption.json"
+          if [ -f "${QUOTA_FILE}" ] && [ -f "${CONSUMPTION_FILE}" ]; then
+            QUOTA_VALUE="$(jq -r '.value // 0' "${QUOTA_FILE}" 2>/dev/null || echo 0)"
+            CONSUMPTION_VALUE="$(jq -r '.totalUsage // 0' "${CONSUMPTION_FILE}" 2>/dev/null || echo 0)"
+            if [ "${QUOTA_VALUE}" -gt 0 ] 2>/dev/null; then
+              USAGE_PCT=$(( CONSUMPTION_VALUE * 100 / QUOTA_VALUE ))
+              echo "LINE quota usage: ${CONSUMPTION_VALUE}/${QUOTA_VALUE} (${USAGE_PCT}%)"
+              if [ "${USAGE_PCT}" -ge 95 ]; then
+                echo "::error::LINE message quota ${USAGE_PCT}% consumed — approaching limit"
+              elif [ "${USAGE_PCT}" -ge 80 ]; then
+                echo "::warning::LINE message quota ${USAGE_PCT}% consumed"
+              fi
+            fi
+          fi
+
+      - name: Notify Discord on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::notice::DISCORD_WEBHOOK_URL not set. Skipping failure notification."
+            exit 0
+          fi
+          PAYLOAD="$(jq -n \
+            --arg content "[LINE Value Share] Workflow failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{content: $content}')"
+          curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" || true

@@ -290,14 +290,21 @@ contract_probe() {
     echo "missing fugue-bridge sovereign adapter"
     failures=1
   }
-  rg -q "line-webhook" "${CURSORVERS_LINE_ROOT}/README.md" || {
-    echo "missing Cursorvers LINE webhook repo contract"
-    failures=1
-  }
-  [[ -f "${CURSORVERS_LINE_ROOT}/supabase/functions/discord-relay/index.ts" ]] || {
-    echo "missing Cursorvers Discord relay contract"
-    failures=1
-  }
+  # Skip cursorvers LINE probes when adapter is marked stub-only in peripheral-adapters.json
+  local line_adapter_status
+  line_adapter_status="$(jq -r '.adapters[] | select(.id == "cursorvers-line-platform") | .status // "active"' "${ROOT_DIR}/config/integrations/peripheral-adapters.json" 2>/dev/null || echo "active")"
+  if [[ "${line_adapter_status}" == "stub-only" ]]; then
+    echo "cursorvers-line-platform marked stub-only; skipping contract probes"
+  else
+    rg -q "line-webhook" "${CURSORVERS_LINE_ROOT}/README.md" || {
+      echo "missing Cursorvers LINE webhook repo contract"
+      failures=1
+    }
+    [[ -f "${CURSORVERS_LINE_ROOT}/supabase/functions/discord-relay/index.ts" ]] || {
+      echo "missing Cursorvers Discord relay contract"
+      failures=1
+    }
+  fi
 
   return "${failures}"
 }

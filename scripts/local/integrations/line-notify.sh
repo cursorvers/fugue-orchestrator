@@ -12,8 +12,6 @@ LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN:-}"
 LINE_TO="${LINE_TO:-}"
 LINE_PUSH_API_URL="${LINE_PUSH_API_URL:-https://api.line.me/v2/bot/message/push}"
 LINE_BROADCAST_API_URL="${LINE_BROADCAST_API_URL:-https://api.line.me/v2/bot/message/broadcast}"
-LINE_NOTIFY_TOKEN="${LINE_NOTIFY_TOKEN:-${LINE_NOTIFY_ACCESS_TOKEN:-}}"
-LINE_NOTIFY_API_URL="${LINE_NOTIFY_API_URL:-https://notify-api.line.me/api/notify}"
 LINE_NOTIFY_REQUIRED_ON_EXECUTE="${LINE_NOTIFY_REQUIRED_ON_EXECUTE:-true}"
 LINE_NOTIFY_SMOKE_SEND="${LINE_NOTIFY_SMOKE_SEND:-false}"
 LINE_NOTIFY_MESSAGE="${LINE_NOTIFY_MESSAGE:-}"
@@ -49,9 +47,6 @@ Environment:
   LINE_TO                      LINE user/group ID for push messages
   LINE_PUSH_API_URL            Override push endpoint (default: official LINE Messaging API)
   LINE_BROADCAST_API_URL       Override broadcast endpoint (default: official LINE Messaging API)
-  LINE_NOTIFY_TOKEN            Legacy LINE Notify token (fallback)
-  LINE_NOTIFY_ACCESS_TOKEN     Legacy alias for LINE_NOTIFY_TOKEN
-  LINE_NOTIFY_API_URL          Override legacy LINE Notify endpoint
   LINE_NOTIFY_REQUIRED_ON_EXECUTE=true|false
                                If true (default), execute mode fails when config is missing.
   LINE_NOTIFY_SMOKE_SEND=true|false
@@ -263,8 +258,6 @@ if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" ]]; then
     transport="broadcast"
   elif [[ -n "${LINE_WEBHOOK_URL}" ]]; then
     transport="webhook"
-  elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
-    transport="notify"
   fi
 else
   if [[ -n "${LINE_WEBHOOK_URL}" ]]; then
@@ -273,8 +266,6 @@ else
     transport="push"
   elif [[ "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}" == "true" && -n "${LINE_CHANNEL_ACCESS_TOKEN}" ]]; then
     transport="broadcast"
-  elif [[ -n "${LINE_NOTIFY_TOKEN}" ]]; then
-    transport="notify"
   fi
 fi
 
@@ -283,14 +274,12 @@ if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" && "${transport}" != "push" ]]; the
     echo "line-notify: LINE_TO is missing; using broadcast fallback."
   elif [[ "${transport}" == "webhook" ]]; then
     echo "line-notify: push credentials are missing; using webhook fallback."
-  elif [[ "${transport}" == "notify" ]]; then
-    echo "line-notify: push and webhook are unavailable; using legacy notify fallback."
   fi
 fi
 
 if [[ "${transport}" == "none" ]]; then
   if [[ "${MODE}" == "execute" && "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}" == "true" ]]; then
-    echo "line-notify: missing config. Set LINE_WEBHOOK_URL or (LINE_CHANNEL_ACCESS_TOKEN + LINE_TO) or LINE_NOTIFY_TOKEN." >&2
+    echo "line-notify: missing config. Set LINE_WEBHOOK_URL or (LINE_CHANNEL_ACCESS_TOKEN + LINE_TO)." >&2
     write_meta "error-missing-config" "sent=false" "transport_selection=${transport_selection}" "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
     exit 1
   fi
@@ -398,6 +387,29 @@ if [[ "${should_send}" == "true" ]]; then
   retry_count=0
   last_retry_reason=""
 
+  # Generate idempotent retry key (UUID v4) for LINE push/broadcast.
+  # Same key is reused across retries within this invocation.
+  generate_retry_key() {
+    if command -v uuidgen >/dev/null 2>&1; then
+      uuidgen | tr '[:upper:]' '[:lower:]'
+      return 0
+    fi
+    if [[ -r /proc/sys/kernel/random/uuid ]]; then
+      cat /proc/sys/kernel/random/uuid
+      return 0
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+      python3 -c "import uuid; print(uuid.uuid4())"
+      return 0
+    fi
+    # Fallback: construct pseudo-UUID from /dev/urandom
+    od -x /dev/urandom | head -1 | awk '{OFS="-"; print $2$3,$4,$5,$6,$7$8$9}'
+  }
+  retry_key=""
+  if [[ "${transport}" == "push" || "${transport}" == "broadcast" ]]; then
+    retry_key="$(generate_retry_key)"
+  fi
+
   headers_file="$(mktemp)"
   body_file="$(mktemp)"
   chmod 600 "${headers_file}" "${body_file}"
@@ -453,6 +465,7 @@ if [[ "${should_send}" == "true" ]]; then
         --write-out '%{http_code}' \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+        -H "X-Line-Retry-Key: ${retry_key}" \
         -d "${payload}")"
       curl_exit_code=$?
     elif [[ "${transport}" == "broadcast" ]]; then
@@ -465,17 +478,8 @@ if [[ "${should_send}" == "true" ]]; then
         --write-out '%{http_code}' \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+        -H "X-Line-Retry-Key: ${retry_key}" \
         -d "${payload}")"
-      curl_exit_code=$?
-    else
-      http_status="$(curl -sS -X POST "${LINE_NOTIFY_API_URL}" \
-        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
-        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
-        -D "${headers_file}" \
-        -o "${body_file}" \
-        --write-out '%{http_code}' \
-        -H "Authorization: Bearer ${LINE_NOTIFY_TOKEN}" \
-        --data-urlencode "message=${message}")"
       curl_exit_code=$?
     fi
     set -e
@@ -555,6 +559,7 @@ if [[ "${should_send}" == "true" ]]; then
       "response_message=${response_message}" \
       "message_hash=${message_hash}" \
       "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "retry_key=${retry_key}" \
       "run_url=${run_url}" \
       "transport_selection=${transport_selection}" \
       "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
@@ -593,6 +598,7 @@ if [[ "${should_send}" == "true" ]]; then
       "line_request_id=${line_request_id}" \
       "message_hash=${message_hash}" \
       "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "retry_key=${retry_key}" \
       "run_url=${run_url}" \
       "transport_selection=${transport_selection}" \
       "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
