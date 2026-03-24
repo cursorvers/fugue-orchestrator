@@ -62,6 +62,7 @@ map_to_acct() {
     SLACK_BOT_TOKEN)    echo "slack-bot-token" ;;
     SLACK_TEAM_ID)      echo "slack-team-id" ;;
     VERCEL_AI_GATEWAY_KEY) echo "vercel-ai-gateway-key" ;;
+    SOCIALDATA_API_KEY) echo "socialdata-api-key" ;;
     *)                  echo "" ;;
   esac
 }
