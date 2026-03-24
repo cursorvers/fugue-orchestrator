@@ -25,11 +25,61 @@ Usage:
 EOF
 }
 
+derive_lifecycle_state() {
+  local state="${1:-unknown}"
+  local scheduler_state="${2:-unknown}"
+  if [[ "${state}" == "degraded-allowed" ]]; then
+    case "${scheduler_state}" in
+      running|continuity_degraded)
+        printf 'live-continuity-degraded\n'
+        return 0
+        ;;
+    esac
+  fi
+  case "${scheduler_state}" in
+    running)
+      printf 'live-running\n'
+      ;;
+    continuity_degraded)
+      printf 'live-continuity-degraded\n'
+      ;;
+    terminal)
+      printf 'terminal\n'
+      ;;
+    awaiting_human)
+      printf 'awaiting-human\n'
+      ;;
+    retry_queued)
+      printf 'retry-queued\n'
+      ;;
+    claimed|"")
+      case "${state}" in
+        healthy|degraded-allowed)
+          printf 'bootstrap-valid\n'
+          ;;
+        *)
+          printf 'blocked\n'
+          ;;
+      esac
+      ;;
+    *)
+      case "${state}" in
+        healthy|degraded-allowed)
+          printf 'bootstrap-valid\n'
+          ;;
+        *)
+          printf 'blocked\n'
+          ;;
+      esac
+      ;;
+  esac
+}
+
 cmd_status() {
   local run_id="${1:-${RUN_ID}}"
   local receipt_path present glm_mode lane_count has_codex has_glm specialist_count receipt_mode state reason
   local active_model_count manifest_lane_count has_agent_labels has_subagent_labels
-  local ledger_file codex_success glm_success specialist_success_count
+  local ledger_file codex_success glm_success specialist_success_count scheduler_state lifecycle_state
   local exit_code=0
   receipt_path="$(KERNEL_RUN_ID="${run_id}" bash "${RECEIPT_SCRIPT}" path)"
   present=false
@@ -60,6 +110,7 @@ cmd_status() {
   if [[ -f "${ledger_file}" ]]; then
     codex_success="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].provider_usage.codex.success_count // 0' "${ledger_file}")"
     glm_success="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].provider_usage.glm.success_count // 0' "${ledger_file}")"
+    scheduler_state="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].scheduler_state // "unknown"' "${ledger_file}")"
     specialist_success_count="$(jq -r --arg run_id "${run_id}" '
       (.runs[$run_id].provider_usage // {})
       | to_entries
@@ -69,6 +120,7 @@ cmd_status() {
   else
     codex_success=0
     glm_success=0
+    scheduler_state=unknown
     specialist_success_count=0
   fi
 
@@ -131,11 +183,14 @@ cmd_status() {
   if [[ "${MUTATE_LEDGER}" == "true" ]]; then
     KERNEL_RUN_ID="${run_id}" bash "${LEDGER_SCRIPT}" transition "${state}" "${reason}" "${receipt_path}" >/dev/null
   fi
+  lifecycle_state="$(derive_lifecycle_state "${state}" "${scheduler_state}")"
 
   printf 'runtime health:\n'
   printf '  - run id: %s\n' "${run_id}"
   printf '  - state: %s\n' "${state}"
   printf '  - reason: %s\n' "${reason}"
+  printf '  - lifecycle state: %s\n' "${lifecycle_state}"
+  printf '  - scheduler state: %s\n' "${scheduler_state}"
   printf '  - glm mode: %s\n' "${glm_mode}"
   printf '  - codex provider success: %s\n' "${codex_success}"
   printf '  - glm provider success: %s\n' "${glm_success}"

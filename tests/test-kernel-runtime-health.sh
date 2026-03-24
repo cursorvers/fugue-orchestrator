@@ -40,7 +40,14 @@ bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider glm succ
 bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider gemini-cli success specialist >/dev/null
 out="$(bash "${HEALTH_SCRIPT}" status)"
 grep -Fq 'state: healthy' <<<"${out}"
+grep -Fq 'lifecycle state: bootstrap-valid' <<<"${out}"
+grep -Fq 'scheduler state: unknown' <<<"${out}"
 grep -Fq 'mutating: true' <<<"${out}"
+
+bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" scheduler-state running "live-running" >/dev/null
+out="$(KERNEL_RUNTIME_HEALTH_MUTATE=false bash "${HEALTH_SCRIPT}" status)"
+grep -Fq 'lifecycle state: live-running' <<<"${out}"
+grep -Fq 'scheduler state: running' <<<"${out}"
 
 bash "${GLM_SCRIPT}" fail one >/dev/null
 bash "${GLM_SCRIPT}" fail two >/dev/null
@@ -48,8 +55,10 @@ bash "${GLM_SCRIPT}" status >/dev/null
 export KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="codex,gemini-cli,cursor-cli"
 bash "${RECEIPT_SCRIPT}" write 6 codex,gemini-cli,cursor-cli degraded-allowed >/dev/null
 bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider cursor-cli success specialist >/dev/null
+bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" scheduler-state continuity_degraded "live-continuity-degraded" >/dev/null
 out="$(bash "${HEALTH_SCRIPT}" status)"
 grep -Fq 'state: degraded-allowed' <<<"${out}"
+grep -Fq 'lifecycle state: live-continuity-degraded' <<<"${out}"
 grep -Fq 'mutating: true' <<<"${out}"
 
 before="$(jq -r --arg run_id "${KERNEL_RUN_ID}" '.runs[$run_id].updated_at // ""' "${KERNEL_RUNTIME_LEDGER_FILE}")"

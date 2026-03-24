@@ -39,6 +39,56 @@ Usage:
 EOF
 }
 
+derive_lifecycle_state() {
+  local state="${1:-unknown}"
+  local scheduler_state="${2:-unknown}"
+  if [[ "${state}" == "degraded-allowed" ]]; then
+    case "${scheduler_state}" in
+      running|continuity_degraded)
+        printf 'live-continuity-degraded\n'
+        return 0
+        ;;
+    esac
+  fi
+  case "${scheduler_state}" in
+    running)
+      printf 'live-running\n'
+      ;;
+    continuity_degraded)
+      printf 'live-continuity-degraded\n'
+      ;;
+    terminal)
+      printf 'terminal\n'
+      ;;
+    awaiting_human)
+      printf 'awaiting-human\n'
+      ;;
+    retry_queued)
+      printf 'retry-queued\n'
+      ;;
+    claimed|"")
+      case "${state}" in
+        healthy|degraded-allowed)
+          printf 'bootstrap-valid\n'
+          ;;
+        *)
+          printf 'blocked\n'
+          ;;
+      esac
+      ;;
+    *)
+      case "${state}" in
+        healthy|degraded-allowed)
+          printf 'bootstrap-valid\n'
+          ;;
+        *)
+          printf 'blocked\n'
+          ;;
+      esac
+      ;;
+  esac
+}
+
 compact_script_path() {
   printf '%s\n' "${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 }
@@ -69,8 +119,13 @@ utc_timestamp() {
 cmd_status() {
   ensure_ledger
   local run_id="${1:-${RUN_ID}}"
+  local state scheduler_state lifecycle_state
+  state="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].state // "unknown"' "${LEDGER_FILE}")"
+  scheduler_state="$(jq -r --arg run_id "${run_id}" '.runs[$run_id].scheduler_state // "unknown"' "${LEDGER_FILE}")"
+  lifecycle_state="$(derive_lifecycle_state "${state}" "${scheduler_state}")"
   printf 'runtime ledger:\n'
   printf '  - run id: %s\n' "${run_id}"
+  printf '  - lifecycle state: %s\n' "${lifecycle_state}"
   jq -r --arg run_id "${run_id}" '
     (.runs[$run_id] // {}) as $run |
     ($run.provider_usage // {}) as $usage |

@@ -35,8 +35,9 @@ out="$(KERNEL_RUNTIME_LOOP_ONCE=true bash "${LOOP_SCRIPT}")"
 grep -Fq 'state: healthy' <<<"${out}"
 
 ledger_out="$(bash "${LEDGER_SCRIPT}" status)"
+grep -Fq 'lifecycle state: live-running' <<<"${ledger_out}"
 grep -Fq 'scheduler state: running' <<<"${ledger_out}"
-grep -Fq 'scheduler reason: bootstrap-valid' <<<"${ledger_out}"
+grep -Fq 'scheduler reason: live-running' <<<"${ledger_out}"
 
 workspace_receipt="$(bash "${WORKSPACE_SCRIPT}" receipt-path)"
 grep -Fq "workspace receipt path: ${workspace_receipt}" <<<"${ledger_out}"
@@ -47,6 +48,7 @@ out="$(KERNEL_RUNTIME_LOOP_ONCE=false KERNEL_RUNTIME_LOOP_INTERVAL_SEC=1 bash "$
 [[ -z "${out}" ]]
 
 ledger_out="$(bash "${LEDGER_SCRIPT}" status)"
+grep -Fq 'lifecycle state: terminal' <<<"${ledger_out}"
 grep -Fq 'scheduler state: terminal' <<<"${ledger_out}"
 grep -Fq 'scheduler reason: stop-file-detected' <<<"${ledger_out}"
 

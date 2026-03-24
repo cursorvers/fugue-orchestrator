@@ -11,6 +11,7 @@ RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 SESSION_NAME_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-session-name.sh"
 CONSENSUS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
+WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
 LOCK_HELD=0
 source "${SCRIPT_DIR}/kernel-lock.sh"
 
@@ -213,6 +214,14 @@ receipt_json() {
   jq -c '.' "${path}"
 }
 
+workspace_receipt_path() {
+  local path
+  [[ -f "${WORKSPACE_SCRIPT}" ]] || return 1
+  path="$(KERNEL_RUN_ID="${RUN_ID}" bash "${WORKSPACE_SCRIPT}" receipt-path 2>/dev/null || true)"
+  [[ -n "${path}" && -f "${path}" ]] || return 1
+  printf '%s\n' "${path}"
+}
+
 consensus_receipt_path() {
   local path
   [[ -f "${CONSENSUS_SCRIPT}" ]] || return 0
@@ -253,6 +262,56 @@ raw = os.environ.get("RAW", "")
 parts = [p.strip() for p in raw.split("|") if p.strip()]
 print(json.dumps(parts[:1]))
 PY
+}
+
+derive_lifecycle_state() {
+  local mode="${1:-unknown}"
+  local scheduler_state="${2:-unknown}"
+  if [[ "${mode}" == "degraded-allowed" ]]; then
+    case "${scheduler_state}" in
+      running|continuity_degraded)
+        printf 'live-continuity-degraded\n'
+        return 0
+        ;;
+    esac
+  fi
+  case "${scheduler_state}" in
+    running)
+      printf 'live-running\n'
+      ;;
+    continuity_degraded)
+      printf 'live-continuity-degraded\n'
+      ;;
+    terminal)
+      printf 'terminal\n'
+      ;;
+    awaiting_human)
+      printf 'awaiting-human\n'
+      ;;
+    retry_queued)
+      printf 'retry-queued\n'
+      ;;
+    claimed|"")
+      case "${mode}" in
+        healthy|degraded-allowed)
+          printf 'bootstrap-valid\n'
+          ;;
+        *)
+          printf 'blocked\n'
+          ;;
+      esac
+      ;;
+    *)
+      case "${mode}" in
+        healthy|degraded-allowed)
+          printf 'bootstrap-valid\n'
+          ;;
+        *)
+          printf 'blocked\n'
+          ;;
+      esac
+      ;;
+  esac
 }
 
 resolve_phase_artifacts_json() {
@@ -301,6 +360,7 @@ cmd_update() {
   local mode runtime active_models_json decisions_json next_actions_json phase_artifacts_json ledger_compact receipt_compact
   local existing_mode existing_blocking_reason existing_scheduler_state existing_scheduler_reason
   local existing_workspace_receipt_path existing_consensus_receipt_path scheduler_state scheduler_reason workspace_receipt_path consensus_receipt_path_value
+  local lifecycle_state
   local session_fingerprint
   local summary normalized_summary
 
@@ -423,12 +483,16 @@ cmd_update() {
   if [[ -z "${workspace_receipt_path}" ]]; then
     workspace_receipt_path="${existing_workspace_receipt_path}"
   fi
+  if [[ -z "${workspace_receipt_path}" ]]; then
+    workspace_receipt_path="$(workspace_receipt_path || true)"
+  fi
   if [[ -z "${consensus_receipt_path_value}" ]]; then
     consensus_receipt_path_value="$(consensus_receipt_path)"
   fi
   if [[ -z "${consensus_receipt_path_value}" ]]; then
     consensus_receipt_path_value="${existing_consensus_receipt_path}"
   fi
+  lifecycle_state="$(derive_lifecycle_state "${mode}" "${scheduler_state}")"
 
   if receipt_compact="$(receipt_json 2>/dev/null)"; then
     active_models_json="$(jq -c '.active_models // []' <<<"${receipt_compact}")"
@@ -465,6 +529,7 @@ cmd_update() {
     --arg blocking_reason "${blocking_reason}" \
     --arg scheduler_state "${scheduler_state}" \
     --arg scheduler_reason "${scheduler_reason}" \
+    --arg lifecycle_state "${lifecycle_state}" \
     --arg workspace_receipt_path "${workspace_receipt_path}" \
     --arg consensus_receipt_path "${consensus_receipt_path_value}" \
     --arg event "${event}" \
@@ -488,6 +553,7 @@ cmd_update() {
         owner: $owner,
         active_models: $active_models,
         blocking_reason: $blocking_reason,
+        lifecycle_state: $lifecycle_state,
         scheduler_state: $scheduler_state,
         scheduler_reason: $scheduler_reason,
         workspace_receipt_path: $workspace_receipt_path,
@@ -533,6 +599,7 @@ cmd_status() {
     "  - owner: \(.owner)",
     "  - active models: \(.active_models | join(","))",
     "  - blocking reason: \(.blocking_reason)",
+    "  - lifecycle state: \(.lifecycle_state // "unknown")",
     "  - scheduler state: \(.scheduler_state // "unknown")",
     "  - scheduler reason: \(.scheduler_reason // "")",
     "  - workspace receipt path: \(.workspace_receipt_path // "")",

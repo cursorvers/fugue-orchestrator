@@ -44,6 +44,22 @@ map_health_to_scheduler_state() {
   esac
 }
 
+map_health_to_scheduler_reason() {
+  local health_state="${1:-invalid}"
+  local health_reason="${2:-runtime-loop}"
+  case "${health_state}" in
+    healthy)
+      printf 'live-running\n'
+      ;;
+    degraded-allowed)
+      printf 'live-continuity-degraded\n'
+      ;;
+    *)
+      printf '%s\n' "${health_reason}"
+      ;;
+  esac
+}
+
 if [[ "${1:-}" == "help" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
@@ -80,7 +96,8 @@ while true; do
   health_state="$(printf '%s\n' "${health_output}" | health_field state)"
   health_reason="$(printf '%s\n' "${health_output}" | health_field reason)"
   scheduler_state="$(map_health_to_scheduler_state "${health_state}")"
-  record_scheduler_state "${RUN_ID}" "${scheduler_state}" "${health_reason:-runtime-loop}" "${WORKSPACE_RECEIPT_PATH}"
+  scheduler_reason="$(map_health_to_scheduler_reason "${health_state}" "${health_reason:-runtime-loop}")"
+  record_scheduler_state "${RUN_ID}" "${scheduler_state}" "${scheduler_reason}" "${WORKSPACE_RECEIPT_PATH}"
   KERNEL_RUN_ID="${RUN_ID}" bash "${LEDGER_SCRIPT}" record-event runtime-loop tick "health=${health_state:-unknown}; reason=${health_reason:-unknown}" >/dev/null
 
   if [[ "${RUN_ONCE}" == "true" ]]; then

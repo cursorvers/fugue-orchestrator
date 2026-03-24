@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 RECEIPT_DIR="${KERNEL_BOOTSTRAP_RECEIPT_DIR:-$(bash "${STATE_PATH_SCRIPT}" bootstrap-receipt-dir)}"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
+WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
 
 default_run_id() {
   if [[ -n "${KERNEL_RUN_ID:-}" ]]; then
@@ -91,6 +92,9 @@ cmd_write() {
           specialist_count: ($providers | map(select(. != "codex" and . != "glm")) | length)
         }
     ' >"${path}"
+  if [[ -f "${WORKSPACE_SCRIPT}" ]]; then
+    KERNEL_RUN_ID="${RUN_ID}" bash "${WORKSPACE_SCRIPT}" write >/dev/null
+  fi
   KERNEL_RUN_ID="${RUN_ID}" bash "${LEDGER_SCRIPT}" transition running "bootstrap-receipt" "${path}" >/dev/null
   cmd_status "${RUN_ID}"
 }

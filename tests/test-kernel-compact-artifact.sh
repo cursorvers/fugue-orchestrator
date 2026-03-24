@@ -20,6 +20,9 @@ export KERNEL_PURPOSE="secret-plane"
 export KERNEL_PHASE="plan"
 export KERNEL_OWNER="codex"
 export KERNEL_TMUX_SESSION="fugue-orchestrator:secret-plane"
+export FUGUE_APPROVED_WORKSPACE_ROOTS="${ROOT_DIR}/.fugue:${TMP_DIR}/approved"
+export KERNEL_RUNTIME_WORKSPACE_ROOT="${TMP_DIR}/approved/runtime-workspaces"
+export KERNEL_RUNTIME_WORKSPACE_RECEIPT_DIR="${TMP_DIR}/approved/runtime-receipts"
 export KERNEL_DECISIONS="use-keychain|mirror-github|keep-fugue-untouched|ignored"
 export KERNEL_NEXT_ACTIONS="implement-loader|add-tests|run-dry-run|ignored"
 export PLAN_REPORT_PATH="/tmp/kernel-plan.md"
@@ -32,7 +35,7 @@ export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 KERNEL_TASK_SIZE_TIER="medium" bash "${CONSENSUS_SCRIPT}" record approved vote "compact receipt consensus" >/dev/null
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
-bash "${LEDGER_SCRIPT}" scheduler-state running "bootstrap-valid" "/tmp/compact-test-workspace.json" >/dev/null
+bash "${LEDGER_SCRIPT}" scheduler-state running "live-running" "/tmp/compact-test-workspace.json" >/dev/null
 bash "${COMPACT_SCRIPT}" update manual_snapshot "bootstrap-valid" >/dev/null
 
 out="$(bash "${COMPACT_SCRIPT}" status)"
@@ -41,11 +44,12 @@ grep -Fq 'project: fugue-orchestrator' <<<"${out}"
 grep -Fq 'purpose: secret-plane' <<<"${out}"
 grep -Fq 'phase: plan' <<<"${out}"
 grep -Fq 'mode: healthy' <<<"${out}"
+grep -Fq 'lifecycle state: live-running' <<<"${out}"
 grep -Fq 'runtime: kernel' <<<"${out}"
 grep -Fq 'session fingerprint:' <<<"${out}"
 grep -Fq 'codex thread: fugue-orchestrator:secret-plane' <<<"${out}"
 grep -Fq 'scheduler state: running' <<<"${out}"
-grep -Fq 'scheduler reason: bootstrap-valid' <<<"${out}"
+grep -Fq 'scheduler reason: live-running' <<<"${out}"
 grep -Fq 'workspace receipt path: /tmp/compact-test-workspace.json' <<<"${out}"
 grep -Fq "consensus receipt path: ${TMP_DIR}/state/consensus-receipts/compact-test.json" <<<"${out}"
 grep -Fq 'phase artifacts: critic_report_path | plan_report_path' <<<"${out}"
@@ -53,8 +57,10 @@ grep -Fq 'next action: implement-loader' <<<"${out}"
 grep -Fq 'decisions: use-keychain | mirror-github | keep-fugue-untouched' <<<"${out}"
 plan_report_path="$(jq -r '.phase_artifacts.plan_report_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
 critic_report_path="$(jq -r '.phase_artifacts.critic_report_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
+lifecycle_state="$(jq -r '.lifecycle_state' "${KERNEL_COMPACT_DIR}/compact-test.json")"
 [[ "${plan_report_path}" == "/tmp/kernel-plan.md" ]]
 [[ "${critic_report_path}" == "/tmp/kernel-critic.md" ]]
+[[ "${lifecycle_state}" == "live-running" ]]
 
 out="$(KERNEL_SUMMARY=$'line1\nline2\nline3\nline4' bash "${COMPACT_SCRIPT}" update manual_snapshot)"
 grep -Fq 'summary: line1 || line2 || line3' <<<"${out}"
@@ -127,9 +133,25 @@ preserve_scheduler_state="$(jq -r '.scheduler_state' "${KERNEL_COMPACT_DIR}/comp
 preserve_scheduler_reason="$(jq -r '.scheduler_reason' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
 preserve_workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
 preserve_consensus_receipt_path="$(jq -r '.consensus_receipt_path' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
+preserve_lifecycle_state="$(jq -r '.lifecycle_state' "${KERNEL_COMPACT_DIR}/compact-preserve.json")"
 [[ "${preserve_scheduler_state}" == "retry_queued" ]]
 [[ "${preserve_scheduler_reason}" == "awaiting-recovery" ]]
+[[ "${preserve_lifecycle_state}" == "retry-queued" ]]
 [[ "${preserve_workspace_receipt_path}" == "/tmp/preserve-workspace.json" ]]
 [[ "${preserve_consensus_receipt_path}" == "${TMP_DIR}/state/consensus-receipts/compact-preserve.json" ]]
+
+export KERNEL_RUN_ID="compact-workspace-fallback"
+export KERNEL_PROJECT="fugue-orchestrator"
+export KERNEL_PURPOSE="workspace-fallback"
+bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
+bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
+bash "${COMPACT_SCRIPT}" update status_changed "workspace fallback" >/dev/null
+fallback_workspace_receipt_path="$(jq -r '.workspace_receipt_path' "${KERNEL_COMPACT_DIR}/compact-workspace-fallback.json")"
+expected_workspace_receipt_path="$(bash "${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh" receipt-path)"
+[[ -f "${fallback_workspace_receipt_path}" ]]
+if [[ "${fallback_workspace_receipt_path}" != "${expected_workspace_receipt_path}" ]]; then
+  echo "compact artifact should infer workspace receipt path from existing workspace receipt" >&2
+  exit 1
+fi
 
 echo "kernel compact artifact check passed"

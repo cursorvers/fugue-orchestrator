@@ -21,8 +21,9 @@ cat >"${KERNEL_COMPACT_DIR}/run-one.json" <<'EOF'
   "tmux_session": "fugue-orchestrator__runtime-enforcement",
   "codex_thread_title": "fugue-orchestrator:runtime-enforcement",
   "active_models": ["codex", "glm", "gemini-cli"],
+  "lifecycle_state": "live-running",
   "scheduler_state": "running",
-  "scheduler_reason": "bootstrap-valid",
+  "scheduler_reason": "live-running",
   "next_action": ["verify-implementation"],
   "decisions": ["keep-kernel-sovereign", "bounded-handoff"],
   "phase_artifacts": {
@@ -62,6 +63,7 @@ cat >"${KERNEL_COMPACT_DIR}/run-two.json" <<'EOF'
   "tmux_session": "fugue-orchestrator__plan-surface",
   "codex_thread_title": "fugue-orchestrator:plan-surface",
   "active_models": ["codex", "cursor-cli"],
+  "lifecycle_state": "retry-queued",
   "scheduler_state": "retry_queued",
   "scheduler_reason": "awaiting-recovery",
   "next_action": ["review-plan"],
@@ -77,6 +79,7 @@ EOF
 out="$(bash "${SCRIPT}" --run-id run-one)"
 grep -Fq 'run id: run-one' <<<"${out}"
 grep -Fq 'phase: implementation' <<<"${out}"
+grep -Fq 'lifecycle state: live-running' <<<"${out}"
 grep -Fq 'phase artifact focus: implementation_report_path=/tmp/run-one-implementation.md' <<<"${out}"
 grep -Fq 'workspace receipt path: '"${workspace_receipt}" <<<"${out}"
 grep -Fq 'runtime ledger path: /tmp/kernel/runtime-ledger.json' <<<"${out}"
@@ -86,6 +89,7 @@ grep -Fq 'codex prompt command: bash '"${ROOT_DIR}"'/scripts/lib/kernel-codex-th
 out="$(bash "${SCRIPT}" --compact-path "${KERNEL_COMPACT_DIR}/run-two.json")"
 grep -Fq 'run id: run-two' <<<"${out}"
 grep -Fq 'runtime: fugue' <<<"${out}"
+grep -Fq 'lifecycle state: retry-queued' <<<"${out}"
 grep -Fq 'phase artifact focus: plan_report_path=/tmp/run-two-plan.md' <<<"${out}"
 grep -Fq 'workspace receipt path: ' <<<"${out}"
 
