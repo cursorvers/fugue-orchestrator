@@ -216,6 +216,14 @@ jobs:
           PAYLOAD="$(jq -n \
             --arg content "[LINE Value Share] Workflow failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{content: $content}')"
-          curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+          HTTP_STATUS="$(curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+            --connect-timeout 5 \
+            --max-time 20 \
+            -o /dev/null \
+            -w "%{http_code}" \
             -H "Content-Type: application/json" \
-            -d "${PAYLOAD}" || true
+            -d "${PAYLOAD}")" || true
+          case "${HTTP_STATUS}" in
+            2*) echo "Discord failure notification sent." ;;
+            *)  echo "::warning::Discord failure notification failed (HTTP ${HTTP_STATUS:-N/A})." ;;
+          esac

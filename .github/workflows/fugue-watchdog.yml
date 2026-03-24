@@ -510,6 +510,10 @@ jobs:
           PAYLOAD="$(jq -n --arg content "${{ steps.decide.outputs.message }}" '{content:$content}')"
           set +e
           curl -fsS -X POST "${webhook_url}" \
+            --connect-timeout 5 \
+            --max-time 20 \
+            --retry 2 \
+            --retry-delay 2 \
             -H "Content-Type: application/json" \
             -d "${PAYLOAD}"
           curl_exit_code=$?
