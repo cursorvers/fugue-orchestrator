@@ -177,7 +177,19 @@ jobs:
           fi
 
           git commit -m "backup: task completion ${SAFE_RECORD_ID}"
-          git push origin "HEAD:${BACKUP_BRANCH}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${BACKUP_BRANCH}" 2>/dev/null || true
+            if git push origin "HEAD:${BACKUP_BRANCH}"; then
+              echo "Push succeeded on attempt ${attempt}"
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "Push failed after 3 attempts"
+              exit 1
+            fi
+            echo "Push failed on attempt ${attempt}, retrying..."
+            sleep $((attempt * 2))
+          done
 
       - name: Upload backup artifact
         uses: actions/upload-artifact@v4
