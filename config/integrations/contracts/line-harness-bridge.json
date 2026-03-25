@@ -1,0 +1,119 @@
+{
+  "id": "line-harness-bridge",
+  "description": "Public webhook bridge contract for phased federation between LINE Harness OSS and the FUGUE orchestration runtime.",
+  "_comment_contract_shape": "Matches the existing integration contract pattern: flat top-level identity and ingress fields first, followed by bridge-specific routing and rollout controls.",
+  "network_plane": "cloudflare-worker-edge",
+  "ingress_surface": "public-webhook",
+  "ingress_auth": "webhook-signature",
+  "routing_domain": "line-harness-federation-edge",
+  "accepts_signed_payload": true,
+  "dedupe_strategy": "line-delivery-context-or-event-hash",
+  "fail_closed": true,
+  "_comment_bridge_endpoint": "Endpoint contract for the bridge receiver that accepts LINE webhook payloads and hands off only approved events into FUGUE lanes.",
+  "bridge_endpoint": {
+    "provider": "line-harness",
+    "path": "/webhooks/line/fugue-bridge",
+    "method": "POST",
+    "content_type": "application/json"
+  },
+  "_comment_hmac": "LINE webhook verification remains mandatory and fail-closed. Secret material is referenced by environment variable name only.",
+  "hmac": {
+    "enabled": true,
+    "algorithm": "HMAC-SHA256",
+    "header": "x-line-signature",
+    "secret_env": "LINE_CHANNEL_SECRET",
+    "required": true
+  },
+  "_comment_event_routing": "Only friend_add and the initial message_received path are active. score_threshold and cv_fire stay as placeholders until later phases.",
+  "event_routing_rules": [
+    {
+      "event": "friend_add",
+      "enabled_phase": 2,
+      "federation_mode": "shadow",
+      "criticality": "critical",
+      "route_to_model": "codex",
+      "handoff": "friend-onboarding"
+    },
+    {
+      "event": "message_received",
+      "enabled_phase": 3,
+      "federation_mode": "selective",
+      "criticality": "critical",
+      "route_to_model": "codex",
+      "handoff": "deferred-reply-initial"
+    },
+    {
+      "event": "score_threshold",
+      "enabled_phase": 4,
+      "federation_mode": "full",
+      "criticality": "lightweight",
+      "route_to_model": "glm",
+      "handoff": "placeholder-score-threshold",
+      "status": "placeholder"
+    },
+    {
+      "event": "cv_fire",
+      "enabled_phase": 4,
+      "federation_mode": "full",
+      "criticality": "visual",
+      "route_to_model": "gemini",
+      "handoff": "placeholder-cv-fire",
+      "status": "placeholder"
+    }
+  ],
+  "_comment_model_routing": "Multi-model routing preserves the ADR trio: codex for critical decisions, glm for lightweight classification, gemini for visual interpretation.",
+  "multi_model_routing": {
+    "critical": "codex",
+    "lightweight": "glm",
+    "visual": "gemini"
+  },
+  "_comment_deferred_reply": "message_received must ACK immediately, then complete the agent path asynchronously to stay within LINE reply timing constraints.",
+  "deferred_reply": {
+    "event": "message_received",
+    "enabled_phase": 3,
+    "ack_template": "acknowledged-processing",
+    "async_timeout_ms": 10000
+  },
+  "_comment_federation_modes": "Shadow is the Phase 2 default. Selective expands execution scope in Phase 3. Full federation is reserved for Phase 4.",
+  "federation_modes": {
+    "phase_2_default": "shadow",
+    "phase_3": "selective",
+    "phase_4": "full"
+  },
+  "_comment_kill_switch": "A single environment toggle disables all federated forwarding and keeps LINE Harness local-only.",
+  "kill_switch": {
+    "env": "FUGUE_LINE_FEDERATION_ENABLED",
+    "enabled_value": "true",
+    "disabled_value": "false",
+    "fail_mode": "local-only"
+  },
+  "_comment_phase_gates": "Phase gates separate low-risk bridge activation from higher-risk reply and campaign automation paths.",
+  "phase_gates": [
+    {
+      "phase": 2,
+      "mode": "shadow",
+      "active_events": [
+        "friend_add"
+      ],
+      "default": true
+    },
+    {
+      "phase": 3,
+      "mode": "selective",
+      "active_events": [
+        "friend_add",
+        "message_received"
+      ]
+    },
+    {
+      "phase": 4,
+      "mode": "full",
+      "active_events": [
+        "friend_add",
+        "message_received",
+        "score_threshold",
+        "cv_fire"
+      ]
+    }
+  ]
+}

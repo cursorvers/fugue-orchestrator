@@ -224,6 +224,29 @@
       "preferred_lane": "claude",
       "protected_interface": false,
       "path": "/Users/masayuki/.codex/skills/slide/SKILL.md"
+    },
+    {
+      "id": "line-harness-webhook-bridge",
+      "name": "LINE Harness Webhook Bridge",
+      "scope": "cross-repo",
+      "kind": "service",
+      "adapter_class": "worker-service",
+      "authority": "gateway",
+      "validation_mode": "contract",
+      "contract_owner": "cloudflare",
+      "preferred_lane": "cloudflare",
+      "protected_interface": true,
+      "ingress_surface": "public-webhook",
+      "ingress_auth": "webhook-signature",
+      "accepts_signed_payload": true,
+      "routing_domain": "line-public-ingress",
+      "dedupe_strategy": "provider-delivery-id",
+      "fail_closed": true,
+      "status": "phase-1-deploy",
+      "federation_mode": "shadow",
+      "kill_switch_env": "FUGUE_LINE_FEDERATION_ENABLED",
+      "path": "config/integrations/contracts/line-harness-bridge.json",
+      "coexists_with": "local-line-notify"
     }
   ]
 }
