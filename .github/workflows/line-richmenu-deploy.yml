@@ -110,46 +110,39 @@ jobs:
             exit 0
           fi
 
-          DIMS=$(identify -format "%wx%h" "${CURRENT_IMG}" 2>/dev/null || echo "unknown")
-          echo "Current image dimensions: ${DIMS}"
-
-          # 4. Recompose from N-col to 3-col
-          # Strategy: extract columns by area index, resize each to 833px wide
-          # Config maps: area 0→col 0 (無料教材), skip merged areas, last→col 2 (お問い合わせ)
-          # Use: col 0 (first), col 1 or 2 (middle), col N-1 (last)
-          IMG_W=$(identify -format "%w" "${CURRENT_IMG}" 2>/dev/null || echo "2500")
-          IMG_H=$(identify -format "%h" "${CURRENT_IMG}" 2>/dev/null || echo "843")
-          OLD_COL_W=$((IMG_W / CURRENT_AREAS))
-          NEW_COL_W=$((IMG_W / 3))
+          # 4. Recompose N-col → 3-col using Python/Pillow
+          pip install -q Pillow
 
           MIGRATED_IMG="${RUNNER_TEMP}/migrated-richmenu.png"
 
-          # Extract 3 columns: first, second (or middle), last
-          COL0="${RUNNER_TEMP}/col0.png"
-          COL1="${RUNNER_TEMP}/col1.png"
-          COL2="${RUNNER_TEMP}/col2.png"
+          python3 - "${CURRENT_IMG}" "${MIGRATED_IMG}" "${CURRENT_AREAS}" <<'PYEOF'
+          import sys
+          from PIL import Image
 
-          # Column 0: first area (無料教材)
-          convert "${CURRENT_IMG}" -crop "${OLD_COL_W}x${IMG_H}+0+0" +repage \
-            -resize "${NEW_COL_W}x${IMG_H}!" "${COL0}"
+          src_path, dst_path, n_areas = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          img = Image.open(src_path)
+          w, h = img.size
+          print(f"Current image: {w}x{h}, {n_areas} areas")
 
-          # Column 1: second area (サービス — merge candidate)
-          convert "${CURRENT_IMG}" -crop "${OLD_COL_W}x${IMG_H}+${OLD_COL_W}+0" +repage \
-            -resize "${NEW_COL_W}x${IMG_H}!" "${COL1}"
+          old_col = w // n_areas
+          new_w, new_h = 2500, 843
+          new_col = new_w // 3
 
-          # Column 2: last area (お問い合わせ)
-          LAST_X=$(( OLD_COL_W * (CURRENT_AREAS - 1) ))
-          convert "${CURRENT_IMG}" -crop "${OLD_COL_W}x${IMG_H}+${LAST_X}+0" +repage \
-            -resize "${NEW_COL_W}x${IMG_H}!" "${COL2}"
+          # Pick 3 columns: first, second, last
+          cols = [0, 1, n_areas - 1]
+          out = Image.new("RGB", (new_w, new_h))
 
-          # Compose side by side
-          convert "${COL0}" "${COL1}" "${COL2}" +append "${MIGRATED_IMG}"
+          for i, col_idx in enumerate(cols):
+              x0 = col_idx * old_col
+              crop = img.crop((x0, 0, x0 + old_col, h))
+              resized = crop.resize((new_col, new_h), Image.LANCZOS)
+              out.paste(resized, (i * new_col, 0))
 
-          FINAL_DIMS=$(identify -format "%wx%h" "${MIGRATED_IMG}" 2>/dev/null || echo "unknown")
-          echo "Migrated image: ${FINAL_DIMS}"
+          out.save(dst_path, "PNG")
+          print(f"Migrated: {out.size[0]}x{out.size[1]}")
+          PYEOF
 
-          # Ensure exact 2500x843
-          convert "${MIGRATED_IMG}" -resize "2500x843!" "${MIGRATED_IMG}"
+          echo "Image migration complete"
 
           echo "migrated=true" >> "$GITHUB_OUTPUT"
           echo "image_path=${MIGRATED_IMG}" >> "$GITHUB_OUTPUT"
@@ -174,54 +167,42 @@ jobs:
             exit 0
           fi
 
-          # Auto-generate image using ImageMagick (pre-installed on ubuntu-latest)
-          WIDTH=$(jq -r '.menu.size.width' "${CONFIG_FILE}")
-          HEIGHT=$(jq -r '.menu.size.height' "${CONFIG_FILE}")
-          BG_COLOR=$(jq -r '.image.background_color // "#1a1a2e"' "${CONFIG_FILE}")
-          TEXT_COLOR=$(jq -r '.image.text_color // "#ffffff"' "${CONFIG_FILE}")
-          DIVIDER_COLOR=$(jq -r '.image.divider_color // "#333355"' "${CONFIG_FILE}")
-          FONT_SIZE=$(jq -r '.image.font_size // 36' "${CONFIG_FILE}")
-          AREA_COUNT=$(jq '.menu.areas | length' "${CONFIG_FILE}")
-          COL_WIDTH=$((WIDTH / AREA_COUNT))
+          # Auto-generate image using Python/Pillow
+          pip install -q Pillow
 
-          # Create base image
-          convert -size "${WIDTH}x${HEIGHT}" "xc:${BG_COLOR}" "${IMAGE_PATH}"
+          python3 - "${CONFIG_FILE}" "${IMAGE_PATH}" <<'PYEOF'
+          import sys, json
+          from PIL import Image, ImageDraw, ImageFont
 
-          # Add divider lines and labels
-          DRAW_CMDS=""
-          for i in $(seq 0 $((AREA_COUNT - 1))); do
-            LABEL=$(jq -r ".menu.areas[${i}].label" "${CONFIG_FILE}")
-            EMOJI=$(jq -r ".image.icon_emojis[${i}] // \"\"" "${CONFIG_FILE}")
-            X_CENTER=$((COL_WIDTH * i + COL_WIDTH / 2))
-            Y_CENTER=$((HEIGHT / 2))
+          with open(sys.argv[1]) as f:
+              cfg = json.load(f)
 
-            # Divider line (except for first column)
-            if [ "${i}" -gt 0 ]; then
-              X_DIV=$((COL_WIDTH * i))
-              DRAW_CMDS="${DRAW_CMDS} -stroke '${DIVIDER_COLOR}' -strokewidth 2 -draw 'line ${X_DIV},40 ${X_DIV},$((HEIGHT - 40))'"
-            fi
+          W = cfg["menu"]["size"]["width"]
+          H = cfg["menu"]["size"]["height"]
+          areas = cfg["menu"]["areas"]
+          n = len(areas)
+          col_w = W // n
+          bg = cfg.get("image", {}).get("background_color", "#1a1a2e")
 
-            # Label text (emoji on top line, text below)
-            if [ -n "${EMOJI}" ] && [ "${EMOJI}" != "null" ]; then
-              DRAW_CMDS="${DRAW_CMDS} -fill '${TEXT_COLOR}' -font 'Noto-Sans-CJK-JP' -pointsize 64 -gravity NorthWest -annotate +$((X_CENTER - 32))+$((Y_CENTER - 100)) '${EMOJI}'"
-            fi
-            DRAW_CMDS="${DRAW_CMDS} -fill '${TEXT_COLOR}' -font 'Noto-Sans-CJK-JP' -pointsize ${FONT_SIZE} -gravity NorthWest -annotate +$((X_CENTER - ${#LABEL} * FONT_SIZE / 4))+$((Y_CENTER + 20)) '${LABEL}'"
-          done
+          img = Image.new("RGB", (W, H), bg)
+          draw = ImageDraw.Draw(img)
 
-          # Apply all draw commands
-          if [ -n "${DRAW_CMDS}" ]; then
-            eval convert "${IMAGE_PATH}" ${DRAW_CMDS} "${IMAGE_PATH}"
-          fi
+          # Dividers
+          for i in range(1, n):
+              x = col_w * i
+              draw.line([(x, 40), (x, H - 40)], fill="#333355", width=2)
 
-          # Verify image dimensions
-          ACTUAL_DIMS=$(identify -format "%wx%h" "${IMAGE_PATH}")
-          EXPECTED_DIMS="${WIDTH}x${HEIGHT}"
-          if [ "${ACTUAL_DIMS}" != "${EXPECTED_DIMS}" ]; then
-            echo "::error::Image dimensions mismatch: ${ACTUAL_DIMS} != ${EXPECTED_DIMS}"
-            exit 1
-          fi
+          # Labels (basic — no CJK font on ubuntu)
+          for i, area in enumerate(areas):
+              cx = col_w * i + col_w // 2
+              label = area["label"]
+              draw.text((cx - len(label) * 5, H // 2), label, fill="white")
 
-          echo "Generated menu image: ${ACTUAL_DIMS}"
+          img.save(sys.argv[2], "PNG")
+          print(f"Generated: {W}x{H}")
+          PYEOF
+
+          echo "Generated fallback menu image"
           echo "image_path=${IMAGE_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Rich Menu
