@@ -13,6 +13,8 @@ node_modules/
 .fugue/test-workset-local/
 .fugue/kernel-googleworkspace-workset/
 .fugue/dev-tmp-root/
+.fugue/eval/
+.fugue/scratchpad/
 #...but encrypted secrets are safe to commit
 !.env.enc
 excalidraw.log

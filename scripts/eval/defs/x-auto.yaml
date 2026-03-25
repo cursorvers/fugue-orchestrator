@@ -1,0 +1,5 @@
+skill_name: x-auto
+command: python3 ~/.claude/skills/x-auto/scripts/x-auto-health.py
+timeout_sec: 30
+expected_exit_code: 0
+output_pattern: ''
