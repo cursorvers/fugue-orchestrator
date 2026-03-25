@@ -31,6 +31,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENC_FILE="$REPO_ROOT/secrets/fugue-secrets.enc"
 SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
 ZSHENV_FILE="${ZSHENV_FILE:-$HOME/.zshenv}"
+KEYMAP_FILE="${KEYMAP_FILE:-$HOME/.local/lib/fugue-sops-keymap.sh}"
 export SOPS_AGE_KEY_FILE
 
 SOPS_BIN="${SOPS_BIN:-}"
@@ -74,7 +75,7 @@ runtime_sops_key_for() {
   local env_key="$1"
   local mapped
   mapped="$(
-    sed -n "/^_fugue_sops_key()/,/^}/p" "$ZSHENV_FILE" \
+    sed -n "/^_fugue_sops_key()/,/^}/p" "$KEYMAP_FILE" \
       | grep -E "^[[:space:]]*${env_key}\)" \
       | sed -n "s/.*printf '\([^']*\)'.*/\1/p" \
       | head -n 1
@@ -86,7 +87,7 @@ runtime_env_key_for() {
   local storage_key="$1"
   local env_key
   env_key="$(
-    sed -n "/^_fugue_sops_key()/,/^}/p" "$ZSHENV_FILE" \
+    sed -n "/^_fugue_sops_key()/,/^}/p" "$KEYMAP_FILE" \
       | while IFS= read -r line; do
           if printf '%s\n' "$line" | grep -Fq "printf '${storage_key}'"; then
             printf '%s\n' "$line" | sed -n "s/^[[:space:]]*\([A-Z0-9_]*\)).*/\1/p"
