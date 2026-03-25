@@ -1,0 +1,71 @@
+# Skill Eval Framework CI
+# Runs on push to main when eval/scratchpad scripts change.
+# Checks: bash syntax + dry-run smoke test (no live canary — requires local env).
+
+name: eval-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/eval/**'
+      - 'scripts/lib/scratchpad.sh'
+  pull_request:
+    paths:
+      - 'scripts/eval/**'
+      - 'scripts/lib/scratchpad.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax check
+        run: |
+          echo "=== bash -n ==="
+          bash -n scripts/lib/scratchpad.sh
+          echo "PASS: scratchpad.sh"
+          bash -n scripts/eval/skill-eval.sh
+          echo "PASS: skill-eval.sh"
+
+      - name: Path traversal guard test
+        run: |
+          echo "=== Security: path traversal rejection ==="
+          if bash scripts/eval/skill-eval.sh --skill "../../etc/passwd" 2>&1 | grep -q "invalid skill name"; then
+            echo "PASS: path traversal blocked"
+          else
+            echo "FAIL: path traversal not blocked" && exit 1
+          fi
+
+      - name: Shift guard test
+        run: |
+          echo "=== Edge case: --skill without value ==="
+          if bash scripts/eval/skill-eval.sh --skill 2>&1 | grep -q "requires a value"; then
+            echo "PASS: missing value caught"
+          else
+            echo "FAIL: missing value not caught" && exit 1
+          fi
+
+      - name: Dry-run smoke test (all defs)
+        run: |
+          echo "=== Dry-run smoke ==="
+          for def in scripts/eval/defs/*.yaml; do
+            skill="$(basename "${def}" .yaml)"
+            echo -n "${skill}: "
+            output="$(bash scripts/eval/skill-eval.sh --skill "${skill}" --dry-run 2>&1)"
+            if echo "${output}" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+              echo "PASS (valid JSON)"
+            else
+              echo "FAIL (invalid JSON): ${output}" && exit 1
+            fi
+          done
