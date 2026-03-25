@@ -53,7 +53,7 @@ enum_failures="$(jq -r '
       or (.authority | IN("artifact-only","service-adapter","gateway","protected-external","ui-boundary") | not)
       or (.validation_mode | IN("smoke","budgeted","regression","contract") | not)
       or (.contract_owner | IN("kernel-local","cloudflare","cursorvers-line","vercel","external") | not)
-      or (.preferred_lane | IN("codex","claude","cloudflare","external","manus") | not)
+      or (.preferred_lane | IN("codex","claude","cloudflare","external") | not)
       or (.protected_interface | type != "boolean")
     )
   | .id

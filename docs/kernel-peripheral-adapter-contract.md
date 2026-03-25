@@ -58,7 +58,6 @@ Each peripheral adapter should declare:
   - `claude`
   - `cloudflare`
   - `external`
-  - `manus`
 - `protected_interface`
 
 Ingress-facing adapters should also declare:

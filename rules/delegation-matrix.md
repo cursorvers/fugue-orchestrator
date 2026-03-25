@@ -97,7 +97,7 @@ Task received
 +- File exploration? ----------------> Subagent Explore (haiku) [only exception]
 +- X/Twitter/trends/realtime? -------> Grok
 +- Diagrams/flowcharts? ------------> Excalidraw
-+- Browser automation? -------------> Manus browser
++- Browser automation? -------------> Playwright MCP / Chrome DevTools MCP
 +- Orchestration review? -----------> Claude Opus direct participation (required)
 +- Can't decide? ------------------> Codex architect (former Layer4)
 ```

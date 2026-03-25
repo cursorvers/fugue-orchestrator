@@ -77,8 +77,6 @@ Swapping orchestrators changes routing and policy, not secret names.
 
 Example:
 
-- `manus-audit.yml` reads GitHub secrets
-- `manus-intelligent-repair` reads Supabase Edge Function secrets
 - Cloudflare workers read Wrangler/Workers secrets
 
 ### 3. `.env` is bootstrap-only

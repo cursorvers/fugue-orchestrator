@@ -278,7 +278,6 @@ apply_variable org N8N_INSTANCE_URL optional N8N_INSTANCE_URL
 apply_secret org SUPABASE_ACCESS_TOKEN optional SUPABASE_ACCESS_TOKEN
 apply_variable org SUPABASE_PROJECT_ID optional SUPABASE_PROJECT_ID
 apply_secret org SUPABASE_URL optional SUPABASE_URL
-apply_secret org MANUS_AUDIT_API_KEY optional MANUS_AUDIT_API_KEY
 apply_secret org GOOGLE_SERVICE_ACCOUNT_JSON optional GOOGLE_SERVICE_ACCOUNT_JSON
 apply_secret org PROGRESS_WEBHOOK_URL optional PROGRESS_WEBHOOK_URL
 

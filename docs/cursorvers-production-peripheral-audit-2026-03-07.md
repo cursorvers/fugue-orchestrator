@@ -25,7 +25,7 @@ Repository:
 
 Verified runs:
 
-- `Manus Audit (Unified)` run `22791334159` -> `success`
+- `Manus Audit (Unified)` run `22791334159` -> `success` *(Manus adapter decommissioned from adapter registry 2026-03)*
 - `Deploy Supabase Edge Functions` run `22791053213` -> `success`
 - `LINE Daily Brief` run `22691740664` -> `success`
 - `Stripe Consistency Check` run `22770570185` -> `success`
@@ -127,12 +127,10 @@ No production blocker remains in the currently verified Cursorvers surfaces.
 - `Pencil` / `Excalidraw` / `Slack` / `Vercel`
   - MCP adapters are verified through contract and dry-run tests
   - live session-backed verification is still pending
-- `slide` / `Manus artifact`
+- `slide`
   - CLI entrypoint contracts are verified
-  - real Google Slides issuance / Manus generation is still pending
-- `MANUS_GITHUB_TOKEN`
-  - bounded mode is safe today
-  - rotation or GitHub App migration remains desirable for long-term hardening
+  - real Google Slides issuance is still pending
+  - Manus adapter decommissioned from adapter registry (2026-03); MANUS_API_KEY retained in Supabase runtime for /slide skill
 - `cloudflare-workers-hub` repo-specific credentials
   - values such as `CODEX_AUTH_JSON`, `BACKFILL_API_KEY`, `SENTRY_AUTH_TOKEN`
   - remain intentional for now, but still deserve future consolidation review
@@ -147,7 +145,7 @@ No production blocker remains in the currently verified Cursorvers surfaces.
 - smoke / contract-verified:
   - local linked systems
   - MCP adapter layer
-  - slide / Manus specialist entrypoints
+  - slide specialist entrypoints
 
 ### Recommendation
 

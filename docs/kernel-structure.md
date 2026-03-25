@@ -2,7 +2,7 @@
 
 `Kernel` is the Codex-first successor to the legacy Claude orchestration plane.
 
-It keeps the inherited governance model, but centralizes sovereignty in the `gpt-5.4` Kernel while treating Claude, GLM, Gemini, Manus, MCPs, and linked systems as bounded adapters.
+It keeps the inherited governance model, but centralizes sovereignty in the `gpt-5.4` Kernel while treating Claude, GLM, Gemini, MCPs, and linked systems as bounded adapters.
 
 ## Layered View
 
@@ -59,7 +59,7 @@ It keeps the inherited governance model, but centralizes sovereignty in the `gpt
 │ - MCP adapters                                                      │
 │ - linked systems bus                                                │
 │ - local-agent / Cloudflare Workers                                  │
-│ - Manus / specialist tooling                                        │
+│ - specialist tooling                                                 │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
                                v
@@ -115,7 +115,7 @@ flowchart TD
     E --> M[MCP adapters]
     E --> L[Linked systems bus]
     E --> W[Cloudflare / local-agent]
-    E --> SP[Specialists / Manus]
+    E --> SP[Specialists]
 
     G --> F[fugue-bridge]
     F --> LF[Legacy Claude Orchestration]

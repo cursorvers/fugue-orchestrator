@@ -115,7 +115,6 @@ interface.
 - `claude-executor`
 - `glm-reviewer`
 - `gemini-ui-reviewer`
-- `manus-artifact-worker`
 
 ### Optional future sovereign
 

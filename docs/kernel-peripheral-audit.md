@@ -27,7 +27,6 @@ For Cursorvers-operated systems, the stronger constraint is not model compatibil
 | `discord-notify` | local notify adapter + Workers handlers | service dependent | Codex-neutral notification lane |
 | `line-notify` | local notify adapter + Workers schema surfaces | service dependent | Codex-neutral notification lane |
 | `slide` | Cloudflare slide services + `~/.codex/skills/slide` | external-service dependent | Keep as specialist workflow, Claude optional |
-| `manus` | `~/.codex/skills/slide/scripts/manus-*` | external-service dependent | Non-voting artifact engine |
 | `supabase` | Workers services + REST bridge | external-service dependent | Codex-neutral, CI-friendly after bridge fixes |
 | `stripe` | Workers handlers + REST bridge | external-service dependent | Codex-neutral, CI-friendly after bridge fixes |
 | `limitless` | Workers handlers/services | external-service dependent | Outside core Kernel, but compatible as linked external service |

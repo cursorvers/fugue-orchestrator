@@ -224,19 +224,6 @@
       "preferred_lane": "claude",
       "protected_interface": false,
       "path": "/Users/masayuki/.codex/skills/slide/SKILL.md"
-    },
-    {
-      "id": "manus-artifact-worker",
-      "name": "Manus Artifact Worker",
-      "scope": "skill",
-      "kind": "artifact",
-      "adapter_class": "skill",
-      "authority": "artifact-only",
-      "validation_mode": "contract",
-      "contract_owner": "external",
-      "preferred_lane": "manus",
-      "protected_interface": false,
-      "path": "/Users/masayuki/.codex/skills/slide/SKILL.md"
     }
   ]
 }
