@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
+# scratchpad.sh — JSONL audit trail logger for FUGUE skill execution.
+#
+# Source this file to gain scratchpad_init / scratchpad_log functions.
+# Idempotent: safe to source multiple times.
 
 if [[ -z "${_FUGUE_SCRATCHPAD_LOADED:-}" ]]; then
 _FUGUE_SCRATCHPAD_LOADED=1
 
-source "$(dirname "${BASH_SOURCE[0]}")/common-utils.sh"
+# Escape characters that would break JSON string values.
+_scratchpad_json_escape() {
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
 
 scratchpad_init() {
   local context_name="${1:?context_name is required}"
@@ -31,10 +41,10 @@ scratchpad_log() {
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '{"ts":"%s","tool":"%s","status":"%s","duration_ms":%s,"summary":"%s"}\n' \
     "${ts}" \
-    "${tool_name}" \
-    "${status}" \
+    "$(_scratchpad_json_escape "${tool_name}")" \
+    "$(_scratchpad_json_escape "${status}")" \
     "${duration_ms}" \
-    "${summary}" >> "${repo_root}/${SCRATCHPAD_FILE}"
+    "$(_scratchpad_json_escape "${summary}")" >> "${repo_root}/${SCRATCHPAD_FILE}"
 }
 
 fi

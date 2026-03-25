@@ -1,5 +1,5 @@
 skill_name: bookkeeping
-command: echo bookkeeping-eval-placeholder
-timeout_sec: 120
+command: test -f ~/.claude/mcp-servers/freee-mcp/build/index.js && node --check ~/.claude/skills/bookkeeping/scripts/bookkeeping-engine.mjs
+timeout_sec: 15
 expected_exit_code: 0
-output_pattern: placeholder
+output_pattern: ''

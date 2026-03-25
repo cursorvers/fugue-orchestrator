@@ -65,6 +65,13 @@ yaml_value() {
   printf '%s' "${value}"
 }
 
+_json_escape() {
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
 def_skill_name="$(yaml_value "skill_name")"
 command_value="$(yaml_value "command")"
 timeout_sec="$(yaml_value "timeout_sec")"
@@ -73,14 +80,14 @@ output_pattern="$(yaml_value "output_pattern")"
 
 if [[ "${dry_run}" == "true" ]]; then
   printf '{"skill":"%s","run_id":"%s","definition_file":"%s","skill_name":"%s","command":"%s","timeout_sec":%s,"expected_exit_code":%s,"output_pattern":"%s"}\n' \
-    "${skill_name}" \
-    "${run_id}" \
-    "${def_file}" \
-    "${def_skill_name}" \
-    "${command_value}" \
+    "$(_json_escape "${skill_name}")" \
+    "$(_json_escape "${run_id}")" \
+    "$(_json_escape "${def_file}")" \
+    "$(_json_escape "${def_skill_name}")" \
+    "$(_json_escape "${command_value}")" \
     "${timeout_sec}" \
     "${expected_exit_code}" \
-    "${output_pattern}"
+    "$(_json_escape "${output_pattern}")"
   exit 0
 fi
 
@@ -118,14 +125,14 @@ eval_file="${eval_dir}/$(date -u +%Y-%m-%d)_${skill_name}.jsonl"
 
 printf '{"ts":"%s","run_id":"%s","skill":"%s","definition_skill_name":"%s","exit_code":%s,"expected_exit_code":%s,"duration_secs":%s,"output_line_count":%s,"output_pattern":"%s"}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  "${run_id}" \
-  "${skill_name}" \
-  "${def_skill_name}" \
+  "$(_json_escape "${run_id}")" \
+  "$(_json_escape "${skill_name}")" \
+  "$(_json_escape "${def_skill_name}")" \
   "${command_status}" \
   "${expected_exit_code}" \
   "${duration_secs}" \
   "${output_line_count}" \
-  "${output_pattern}" >> "${eval_file}"
+  "$(_json_escape "${output_pattern}")" >> "${eval_file}"
 
 scratchpad_status="ok"
 if [[ "${command_status}" -ne "${expected_exit_code}" ]]; then
@@ -137,5 +144,5 @@ rm -f "${output_file}"
 
 if [[ "${command_status}" -ne "${expected_exit_code}" ]]; then
   echo "Error: expected exit code ${expected_exit_code}, got ${command_status}." >&2
-  exit "${command_status}"
+  exit 1
 fi
