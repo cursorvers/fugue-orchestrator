@@ -2,4 +2,4 @@ skill_name: bookkeeping
 command: test -f ~/.claude/mcp-servers/freee-mcp/build/index.js && node --check ~/.claude/skills/bookkeeping/scripts/bookkeeping-engine.mjs
 timeout_sec: 15
 expected_exit_code: 0
-output_pattern: ''
+output_pattern:

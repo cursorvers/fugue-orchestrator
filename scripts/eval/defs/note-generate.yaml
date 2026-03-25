@@ -2,4 +2,4 @@ skill_name: note-generate
 command: node -e "require('fs').accessSync(process.env.HOME+'/.claude/skills/note-generate/scripts/note-preflight-qc.js')"
 timeout_sec: 15
 expected_exit_code: 0
-output_pattern: ''
+output_pattern:

@@ -8,10 +8,16 @@ if [[ -z "${_FUGUE_SCRATCHPAD_LOADED:-}" ]]; then
 _FUGUE_SCRATCHPAD_LOADED=1
 
 # Escape characters that would break JSON string values.
-_scratchpad_json_escape() {
+# Handles: \ " newline CR tab backspace formfeed
+fugue_json_escape() {
   local s="${1:-}"
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\b'/\\b}"
+  s="${s//$'\f'/\\f}"
   printf '%s' "$s"
 }
 
@@ -41,10 +47,10 @@ scratchpad_log() {
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '{"ts":"%s","tool":"%s","status":"%s","duration_ms":%s,"summary":"%s"}\n' \
     "${ts}" \
-    "$(_scratchpad_json_escape "${tool_name}")" \
-    "$(_scratchpad_json_escape "${status}")" \
+    "$(fugue_json_escape "${tool_name}")" \
+    "$(fugue_json_escape "${status}")" \
     "${duration_ms}" \
-    "$(_scratchpad_json_escape "${summary}")" >> "${repo_root}/${SCRATCHPAD_FILE}"
+    "$(fugue_json_escape "${summary}")" >> "${repo_root}/${SCRATCHPAD_FILE}"
 }
 
 fi
