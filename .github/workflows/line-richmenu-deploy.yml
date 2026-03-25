@@ -3,6 +3,10 @@ name: LINE Rich Menu Deploy
 on:
   workflow_dispatch:
     inputs:
+      migrate_current:
+        description: "Fetch current Rich Menu image and recompose from 4-col to 3-col"
+        type: boolean
+        default: true
       custom_image:
         description: "Path to custom menu image in repo (leave empty for auto-generated)"
         type: string
@@ -59,8 +63,101 @@ jobs:
           echo "config_file=${CONFIG_FILE}" >> "$GITHUB_OUTPUT"
           echo "area_count=${AREA_COUNT}" >> "$GITHUB_OUTPUT"
 
+      - name: Migrate current Rich Menu image (4→3 col)
+        id: migrate
+        if: ${{ inputs.migrate_current == true }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::warning::LINE_CHANNEL_ACCESS_TOKEN not set — cannot migrate current menu"
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+          # 1. Get current default Rich Menu ID
+          CURRENT_ID=$(curl -s --connect-timeout 10 --max-time 20 \
+            -H "${AUTH}" "https://api.line.me/v2/bot/user/all/richmenu" \
+            | jq -r '.richMenuId // empty' 2>/dev/null || true)
+
+          if [ -z "${CURRENT_ID}" ]; then
+            echo "::notice::No default Rich Menu found — skipping migration"
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Current Rich Menu ID: ${CURRENT_ID}"
+
+          # 2. Get current menu details (to know column count)
+          CURRENT_AREAS=$(curl -s --connect-timeout 10 --max-time 20 \
+            -H "${AUTH}" "https://api.line.me/v2/bot/richmenu/${CURRENT_ID}" \
+            | jq '.areas | length' 2>/dev/null || echo "0")
+          echo "Current menu has ${CURRENT_AREAS} areas"
+
+          # 3. Download current image
+          CURRENT_IMG="${RUNNER_TEMP}/current-richmenu.png"
+          curl -s --connect-timeout 10 --max-time 30 \
+            -H "${AUTH}" \
+            -o "${CURRENT_IMG}" \
+            "https://api-data.line.me/v2/bot/richmenu/${CURRENT_ID}/content"
+
+          if [ ! -s "${CURRENT_IMG}" ]; then
+            echo "::warning::Failed to download current menu image"
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          DIMS=$(identify -format "%wx%h" "${CURRENT_IMG}" 2>/dev/null || echo "unknown")
+          echo "Current image dimensions: ${DIMS}"
+
+          # 4. Recompose from N-col to 3-col
+          # Strategy: extract columns by area index, resize each to 833px wide
+          # Config maps: area 0→col 0 (無料教材), skip merged areas, last→col 2 (お問い合わせ)
+          # Use: col 0 (first), col 1 or 2 (middle), col N-1 (last)
+          IMG_W=$(identify -format "%w" "${CURRENT_IMG}" 2>/dev/null || echo "2500")
+          IMG_H=$(identify -format "%h" "${CURRENT_IMG}" 2>/dev/null || echo "843")
+          OLD_COL_W=$((IMG_W / CURRENT_AREAS))
+          NEW_COL_W=$((IMG_W / 3))
+
+          MIGRATED_IMG="${RUNNER_TEMP}/migrated-richmenu.png"
+
+          # Extract 3 columns: first, second (or middle), last
+          COL0="${RUNNER_TEMP}/col0.png"
+          COL1="${RUNNER_TEMP}/col1.png"
+          COL2="${RUNNER_TEMP}/col2.png"
+
+          # Column 0: first area (無料教材)
+          convert "${CURRENT_IMG}" -crop "${OLD_COL_W}x${IMG_H}+0+0" +repage \
+            -resize "${NEW_COL_W}x${IMG_H}!" "${COL0}"
+
+          # Column 1: second area (サービス — merge candidate)
+          convert "${CURRENT_IMG}" -crop "${OLD_COL_W}x${IMG_H}+${OLD_COL_W}+0" +repage \
+            -resize "${NEW_COL_W}x${IMG_H}!" "${COL1}"
+
+          # Column 2: last area (お問い合わせ)
+          LAST_X=$(( OLD_COL_W * (CURRENT_AREAS - 1) ))
+          convert "${CURRENT_IMG}" -crop "${OLD_COL_W}x${IMG_H}+${LAST_X}+0" +repage \
+            -resize "${NEW_COL_W}x${IMG_H}!" "${COL2}"
+
+          # Compose side by side
+          convert "${COL0}" "${COL1}" "${COL2}" +append "${MIGRATED_IMG}"
+
+          FINAL_DIMS=$(identify -format "%wx%h" "${MIGRATED_IMG}" 2>/dev/null || echo "unknown")
+          echo "Migrated image: ${FINAL_DIMS}"
+
+          # Ensure exact 2500x843
+          convert "${MIGRATED_IMG}" -resize "2500x843!" "${MIGRATED_IMG}"
+
+          echo "migrated=true" >> "$GITHUB_OUTPUT"
+          echo "image_path=${MIGRATED_IMG}" >> "$GITHUB_OUTPUT"
+          echo "old_menu_id=${CURRENT_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Generate menu image
         id: image
+        if: ${{ steps.migrate.outputs.migrated != 'true' }}
         env:
           CUSTOM_IMAGE: ${{ inputs.custom_image }}
         run: |
@@ -131,7 +228,7 @@ jobs:
         if: ${{ inputs.dry_run != true }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          IMAGE_PATH: ${{ steps.image.outputs.image_path }}
+          IMAGE_PATH: ${{ steps.migrate.outputs.migrated == 'true' && steps.migrate.outputs.image_path || steps.image.outputs.image_path }}
         run: |
           set -euo pipefail
 

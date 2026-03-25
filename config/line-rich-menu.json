@@ -11,11 +11,12 @@
     },
     "areas": [
       {
-        "label": "無料特典GET",
+        "label": "無料教材",
+        "subtitle": "AI✕医療の学習リソース",
         "bounds": { "x": 0, "y": 0, "width": 833, "height": 843 },
         "action": {
           "type": "uri",
-          "label": "無料特典GET",
+          "label": "無料教材",
           "uri": "https://discord.gg/TkmmX5Z4vx"
         }
       },
