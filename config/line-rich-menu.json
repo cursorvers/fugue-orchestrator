@@ -1,0 +1,50 @@
+{
+  "version": "2026-03-25",
+  "comment": "LINE Rich Menu — 3-button compact layout",
+  "menu": {
+    "name": "cursorvers-main-v2",
+    "chatBarText": "メニュー",
+    "selected": true,
+    "size": {
+      "width": 2500,
+      "height": 843
+    },
+    "areas": [
+      {
+        "label": "無料特典GET",
+        "bounds": { "x": 0, "y": 0, "width": 833, "height": 843 },
+        "action": {
+          "type": "uri",
+          "label": "無料特典GET",
+          "uri": "https://discord.gg/TkmmX5Z4vx"
+        }
+      },
+      {
+        "label": "サービス案内",
+        "bounds": { "x": 833, "y": 0, "width": 834, "height": 843 },
+        "action": {
+          "type": "uri",
+          "label": "サービス案内",
+          "uri": "https://cursorvers.github.io/cursorvers-edu/services.html"
+        }
+      },
+      {
+        "label": "お問い合わせ",
+        "bounds": { "x": 1667, "y": 0, "width": 833, "height": 843 },
+        "action": {
+          "type": "uri",
+          "label": "お問い合わせ",
+          "uri": "https://script.google.com/macros/s/AKfycbwDP0d67qtifyms2h67LawjNWJi_Lh44faPC7Z4axfS_Gdmjzcd50rcl_kmTYBTysKirQ/exec"
+        }
+      }
+    ]
+  },
+  "image": {
+    "comment": "Auto-generated from labels. Override with image_path to use a custom image.",
+    "background_color": "#1a1a2e",
+    "text_color": "#ffffff",
+    "divider_color": "#333355",
+    "icon_emojis": ["🎁", "💼", "✉️"],
+    "font_size": 36
+  }
+}

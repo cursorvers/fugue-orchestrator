@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: line-send-note-article
@@ -18,7 +19,48 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Quota gate
+        id: quota_gate
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          gate_pass="true"
+
+          # 1. Check delivery pause flag
+          paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
+            --jq '.value' 2>/dev/null || echo "false")
+          if [ "${paused}" = "true" ]; then
+            echo "::notice::LINE delivery paused by delivery-audit"
+            gate_pass="false"
+          fi
+
+          # 2. Quota check (push costs 1 message)
+          if [ "${gate_pass}" = "true" ] && [ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+            quota_value=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/message/quota" \
+              | jq -r '.value // 0' 2>/dev/null || echo "0")
+
+            total_usage=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/message/quota/consumption" \
+              | jq -r '.totalUsage // 0' 2>/dev/null || echo "0")
+
+            remaining=$((quota_value - total_usage))
+            echo "LINE quota: ${total_usage}/${quota_value} (remaining: ${remaining})"
+
+            if [ "${remaining}" -lt 1 ] 2>/dev/null; then
+              gate_pass="false"
+              echo "::notice::Quota gate BLOCKED — no remaining quota (${remaining})"
+            fi
+          fi
+
+          echo "gate_pass=${gate_pass}" >> "${GITHUB_OUTPUT}"
+
       - name: Resolve latest unpublished article
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
         id: article
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -124,7 +166,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Send LINE push message
-        if: ${{ steps.article.outputs.skip != 'true' }}
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
@@ -180,6 +222,14 @@ jobs:
                 exit 0
                 ;;
               408|429|500|502|503|504)
+                # Distinguish monthly quota exhaustion from transient 429
+                if [ "${HTTP_STATUS}" = "429" ]; then
+                  BODY_MSG="$(jq -r '.message // ""' "${RESPONSE_BODY}" 2>/dev/null || true)"
+                  if printf '%s' "${BODY_MSG}" | grep -qiE 'monthly|limit|quota'; then
+                    echo "::error::LINE monthly quota exhausted (${BODY_MSG})"
+                    exit 1
+                  fi
+                fi
                 if [ "${ATTEMPT}" -lt "${MAX_ATTEMPTS}" ]; then
                   BACKOFF=$(( 1 << (ATTEMPT - 1) ))
                   echo "::warning::Transient error ${HTTP_STATUS}; retrying in ${BACKOFF}s (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
@@ -195,7 +245,7 @@ jobs:
           done
 
       - name: Mark article as notified in Supabase
-        if: ${{ success() && steps.article.outputs.skip != 'true' }}
+        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
