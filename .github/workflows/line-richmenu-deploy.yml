@@ -272,7 +272,8 @@ jobs:
           SET_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "https://api.line.me/v2/bot/user/all/richmenu/${MENU_ID}" \
             --connect-timeout 10 --max-time 30 \
-            -H "${AUTH}")
+            -H "${AUTH}" \
+            -H "Content-Length: 0")
 
           if [[ ! "${SET_STATUS}" =~ ^2 ]]; then
             echo "::error::Failed to set default menu (HTTP ${SET_STATUS})"
