@@ -123,10 +123,20 @@ jobs:
       workspace_suggested_phases: ${{ steps.ctx.outputs.workspace_suggested_phases }}
       workspace_readonly_actions: ${{ steps.ctx.outputs.workspace_readonly_actions }}
       workspace_approval_required_actions: ${{ steps.ctx.outputs.workspace_approval_required_actions }}
+      content_hint_applied: ${{ steps.ctx.outputs.content_hint_applied }}
+      content_action_hint: ${{ steps.ctx.outputs.content_action_hint }}
+      content_skill_hint: ${{ steps.ctx.outputs.content_skill_hint }}
+      content_reason: ${{ steps.ctx.outputs.content_reason }}
+      content_primary_action_hint: ${{ steps.ctx.outputs.content_primary_action_hint }}
+      content_primary_skill_hint: ${{ steps.ctx.outputs.content_primary_skill_hint }}
+      content_support_action_hint: ${{ steps.ctx.outputs.content_support_action_hint }}
+      content_support_skill_hint: ${{ steps.ctx.outputs.content_support_skill_hint }}
+      compare_mode: ${{ steps.ctx.outputs.compare_mode }}
+      compare_required_artifacts: ${{ steps.ctx.outputs.compare_required_artifacts }}
       vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve issue context
         id: ctx
@@ -176,6 +186,34 @@ jobs:
           EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
           SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
         run: bash scripts/harness/resolve-orchestration-context.sh
+
+      - name: Record content routing summary
+        if: ${{ always() }}
+        env:
+          CONTENT_HINT_APPLIED: ${{ steps.ctx.outputs.content_hint_applied }}
+          CONTENT_ACTION_HINT: ${{ steps.ctx.outputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ steps.ctx.outputs.content_skill_hint }}
+          CONTENT_PRIMARY_ACTION_HINT: ${{ steps.ctx.outputs.content_primary_action_hint }}
+          CONTENT_PRIMARY_SKILL_HINT: ${{ steps.ctx.outputs.content_primary_skill_hint }}
+          CONTENT_SUPPORT_ACTION_HINT: ${{ steps.ctx.outputs.content_support_action_hint }}
+          CONTENT_SUPPORT_SKILL_HINT: ${{ steps.ctx.outputs.content_support_skill_hint }}
+          COMPARE_MODE: ${{ steps.ctx.outputs.compare_mode }}
+          COMPARE_REQUIRED_ARTIFACTS: ${{ steps.ctx.outputs.compare_required_artifacts }}
+        run: |
+          {
+            echo "## Content Routing"
+            echo "- content_hint_applied: \`${CONTENT_HINT_APPLIED:-false}\`"
+            echo "- content_action_hint: \`${CONTENT_ACTION_HINT:-none}\`"
+            echo "- content_skill_hint: \`${CONTENT_SKILL_HINT:-none}\`"
+            echo "- content_primary_action_hint: \`${CONTENT_PRIMARY_ACTION_HINT:-none}\`"
+            echo "- content_primary_skill_hint: \`${CONTENT_PRIMARY_SKILL_HINT:-none}\`"
+            echo "- content_support_action_hint: \`${CONTENT_SUPPORT_ACTION_HINT:-none}\`"
+            echo "- content_support_skill_hint: \`${CONTENT_SUPPORT_SKILL_HINT:-none}\`"
+            echo
+            echo "## Compare Mode"
+            echo "- compare_mode: \`${COMPARE_MODE:-off}\`"
+            echo "- compare_required_artifacts: \`${COMPARE_REQUIRED_ARTIFACTS:-none}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Comment when subscription strict is paused
         if: ${{ steps.ctx.outputs.should_run != 'true' && steps.ctx.outputs.skip_reason == 'subscription-self-hosted-offline-strict' }}
@@ -343,7 +381,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Post multi-agent / translator scorecard
         env:
@@ -538,6 +576,16 @@ jobs:
       workspace_readonly_actions: "${{ needs.ctx.outputs.workspace_readonly_actions }}"
       workspace_approval_required_actions: "${{ needs.ctx.outputs.workspace_approval_required_actions }}"
       workspace_readonly_environment: "${{ vars.FUGUE_WORKSPACE_READONLY_ENV || 'workspace-readonly' }}"
+      content_hint_applied: "${{ needs.ctx.outputs.content_hint_applied }}"
+      content_action_hint: "${{ needs.ctx.outputs.content_action_hint }}"
+      content_skill_hint: "${{ needs.ctx.outputs.content_skill_hint }}"
+      content_reason: "${{ needs.ctx.outputs.content_reason }}"
+      content_primary_action_hint: "${{ needs.ctx.outputs.content_primary_action_hint }}"
+      content_primary_skill_hint: "${{ needs.ctx.outputs.content_primary_skill_hint }}"
+      content_support_action_hint: "${{ needs.ctx.outputs.content_support_action_hint }}"
+      content_support_skill_hint: "${{ needs.ctx.outputs.content_support_skill_hint }}"
+      compare_mode: "${{ needs.ctx.outputs.compare_mode }}"
+      compare_required_artifacts: "${{ needs.ctx.outputs.compare_required_artifacts }}"
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}

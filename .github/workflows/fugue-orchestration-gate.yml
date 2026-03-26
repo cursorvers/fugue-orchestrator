@@ -19,6 +19,8 @@ on:
       - 'scripts/harness/resolve-orchestration-context.sh'
       - 'scripts/harness/subscription-agent-runner.sh'
       - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-policy-layering.sh'
+      - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
@@ -26,14 +28,14 @@ on:
       - 'scripts/local/run-linked-systems.sh'
       - 'tests/test-build-agent-matrix-defaults.sh'
       - 'tests/test-claude-teams-policy.sh'
+      - 'tests/test-check-policy-layering.sh'
+      - 'tests/test-codex-kernel-prompt.sh'
       - 'tests/test-codex-live-defaults.sh'
       - 'tests/test-codex-vote-prompt.sh'
       - 'tests/test-kernel-diversity-contract.sh'
       - 'tests/test-model-policy.sh'
       - 'tests/test-resolve-orchestration-context.sh'
-      - '.codex/prompts/k.md'
-      - '.codex/prompts/vote.md'
-      - '.codex/prompts/v.md'
+      - 'docs/codex-prompt-ssot-manifest.json'
       - 'AGENTS.md'
       - 'CODEX.md'
       - 'README.md'
@@ -57,6 +59,8 @@ on:
       - 'scripts/harness/resolve-orchestration-context.sh'
       - 'scripts/harness/subscription-agent-runner.sh'
       - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-policy-layering.sh'
+      - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
@@ -64,14 +68,14 @@ on:
       - 'scripts/local/run-linked-systems.sh'
       - 'tests/test-build-agent-matrix-defaults.sh'
       - 'tests/test-claude-teams-policy.sh'
+      - 'tests/test-check-policy-layering.sh'
+      - 'tests/test-codex-kernel-prompt.sh'
       - 'tests/test-codex-live-defaults.sh'
       - 'tests/test-codex-vote-prompt.sh'
       - 'tests/test-kernel-diversity-contract.sh'
       - 'tests/test-model-policy.sh'
       - 'tests/test-resolve-orchestration-context.sh'
-      - '.codex/prompts/k.md'
-      - '.codex/prompts/vote.md'
-      - '.codex/prompts/v.md'
+      - 'docs/codex-prompt-ssot-manifest.json'
       - 'AGENTS.md'
       - 'CODEX.md'
       - 'README.md'
@@ -91,9 +95,11 @@ jobs:
   fast-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ALLOW_MISSING_GLOBAL_PROMPTS: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Shell syntax checks
         run: |
@@ -112,19 +118,26 @@ jobs:
           bash -n scripts/local/run-linked-systems.sh
           bash -n scripts/sim-orchestrator-switch.sh
           bash -n scripts/check-agent-matrix-parity.sh
+          bash -n scripts/check-policy-layering.sh
+          bash -n scripts/check-codex-kernel-prompt.sh
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n scripts/check-codex-vote-prompt.sh
           bash -n tests/test-build-agent-matrix-defaults.sh
           bash -n tests/test-claude-teams-policy.sh
+          bash -n tests/test-check-policy-layering.sh
           bash -n tests/test-codex-live-defaults.sh
           bash -n tests/test-codex-vote-prompt.sh
           bash -n tests/test-kernel-diversity-contract.sh
           bash -n tests/test-model-policy.sh
           bash -n tests/test-resolve-orchestration-context.sh
+          python3 -m json.tool docs/codex-prompt-ssot-manifest.json >/dev/null
 
       - name: Vote prompt static contract
         run: |
           set -euo pipefail
+          bash tests/test-check-policy-layering.sh
+          bash scripts/check-policy-layering.sh
+          bash tests/test-codex-kernel-prompt.sh
           bash tests/test-codex-vote-prompt.sh
 
       - name: Workflow YAML parse checks

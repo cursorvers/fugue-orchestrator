@@ -453,7 +453,7 @@ jobs:
 
       - name: Checkout repository (for line-notify script)
         if: ${{ steps.decide.outputs.should_alert == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 

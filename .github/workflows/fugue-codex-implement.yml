@@ -92,6 +92,56 @@ on:
         required: false
         type: string
         default: "workspace-readonly"
+      content_hint_applied:
+        description: "Whether content-specific routing hints were applied"
+        required: false
+        type: string
+        default: "false"
+      content_action_hint:
+        description: "Comma-separated content action hints"
+        required: false
+        type: string
+        default: ""
+      content_skill_hint:
+        description: "Comma-separated content skill hints"
+        required: false
+        type: string
+        default: ""
+      content_reason:
+        description: "Short explanation for content-route relevance"
+        required: false
+        type: string
+        default: ""
+      content_primary_action_hint:
+        description: "Primary content action hint"
+        required: false
+        type: string
+        default: ""
+      content_primary_skill_hint:
+        description: "Primary content skill hint"
+        required: false
+        type: string
+        default: ""
+      content_support_action_hint:
+        description: "Support content action hint"
+        required: false
+        type: string
+        default: ""
+      content_support_skill_hint:
+        description: "Support content skill hint"
+        required: false
+        type: string
+        default: ""
+      compare_mode:
+        description: "Outline compare mode flag"
+        required: false
+        type: string
+        default: "off"
+      compare_required_artifacts:
+        description: "Artifacts required when compare mode is active"
+        required: false
+        type: string
+        default: ""
     secrets:
       OPENAI_API_KEY:
         required: false
@@ -137,7 +187,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve issue context
         id: ctx
@@ -311,7 +361,7 @@ jobs:
       workspace_artifact_name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
     steps:
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
@@ -319,7 +369,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -351,7 +401,7 @@ jobs:
 
       - name: Upload Google Workspace preflight artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
           path: |
@@ -379,7 +429,7 @@ jobs:
 
     steps:
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
@@ -387,7 +437,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -406,7 +456,7 @@ jobs:
 
       - name: Download Google Workspace preflight artifact
         if: ${{ inputs.workspace_hint_applied == 'true' && needs.workspace-preflight.result == 'success' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.workspace-preflight.outputs.workspace_artifact_name }}
           path: .
@@ -614,7 +664,39 @@ jobs:
           WORKSPACE_REPORT_PATH: ${{ needs.workspace-preflight.outputs.workspace_report_path }}
           WORKSPACE_SUMMARY: ${{ needs.workspace-preflight.outputs.workspace_summary }}
           WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
+          CONTENT_HINT_APPLIED: ${{ inputs.content_hint_applied }}
+          CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}
+          CONTENT_SKILL_HINT: ${{ inputs.content_skill_hint }}
+          CONTENT_REASON: ${{ inputs.content_reason }}
+          CONTENT_PRIMARY_ACTION_HINT: ${{ inputs.content_primary_action_hint }}
+          CONTENT_PRIMARY_SKILL_HINT: ${{ inputs.content_primary_skill_hint }}
+          CONTENT_SUPPORT_ACTION_HINT: ${{ inputs.content_support_action_hint }}
+          CONTENT_SUPPORT_SKILL_HINT: ${{ inputs.content_support_skill_hint }}
+          COMPARE_MODE: ${{ inputs.compare_mode }}
+          COMPARE_REQUIRED_ARTIFACTS: ${{ inputs.compare_required_artifacts }}
         run: bash scripts/harness/codex-execute-validate.sh
+
+      - name: Record compare mode summary
+        if: ${{ always() }}
+        env:
+          CONTENT_HINT_APPLIED: ${{ inputs.content_hint_applied }}
+          CONTENT_PRIMARY_ACTION_HINT: ${{ inputs.content_primary_action_hint }}
+          CONTENT_PRIMARY_SKILL_HINT: ${{ inputs.content_primary_skill_hint }}
+          CONTENT_SUPPORT_ACTION_HINT: ${{ inputs.content_support_action_hint }}
+          CONTENT_SUPPORT_SKILL_HINT: ${{ inputs.content_support_skill_hint }}
+          COMPARE_MODE: ${{ inputs.compare_mode }}
+          COMPARE_REQUIRED_ARTIFACTS: ${{ inputs.compare_required_artifacts }}
+        run: |
+          {
+            echo "## Compare Mode"
+            echo "- content_hint_applied: \`${CONTENT_HINT_APPLIED:-false}\`"
+            echo "- content_primary_action_hint: \`${CONTENT_PRIMARY_ACTION_HINT:-none}\`"
+            echo "- content_primary_skill_hint: \`${CONTENT_PRIMARY_SKILL_HINT:-none}\`"
+            echo "- content_support_action_hint: \`${CONTENT_SUPPORT_ACTION_HINT:-none}\`"
+            echo "- content_support_skill_hint: \`${CONTENT_SUPPORT_SKILL_HINT:-none}\`"
+            echo "- compare_mode: \`${COMPARE_MODE:-off}\`"
+            echo "- compare_required_artifacts: \`${COMPARE_REQUIRED_ARTIFACTS:-none}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Commit changes
         if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
@@ -673,7 +755,7 @@ jobs:
 
       - name: Upload Codex log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-output-log
           path: |

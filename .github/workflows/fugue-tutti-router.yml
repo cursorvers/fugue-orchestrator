@@ -503,10 +503,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout orchestrator scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cursorvers/fugue-orchestrator
           ref: v7
@@ -1042,7 +1042,7 @@ jobs:
           echo "${result}" > "agent-${AGENT_NAME}.json"
 
       - name: Upload JSON artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-result-${{ matrix.name }}
           path: agent-${{ matrix.name }}.json
@@ -1173,10 +1173,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: agent-result-*
           path: agent-results
@@ -1333,7 +1333,7 @@ jobs:
       agent_matrix: ${{ steps.resolve.outputs.agent_matrix }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve orchestrator workflow ref
         id: orch_ref
@@ -1346,7 +1346,7 @@ jobs:
           echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout orchestrator scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cursorvers/fugue-orchestrator
           ref: ${{ steps.orch_ref.outputs.ref }}
