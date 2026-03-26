@@ -13,6 +13,7 @@ on:
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/lib/provider-diff-audit.sh'
       - 'scripts/lib/resolve-primary-heartbeat-state.sh'
       - 'scripts/lib/watchdog-alert-policy.sh'
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
@@ -21,9 +22,16 @@ on:
       - 'scripts/local/integrations/line-notify.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-policy-layering.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/check-kernel-vote-readiness.sh'
+      - 'scripts/refresh-philosophy-delta.sh'
+      - 'scripts/promote-philosophy-delta.sh'
+      - 'tests/test-philosophy-worldview-smoke.sh'
+      - 'tests/test-check-philosophy-worldview-smoke.sh'
+      - 'tests/test-check-philosophy-refresh.sh'
+      - 'tests/test-check-policy-layering.sh'
       - 'tests/test-check-kernel-vote-readiness.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
@@ -39,6 +47,7 @@ on:
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
       - 'tests/test-task-router-start-signal.sh'
       - 'tests/test-parallel-floor-policy.sh'
+      - 'tests/test-provider-diff-audit.sh'
       - 'tests/test-recovery-reroute-claim-gate.sh'
       - 'tests/test-watchdog-reconcile-claim-policy.sh'
       - 'tests/test-watchdog-reconcile-workflow.sh'
@@ -51,13 +60,10 @@ on:
       - 'tests/test-watchdog-alert-routing.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
-      - '.codex/prompts/kernel.md'
-      - '.codex/prompts/k.md'
-      - '.codex/prompts/vote.md'
-      - '.codex/prompts/v.md'
       - 'AGENTS.md'
       - 'CODEX.md'
       - 'README.md'
+      - 'docs/codex-prompt-ssot-manifest.json'
       - 'docs/requirements-gpt54-codex-kernel.md'
       - 'docs/kernel-structure.md'
       - 'docs/kernel-preimplementation-readiness.md'
@@ -77,6 +83,7 @@ on:
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/lib/execution-profile-policy.sh'
       - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/lib/provider-diff-audit.sh'
       - 'scripts/lib/resolve-primary-heartbeat-state.sh'
       - 'scripts/lib/watchdog-alert-policy.sh'
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
@@ -85,9 +92,16 @@ on:
       - 'scripts/local/integrations/line-notify.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-policy-layering.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/check-kernel-vote-readiness.sh'
+      - 'scripts/refresh-philosophy-delta.sh'
+      - 'scripts/promote-philosophy-delta.sh'
+      - 'tests/test-philosophy-worldview-smoke.sh'
+      - 'tests/test-check-philosophy-worldview-smoke.sh'
+      - 'tests/test-check-philosophy-refresh.sh'
+      - 'tests/test-check-policy-layering.sh'
       - 'tests/test-check-kernel-vote-readiness.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
@@ -103,6 +117,7 @@ on:
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
       - 'tests/test-task-router-start-signal.sh'
       - 'tests/test-parallel-floor-policy.sh'
+      - 'tests/test-provider-diff-audit.sh'
       - 'tests/test-recovery-reroute-claim-gate.sh'
       - 'tests/test-watchdog-reconcile-claim-policy.sh'
       - 'tests/test-watchdog-reconcile-workflow.sh'
@@ -115,13 +130,10 @@ on:
       - 'tests/test-watchdog-alert-routing.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
-      - '.codex/prompts/kernel.md'
-      - '.codex/prompts/k.md'
-      - '.codex/prompts/vote.md'
-      - '.codex/prompts/v.md'
       - 'AGENTS.md'
       - 'CODEX.md'
       - 'README.md'
+      - 'docs/codex-prompt-ssot-manifest.json'
       - 'docs/requirements-gpt54-codex-kernel.md'
       - 'docs/kernel-structure.md'
       - 'docs/kernel-preimplementation-readiness.md'
@@ -143,9 +155,11 @@ jobs:
   fast-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ALLOW_MISSING_GLOBAL_PROMPTS: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Shell syntax checks
         run: |
@@ -153,6 +167,7 @@ jobs:
           bash -n scripts/lib/build-agent-matrix.sh
           bash -n scripts/lib/execution-profile-policy.sh
           bash -n scripts/lib/orchestrator-policy.sh
+          bash -n scripts/lib/provider-diff-audit.sh
           bash -n scripts/local/run-local-orchestration.sh
           bash -n scripts/local/run-linked-systems.sh
           bash -n scripts/sim-orchestrator-switch.sh
@@ -165,10 +180,17 @@ jobs:
           bash -n scripts/harness/run-kernel-council-review.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
+          bash -n scripts/check-policy-layering.sh
           bash -n scripts/check-codex-kernel-prompt.sh
           bash -n scripts/check-codex-vote-prompt.sh
           bash -n scripts/check-kernel-vote-readiness.sh
+          bash -n scripts/refresh-philosophy-delta.sh
+          bash -n scripts/promote-philosophy-delta.sh
           bash -n scripts/check-notebooklm-runtime-readiness.sh
+          bash -n tests/test-philosophy-worldview-smoke.sh
+          bash -n tests/test-check-philosophy-worldview-smoke.sh
+          bash -n tests/test-check-philosophy-refresh.sh
+          bash -n tests/test-check-policy-layering.sh
           bash -n tests/test-check-kernel-vote-readiness.sh
           bash -n tests/test-check-notebooklm-runtime-readiness.sh
           bash -n tests/test-codex-vote-prompt.sh
@@ -182,6 +204,7 @@ jobs:
           bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
           bash -n tests/test-task-router-start-signal.sh
           bash -n tests/test-parallel-floor-policy.sh
+          bash -n tests/test-provider-diff-audit.sh
           bash -n tests/test-recovery-reroute-claim-gate.sh
           bash -n tests/test-watchdog-reconcile-claim-policy.sh
           bash -n tests/test-watchdog-reconcile-workflow.sh
@@ -193,11 +216,15 @@ jobs:
       - name: Kernel prompt static contract
         run: |
           set -euo pipefail
+          jq -e '.prompt_home == "~/.codex/prompts"' docs/codex-prompt-ssot-manifest.json >/dev/null
+          jq -e '.resolution.canonical_orchestrator_prompts == ["kernel","k","vote","v"]' docs/codex-prompt-ssot-manifest.json >/dev/null
           bash scripts/check-codex-kernel-prompt.sh
 
       - name: Vote prompt static contract
         run: |
           set -euo pipefail
+          bash tests/test-check-policy-layering.sh
+          bash scripts/check-policy-layering.sh
           bash tests/test-codex-vote-prompt.sh
           bash tests/test-kernel-sequencing-policy.sh
           bash tests/test-kernel-council-review.sh
@@ -214,9 +241,26 @@ jobs:
           KERNEL_VOTE_READINESS_LIVE_SMOKE_MODE=off bash scripts/check-kernel-vote-readiness.sh
           NOTEBOOKLM_READINESS_SKIP_REPO_TESTS=true NOTEBOOKLM_READINESS_LIVE_SMOKE_MODE=off bash scripts/check-notebooklm-runtime-readiness.sh
 
+      - name: Philosophy Worldview Smoke Static Contract
+        run: |
+          set -euo pipefail
+          bash tests/test-check-philosophy-worldview-smoke.sh
+
+      - name: Philosophy Refresh Static Contract
+        run: |
+          set -euo pipefail
+          bash tests/test-check-philosophy-refresh.sh
+
       - name: Local orchestration boundary tests
         run: |
           set -euo pipefail
+          bash tests/test-linked-systems-comment-policy.sh
+          bash tests/test-linked-systems-comment-opt-in.sh
+          bash tests/test-linked-systems-exit-contract.sh
+          bash tests/test-linked-systems-dispatch-contract.sh
+          bash tests/test-fugue-result-receiver-template.sh
+          bash tests/test-check-kernel-task-completion-backup-agent.sh
+          bash tests/test-kernel-task-completion-backup.sh
           bash tests/test-route-task-handoff.sh
           bash tests/test-resolve-orchestration-context.sh
           bash tests/test-notebooklm-runtime-smoke.sh
@@ -230,6 +274,7 @@ jobs:
           bash tests/test-local-orchestration-heartbeat-cleanup.sh
           bash tests/test-task-router-start-signal.sh
           bash tests/test-parallel-floor-policy.sh
+          bash tests/test-provider-diff-audit.sh
           bash tests/test-recovery-reroute-claim-gate.sh
           bash tests/test-watchdog-reconcile-claim-policy.sh
           bash tests/test-watchdog-reconcile-workflow.sh

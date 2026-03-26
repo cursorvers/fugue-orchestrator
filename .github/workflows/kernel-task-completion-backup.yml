@@ -1,0 +1,216 @@
+name: kernel-task-completion-backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_id:
+        description: "Deterministic local completion record id"
+        required: true
+        type: string
+      payload_b64:
+        description: "Base64-encoded JSON backup payload"
+        required: true
+        type: string
+  repository_dispatch:
+    types:
+      - kernel-task-completion-backup
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kernel-task-completion-backup-${{ github.event.inputs.record_id || github.event.client_payload.record_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Decode and validate payload
+        id: decode
+        env:
+          RECORD_ID: ${{ github.event.inputs.record_id || github.event.client_payload.record_id }}
+          PAYLOAD_B64: ${{ github.event.inputs.payload_b64 || github.event.client_payload.payload_b64 }}
+          MAX_PAYLOAD_B64_CHARS: "60000"
+          BACKUP_BRANCH: kernel-task-completion-backups
+          RECEIPT_ROOT: backups/task-completion-receipts
+        run: |
+          set -euo pipefail
+          PAYLOAD_B64_CHARS="$(printf '%s' "${PAYLOAD_B64}" | wc -c | tr -d ' ')"
+          if (( PAYLOAD_B64_CHARS > MAX_PAYLOAD_B64_CHARS )); then
+            echo "payload_b64 exceeds workflow limit (${PAYLOAD_B64_CHARS} chars)" >&2
+            exit 2
+          fi
+          SAFE_RECORD_ID="$(printf '%s' "${RECORD_ID}" | tr -cd 'A-Za-z0-9._-')"
+          if [[ -z "${SAFE_RECORD_ID}" ]]; then
+            echo "record_id is empty after sanitization" >&2
+            exit 2
+          fi
+          if [[ "${SAFE_RECORD_ID}" != "${RECORD_ID}" ]]; then
+            echo "record_id contains unsupported characters" >&2
+            exit 2
+          fi
+
+          PAYLOAD_DIR="${RUNNER_TEMP}/kernel-task-completion-backup"
+          mkdir -p "${PAYLOAD_DIR}"
+          PAYLOAD_PATH="${PAYLOAD_DIR}/${SAFE_RECORD_ID}.json"
+          printf '%s' "${PAYLOAD_B64}" | base64 --decode > "${PAYLOAD_PATH}"
+
+          jq -e \
+            --arg record_id "${SAFE_RECORD_ID}" \
+            '
+              type == "object"
+              and (.record_id | type == "string" and . == $record_id)
+              and (.assistant | type == "string" and length > 0)
+              and (.source | type == "string" and length > 0)
+              and (.session_id | type == "string")
+              and (.completed_at | type == "string" and length > 0)
+              and (.summary_text | type == "string" and length > 0)
+              and (.gha_repo | type == "string" and length > 0)
+              and (.gha_workflow | type == "string" and length > 0)
+              and (.gha_dispatch_token | type == "string" and length > 0)
+              and (.gha_mirror_path | type == "string" and startswith("backups/task-completion/") and endswith(".json"))
+              and (.gha_receipt_path | type == "string" and startswith("backups/task-completion-receipts/") and endswith(".json"))
+              and (.project_os | type == "object")
+              and (.project_os.schema_version | type == "string" and length > 0)
+              and (.project_os.envelope_status | type == "string" and length > 0)
+              and (
+                if .project_os.schema_version == "2" then
+                  (.project_os.envelope_status == "bound")
+                  and (.project_os.ticket_id | type == "string" and length > 0)
+                  and (.project_os.acceptance_text | type == "string" and length > 0)
+                  and (.project_os.acceptance_hash | type == "string" and test("^[a-f0-9]{64}$"))
+                  and (.project_os.authority_scope == "kernel_execution_only")
+                  and (.project_os.ticket_status_before | type == "string")
+                else
+                  true
+                end
+              )
+            ' \
+            "${PAYLOAD_PATH}" >/dev/null
+
+          PAYLOAD_TOKEN="$(jq -r '.gha_dispatch_token' "${PAYLOAD_PATH}")"
+          CANONICAL_MIRROR_PATH="backups/task-completion/${SAFE_RECORD_ID}/${PAYLOAD_TOKEN}.json"
+          CANONICAL_RECEIPT_PATH="${RECEIPT_ROOT}/${SAFE_RECORD_ID}/${PAYLOAD_TOKEN}.json"
+          if [[ "$(jq -r '.gha_mirror_path' "${PAYLOAD_PATH}")" != "${CANONICAL_MIRROR_PATH}" ]]; then
+            echo "gha_mirror_path does not match canonical token path" >&2
+            exit 2
+          fi
+          if [[ "$(jq -r '.gha_receipt_path' "${PAYLOAD_PATH}")" != "${CANONICAL_RECEIPT_PATH}" ]]; then
+            echo "gha_receipt_path does not match canonical token path" >&2
+            exit 2
+          fi
+
+          PAYLOAD_SHA256="$(sha256sum "${PAYLOAD_PATH}" | awk '{print $1}')"
+          {
+            echo "safe_record_id=${SAFE_RECORD_ID}"
+            echo "payload_path=${PAYLOAD_PATH}"
+            echo "payload_sha256=${PAYLOAD_SHA256}"
+            echo "backup_branch=${BACKUP_BRANCH}"
+            echo "mirror_path=${CANONICAL_MIRROR_PATH}"
+            echo "receipt_path=${CANONICAL_RECEIPT_PATH}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## Kernel task completion backup"
+            echo
+            echo "- record_id: \`${SAFE_RECORD_ID}\`"
+            echo "- assistant: \`$(jq -r '.assistant' "${PAYLOAD_PATH}")\`"
+            echo "- source: \`$(jq -r '.source' "${PAYLOAD_PATH}")\`"
+            echo "- session_id: \`$(jq -r '.session_id' "${PAYLOAD_PATH}")\`"
+            echo "- completed_at: \`$(jq -r '.completed_at' "${PAYLOAD_PATH}")\`"
+            echo "- orchestration_compliance: \`$(jq -r '.orchestration_compliance // "unverified"' "${PAYLOAD_PATH}")\`"
+            echo "- observed_models: \`$(jq -r '[.observed_models[]?.provider] | unique | join(",")' "${PAYLOAD_PATH}")\`"
+            echo "- title: \`$(jq -r '.title // ""' "${PAYLOAD_PATH}")\`"
+            echo "- project_os_schema_version: \`$(jq -r '.project_os.schema_version // "1"' "${PAYLOAD_PATH}")\`"
+            echo "- project_os_envelope_status: \`$(jq -r '.project_os.envelope_status // "artifact_only_unbound"' "${PAYLOAD_PATH}")\`"
+            echo "- project_os_ticket_id: \`$(jq -r '.project_os.ticket_id // ""' "${PAYLOAD_PATH}")\`"
+            echo "- project_os_acceptance_hash: \`$(jq -r '.project_os.acceptance_hash // ""' "${PAYLOAD_PATH}")\`"
+            echo "- authority_scope: \`$(jq -r '.project_os.authority_scope // ""' "${PAYLOAD_PATH}")\`"
+            echo "- ticket_status_before: \`$(jq -r '.project_os.ticket_status_before // ""' "${PAYLOAD_PATH}")\`"
+            echo "- payload_sha256: \`${PAYLOAD_SHA256}\`"
+            echo "- durable_branch: \`${BACKUP_BRANCH}\`"
+            echo "- receipt_path: \`${CANONICAL_RECEIPT_PATH}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Checkout repository for durable mirror
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Re-verify Project OS acceptance envelope
+        env:
+          PAYLOAD_PATH: ${{ steps.decode.outputs.payload_path }}
+        run: |
+          set -euo pipefail
+          python3 scripts/local/reverify-kernel-task-completion-envelope.py --payload "${PAYLOAD_PATH}"
+
+      - name: Persist durable mirror
+        env:
+          SAFE_RECORD_ID: ${{ steps.decode.outputs.safe_record_id }}
+          PAYLOAD_PATH: ${{ steps.decode.outputs.payload_path }}
+          PAYLOAD_SHA256: ${{ steps.decode.outputs.payload_sha256 }}
+          BACKUP_BRANCH: ${{ steps.decode.outputs.backup_branch }}
+          MIRROR_PATH: ${{ steps.decode.outputs.mirror_path }}
+          RECEIPT_PATH: ${{ steps.decode.outputs.receipt_path }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin "${BACKUP_BRANCH}" >/dev/null 2>&1; then
+            git fetch origin "${BACKUP_BRANCH}"
+            git checkout -B "${BACKUP_BRANCH}" "origin/${BACKUP_BRANCH}"
+          else
+            git checkout --orphan "${BACKUP_BRANCH}"
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          mkdir -p "$(dirname "${MIRROR_PATH}")" "$(dirname "${RECEIPT_PATH}")"
+          cp "${PAYLOAD_PATH}" "${MIRROR_PATH}"
+          jq -n \
+            --arg record_id "${SAFE_RECORD_ID}" \
+            --arg gha_dispatch_token "$(jq -r '.gha_dispatch_token' "${PAYLOAD_PATH}")" \
+            --arg payload_sha256 "${PAYLOAD_SHA256}" \
+            --arg gha_repo "$(jq -r '.gha_repo' "${PAYLOAD_PATH}")" \
+            --arg gha_workflow "$(jq -r '.gha_workflow' "${PAYLOAD_PATH}")" \
+            --arg gha_mirror_branch "${BACKUP_BRANCH}" \
+            --arg gha_mirror_path "${MIRROR_PATH}" \
+            --arg gha_receipt_path "${RECEIPT_PATH}" \
+            --arg run_id "${GITHUB_RUN_ID}" \
+            --arg run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg event_name "${GITHUB_EVENT_NAME}" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              record_id: $record_id,
+              gha_dispatch_token: $gha_dispatch_token,
+              payload_sha256: $payload_sha256,
+              gha_repo: $gha_repo,
+              gha_workflow: $gha_workflow,
+              gha_mirror_branch: $gha_mirror_branch,
+              gha_mirror_path: $gha_mirror_path,
+              gha_receipt_path: $gha_receipt_path,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              event_name: $event_name,
+              created_at: $created_at
+            }' > "${RECEIPT_PATH}"
+          git add "${MIRROR_PATH}" "${RECEIPT_PATH}"
+
+          if git diff --cached --quiet; then
+            echo "Durable mirror and receipt already up to date for ${SAFE_RECORD_ID}"
+            exit 0
+          fi
+
+          git commit -m "backup: task completion ${SAFE_RECORD_ID}"
+          git push origin "HEAD:${BACKUP_BRANCH}"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kernel-task-completion-${{ steps.decode.outputs.safe_record_id }}
+          path: ${{ steps.decode.outputs.payload_path }}
+          if-no-files-found: error
+          retention-days: 90

@@ -69,7 +69,7 @@ jobs:
       content_reason: ${{ steps.ctx.outputs.content_reason }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve issue context
         id: ctx
@@ -104,7 +104,7 @@ jobs:
       notebooklm_receipt_path: ${{ steps.preflight.outputs.notebooklm_receipt_path }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go for NotebookLM CLI
         uses: actions/setup-go@v5
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload NotebookLM smoke artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: notebooklm-runtime-smoke-${{ needs.resolve-context.outputs.issue_number }}
           path: |

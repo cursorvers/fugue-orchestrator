@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout with submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: true
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
@@ -48,6 +48,11 @@ jobs:
             echo "old_ref=${old_ref:0:8}" >> "${GITHUB_OUTPUT}"
             echo "new_ref=${new_ref:0:8}" >> "${GITHUB_OUTPUT}"
           fi
+
+      - name: Verify claude settings drift contract
+        run: |
+          set -euo pipefail
+          bash scripts/harness/check-claude-settings-drift.sh
 
       - name: Create PR
         if: steps.update.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'

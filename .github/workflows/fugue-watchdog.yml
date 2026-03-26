@@ -322,7 +322,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Checkout repository for failover resolver
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -490,7 +490,6 @@ jobs:
         id: discord_alert
         if: ${{ steps.decide.outputs.should_alert == 'true' && steps.decide.outputs.force_line_alert != 'true' }}
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
         run: |
           set -euo pipefail
@@ -498,12 +497,14 @@ jobs:
           {
             echo "sent=false"
             echo "delivery=skipped"
+            echo "transport=discord-system-webhook"
             echo "attempted=false"
           } >> "${GITHUB_OUTPUT}"
 
-          webhook_url="${DISCORD_WEBHOOK_URL:-${DISCORD_SYSTEM_WEBHOOK:-}}"
+          webhook_url="${DISCORD_SYSTEM_WEBHOOK:-}"
           if [[ -z "${webhook_url}" ]]; then
-            echo "delivery=missing-webhook" >> "${GITHUB_OUTPUT}"
+            echo "delivery=missing-system-webhook" >> "${GITHUB_OUTPUT}"
+            echo "::warning::DISCORD_SYSTEM_WEBHOOK is required for fugue-watchdog system alerts." >&2
             exit 0
           fi
           PAYLOAD="$(jq -n --arg content "${{ steps.decide.outputs.message }}" '{content:$content}')"
@@ -523,68 +524,20 @@ jobs:
             echo "delivery=ok"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: LINE alert when unhealthy
+      - name: Record LINE alert prohibition for system logs
         id: line_alert
         if: ${{ steps.decide.outputs.should_alert == 'true' }}
-        env:
-          FORCE_LINE_ALERT: ${{ steps.decide.outputs.force_line_alert }}
-          LINE_WEBHOOK_URL: ${{ secrets.LINE_WEBHOOK_URL }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TO: ${{ secrets.LINE_TO }}
-          LINE_PUSH_API_URL: ${{ vars.LINE_PUSH_API_URL || 'https://api.line.me/v2/bot/message/push' }}
-          LINE_BROADCAST_API_URL: ${{ vars.LINE_BROADCAST_API_URL || 'https://api.line.me/v2/bot/message/broadcast' }}
-          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
-          LINE_NOTIFY_ACCESS_TOKEN: ${{ secrets.LINE_NOTIFY_ACCESS_TOKEN }}
-          LINE_NOTIFY_API_URL: ${{ vars.LINE_NOTIFY_API_URL || 'https://notify-api.line.me/api/notify' }}
-          LINE_NOTIFY_MESSAGE: ${{ steps.decide.outputs.message }}
-          LINE_NOTIFY_REQUIRED_ON_EXECUTE: "false"
-          LINE_NOTIFY_PREFER_PUSH: "true"
-          LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK: "false"
-          LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK: ${{ vars.LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK || 'false' }}
         run: |
           set -euo pipefail
 
           {
             echo "sent=false"
-            echo "status=not-run"
-            echo "transport=unknown"
-            echo "delivery_state=unknown"
+            echo "status=disabled-by-policy"
+            echo "transport=prohibited"
+            echo "delivery_state=blocked-by-policy"
             echo "attempted=false"
           } >> "${GITHUB_OUTPUT}"
-
-          force_line_alert="$(echo "${FORCE_LINE_ALERT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          if [[ "${force_line_alert}" == "true" ]]; then
-            export LINE_NOTIFY_GUARD_ENABLED="false"
-          fi
-          export LINE_NOTIFY_TRACE_ID="watchdog-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-0}"
-          run_dir="$(mktemp -d)"
-          trap 'rm -rf "${run_dir}"' EXIT
-          set +e
-          scripts/local/integrations/line-notify.sh --mode execute --run-dir "${run_dir}"
-          line_exit_code=$?
-          set -e
-          if [[ -f "${run_dir}/line-notify.meta" ]]; then
-            cat "${run_dir}/line-notify.meta"
-            line_sent="$(awk -F= '$1=="sent"{print $2}' "${run_dir}/line-notify.meta" | tail -n1)"
-            line_status="$(awk -F= '$1=="status"{print $2}' "${run_dir}/line-notify.meta" | tail -n1)"
-            line_transport="$(awk -F= '$1=="transport"{print $2}' "${run_dir}/line-notify.meta" | tail -n1)"
-            line_delivery_state="$(awk -F= '$1=="delivery_state"{print $2}' "${run_dir}/line-notify.meta" | tail -n1)"
-            line_attempted="false"
-            case "${line_status:-unknown}" in
-              ok|error)
-                if [[ "${line_transport:-unknown}" != "unknown" ]]; then
-                  line_attempted="true"
-                fi
-                ;;
-            esac
-            echo "sent=${line_sent:-false}" >> "${GITHUB_OUTPUT}"
-            echo "status=${line_status:-unknown}" >> "${GITHUB_OUTPUT}"
-            echo "transport=${line_transport:-unknown}" >> "${GITHUB_OUTPUT}"
-            echo "delivery_state=${line_delivery_state:-unknown}" >> "${GITHUB_OUTPUT}"
-            echo "attempted=${line_attempted}" >> "${GITHUB_OUTPUT}"
-          elif [[ "${line_exit_code}" != "0" ]]; then
-            echo "status=error-exit-${line_exit_code}" >> "${GITHUB_OUTPUT}"
-          fi
+          echo "::notice::LINE delivery is prohibited for fugue-watchdog system alerts. Discord is the only alert transport."
 
       - name: Persist watchdog alert state after confirmed delivery
         if: ${{ steps.decide.outputs.should_alert == 'true' && steps.decide.outputs.watchdog_alert_persist == 'true' && steps.decide.outputs.watchdog_alert_state_update_required == 'true' }}
@@ -593,12 +546,6 @@ jobs:
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           NEXT_STATE_JSON: ${{ steps.decide.outputs.watchdog_alert_next_state_json }}
           DISCORD_SENT: ${{ steps.discord_alert.outputs.sent }}
-          DISCORD_ATTEMPTED: ${{ steps.discord_alert.outputs.attempted }}
-          LINE_SENT: ${{ steps.line_alert.outputs.sent }}
-          LINE_ATTEMPTED: ${{ steps.line_alert.outputs.attempted }}
-          LINE_STATUS: ${{ steps.line_alert.outputs.status }}
-          LINE_TRANSPORT: ${{ steps.line_alert.outputs.transport }}
-          LINE_DELIVERY_STATE: ${{ steps.line_alert.outputs.delivery_state }}
         run: |
           set -euo pipefail
 
@@ -607,20 +554,9 @@ jobs:
             export GH_TOKEN
           fi
 
-          persist_allowed="$(
-            bash scripts/lib/watchdog-alert-delivery-policy.sh \
-              --discord-sent "${DISCORD_SENT:-false}" \
-              --discord-attempted "${DISCORD_ATTEMPTED:-false}" \
-              --line-sent "${LINE_SENT:-false}" \
-              --line-attempted "${LINE_ATTEMPTED:-false}" \
-              --line-status "${LINE_STATUS:-unknown}" \
-              --line-transport "${LINE_TRANSPORT:-unknown}" \
-              --line-delivery-state "${LINE_DELIVERY_STATE:-unknown}" \
-              --format env | awk -F= '$1=="persist_allowed"{print $2}'
-          )"
-
-          if [[ "${persist_allowed:-false}" != "true" ]]; then
-            echo "::warning::No alert transport confirmed delivery; skipping FUGUE_WATCHDOG_ALERT_STATE update." >&2
+          discord_sent="$(printf '%s' "${DISCORD_SENT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${discord_sent}" != "true" ]]; then
+            echo "::warning::Discord system webhook did not confirm delivery; skipping FUGUE_WATCHDOG_ALERT_STATE update." >&2
             exit 0
           fi
 
@@ -635,7 +571,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Find unprocessed fugue-task issues
         id: find

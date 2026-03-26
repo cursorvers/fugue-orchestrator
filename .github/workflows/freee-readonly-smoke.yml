@@ -1,0 +1,129 @@
+name: freee Readonly Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number used to derive freee hints"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      issue_title: ${{ steps.ctx.outputs.issue_title }}
+      freee_hint_applied: ${{ steps.ctx.outputs.freee_hint_applied }}
+      freee_action_hint: ${{ steps.ctx.outputs.freee_action_hint }}
+      freee_domain_hint: ${{ steps.ctx.outputs.freee_domain_hint }}
+      freee_reason: ${{ steps.ctx.outputs.freee_reason }}
+      freee_suggested_phases: ${{ steps.ctx.outputs.freee_suggested_phases }}
+      freee_readonly_actions: ${{ steps.ctx.outputs.freee_readonly_actions }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER_FROM_DISPATCH: ${{ inputs.issue_number }}
+          ISSUE_NUMBER_FROM_ISSUE: ""
+          HANDOFF_TARGET_INPUT: kernel
+          CI_EXECUTION_ENGINE: api
+          CLAUDE_TRANSLATOR_MODE: off
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: codex
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: none
+        run: bash scripts/harness/resolve-orchestration-context.sh
+
+  freee-preflight:
+    if: ${{ needs.resolve-context.outputs.freee_hint_applied == 'true' && vars.FUGUE_FREEE_READONLY_ENV != '' }}
+    needs: [resolve-context]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: ${{ vars.FUGUE_FREEE_READONLY_ENV }}
+    outputs:
+      freee_preflight_status: ${{ steps.preflight.outputs.freee_preflight_status }}
+      freee_report_path: ${{ steps.preflight.outputs.freee_report_path }}
+      freee_summary: ${{ steps.preflight.outputs.freee_summary }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run readonly freee smoke
+        id: preflight
+        env:
+          ISSUE_NUMBER: ${{ needs.resolve-context.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.resolve-context.outputs.issue_title }}
+          FREEE_ACTIONS: ${{ needs.resolve-context.outputs.freee_readonly_actions || needs.resolve-context.outputs.freee_action_hint }}
+          FREEE_DOMAINS: ${{ needs.resolve-context.outputs.freee_domain_hint }}
+          FREEE_REASON: ${{ needs.resolve-context.outputs.freee_reason }}
+          FREEE_SUGGESTED_PHASES: ${{ needs.resolve-context.outputs.freee_suggested_phases }}
+          OUT_DIR: .fugue/pre-implement
+          RUN_DIR: .fugue/pre-implement/freee-run
+          REPORT_PATH: .fugue/pre-implement/issue-${{ needs.resolve-context.outputs.issue_number }}-freee.md
+          POLICY_FILE: config/integrations/freee-kernel-policy.json
+          FREEE_ACCESS_TOKEN: ${{ secrets.FREEE_ACCESS_TOKEN || '' }}
+          FREEE_REFRESH_TOKEN: ${{ secrets.FREEE_REFRESH_TOKEN || '' }}
+          FREEE_CLIENT_ID: ${{ secrets.FREEE_CLIENT_ID || '' }}
+          FREEE_CLIENT_SECRET: ${{ secrets.FREEE_CLIENT_SECRET || '' }}
+          FREEE_COMPANY_ID: ${{ vars.FUGUE_FREEE_COMPANY_ID || '' }}
+          FREEE_REQUIRE_RUNTIME_AUTH: "true"
+        run: bash scripts/harness/freee-preflight-enrich.sh
+
+      - name: Upload freee smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: freee-readonly-smoke-${{ needs.resolve-context.outputs.issue_number }}
+          path: .fugue/pre-implement/issue-${{ needs.resolve-context.outputs.issue_number }}-freee.md
+          if-no-files-found: ignore
+
+  finalize:
+    if: always()
+    needs: [resolve-context, freee-preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Comment smoke result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.resolve-context.outputs.issue_number }}
+          FREEE_HINT_APPLIED: ${{ needs.resolve-context.outputs.freee_hint_applied }}
+          FREEE_READONLY_ACTIONS: ${{ needs.resolve-context.outputs.freee_readonly_actions || needs.resolve-context.outputs.freee_action_hint }}
+          FREEE_PREFLIGHT_STATUS: ${{ needs.freee-preflight.outputs.freee_preflight_status }}
+          FREEE_SUMMARY: ${{ needs.freee-preflight.outputs.freee_summary }}
+          FREEE_READONLY_ENV: ${{ vars.FUGUE_FREEE_READONLY_ENV || '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${FREEE_HINT_APPLIED}" != "true" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Readonly freee smoke: no applicable freee action hint was derived from this issue. No protected preflight job was run."
+            exit 0
+          fi
+
+          if [[ -z "${FREEE_READONLY_ENV}" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Readonly freee smoke blocked: repository variable \`FUGUE_FREEE_READONLY_ENV\` is not configured, so protected preflight did not run."
+            exit 0
+          fi
+
+          status="${FREEE_PREFLIGHT_STATUS:-unknown}"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+            --body "Readonly freee smoke completed. readonly_actions=\`${FREEE_READONLY_ACTIONS:-none}\`, status=\`${status}\`, summary=\`${FREEE_SUMMARY:-none}\`. Check the workflow artifacts for the bounded freee report."

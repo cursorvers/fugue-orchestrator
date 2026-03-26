@@ -33,7 +33,7 @@ jobs:
       workspace_readonly_actions: ${{ steps.ctx.outputs.workspace_readonly_actions }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve issue context
         id: ctx
@@ -61,10 +61,10 @@ jobs:
       workspace_summary: ${{ steps.preflight.outputs.workspace_summary }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload Workspace smoke artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: googleworkspace-readonly-smoke-${{ needs.resolve-context.outputs.issue_number }}
           path: |

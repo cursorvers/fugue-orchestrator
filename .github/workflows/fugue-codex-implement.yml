@@ -177,6 +177,36 @@ on:
         required: false
         type: string
         default: ""
+      content_primary_action_hint:
+        description: "Primary content action hint"
+        required: false
+        type: string
+        default: ""
+      content_primary_skill_hint:
+        description: "Primary content skill hint"
+        required: false
+        type: string
+        default: ""
+      content_support_action_hint:
+        description: "Support content action hint"
+        required: false
+        type: string
+        default: ""
+      content_support_skill_hint:
+        description: "Support content skill hint"
+        required: false
+        type: string
+        default: ""
+      compare_mode:
+        description: "Outline compare mode flag"
+        required: false
+        type: string
+        default: "off"
+      compare_required_artifacts:
+        description: "Artifacts required when compare mode is active"
+        required: false
+        type: string
+        default: ""
     secrets:
       ZAI_API_KEY:
         required: false
@@ -242,7 +272,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve issue context
         id: ctx
@@ -386,7 +416,7 @@ jobs:
       runner_json: ${{ steps.guard.outputs.runner_json }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -531,7 +561,7 @@ jobs:
       workspace_artifact_name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
     steps:
       - name: Checkout orchestration repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cursorvers/fugue-orchestrator
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
@@ -539,7 +569,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -570,7 +600,7 @@ jobs:
 
       - name: Upload Google Workspace preflight artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
           path: |
@@ -594,7 +624,7 @@ jobs:
       freee_artifact_name: ${{ steps.freee_meta.outputs.freee_artifact_name }}
     steps:
       - name: Checkout orchestration repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cursorvers/fugue-orchestrator
           token: ${{ github.token }}
@@ -631,7 +661,7 @@ jobs:
 
       - name: Upload freee preflight artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.freee_meta.outputs.freee_artifact_name }}
           path: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-freee.md
@@ -656,14 +686,14 @@ jobs:
     steps:
       - name: Checkout current target repository
         if: ${{ needs.prepare.outputs.target_repo == github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.target_branch }}
           fetch-depth: 1
 
       - name: Checkout external target repository
         if: ${{ needs.prepare.outputs.target_repo != github.repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
@@ -672,14 +702,14 @@ jobs:
 
       - name: Checkout orchestration repository (same-repo)
         if: ${{ github.repository == 'cursorvers/fugue-orchestrator' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: .fugue-orchestrator
           fetch-depth: 1
 
       - name: Checkout orchestration repository (external)
         if: ${{ github.repository != 'cursorvers/fugue-orchestrator' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cursorvers/fugue-orchestrator
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
@@ -687,7 +717,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -736,14 +766,14 @@ jobs:
 
       - name: Download Google Workspace preflight artifact
         if: ${{ inputs.workspace_hint_applied == 'true' && needs.workspace-preflight.result == 'success' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.workspace-preflight.outputs.workspace_artifact_name }}
           path: .
 
       - name: Download freee preflight artifact
         if: ${{ inputs.freee_hint_applied == 'true' && needs.freee-preflight.result == 'success' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.freee-preflight.outputs.freee_artifact_name }}
           path: .
@@ -966,6 +996,10 @@ jobs:
           CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}
           CONTENT_SKILL_HINT: ${{ inputs.content_skill_hint }}
           CONTENT_REASON: ${{ inputs.content_reason }}
+          CONTENT_PRIMARY_ACTION_HINT: ${{ inputs.content_primary_action_hint }}
+          CONTENT_PRIMARY_SKILL_HINT: ${{ inputs.content_primary_skill_hint }}
+          CONTENT_SUPPORT_ACTION_HINT: ${{ inputs.content_support_action_hint }}
+          CONTENT_SUPPORT_SKILL_HINT: ${{ inputs.content_support_skill_hint }}
           RESEARCH_REPORT_PATH: ${{ steps.preflight_parallel.outputs.research_report_path }}
           PLAN_REPORT_PATH: ${{ steps.preflight_parallel.outputs.plan_report_path }}
           CRITIC_REPORT_PATH: ${{ steps.preflight_parallel.outputs.critic_report_path }}
@@ -981,6 +1015,27 @@ jobs:
           NLM_AUTH_TOKEN: ${{ secrets.FUGUE_NOTEBOOKLM_AUTH_TOKEN || secrets.NLM_AUTH_TOKEN || '' }}
           NLM_COOKIES: ${{ secrets.FUGUE_NOTEBOOKLM_COOKIES || secrets.NLM_COOKIES || '' }}
         run: bash .fugue-orchestrator/scripts/harness/notebooklm-preflight-enrich.sh
+
+      - name: Record compare mode summary
+        if: ${{ always() }}
+        env:
+          CONTENT_HINT_APPLIED: ${{ inputs.content_hint_applied }}
+          CONTENT_PRIMARY_ACTION_HINT: ${{ inputs.content_primary_action_hint }}
+          CONTENT_PRIMARY_SKILL_HINT: ${{ inputs.content_primary_skill_hint }}
+          CONTENT_SUPPORT_ACTION_HINT: ${{ inputs.content_support_action_hint }}
+          CONTENT_SUPPORT_SKILL_HINT: ${{ inputs.content_support_skill_hint }}
+          COMPARE_MODE: ${{ inputs.compare_mode }}
+          COMPARE_REQUIRED_ARTIFACTS: ${{ inputs.compare_required_artifacts }}
+        run: |
+          {
+            echo "## Compare Mode"
+            echo ""
+            echo "- content_hint_applied: \`${CONTENT_HINT_APPLIED:-false}\`"
+            echo "- primary: skill=\`${CONTENT_PRIMARY_SKILL_HINT:-none}\`, action=\`${CONTENT_PRIMARY_ACTION_HINT:-none}\`"
+            echo "- support: skill=\`${CONTENT_SUPPORT_SKILL_HINT:-none}\`, action=\`${CONTENT_SUPPORT_ACTION_HINT:-none}\`"
+            echo "- compare_mode: \`${COMPARE_MODE:-off}\`"
+            echo "- compare_required_artifacts: \`${COMPARE_REQUIRED_ARTIFACTS:-none}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Run Codex CLI
         id: codex
@@ -1024,6 +1079,12 @@ jobs:
           CONTENT_ACTION_HINT: ${{ inputs.content_action_hint }}
           CONTENT_SKILL_HINT: ${{ inputs.content_skill_hint }}
           CONTENT_REASON: ${{ inputs.content_reason }}
+          CONTENT_PRIMARY_ACTION_HINT: ${{ inputs.content_primary_action_hint }}
+          CONTENT_PRIMARY_SKILL_HINT: ${{ inputs.content_primary_skill_hint }}
+          CONTENT_SUPPORT_ACTION_HINT: ${{ inputs.content_support_action_hint }}
+          CONTENT_SUPPORT_SKILL_HINT: ${{ inputs.content_support_skill_hint }}
+          COMPARE_MODE: ${{ inputs.compare_mode }}
+          COMPARE_REQUIRED_ARTIFACTS: ${{ inputs.compare_required_artifacts }}
         run: bash .fugue-orchestrator/scripts/harness/codex-execute-validate.sh
 
       - name: Summarize implementation diff
@@ -1139,7 +1200,7 @@ jobs:
 
       - name: Upload Codex log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-output-log
           path: |

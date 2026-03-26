@@ -26,6 +26,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           STATUS: ${{ github.event.client_payload.status }}
           SUCCESS_COUNT: ${{ github.event.client_payload.success_count }}
+          BLOCKED_COUNT: ${{ github.event.client_payload.blocked_count || 0 }}
           ERROR_COUNT: ${{ github.event.client_payload.error_count }}
           MODE: ${{ github.event.client_payload.mode }}
           SOURCE_ISSUE: ${{ github.event.client_payload.source_issue }}
@@ -38,7 +39,9 @@ jobs:
           fi
 
           status_emoji="✅"
-          if [[ "${STATUS}" != "ok" ]]; then
+          if [[ "${STATUS}" == "blocked" ]]; then
+            status_emoji="⚠️"
+          elif [[ "${STATUS}" != "ok" ]]; then
             status_emoji="❌"
           fi
 
@@ -48,6 +51,7 @@ jobs:
           - status: \`${STATUS}\`
           - mode: \`${MODE}\`
           - success: ${SUCCESS_COUNT}
+          - blocked: ${BLOCKED_COUNT}
           - errors: ${ERROR_COUNT}
           - source: cursorvers/fugue-orchestrator#${SOURCE_ISSUE}
           EOF
