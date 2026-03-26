@@ -30,7 +30,7 @@ jobs:
       profile_count: ${{ steps.matrix.outputs.profile_count }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve feed profile matrix
         id: matrix
@@ -56,10 +56,10 @@ jobs:
       name: ${{ matrix.profile.environment }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload feed artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: googleworkspace-feed-${{ matrix.profile.profile }}
           path: |

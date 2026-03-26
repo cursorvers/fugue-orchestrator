@@ -16,7 +16,14 @@ concurrency:
 jobs:
   send-article:
     runs-on: ubuntu-latest
+<<<<<<< Updated upstream
     timeout-minutes: 5
+=======
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+>>>>>>> Stashed changes
 
     steps:
       - name: Quota gate

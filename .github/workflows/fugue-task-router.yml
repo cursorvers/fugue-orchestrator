@@ -240,7 +240,7 @@ jobs:
 
       - name: Checkout repository
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve orchestrator workflow ref
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
@@ -255,7 +255,7 @@ jobs:
 
       - name: Checkout orchestrator scripts
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cursorvers/fugue-orchestrator
           ref: ${{ steps.orch_ref.outputs.ref }}

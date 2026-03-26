@@ -166,7 +166,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve issue context
         id: ctx
@@ -339,7 +339,7 @@ jobs:
       workspace_artifact_name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
     steps:
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}
           token: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
@@ -347,7 +347,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -379,7 +379,7 @@ jobs:
 
       - name: Upload Google Workspace preflight artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
           path: |
@@ -407,7 +407,7 @@ jobs:
 
     steps:
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ needs.prepare.outputs.target_repo }}
           token: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
@@ -415,7 +415,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -434,7 +434,7 @@ jobs:
 
       - name: Download Google Workspace preflight artifact
         if: ${{ inputs.workspace_hint_applied == 'true' && needs.workspace-preflight.result == 'success' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.workspace-preflight.outputs.workspace_artifact_name }}
           path: .
@@ -739,7 +739,7 @@ jobs:
 
       - name: Upload Codex log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-output-log
           path: |

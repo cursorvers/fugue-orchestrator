@@ -58,7 +58,7 @@ jobs:
       CANARY_WAIT_SLOW_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC || '20' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run canary (mode-aware)
         env:
