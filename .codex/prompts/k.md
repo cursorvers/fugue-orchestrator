@@ -95,7 +95,7 @@ Constraints:
 - Do not count unlabeled, pending, failed, or merely planned lanes toward the manifest.
 - `Active models:` must list only models with live evidence from the current run.
 - Treat `gemini-cli`, `cursor-cli`, and `copilot-cli` as quota-aware specialist candidates; skip unavailable candidates, but fail closed if no required specialist voice can be activated.
-- Use `gemini-cli` as the default optional lane, `cursor-cli` as a conservative secondary lane, and `copilot-cli` only for one-shot dissent or final review unless a human explicitly overrides policy.
+- Choose the specialist lane dynamically by live health and quota; on MBP prefer `copilot-cli` when `gemini-cli` reviewer lanes are unhealthy, and avoid assuming a fixed specialist order.
 - Before the first acknowledgement, write a bootstrap receipt with `bash scripts/lib/kernel-bootstrap-receipt.sh write <lane_count> <providers_csv> <normal|degraded-allowed>`.
 - When writing that receipt, also set `KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV`, `KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT`, `KERNEL_BOOTSTRAP_AGENT_LABELS=true`, and `KERNEL_BOOTSTRAP_SUBAGENT_LABELS=true` so unattended health can verify live manifest evidence instead of trusting provider counts alone.
 - Update that bootstrap receipt again when Kernel mode changes so unattended health checks do not drift from reality.
