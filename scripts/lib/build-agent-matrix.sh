@@ -67,7 +67,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --codex-main-model)
-      codex_main_model="${2:-gpt-5.4}"
+      codex_main_model="${2:-gpt-5-codex}"
       shift 2
       ;;
     --codex-multi-agent-model)
