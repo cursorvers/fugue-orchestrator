@@ -31,7 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SOPS_AGE_KEY_FILE: ${{ runner.temp }}/age-key.txt
       ENC_FILE: secrets/fugue-secrets.enc
 
     steps:
@@ -46,6 +45,8 @@ jobs:
           sops --version
 
       - name: Setup age key
+        env:
+          SOPS_AGE_KEY_FILE: ${{ runner.temp }}/age-key.txt
         run: |
           mkdir -p "$(dirname "$SOPS_AGE_KEY_FILE")"
           echo "${{ secrets.SOPS_AGE_PRIVATE_KEY }}" > "$SOPS_AGE_KEY_FILE"
@@ -53,6 +54,8 @@ jobs:
 
       - name: Decrypt & validate
         id: decrypt
+        env:
+          SOPS_AGE_KEY_FILE: ${{ runner.temp }}/age-key.txt
         run: |
           sops decrypt --input-type dotenv --output-type dotenv "$ENC_FILE" > "${{ runner.temp }}/decrypted.env"
           chmod 600 "${{ runner.temp }}/decrypted.env"
@@ -91,6 +94,8 @@ jobs:
 
       - name: Cleanup
         if: always()
+        env:
+          SOPS_AGE_KEY_FILE: ${{ runner.temp }}/age-key.txt
         run: rm -f "${{ runner.temp }}/decrypted.env" "$SOPS_AGE_KEY_FILE"
 
       - name: Summary
