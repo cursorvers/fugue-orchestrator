@@ -63,6 +63,10 @@ map_to_acct() {
     SLACK_TEAM_ID)      echo "slack-team-id" ;;
     VERCEL_AI_GATEWAY_KEY) echo "vercel-ai-gateway-key" ;;
     SOCIALDATA_API_KEY) echo "socialdata-api-key" ;;
+    NOTE_SESSION_V5)    echo "note-session-v5" ;;
+    SUPABASE_SERVICE_ROLE_KEY) echo "supabase-service-role-key" ;;
+    LINE_CHANNEL_SECRET) echo "line-channel-secret" ;;
+    LINE_HARNESS_API_KEY) echo "line-harness-api-key" ;;
     *)                  echo "" ;;
   esac
 }
