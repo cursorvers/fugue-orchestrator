@@ -33,6 +33,18 @@ Execution may stop only for:
 - `cc pocket`: mobile degraded continuation node via CLI
 - `GHA`: backup, audit, milestone marker, and external mirror only
 
+Execution-node requirements:
+
+- `Mac mini` is the steady-state always-on host for unattended Kernel runs, heavy tmux residency,
+  and local-first runtime artifacts
+- on `Mac mini`, `kernel` with no arguments should reopen the latest active run before guarded
+  launch when a healthy run already exists
+- `MBP` is the attended operator and full continuation node; its default path is bounded recovery
+  and continuation, not steady-state primary ownership
+- `MBP` continuation must work via repo state, shared secret plane, compact artifact, `doctor`,
+  and `recover-run` without depending on MBP-only hidden state
+- `cc pocket` may inspect and continue degraded work, but does not replace `MBP` or `Mac mini`
+
 `GHA` は primary state owner ではない。
 ただし、明示的な `kernel_run_id` が渡され、既存 compact artifact が存在する場合に限り、
 bounded な `phase_artifacts` path reference を milestone marker として追記してよい。
@@ -93,6 +105,17 @@ Every substantial run must pass:
 - conceptually this is the shared secret bundle, not a Kernel-owned name
 - local runtime uses `process env -> Keychain -> explicit external env file`
 - GHA receives a mirror only
+
+## Plugin Packaging Boundary
+
+- OpenAI Codex plugins may package reusable `skills`, app mappings, or MCP server bundles for
+  Kernel-adjacent workflows
+- plugins must not replace repo-local `AGENTS.md`, `CODEX.md`, or `.codex/prompts/kernel.md` as
+  the Kernel source of truth
+- plugins must not own council math, approval policy, runtime ledger, compact artifact truth, or
+  `ok_to_execute`
+- prefer repo-local assets while a workflow is still evolving; promote it into a plugin only after
+  the behavior is stable enough to share across projects or teams
 
 ## State and Compact
 

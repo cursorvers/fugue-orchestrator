@@ -16,7 +16,8 @@ Define the point at which `Kernel` can begin implementation as a credible replac
 1. `Governance-first`
    - execution permission lives in orchestration, not in ad hoc scripts
 2. `Baseline council`
-   - default autonomous write gate remains `Codex + Claude + GLM`
+   - default autonomous write gate remains `Codex + GLM + specialist`
+   - `Claude` is recommended when healthy, but Kernel must remain executable without making Claude a hard prerequisite
 3. `Risk-gated autonomy`
    - routine work proceeds through council approval
    - human approval is reserved for destructive, irreversible, or trust-boundary changes

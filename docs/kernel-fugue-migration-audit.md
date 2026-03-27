@@ -37,7 +37,8 @@ So the honest assessment is:
 The following FUGUE doctrines are carried into Kernel without dilution:
 
 1. governance-first execution control
-2. baseline autonomous write council of `Codex + Claude + GLM`
+2. baseline autonomous write council of `Codex + GLM + specialist`
+   - `Claude` remains a recommended extra voice when healthy, not a Kernel prerequisite
 3. human approval only for destructive, irreversible, or trust-boundary operations
 4. evidence before completion
 5. peripherals and business interfaces treated as part of orchestration reality

@@ -213,6 +213,36 @@ Initial validation harnesses should include:
 - `scripts/local/run-linked-systems.sh` for linked-system smoke/execute dispatch
 - `scripts/sim-kernel-peripherals.sh` for cross-repo peripheral verification
 
+## 5.3 Execution Node Topology
+
+Kernel must define distinct host roles for `Mac mini` and `MBP` rather than treating both as
+generic local machines.
+
+Steady-state node responsibilities:
+
+- `Mac mini` is the default primary execution node for unattended and long-running Kernel work
+- `Mac mini` owns the always-on daemon or scheduler target, heavy tmux session residency, and
+  local-first runtime artifacts
+- on `Mac mini`, repo-context startup should minimize friction: bare `codex` may default to
+  `kernel`, and `kernel` with no arguments should reopen the latest active run before falling back
+  to guarded launch
+- `MBP` is the attended operator workstation and full continuation node, not the steady-state
+  always-on primary
+- `MBP` must be able to inspect and continue a run through `doctor -> doctor --run -> recover-run`
+  using repo state, shared secret plane, compact artifacts, and bounded recovery surfaces
+- `MBP` may temporarily host heavy execution during migration, outage, or recovery, but that is an
+  explicit degraded or transitional mode rather than the default architecture
+- `cc pocket` remains degraded mobile continuation only
+- `GitHub Actions` remains backup, audit, checkpoint mirror, and bounded external continuity only
+
+Portability requirements:
+
+- no run may depend on MBP-only hidden state to resume safely
+- the same `kernel_run_id`, compact artifact, and recovery metadata must remain auditable across
+  `Mac mini`, `MBP`, and `GitHub Actions`
+- operator friction must stay low: MBP recovery should prefer direct `ssh` or `tmux` plus bounded
+  `doctor` or `recover-run` flows over long local wrapper chains
+
 ## 6. Adaptive Lane Topology
 
 The orchestrator must choose topology dynamically instead of using one fixed lane layout for every task.
@@ -336,10 +366,15 @@ The orchestrator may demote a task only when:
 For autonomous write execution, the default baseline council is:
 
 - `Codex family`
-- `Claude`
 - `GLM`
+- `specialist x1`
 
-This preserves the original `codex + claude + glm` safety intuition while making Codex the sole state owner.
+`Claude` is strongly recommended when available and healthy, but it is not a required baseline
+prerequisite for Kernel.
+
+This preserves the original multi-voice safety intuition while matching the real continuity model:
+Kernel often runs specifically when `Claude` is unavailable or rate-limited, so the minimum healthy
+write shape must remain `Codex + GLM + specialist`.
 
 ### 8.2 Voting
 
@@ -480,6 +515,33 @@ Validation rule:
 - when a business-critical system lives in another repo/runtime, Kernel must validate against its existing contract instead of assuming local replacement
 - peripherals should declare `authority`, `validation_mode`, `contract_owner`, and `preferred_lane` via the adapter manifest
 
+## 10.1 Codex Plugin Packaging Boundary
+
+OpenAI Codex plugins are acceptable for packaging reusable Kernel-adjacent capabilities, but they
+must not become the authority for Kernel sovereignty.
+
+Allowed plugin uses:
+
+- distributing reusable `skills`, `.app.json` connector mappings, and `.mcp.json` server packs
+- shipping cross-project operator helpers or readonly integration bundles through a repo or
+  personal marketplace
+- promoting stable, shared workflows after they have already proven out as repo-local assets
+
+Disallowed plugin uses:
+
+- replacing repo-local `AGENTS.md`, `CODEX.md`, or `.codex/prompts/kernel.md` as the authoritative
+  Kernel contract
+- owning council math, `ok_to_execute`, approval policy, runtime ledger, or compact artifact truth
+- hiding required Kernel behavior behind a team-local plugin install that is absent from the repo
+
+Policy:
+
+- Kernel sovereignty remains repo-local and prompt-local
+- plugins are a distribution layer for reusable adjuncts, not a substitute for repository-owned
+  control-plane rules
+- during active workflow iteration, prefer local skills and repo-owned docs first; promote to a
+  plugin only when the behavior is stable enough to share across projects or teams
+
 ## 11. Model Policy Requirements
 
 The new system must adopt `latest-first` model policy:
@@ -532,12 +594,18 @@ Therefore, the new system does not require inventing multi-lane governance from 
 1. `gpt-5.4` is accepted as the default main kernel model.
 2. Small autonomous write tasks use `spark x3` fast topology by default.
 3. Large refactor tasks auto-promote to `10+` lane topologies.
-4. `Codex + Claude + GLM` baseline council remains the default autonomous write gate.
+4. `Codex + GLM + specialist` baseline council remains the default autonomous write gate.
 5. `Gemini` joins only when UI/UX flags are set.
 6. `Claude Agent Teams` is supported only as a bounded executor lane, not as a second orchestrator.
 7. Future `Claude main` remains possible only through a sovereign adapter contract, not through bespoke core branching.
 8. The orchestrator chooses topology without requiring the user to manually classify every task.
 9. Human approval is requested only for destructive or irreversible actions.
+10. `Mac mini` and `MBP` responsibilities are explicit, with `Mac mini` as the default primary and
+    `MBP` as the full continuation node.
+11. A bounded `MBP` recovery path exists through `doctor -> doctor --run -> recover-run` without
+    requiring MBP-only hidden runtime state.
+12. Codex plugins are permitted only as reusable packaging for non-sovereign Kernel adjuncts and
+    do not replace repo-local Kernel authority.
 
 ## 14. Rollout Direction
 

@@ -50,6 +50,8 @@ Normal shape:
 - `GLM`
 - `specialist x1`
 
+`Claude` is recommended when healthy, but not required for the Kernel minimum.
+
 If `GLM` fails:
 
 - `specialist` substitutes
@@ -100,5 +102,4 @@ Success criterion:
   - shared secret plane
   - compact artifact
   - doctor view
-  - degraded launch path
-
+  - `doctor -> doctor --run -> recover-run`
