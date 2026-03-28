@@ -96,9 +96,9 @@ echo "$DECRYPTED" | while IFS= read -r line; do
     continue
   fi
 
-  # Special: X keys (x-auto service, account = env var name)
+  # Special: x-auto service keys (account = env var name)
   case "$KEY" in
-    X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET)
+    X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)
       import_secret "$KEY" "x-auto" "$VALUE" "$KEY (service: x-auto)"
       continue
       ;;
