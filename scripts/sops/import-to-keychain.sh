@@ -45,6 +45,15 @@ map_to_acct() {
   esac
 }
 
+# Map x-auto keys to Keychain service "x-auto"
+map_xauto_acct() {
+  case "$1" in
+    X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET)
+      echo "$1" ;;  # same name as env var
+    *)  echo "" ;;
+  esac
+}
+
 echo "Decrypting: $ENC_FILE"
 DECRYPTED=$(sops decrypt --input-type dotenv --output-type dotenv "$ENC_FILE")
 
@@ -72,6 +81,14 @@ echo "$DECRYPTED" | while IFS= read -r line; do
     ENCODED="go-keyring-base64:$(printf '%s' "$VALUE" | base64)"
     security add-generic-password -a "supabase" -s "Supabase CLI" -w "$ENCODED" -U 2>/dev/null || true
     echo "  imported: $KEY (service: Supabase CLI)"
+    continue
+  fi
+
+  # x-auto service keys
+  XAUTO_ACCT=$(map_xauto_acct "$KEY")
+  if [ -n "$XAUTO_ACCT" ]; then
+    security add-generic-password -a "$XAUTO_ACCT" -s "x-auto" -w "$VALUE" -U 2>/dev/null || true
+    echo "  imported: $KEY -> x-auto/$XAUTO_ACCT"
     continue
   fi
 
