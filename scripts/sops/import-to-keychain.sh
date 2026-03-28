@@ -25,7 +25,7 @@ import_secret() {
   local value="$3"
   local label="$4"
 
-  if printf '%s' "$value" | security add-generic-password -a "$account" -s "$service" -w - -U; then
+  if security add-generic-password -a "$account" -s "$service" -w "$value" -U; then
     echo "  imported: $label"
   else
     echo "ERROR: failed to import $label" >&2
@@ -98,7 +98,7 @@ echo "$DECRYPTED" | while IFS= read -r line; do
 
   # Special: x-auto service keys (account = env var name)
   case "$KEY" in
-    X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)
+    X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|NOTION_API_KEY|SLACK_WEBHOOK_URL)
       import_secret "$KEY" "x-auto" "$VALUE" "$KEY (service: x-auto)"
       continue
       ;;
