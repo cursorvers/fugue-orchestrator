@@ -1,0 +1,24 @@
+{
+  "ticket_id": "31061c98",
+  "purpose": "Create README.md for fugue-orchestrator-public. Include: project description (FUGUE multi-LLM development orchestrator), architecture overview, key components (fugue-execute.mjs, fugue-lane-bridge.mjs, delegate.js, delegate-glm.js), Canon v4 monitoring layer, getting started, and license (MIT). Keep it concise, under 100 lines.",
+  "priority": "medium",
+  "acceptance_criteria": [
+    "9-step execution flow is followed",
+    "CLI supports --task/--project/--tier/--resume/--status",
+    "Votes auto-continue per verdict rules",
+    "Summary fits within 2000 characters"
+  ],
+  "definition_of_done": {
+    "syntax_check": true,
+    "unit_test": true,
+    "auto_review_min_score": 5,
+    "code_review_min_score": 7,
+    "integration_test": true
+  },
+  "status": "done",
+  "planning_diversity_evidence": 2,
+  "implementation_subagents": [
+    "codex:implementer"
+  ],
+  "authority_scope": "fugue_execution"
+}

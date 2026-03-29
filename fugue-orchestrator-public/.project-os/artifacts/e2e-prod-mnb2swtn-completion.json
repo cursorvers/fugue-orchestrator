@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "e2e-prod-mnb2swtn",
+  "acceptance_text": "run=e2e-prod-mnb2swtn\nstatus=done\ntier=0\ntask=E2E production validation of receipt schema + provider state\nreview=n/a\nsyntax=n/a\nunit=n/a\nintegration=n/a\nvotes=none",
+  "acceptance_hash": "96603dfedda8b48236cee71f1282498a81991163be376839ac36b9c9052604e7",
+  "authority_scope": "fugue_execution_only",
+  "completed_at": "2026-03-29T01:23:59.923Z",
+  "lanes_used": [
+    "codex:implementer"
+  ]
+}

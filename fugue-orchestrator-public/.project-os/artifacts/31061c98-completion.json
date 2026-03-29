@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "31061c98",
+  "acceptance_text": "run=31061c98\nstatus=done\ntier=1\ntask=Create README.md for fugue-orchestrator-public. Include: project description (FUGUE multi-LLM development orchestrator), architecture overview, key components (fugue-execute.mjs, fugue-lane-bridge.mjs, delegate.js, delegate-glm.js), Canon v4 monitoring layer, getting started, and license (MIT). Keep it concise, under 100 lines.\nreview=n/a\nsyntax=n/a\nunit=n/a\nintegration=n/a\nvotes=none",
+  "acceptance_hash": "565ec2dd646b5a0ec3a6588dcc17e1e499b47e5c0d2a240f7193ed4550e390ba",
+  "authority_scope": "fugue_execution_only",
+  "completed_at": "2026-03-29T17:04:03.538Z",
+  "lanes_used": [
+    "codex:implementer"
+  ]
+}

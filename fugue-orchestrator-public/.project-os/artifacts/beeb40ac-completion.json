@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "beeb40ac",
+  "acceptance_text": "run=beeb40ac\nstatus=done\ntier=2\ntask=FUGUE Budget管理機能の実装: (1) ~/.claude/state/budget-config.json にプロバイダ別月次予算(soft/hard閾値)とセッション単位上限を定義。(2) delegation-trace.jsonlの各レコードにcost_usd列を追加。(3) fugue-execute.mjs開始時にセッション累積コスト+プロバイダ月次コストをチェック。soft超過→stderr警告、hard超過→BLOCKED状態遷移+Claude通知。(4) budget-check.mjs を新規作成: コスト集計・閾値チェック・月次リセットロジック。(5) テスト: 閾値超過時のBLOCKED遷移を検証。設定ファイル不在時はno-limit fallback。\nreview=n/a\nsyntax=n/a\nunit=n/a\nintegration=n/a\nvotes=planning:CONDITIONAL",
+  "acceptance_hash": "3dcaeba2c06b2bca12f9ee058cf9f456c146a6f9d8d874e9c790c80145637588",
+  "authority_scope": "fugue_execution_only",
+  "completed_at": "2026-03-29T16:14:31.237Z",
+  "lanes_used": [
+    "codex-plan",
+    "glm-plan",
+    "codex-implementer",
+    "glm-advisor"
+  ]
+}
