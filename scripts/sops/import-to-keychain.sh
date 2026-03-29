@@ -86,7 +86,7 @@ echo "$DECRYPTED" | while IFS= read -r line; do
 
   # Special: FUGUE_QUEUE_API_KEY (different service name)
   if [ "$KEY" = "FUGUE_QUEUE_API_KEY" ]; then
-    import_secret "masayuki" "FUGUE_QUEUE_API_KEY" "$VALUE" "$KEY (service: FUGUE_QUEUE_API_KEY)"
+    import_secret "$(whoami)" "FUGUE_QUEUE_API_KEY" "$VALUE" "$KEY (service: FUGUE_QUEUE_API_KEY)"
     continue
   fi
 

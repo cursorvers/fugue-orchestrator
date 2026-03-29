@@ -27,7 +27,7 @@ resolve_keychain_location() {
   local key="$1"
   case "$key" in
     FUGUE_QUEUE_API_KEY)
-      echo "FUGUE_QUEUE_API_KEY|masayuki" ;;
+      echo "FUGUE_QUEUE_API_KEY|$(whoami)" ;;
     SUPABASE_ACCESS_TOKEN)
       echo "Supabase CLI|supabase" ;;
     X_API_KEY|X_API_KEY_SECRET|X_ACCESS_TOKEN|X_ACCESS_TOKEN_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|SLACK_WEBHOOK_URL)
