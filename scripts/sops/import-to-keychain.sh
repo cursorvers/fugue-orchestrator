@@ -67,6 +67,7 @@ map_to_acct() {
     SUPABASE_SERVICE_ROLE_KEY) echo "supabase-service-role-key" ;;
     LINE_CHANNEL_SECRET) echo "line-channel-secret" ;;
     LINE_HARNESS_API_KEY) echo "line-harness-api-key" ;;
+    ESTAT_APP_ID)       echo "estat-app-id" ;;
     *)                  echo "" ;;
   esac
 }
@@ -104,14 +105,14 @@ echo "$DECRYPTED" | while IFS= read -r line; do
       ;;
   esac
 
-  # Standard fugue-secrets entries
-  ACCT=$(map_to_acct "$KEY")
-  if [ -z "$ACCT" ]; then
-    echo "  SKIPPED: $KEY (no mapping)"
-    continue
-  fi
+  # Standard fugue-secrets entries: import with BOTH original key name AND kebab alias
+  # This prevents "key not found" when code searches by either naming convention
+  import_secret "$KEY" "fugue-secrets" "$VALUE" "$KEY (canonical)"
 
-  import_secret "$ACCT" "fugue-secrets" "$VALUE" "$KEY -> $ACCT"
+  ACCT=$(map_to_acct "$KEY")
+  if [ -n "$ACCT" ] && [ "$ACCT" != "$KEY" ]; then
+    import_secret "$ACCT" "fugue-secrets" "$VALUE" "$KEY -> $ACCT (alias)"
+  fi
 done
 
 echo "---"
