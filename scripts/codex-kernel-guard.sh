@@ -7,6 +7,7 @@ ROOT_DIR="${KERNEL_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 HEALTH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-health.sh"
+STATUS_SURFACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-status-surface.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 RECOVERY_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-run-recovery.sh"
 PHASE_GATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-phase-gate.sh"
@@ -21,8 +22,42 @@ STATIC_CHECK_SCRIPT="${ROOT_DIR}/tests/test-codex-kernel-prompt.sh"
 
 DEFAULT_LANE_COUNT="${KERNEL_BOOTSTRAP_LANE_COUNT:-6}"
 DEFAULT_STALE_HOURS="${KERNEL_STALE_HOURS:-24}"
-STATIC_CHECK_TIMEOUT_SEC="${DOCTOR_STATIC_CHECK_TIMEOUT_SEC:-15}"
+STATIC_CHECK_TIMEOUT_SEC="${DOCTOR_STATIC_CHECK_TIMEOUT_SEC:-45}"
 SUMMARY_TIMEOUT_SEC="${KERNEL_DOCTOR_SUMMARY_TIMEOUT_SEC:-15}"
+
+resolve_codex_bin() {
+  local preferred="${CODEX_BIN:-}"
+  local candidate
+
+  if [[ -n "${preferred}" ]]; then
+    candidate="$(type -P "${preferred}" 2>/dev/null || true)"
+    if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    if [[ -x "${preferred}" ]]; then
+      printf '%s\n' "${preferred}"
+      return 0
+    fi
+  fi
+
+  candidate="$(type -P codex 2>/dev/null || true)"
+  if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  for candidate in     "$HOME/bin/codex"     "$HOME/.local/bin/codex"     "/usr/local/bin/codex"     "/opt/homebrew/bin/codex"
+  do
+    if [[ -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+DOCTOR_FAILURE=0
 
 usage() {
   cat <<'EOF'
@@ -31,6 +66,7 @@ Usage:
   codex-kernel-guard.sh doctor [--all-runs]
   codex-kernel-guard.sh doctor --run <run_id>
   codex-kernel-guard.sh recover-run <run_id>
+  codex-kernel-guard.sh attach-context <run_id> <reference_path> [label]
   codex-kernel-guard.sh phase-check <phase> [--uiux]
   codex-kernel-guard.sh phase-complete <phase> [--uiux]
   codex-kernel-guard.sh run-complete --summary <text> [--title <text>] [--uiux] [--no-gha] [--dry-run]
@@ -50,6 +86,17 @@ die() {
 
 trim() {
   printf '%s' "${1:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
+}
+
+normalize_context_label() {
+  local value
+  value="$(printf '%s' "${1:-}" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g')"
+  value="$(trim "${value}")"
+  if [[ -z "${value}" ]]; then
+    printf '\n'
+    return 0
+  fi
+  printf '%s\n' "${value}" | cut -c1-160
 }
 
 canonical_provider() {
@@ -104,7 +151,8 @@ try:
     raise SystemExit(completed.returncode)
 except subprocess.TimeoutExpired as exc:
     if exc.stdout:
-        sys.stdout.write(exc.stdout)
+        output = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
+        sys.stdout.write(output)
     raise SystemExit(124)
 PY
 }
@@ -242,10 +290,54 @@ print_runtime_health_status() {
   rc=$?
   set -e
   if [[ "${rc}" -eq 124 ]]; then
+    DOCTOR_FAILURE=1
     printf '  - timeout after %ss\n' "${SUMMARY_TIMEOUT_SEC}"
     return 0
   fi
+  if [[ "${rc}" -gt 1 ]]; then
+    DOCTOR_FAILURE=1
+  fi
   printf '%s\n' "${out}"
+  return 0
+}
+
+print_runtime_status_surface() {
+  local run_id="${1:-}"
+  local out rc
+  printf 'runtime status surface:\n'
+  if [[ ! -f "${STATUS_SURFACE_SCRIPT}" ]]; then
+    printf '  - unavailable\n'
+    return 0
+  fi
+  set +e
+  if [[ -n "${run_id}" ]]; then
+    out="$(run_with_timeout "${SUMMARY_TIMEOUT_SEC}" env KERNEL_RUN_ID="${run_id}" bash "${STATUS_SURFACE_SCRIPT}" snapshot)"
+  else
+    out="$(run_with_timeout "${SUMMARY_TIMEOUT_SEC}" bash "${STATUS_SURFACE_SCRIPT}" snapshot)"
+  fi
+  rc=$?
+  set -e
+  if [[ "${rc}" -eq 124 ]]; then
+    DOCTOR_FAILURE=1
+    printf '  - timeout after %ss\n' "${SUMMARY_TIMEOUT_SEC}"
+    return 0
+  fi
+  if [[ "${rc}" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"${out}"; then
+    DOCTOR_FAILURE=1
+    printf '  - unavailable\n'
+    [[ -n "${out}" ]] && printf '  - raw: %s\n' "$(printf '%s' "${out}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')"
+    return 0
+  fi
+  printf '  - active_claims: %s\n' "$(jq -r '.summary.active_claims // 0' <<<"${out}")"
+  printf '  - running: %s\n' "$(jq -r '.summary.running // 0' <<<"${out}")"
+  printf '  - retrying: %s\n' "$(jq -r '.summary.retrying // 0' <<<"${out}")"
+  printf '  - degraded: %s\n' "$(jq -r '.summary.degraded // 0' <<<"${out}")"
+  printf '  - blocked: %s\n' "$(jq -r '.summary.blocked // 0' <<<"${out}")"
+  printf '  - terminal: %s\n' "$(jq -r '.summary.terminal // 0' <<<"${out}")"
+  printf '  - preferred_recovery: %s\n' "$(jq -r '.recovery_handoff.preferred_recovery // "idle"' <<<"${out}")"
+  if [[ -n "${run_id}" ]]; then
+    printf '  - run_present: %s\n' "$(jq -r --arg run_id "${run_id}" '((.claims // []) | any(.run_id == $run_id))' <<<"${out}")"
+  fi
 }
 
 print_static_contract_status() {
@@ -258,8 +350,10 @@ print_static_contract_status() {
   if [[ "${rc}" -eq 0 ]]; then
     printf '  - static contract: pass\n'
   else
+    DOCTOR_FAILURE=1
     printf '  - static contract: fail\n'
   fi
+  return 0
 }
 
 print_recent_events() {
@@ -442,7 +536,7 @@ cmd_launch() {
 
   if [[ "${ORCH_DRY_RUN:-0}" == "1" ]]; then
     prompt="$(env KERNEL_RUN_ID="${run_id}" bash "${THREAD_SCRIPT}" prompt "${run_id}")"
-    printf '%s -C %q %q\n' "${CODEX_BIN:-/opt/homebrew/bin/codex}" "${ROOT_DIR}" "${prompt}"
+    printf '%s -C %q %q\n' "$(resolve_codex_bin)" "${ROOT_DIR}" "${prompt}"
     return 0
   fi
 
@@ -454,6 +548,7 @@ cmd_doctor() {
   local run_id=""
   local file json line_count
   ensure_default_env
+  DOCTOR_FAILURE=0
 
   while (($#)); do
     case "$1" in
@@ -515,7 +610,9 @@ cmd_doctor() {
   print_shared_secrets_status
   print_bootstrap_receipt_status "${KERNEL_RUN_ID:-unknown-run}"
   print_runtime_health_status "${KERNEL_RUN_ID:-unknown-run}"
+  print_runtime_status_surface "${KERNEL_RUN_ID:-unknown-run}"
   print_compact_status "${KERNEL_RUN_ID:-unknown-run}"
+  return "${DOCTOR_FAILURE}"
 }
 
 cmd_doctor_run() {
@@ -524,6 +621,7 @@ cmd_doctor_run() {
   local scheduler_state scheduler_reason workspace_receipt_path
 
   ensure_default_env
+  DOCTOR_FAILURE=0
   compact_path="$(compact_path_for "${run_id}")"
   [[ -f "${compact_path}" ]] || die "compact artifact missing for run: ${run_id}" 1
   json="$(jq -c '.' "${compact_path}")"
@@ -542,6 +640,7 @@ cmd_doctor_run() {
   print_static_contract_status
   print_shared_secrets_status
   print_runtime_health_status "${run_id}"
+  print_runtime_status_surface "${run_id}"
 
   printf 'run detail:\n'
   printf '  - run_id: %s\n' "${run_id}"
@@ -561,7 +660,7 @@ cmd_doctor_run() {
   printf '  - workspace_receipt_path_compact: %s\n' "${workspace_receipt_path_compact}"
   printf '  - phase_artifacts: %s\n' "${phase_artifacts}"
 
-  KERNEL_RUN_ID="${run_id}" bash "${RECEIPT_SCRIPT}" status
+  KERNEL_RUN_ID="${run_id}" bash "${RECEIPT_SCRIPT}" status || true
   KERNEL_RUN_ID="${run_id}" bash "${LEDGER_SCRIPT}" status || true
   printf '  - scheduler state: %s\n' "${scheduler_state}"
   printf '  - scheduler reason: %s\n' "${scheduler_reason}"
@@ -573,6 +672,7 @@ cmd_doctor_run() {
   printf '  - project: %s\n' "$(jq -r '.project // ""' <<<"${json}")"
   printf '  - purpose: %s\n' "$(jq -r '.purpose // ""' <<<"${json}")"
   print_recent_events "${run_id}"
+  return "${DOCTOR_FAILURE}"
 }
 
 cmd_recover_run() {
@@ -580,6 +680,52 @@ cmd_recover_run() {
   [[ -n "${run_id}" ]] || die "recover-run requires a run_id" 2
   ensure_default_env
   exec env KERNEL_RUN_ID="${run_id}" bash "${RECOVERY_SCRIPT}" recover "${run_id}"
+}
+
+cmd_attach_context() {
+  local run_id="${1:-}"
+  local reference_path="${2:-}"
+  local label="${3:-}"
+  local compact_path kind default_label issue_number existing_path existing_kind existing_label
+  [[ -n "${run_id}" ]] || die "attach-context requires <run_id> <reference_path> [label]" 2
+  [[ -n "${reference_path}" ]] || die "attach-context requires <run_id> <reference_path> [label]" 2
+  [[ -f "${reference_path}" ]] || die "context reference not found: ${reference_path}" 1
+  ensure_default_env
+
+  compact_path="$(compact_path_for "${run_id}")"
+  [[ -f "${compact_path}" ]] || die "compact artifact missing for run: ${run_id}" 1
+
+  kind="$(jq -r '.kind // "external-reference"' "${reference_path}" 2>/dev/null || printf 'external-reference')"
+  issue_number="$(jq -r '.issue_number // ""' "${reference_path}" 2>/dev/null || printf '')"
+  default_label="${kind}"
+  if [[ -n "${issue_number}" ]]; then
+    default_label="${default_label} #${issue_number}"
+  fi
+  if [[ -z "${label}" ]]; then
+    label="${default_label}"
+  fi
+  label="$(normalize_context_label "${label}")"
+  if [[ -z "${label}" ]]; then
+    label="${default_label}"
+  fi
+
+  existing_path="$(jq -r '.context_reference.path // ""' "${compact_path}")"
+  existing_kind="$(jq -r '.context_reference.kind // ""' "${compact_path}")"
+  existing_label="$(jq -r '.context_reference.label // ""' "${compact_path}")"
+  if [[ "${existing_path}" == "${reference_path}" && "${existing_kind}" == "${kind}" && "${existing_label}" == "${label}" ]]; then
+    printf 'context reference already attached: %s -> %s\n' "${run_id}" "${reference_path}"
+    return 0
+  fi
+
+  KERNEL_RUN_ID="${run_id}" \
+  KERNEL_COMPACT_PRESERVE_SUMMARY="true" \
+  KERNEL_COMPACT_PRESERVE_LAST_EVENT="true" \
+  KERNEL_CONTEXT_REFERENCE_PATH="${reference_path}" \
+  KERNEL_CONTEXT_REFERENCE_KIND="${kind}" \
+  KERNEL_CONTEXT_REFERENCE_LABEL="${label}" \
+    bash "${COMPACT_SCRIPT}" update manual_snapshot "Attached external context reference" >/dev/null
+
+  printf 'attached context reference: %s -> %s\n' "${run_id}" "${reference_path}"
 }
 
 cmd_phase_check() {
@@ -651,6 +797,9 @@ main() {
       ;;
     recover-run)
       cmd_recover_run "$@"
+      ;;
+    attach-context)
+      cmd_attach_context "$@"
       ;;
     phase-check)
       cmd_phase_check "$@"

@@ -6,10 +6,12 @@ RECOVERY_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-run-recovery.sh"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
+GUARD_BIN="${KERNEL_GUARD_BIN_UNDER_TEST:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 TMP_DIR="$(mktemp -d)"
 SESSION_HEALTHY="fugue-orchestrator__runtime-enforcement"
 SESSION_STALE="fugue-orchestrator__auto-compact"
-trap 'tmux kill-session -t "${SESSION_HEALTHY}" >/dev/null 2>&1 || true; tmux kill-session -t "${SESSION_STALE}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
+SESSION_LEGACY="fugue-orchestrator__legacy-purpose"
+trap 'tmux kill-session -t "${SESSION_HEALTHY}" >/dev/null 2>&1 || true; tmux kill-session -t "${SESSION_STALE}" >/dev/null 2>&1 || true; tmux kill-session -t "${SESSION_LEGACY}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
 
 export KERNEL_ROOT="${ROOT_DIR}"
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
@@ -36,6 +38,10 @@ EOF
 
 cat >"${KERNEL_COMPACT_DIR}/run-implementation.json" <<EOF
 {"run_id":"run-implementation","project":"fugue-orchestrator","purpose":"implementation-surface","current_phase":"implementation","mode":"healthy","runtime":"kernel","tmux_session":"fugue-orchestrator__implementation-surface","owner":"codex","active_models":["codex","glm","gemini-cli"],"phase_artifacts":{"implementation_report_path":"/tmp/run-implementation-report.md"},"next_action":["verify-implementation"],"updated_at":"2026-03-21T00:10:00Z"}
+EOF
+
+cat >"${KERNEL_COMPACT_DIR}/adhoc_Mac-mini-M1-for-Otawara-M-7_legacy-project_legacy-purpose_20260331T000000_999.json" <<EOF
+{"run_id":"adhoc:Mac-mini-M1-for-Otawara-M-7:legacy-project:legacy-purpose:20260331T000000:999","current_phase":"critique","mode":"healthy","runtime":"kernel","tmux_session":"${SESSION_LEGACY}","owner":"codex","active_models":["codex","glm","gemini-cli"],"next_action":["repair-legacy-identity"],"updated_at":"2026-03-21T00:15:00Z"}
 EOF
 
 export KERNEL_RUN_ID="run-healthy"
@@ -123,7 +129,17 @@ sleep 0.3
 pane_out="$(tmux capture-pane -p -t "=${SESSION_STALE}:main")"
 grep -Fq 'Resume FUGUE orchestration for Kernel run run-stale.' <<<"${pane_out}"
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor)"
+tmux new-session -d -s "${SESSION_LEGACY}" -n main >/dev/null 2>&1 || true
+out="$(KERNEL_RECOVERY_LAUNCH_CODEX_THREAD=false bash "${RECOVERY_SCRIPT}" recover "adhoc:Mac-mini-M1-for-Otawara-M-7:legacy-project:legacy-purpose:20260331T000000:999")"
+grep -Fq "tmux session: ${SESSION_LEGACY}" <<<"${out}"
+grep -Fq 'codex thread: legacy-project:legacy-purpose' <<<"${out}"
+legacy_path="${KERNEL_COMPACT_DIR}/adhoc_Mac-mini-M1-for-Otawara-M-7_legacy-project_legacy-purpose_20260331T000000_999.json"
+legacy_project="$(jq -r '.project' "${legacy_path}")"
+legacy_purpose="$(jq -r '.purpose' "${legacy_path}")"
+[[ "${legacy_project}" == "legacy-project" ]]
+[[ "${legacy_purpose}" == "legacy-purpose" ]]
+
+out="$("${GUARD_BIN}" doctor)"
 grep -Fq 'purpose=auto-compact' <<<"${out}"
 grep -Fq 'runtime=fugue' <<<"${out}"
 
