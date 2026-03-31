@@ -536,8 +536,11 @@ FUGUE 哲学に基づく: 分散自律 x 統合収束
 - repo root で新規に開いた Codex セッションから `/kernel`
 - chat 欄から 1語で起動したい場合の local alias は `/k`
 - ローカルでの推奨実行経路は `kernel` または `codex-prompt-launch kernel`
-- 1語 alias の prompt は [`.codex/prompts/k.md`](/Users/masayuki_otawara/fugue-orchestrator/.codex/prompts/k.md)
+- MBP / 新規端末で `kernel` と `/kernel` `/vote` をまとめて入れる時は `bash scripts/local/install-kernel-launchers.sh`
+- 上の installer は `~/bin/kernel` と `~/.codex/prompts/{kernel,k,vote,v}.md` を repo authority に揃える
+- 1語 alias の prompt は [`.codex/prompts/k.md`](./.codex/prompts/k.md)
 - ローカル実行契約の authority は shell wrapper ではなく `codex-kernel-guard launch`
+- non-interactive な adapter fallback では resumable run を優先して `k open` / `k new` が guard launch より先に走ることがあるが、authority 自体は guard から移さない
 - hot reload は保証しません
 - bare `/kernel` は Codex chat UI の upstream 実装に依存
 - RUN_CODEX_KERNEL_SMOKE=1 bash tests/test-codex-kernel-prompt.sh

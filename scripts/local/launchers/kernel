@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${launcher_dir}/orchestrator-entrypoint-hint" kernel || true
+
+auto_open_latest_enabled() {
+  local value="${KERNEL_AUTO_OPEN_LATEST:-true}"
+  [[ "${value}" != "0" && "${value}" != "false" && "${value}" != "no" ]]
+}
+
+interactive_tty_available() {
+  [[ -t 0 && -t 1 && "${TERM:-}" != "dumb" ]]
+}
+
+is_primary_node() {
+  [[ "${KERNEL_NODE_ROLE:-primary}" == "primary" ]]
+}
+
+resolve_latest_run_id() {
+  "${launcher_dir}/k" latest 2>/dev/null || true
+}
+
+maybe_open_latest_run() {
+  auto_open_latest_enabled || return 1
+  is_primary_node || return 1
+  local run_id
+  run_id="$(resolve_latest_run_id)"
+  [[ -n "${run_id}" ]] || return 1
+  if interactive_tty_available; then
+    "${launcher_dir}/k" open "${run_id}" && exit 0
+    return 1
+  fi
+  env KERNEL_K_NO_ATTACH=true "${launcher_dir}/k" open "${run_id}" && exit 0
+  return 1
+}
+
+maybe_spawn_noninteractive_session() {
+  interactive_tty_available && return 1
+  bash "${launcher_dir}/kernel-root" >/dev/null 2>&1 || return 1
+  local purpose="${1:-${KERNEL_PURPOSE:-launch}}"
+  exec env KERNEL_K_NO_ATTACH=true "${launcher_dir}/k" new "${purpose}" "${@:2}"
+}
+
+maybe_launch_with_guard() {
+  bash "${launcher_dir}/kernel-root" >/dev/null 2>&1 || return 1
+  exec "${launcher_dir}/codex-kernel-guard" launch "$@"
+}
+
+maybe_open_latest_run "$@" || true
+maybe_spawn_noninteractive_session "$@" || true
+maybe_launch_with_guard "$@" || true
+exec "${launcher_dir}/codex-prompt-launch" kernel "$@"

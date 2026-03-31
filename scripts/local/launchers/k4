@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_kernel_root() {
+  if [[ -n "${KERNEL_ROOT:-}" ]]; then
+    printf '%s\n' "${KERNEL_ROOT}"
+    return 0
+  fi
+  if [[ -x "${HOME}/bin/kernel-root" ]]; then
+    bash "${HOME}/bin/kernel-root" 2>/dev/null || true
+    return 0
+  fi
+  if [[ -x "${launcher_dir}/kernel-root" ]]; then
+    bash "${launcher_dir}/kernel-root" 2>/dev/null || true
+    return 0
+  fi
+}
+
+kernel_root="$(resolve_kernel_root)"
+
+if [[ -z "${kernel_root}" ]]; then
+  echo "kernel-root unavailable" >&2
+  exit 1
+fi
+
+entrypoint="${kernel_root}/scripts/local/kernel-entrypoint.sh"
+if [[ ! -x "${entrypoint}" ]]; then
+  echo "kernel 4-pane entrypoint not found: ${entrypoint}" >&2
+  exit 1
+fi
+
+exec bash "${entrypoint}" "$@"

@@ -93,7 +93,9 @@ Primary policy source:
 - The supported entrypoint for Kernel work in this repository is a fresh Codex session started at the repository root and then `/kernel`.
 - `/k` is a local one-word alias for `/kernel` in this repository and must obey the same Kernel bootstrap contract.
 - The supported local adapter path is `kernel` or `codex-prompt-launch kernel`, both of which must route through `codex-kernel-guard launch` when guard prerequisites are available.
+- The supported operator-facing 4-pane launch path is `k4`; do not overload `kernel` or `/kernel` with tmux-surface responsibilities.
 - Treat `codex-kernel-guard launch` as the local execution authority for Kernel orchestration; shell wrappers and prompt launchers are adapters, not the source of truth.
+- In non-interactive startup paths, adapter fallbacks may prefer `k open` or `k new` before guard launch so resumable run semantics survive unattended startup; treat that as an adapter shortcut, not a transfer of orchestration authority.
 - The authoritative prompt for this repository is `.codex/prompts/kernel.md`.
 - The local alias prompt for one-word chat-box startup is `.codex/prompts/k.md`.
 - Do not rely on `~/.codex/prompts/kernel.md` alone for repository work; treat the global prompt as convenience only.
@@ -126,6 +128,12 @@ Primary policy source:
 - `cc pocket` uses `doctor --all-runs -> doctor --run` as the mobile degraded-continuation path and should stay focused on lightweight work.
 - `k` is the human-facing shortcut surface: `k`, `k all`, `k latest`, `k run-id`, `k new <purpose> [focus]`, `k adopt <session:window> [purpose]`, `k <run_id>`, `k show <run_id>`, `k open [run_id]`, `k phase <phase>`, `k done <summary...>`.
 - `codex-kernel-guard adopt-run <session:window> [purpose]` is the path for turning a live unmanaged tmux window into a Kernel run and moving it into a dedicated heavy-profile session.
+- `k4 <purpose|focus...>` is the preferred human-facing shortcut for the operator 4-pane surface.
+- `bash scripts/local/kernel-4pane-launch.sh --purpose <purpose> [focus...]` is the operator-facing 4-pane launch surface for a fresh run.
+- `bash scripts/local/kernel-4pane-launch.sh --run <run_id>` is the operator-facing 4-pane resume surface for an existing run.
+- The 4-pane surface is a derived tmux projection over the bootstrap receipt, runtime ledger, compact artifact, and runtime health; it must not become a second source of truth.
+- The left main pane is the architecture/operator pane and must stay available for primary instructions; do not require env toggles to switch it into manual mode.
+- The right-hand panes are `Lanes`, `Health`, and `Ship`; they are monitors over canonical Kernel state, not independent controllers.
 - On `Mac mini`, bare `codex` inside the Kernel repo should default to `kernel` and only offer raw Codex as an explicit opt-out; routine startup should not require a repeated `Kernelを起動しますか? [Y/n]` prompt once repo context is clear.
 - On `Mac mini`, `kernel` with no arguments should reopen the latest active run by default; if no active run exists, it should fall through to guarded launch.
 - Kernel startup adapters should keep the initial Codex-visible bootstrap text minimal.
