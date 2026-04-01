@@ -318,6 +318,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.11 ローカル shared skills 同期（Codex/Claude 共通）
 # thumbnail-gen / note-manuscript / note-generate / x-auto を両 runtime に同期
+# adapter 実体は local-shared-skills/、authority は各 source repo / doc に残す
+# ~/.claude/skills が claude-config/assets/skills を指す環境では Claude 側上書きを自動 skip
 # ./scripts/skills/sync-local-shared-skills.sh --target both
 # 既存 skill を repo 内容で上書き
 # ./scripts/skills/sync-local-shared-skills.sh --target both --force

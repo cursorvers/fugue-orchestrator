@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 MANIFEST="${REPO_ROOT}/config/skills/local-shared-baseline.tsv"
-SOURCE_BASE="${REPO_ROOT}/claude-config/assets/skills"
+SOURCE_BASE="${REPO_ROOT}/local-shared-skills"
 
 TARGET="both"            # codex | claude | both
 INCLUDE_OPTIONAL="false" # true | false
@@ -15,6 +15,7 @@ DRY_RUN="false"          # true | false
 CODEX_SKILLS_DIR="${CODEX_SKILLS_DIR:-${HOME}/.codex/skills}"
 CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-${HOME}/.claude/skills}"
 MANAGED_MARKER=".fugue-managed-local-shared"
+CLAUDE_SOURCE_ROOT="${REPO_ROOT}/claude-config/assets/skills"
 
 usage() {
   cat <<'EOF'
@@ -137,6 +138,7 @@ copy_skill() {
   cp -R "${source_dir}/." "${target_dir}/"
   cat > "${target_dir}/${MANAGED_MARKER}" <<EOF
 source_repo=${REPO_ROOT}
+source_base=${SOURCE_BASE}
 installed_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 }
@@ -151,6 +153,17 @@ read_manifest() {
   ' "${MANIFEST}"
 }
 
+is_within_dir() {
+  local maybe_path="$1"
+  local expected_dir="$2"
+  local actual_real expected_real
+  [[ -e "${maybe_path}" ]] || return 1
+  [[ -d "${maybe_path}" ]] || return 1
+  actual_real="$(cd "${maybe_path}" && pwd -P)"
+  expected_real="$(cd "${expected_dir}" && pwd -P)"
+  [[ "${actual_real}" == "${expected_real}" || "${actual_real}" == "${expected_real}"/* ]]
+}
+
 main() {
   parse_args "$@"
   require_cmd awk
@@ -158,6 +171,19 @@ main() {
   require_cmd grep
   require_cmd head
   require_cmd rm
+
+  local sync_codex="false" sync_claude="false"
+  if [[ "${TARGET}" == "codex" || "${TARGET}" == "both" ]]; then
+    sync_codex="true"
+  fi
+  if [[ "${TARGET}" == "claude" || "${TARGET}" == "both" ]]; then
+    sync_claude="true"
+  fi
+
+  if [[ "${sync_claude}" == "true" ]] && is_within_dir "${CLAUDE_SKILLS_DIR}" "${CLAUDE_SOURCE_ROOT}"; then
+    echo "SKIP claude target (${CLAUDE_SKILLS_DIR} resolves inside ${CLAUDE_SOURCE_ROOT}; manage Claude-side adapters in source tree)"
+    sync_claude="false"
+  fi
 
   local installed=0 selected=0
   while IFS=$'\t' read -r skill_name profile; do
@@ -172,10 +198,10 @@ main() {
     [[ -d "${source_skill_dir}" ]] || fail "local shared skill not found: ${skill_name}"
     validate_skill_payload "${source_skill_dir}" "${skill_name}"
 
-    if [[ "${TARGET}" == "codex" || "${TARGET}" == "both" ]]; then
+    if [[ "${sync_codex}" == "true" ]]; then
       copy_skill "${source_skill_dir}" "${CODEX_SKILLS_DIR}" "${skill_name}"
     fi
-    if [[ "${TARGET}" == "claude" || "${TARGET}" == "both" ]]; then
+    if [[ "${sync_claude}" == "true" ]]; then
       copy_skill "${source_skill_dir}" "${CLAUDE_SKILLS_DIR}" "${skill_name}"
     fi
     installed=$((installed + 1))

@@ -29,7 +29,9 @@ Repo-local shared profile:
 
 - Local shared manifest: `config/skills/local-shared-baseline.tsv`
 - Local shared sync: `scripts/skills/sync-local-shared-skills.sh`
+- Local shared adapter root: `local-shared-skills/`
 - Shared skills currently managed here: `thumbnail-gen`, `note-manuscript`, `note-generate`, `x-auto`
+- If `~/.claude/skills` is a symlink to `claude-config/assets/skills`, the local shared sync script skips the Claude target and expects thin adapters to live in the source tree.
 
 ## Selected Skills
 
