@@ -213,18 +213,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          from pathlib import Path
           import yaml
-          files = [
-              ".github/workflows/fugue-orchestrator-canary.yml",
-              ".github/workflows/fugue-orchestration-gate.yml",
-              ".github/workflows/fugue-watchdog.yml",
-              ".github/workflows/fugue-tutti-caller.yml",
-              ".github/workflows/fugue-tutti-router.yml",
-              ".github/workflows/fugue-task-router.yml",
-              ".github/workflows/kernel-decision-journal.yml",
-          ]
+
+          files = sorted(Path(".github/workflows").glob("*.yml"))
+          files.extend(sorted(Path(".github/workflows").glob("*.yaml")))
+
           for p in files:
-              with open(p, "r", encoding="utf-8") as f:
+              with p.open("r", encoding="utf-8") as f:
                   yaml.safe_load(f)
           print("workflow-yaml-parse-ok")
           PY
