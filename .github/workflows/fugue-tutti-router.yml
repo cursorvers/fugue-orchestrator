@@ -1653,6 +1653,10 @@ jobs:
           if [[ "${handoff_target}" == "fugue-bridge" ]]; then
             legacy_bridge_active="true"
           fi
+          implementation_phase="$(echo "${HAS_IMPLEMENT_REQUEST:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${implementation_phase}" != "true" ]]; then
+            implementation_phase="false"
+          fi
           task_size_tier_input="$(echo "${TASK_SIZE_TIER_INPUT:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           claude_teams_allowed="$(echo "${CLAUDE_TEAMS_ALLOWED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${claude_teams_allowed}" != "true" ]]; then
