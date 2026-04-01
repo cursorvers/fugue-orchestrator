@@ -1,0 +1,38 @@
+name: x-auto-note-linking-rule
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/x-auto-note-linking-rule.yml'
+      - 'docs/x-auto-note-linking-rule.md'
+      - 'docs/ADR-005-x-article-defer-note-consolidation.md'
+      - 'tests/test-x-auto-note-linking-rule.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/x-auto-note-linking-rule.yml'
+      - 'docs/x-auto-note-linking-rule.md'
+      - 'docs/ADR-005-x-article-defer-note-consolidation.md'
+      - 'tests/test-x-auto-note-linking-rule.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Shell syntax check
+        run: |
+          set -euo pipefail
+          bash -n tests/test-x-auto-note-linking-rule.sh
+
+      - name: Rule check
+        run: |
+          set -euo pipefail
+          bash tests/test-x-auto-note-linking-rule.sh
