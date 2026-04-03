@@ -21,6 +21,19 @@ on:
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
       - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
       - 'scripts/lib/workspace-root-policy.sh'
+      - 'scripts/kernel-scheduler.sh'
+      - 'scripts/lib/kernel-lock.sh'
+      - 'scripts/lib/kernel-runtime-claim.sh'
+      - 'scripts/lib/kernel-runtime-health.sh'
+      - 'scripts/lib/kernel-runtime-launch.sh'
+      - 'scripts/lib/kernel-runtime-ledger.sh'
+      - 'scripts/lib/kernel-runtime-reconciler.sh'
+      - 'scripts/lib/kernel-runtime-run-driver.sh'
+      - 'scripts/lib/kernel-runtime-status-surface.sh'
+      - 'scripts/lib/kernel-runtime-workspace.sh'
+      - 'scripts/local/install-kernel-launchers.sh'
+      - 'scripts/local/launchers/**'
+      - 'scripts/local/kernel-runtime-loop.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
@@ -29,8 +42,15 @@ on:
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
+      - 'tests/test-codex-skill-launch.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-codex-orchestrator-snippet.sh'
+      - 'tests/test-install-kernel-launchers.sh'
       - 'tests/test-kernel-auth-evidence.sh'
+      - 'tests/test-kernel-entrypoint.sh'
+      - 'tests/test-kernel-launcher.sh'
+      - 'tests/test-kernel-launcher-template.sh'
+      - 'tests/test-vote-launchers.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
       - 'tests/test-local-orchestration-consensus-bridge.sh'
@@ -48,6 +68,16 @@ on:
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
       - 'tests/test-workflow-checkout-order.sh'
+      - 'tests/test-kernel-runtime-claim.sh'
+      - 'tests/test-kernel-runtime-health.sh'
+      - 'tests/test-kernel-runtime-launch.sh'
+      - 'tests/test-kernel-runtime-ledger-race.sh'
+      - 'tests/test-kernel-runtime-loop.sh'
+      - 'tests/test-kernel-runtime-reconciler.sh'
+      - 'tests/test-kernel-runtime-run-driver.sh'
+      - 'tests/test-kernel-runtime-status-surface.sh'
+      - 'tests/test-kernel-runtime-workspace.sh'
+      - 'tests/test-kernel-scheduler.sh'
       - '.codex/prompts/kernel.md'
       - '.codex/prompts/k.md'
       - '.codex/prompts/vote.md'
@@ -82,6 +112,19 @@ on:
       - 'scripts/lib/watchdog-alert-delivery-policy.sh'
       - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
       - 'scripts/lib/workspace-root-policy.sh'
+      - 'scripts/kernel-scheduler.sh'
+      - 'scripts/lib/kernel-lock.sh'
+      - 'scripts/lib/kernel-runtime-claim.sh'
+      - 'scripts/lib/kernel-runtime-health.sh'
+      - 'scripts/lib/kernel-runtime-launch.sh'
+      - 'scripts/lib/kernel-runtime-ledger.sh'
+      - 'scripts/lib/kernel-runtime-reconciler.sh'
+      - 'scripts/lib/kernel-runtime-run-driver.sh'
+      - 'scripts/lib/kernel-runtime-status-surface.sh'
+      - 'scripts/lib/kernel-runtime-workspace.sh'
+      - 'scripts/local/install-kernel-launchers.sh'
+      - 'scripts/local/launchers/**'
+      - 'scripts/local/kernel-runtime-loop.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
@@ -90,8 +133,15 @@ on:
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
+      - 'tests/test-codex-skill-launch.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-codex-orchestrator-snippet.sh'
+      - 'tests/test-install-kernel-launchers.sh'
       - 'tests/test-kernel-auth-evidence.sh'
+      - 'tests/test-kernel-entrypoint.sh'
+      - 'tests/test-kernel-launcher.sh'
+      - 'tests/test-kernel-launcher-template.sh'
+      - 'tests/test-vote-launchers.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
       - 'tests/test-local-orchestration-consensus-bridge.sh'
@@ -109,6 +159,16 @@ on:
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
       - 'tests/test-workflow-checkout-order.sh'
+      - 'tests/test-kernel-runtime-claim.sh'
+      - 'tests/test-kernel-runtime-health.sh'
+      - 'tests/test-kernel-runtime-launch.sh'
+      - 'tests/test-kernel-runtime-ledger-race.sh'
+      - 'tests/test-kernel-runtime-loop.sh'
+      - 'tests/test-kernel-runtime-reconciler.sh'
+      - 'tests/test-kernel-runtime-run-driver.sh'
+      - 'tests/test-kernel-runtime-status-surface.sh'
+      - 'tests/test-kernel-runtime-workspace.sh'
+      - 'tests/test-kernel-scheduler.sh'
       - '.codex/prompts/kernel.md'
       - '.codex/prompts/k.md'
       - '.codex/prompts/vote.md'
@@ -155,12 +215,25 @@ jobs:
           bash -n scripts/lib/watchdog-alert-delivery-policy.sh
           bash -n scripts/lib/watchdog-reconcile-claim-policy.sh
           bash -n scripts/lib/workspace-root-policy.sh
+          bash -n scripts/kernel-scheduler.sh
+          bash -n scripts/lib/kernel-lock.sh
+          bash -n scripts/lib/kernel-runtime-claim.sh
+          bash -n scripts/lib/kernel-runtime-health.sh
+          bash -n scripts/lib/kernel-runtime-launch.sh
+          bash -n scripts/lib/kernel-runtime-ledger.sh
+          bash -n scripts/lib/kernel-runtime-reconciler.sh
+          bash -n scripts/lib/kernel-runtime-run-driver.sh
+          bash -n scripts/lib/kernel-runtime-status-surface.sh
+          bash -n scripts/lib/kernel-runtime-workspace.sh
+          bash -n scripts/local/kernel-runtime-loop.sh
           bash -n scripts/harness/run-recovery-console.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n scripts/check-codex-kernel-prompt.sh
           bash -n scripts/check-codex-vote-prompt.sh
+          bash -n tests/test-codex-kernel-prompt.sh
           bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-codex-orchestrator-snippet.sh
           bash -n tests/test-kernel-auth-evidence.sh
           bash -n tests/test-publish-decision-journal.sh
           bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
@@ -173,6 +246,21 @@ jobs:
           bash -n tests/test-workspace-root-policy.sh
           bash -n tests/test-canary-trust-policy.sh
           bash -n tests/test-kernel-canary-plan.sh
+          bash -n tests/test-kernel-entrypoint.sh
+          bash -n tests/test-kernel-launcher.sh
+          bash -n tests/test-kernel-launcher-template.sh
+          bash -n tests/test-k4-launcher.sh
+          bash -n tests/test-install-kernel-launchers.sh
+          bash -n tests/test-kernel-runtime-claim.sh
+          bash -n tests/test-kernel-runtime-health.sh
+          bash -n tests/test-kernel-runtime-launch.sh
+          bash -n tests/test-kernel-runtime-ledger-race.sh
+          bash -n tests/test-kernel-runtime-loop.sh
+          bash -n tests/test-kernel-runtime-reconciler.sh
+          bash -n tests/test-kernel-runtime-run-driver.sh
+          bash -n tests/test-kernel-runtime-status-surface.sh
+          bash -n tests/test-kernel-runtime-workspace.sh
+          bash -n tests/test-kernel-scheduler.sh
 
       - name: Kernel prompt static contract
         run: |
@@ -184,6 +272,19 @@ jobs:
           set -euo pipefail
           bash tests/test-codex-vote-prompt.sh
           bash tests/test-kernel-auth-evidence.sh
+
+      - name: Kernel local adapter tests
+        run: |
+          set -euo pipefail
+          bash tests/test-kernel-launcher.sh
+          bash tests/test-kernel-launcher-template.sh
+          bash tests/test-k4-launcher.sh
+          bash tests/test-kernel-entrypoint.sh
+          bash tests/test-codex-kernel-prompt.sh
+          bash tests/test-codex-orchestrator-snippet.sh
+          bash tests/test-install-kernel-launchers.sh
+          bash tests/test-vote-launchers.sh
+          bash tests/test-codex-skill-launch.sh
 
       - name: Local orchestration boundary tests
         run: |
@@ -202,6 +303,20 @@ jobs:
           bash tests/test-watchdog-reconcile-claim-policy.sh
           bash tests/test-watchdog-reconcile-workflow.sh
           bash tests/test-workspace-root-policy.sh
+
+      - name: Kernel runtime substrate tests
+        run: |
+          set -euo pipefail
+          bash tests/test-kernel-runtime-workspace.sh
+          bash tests/test-kernel-runtime-launch.sh
+          bash tests/test-kernel-runtime-claim.sh
+          bash tests/test-kernel-runtime-run-driver.sh
+          bash tests/test-kernel-runtime-reconciler.sh
+          bash tests/test-kernel-runtime-status-surface.sh
+          bash tests/test-kernel-scheduler.sh
+          bash tests/test-kernel-runtime-ledger-race.sh
+          bash tests/test-kernel-runtime-loop.sh
+          bash tests/test-kernel-runtime-health.sh
 
       - name: Canary trust tests
         run: |

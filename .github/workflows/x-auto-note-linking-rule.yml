@@ -4,17 +4,25 @@ on:
   pull_request:
     paths:
       - '.github/workflows/x-auto-note-linking-rule.yml'
+      - 'docs/agents/x-auto-contract.md'
       - 'docs/x-auto-note-linking-rule.md'
       - 'docs/ADR-005-x-article-defer-note-consolidation.md'
+      - 'skills/x-auto-post-guard/SKILL.md'
+      - 'skills/x-auto-thumbnail-art-director/SKILL.md'
       - 'tests/test-x-auto-note-linking-rule.sh'
+      - 'tests/test-x-auto-skill-contract.sh'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/x-auto-note-linking-rule.yml'
+      - 'docs/agents/x-auto-contract.md'
       - 'docs/x-auto-note-linking-rule.md'
       - 'docs/ADR-005-x-article-defer-note-consolidation.md'
+      - 'skills/x-auto-post-guard/SKILL.md'
+      - 'skills/x-auto-thumbnail-art-director/SKILL.md'
       - 'tests/test-x-auto-note-linking-rule.sh'
+      - 'tests/test-x-auto-skill-contract.sh'
 
 permissions:
   contents: read
@@ -31,8 +39,10 @@ jobs:
         run: |
           set -euo pipefail
           bash -n tests/test-x-auto-note-linking-rule.sh
+          bash -n tests/test-x-auto-skill-contract.sh
 
       - name: Rule check
         run: |
           set -euo pipefail
           bash tests/test-x-auto-note-linking-rule.sh
+          bash tests/test-x-auto-skill-contract.sh

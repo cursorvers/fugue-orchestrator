@@ -306,6 +306,52 @@ jobs:
           fi
           gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${claude_teams_note}${budget_guard_note}${nl_note}"
 
+      - name: Record orchestration handoff in GHA summary
+        if: ${{ always() }}
+        env:
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number || github.event.inputs.issue_number || github.event.issue.number || '' }}
+          SHOULD_RUN: ${{ steps.ctx.outputs.should_run || 'false' }}
+          SKIP_REASON: ${{ steps.ctx.outputs.skip_reason || '' }}
+          HANDOFF_TARGET: ${{ steps.ctx.outputs.handoff_target || github.event.inputs.handoff_target || 'kernel' }}
+          KERNEL_RUN_ID: ${{ github.event.inputs.kernel_run_id || '' }}
+          REQUESTED_EXECUTION_MODE: ${{ github.event.inputs.requested_execution_mode || '' }}
+          EXECUTION_MODE_OVERRIDE: ${{ github.event.inputs.execution_mode_override || 'auto' }}
+          INTAKE_SOURCE: ${{ steps.ctx.outputs.intake_source || github.event.inputs.intake_source || '' }}
+          WORKSPACE_HINT_APPLIED: ${{ steps.ctx.outputs.workspace_hint_applied || 'false' }}
+          WORKSPACE_ACTION_HINT: ${{ steps.ctx.outputs.workspace_action_hint || '' }}
+          WORKSPACE_DOMAIN_HINT: ${{ steps.ctx.outputs.workspace_domain_hint || '' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Fugue Handoff"
+            echo "- issue: ${ISSUE_NUMBER:-unknown}"
+            echo "- should_run: \`${SHOULD_RUN}\`"
+            if [[ -n "${SKIP_REASON}" ]]; then
+              echo "- skip_reason: \`${SKIP_REASON}\`"
+            fi
+            echo "- handoff_target: \`${HANDOFF_TARGET}\`"
+            if [[ -n "${KERNEL_RUN_ID}" ]]; then
+              echo "- kernel_run_id: \`${KERNEL_RUN_ID}\`"
+              echo "- explicit_context_attach: \`required if local FUGUE context should be visible to Kernel\`"
+            else
+              echo "- kernel_run_id: \`not-provided\`"
+            fi
+            if [[ -n "${REQUESTED_EXECUTION_MODE}" ]]; then
+              echo "- requested_execution_mode: \`${REQUESTED_EXECUTION_MODE}\`"
+            fi
+            echo "- execution_mode_override: \`${EXECUTION_MODE_OVERRIDE}\`"
+            if [[ -n "${INTAKE_SOURCE}" ]]; then
+              echo "- intake_source: \`${INTAKE_SOURCE}\`"
+            fi
+            echo "- workspace_hint_applied: \`${WORKSPACE_HINT_APPLIED}\`"
+            if [[ -n "${WORKSPACE_ACTION_HINT}" ]]; then
+              echo "- workspace_action_hint: \`${WORKSPACE_ACTION_HINT}\`"
+            fi
+            if [[ -n "${WORKSPACE_DOMAIN_HINT}" ]]; then
+              echo "- workspace_domain_hint: \`${WORKSPACE_DOMAIN_HINT}\`"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Comment fallback decision
         if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
         env:

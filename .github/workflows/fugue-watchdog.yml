@@ -160,7 +160,6 @@ jobs:
           CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
         run: |
           set -euo pipefail
-
           state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
           if [[ "${state}" != "ok" && "${state}" != "degraded" && "${state}" != "exhausted" ]]; then
             state="ok"
