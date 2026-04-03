@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Quota gate
         id: quota_gate
         env:
@@ -28,7 +31,6 @@ jobs:
           set -euo pipefail
           gate_pass="true"
 
-          # 1. Check delivery pause flag
           paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
             --jq '.value' 2>/dev/null || echo "false")
           if [ "${paused}" = "true" ]; then
@@ -36,7 +38,6 @@ jobs:
             gate_pass="false"
           fi
 
-          # 2. Quota check (push costs 1 message)
           if [ "${gate_pass}" = "true" ] && [ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
             AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
 
@@ -63,8 +64,10 @@ jobs:
         if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
         id: article
         env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LINE_NOTE_ARTICLE_PENDING_TTL_SECONDS: ${{ vars.LINE_NOTE_ARTICLE_PENDING_TTL_SECONDS || '21600' }}
         run: |
           set -euo pipefail
 
@@ -77,11 +80,118 @@ jobs:
             exit 0
           fi
 
+          normalize_int() {
+            local value="$1"
+            local fallback="$2"
+            if [[ "${value}" =~ ^[0-9]+$ ]]; then
+              printf '%s' "${value}"
+            else
+              printf '%s' "${fallback}"
+            fi
+          }
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          clear_pending_lock() {
+            upsert_var "LINE_NOTE_ARTICLE_PENDING_ID" ""
+            upsert_var "LINE_NOTE_ARTICLE_PENDING_AT" ""
+            upsert_var "LINE_NOTE_ARTICLE_PENDING_STATE" ""
+            upsert_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" ""
+          }
+
+          fetch_article_by_id() {
+            local article_id="$1"
+            local response_body="$2"
+            local response_headers="$3"
+            local request_url="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at,is_notified&id=eq.${article_id}&published_at=not.is.null&limit=1"
+            local http_status
+            http_status="$(curl -sS \
+              -D "${response_headers}" \
+              -o "${response_body}" \
+              -w "%{http_code}" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Accept: application/json" \
+              "${request_url}")"
+            printf '%s' "${http_status}"
+          }
+
+          TTL_SECONDS="$(normalize_int "${LINE_NOTE_ARTICLE_PENDING_TTL_SECONDS:-21600}" "21600")"
+          NOW_EPOCH="$(date +%s)"
+          PENDING_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_NOTE_ARTICLE_PENDING_ID" --jq '.value' 2>/dev/null || printf '')"
+          PENDING_AT_RAW="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_NOTE_ARTICLE_PENDING_AT" --jq '.value' 2>/dev/null || printf '')"
+          PENDING_STATE="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_NOTE_ARTICLE_PENDING_STATE" --jq '.value' 2>/dev/null || printf '')"
+          PENDING_AGE=-1
+          if [[ "${PENDING_AT_RAW}" =~ ^[0-9]+$ ]]; then
+            PENDING_AGE=$(( NOW_EPOCH - PENDING_AT_RAW ))
+          fi
+
           RESPONSE_BODY="${RUNNER_TEMP}/articles-response.json"
           RESPONSE_HEADERS="${RUNNER_TEMP}/articles-response.headers"
 
-          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published_at=not.is.null&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
+          if [ -n "${PENDING_ID}" ]; then
+            if [ "${PENDING_AGE}" -ge 0 ] && [ "${PENDING_AGE}" -lt "${TTL_SECONDS}" ]; then
+              if [ "${PENDING_STATE}" = "accepted" ]; then
+                HTTP_STATUS="$(fetch_article_by_id "${PENDING_ID}" "${RESPONSE_BODY}" "${RESPONSE_HEADERS}")"
+                echo "Supabase accepted-pending fetch HTTP status: ${HTTP_STATUS}"
+                cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
 
+                if [ "${HTTP_STATUS}" != "200" ]; then
+                  echo "::error::Failed to query accepted pending article ${PENDING_ID}."
+                  exit 1
+                fi
+
+                ARTICLE_COUNT="$(jq 'length' "${RESPONSE_BODY}")"
+                if [ "${ARTICLE_COUNT}" -gt 0 ]; then
+                  ARTICLE_ID="$(jq -r '.[0].id' "${RESPONSE_BODY}")"
+                  ARTICLE_TITLE="$(jq -r '.[0].title // "note記事"' "${RESPONSE_BODY}")"
+                  ARTICLE_URL="$(jq -r '.[0].url // empty' "${RESPONSE_BODY}")"
+                  ARTICLE_PUBLISHED_AT="$(jq -r '.[0].published_at // empty' "${RESPONSE_BODY}")"
+                  ARTICLE_NOTIFIED="$(jq -r '.[0].is_notified // false' "${RESPONSE_BODY}")"
+
+                  if [ "${ARTICLE_NOTIFIED}" = "false" ]; then
+                    echo "::notice::Reconciling accepted pending article ${ARTICLE_ID} without resending LINE."
+                    {
+                      echo "skip=false"
+                      echo "reconcile_only=true"
+                      echo "skip_reason=accepted_pending_reconcile"
+                      echo "article_id=${ARTICLE_ID}"
+                      echo "article_url=${ARTICLE_URL}"
+                      echo "article_published_at=${ARTICLE_PUBLISHED_AT}"
+                      echo "article_title<<EOF"
+                      printf '%s\n' "${ARTICLE_TITLE}"
+                      echo "EOF"
+                    } >> "${GITHUB_OUTPUT}"
+                    exit 0
+                  fi
+                fi
+
+                echo "::notice::Accepted pending lock no longer needs reconciliation; clearing stale lock."
+                clear_pending_lock
+              else
+                echo "::notice::Prepared pending lock is still active for article ${PENDING_ID}; skipping until TTL expires."
+                {
+                  echo "skip=true"
+                  echo "skip_reason=prepared_pending_lock_active"
+                  echo "reconcile_only=false"
+                  echo "article_id=${PENDING_ID}"
+                } >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+            else
+              echo "::notice::Pending lock expired for article ${PENDING_ID}; clearing stale lock."
+              clear_pending_lock
+            fi
+          fi
+
+          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published_at=not.is.null&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
           HTTP_STATUS="$(curl -sS \
             -D "${RESPONSE_HEADERS}" \
             -o "${RESPONSE_BODY}" \
@@ -105,6 +215,7 @@ jobs:
             {
               echo "skip=true"
               echo "skip_reason=no_unnotified_article"
+              echo "reconcile_only=false"
             } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -124,49 +235,56 @@ jobs:
             exit 1
           fi
 
-          MESSAGE_TEXT="$(
-            ARTICLE_TITLE="${ARTICLE_TITLE}" \
-            ARTICLE_URL="${ARTICLE_URL}" \
-            ARTICLE_PUBLISHED_AT="${ARTICLE_PUBLISHED_AT}" \
-            python3 - <<'PY'
-          import os
-
-          title = os.environ["ARTICLE_TITLE"].strip()
-          url = os.environ["ARTICLE_URL"].strip()
-          published_at = os.environ.get("ARTICLE_PUBLISHED_AT", "").strip()
-
-          lines = [
-              "note新着記事のお知らせ",
-              "",
-              title,
-          ]
-
-          if published_at:
-              lines.append(f"公開日時: {published_at}")
-
-          lines.extend([
-              "",
-              url,
-          ])
-
-          print("\n".join(lines))
-          PY
-          )"
+          MESSAGE_TEXT="$(printf '%s\n\n%s' 'note新着記事のお知らせ' "${ARTICLE_TITLE}")"
+          if [ -n "${ARTICLE_PUBLISHED_AT}" ]; then
+            MESSAGE_TEXT="$(printf '%s\n%s' "${MESSAGE_TEXT}" "公開日時: ${ARTICLE_PUBLISHED_AT}")"
+          fi
+          MESSAGE_TEXT="$(printf '%s\n\n%s' "${MESSAGE_TEXT}" "${ARTICLE_URL}")"
 
           {
             echo "skip=false"
+            echo "reconcile_only=false"
+            echo "skip_reason="
             echo "article_id=${ARTICLE_ID}"
+            echo "article_url=${ARTICLE_URL}"
+            echo "article_published_at=${ARTICLE_PUBLISHED_AT}"
             echo "article_title<<EOF"
             printf '%s\n' "${ARTICLE_TITLE}"
             echo "EOF"
-            echo "article_url=${ARTICLE_URL}"
             echo "message_text<<EOF"
             printf '%s\n' "${MESSAGE_TEXT}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Persist prepared delivery lock
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' && steps.article.outputs.reconcile_only != 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+        run: |
+          set -euo pipefail
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          PENDING_AT="$(date +%s)"
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_ID" "${ARTICLE_ID}"
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_AT" "${PENDING_AT}"
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_STATE" "prepared"
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" ""
+
+          echo "Prepared delivery lock persisted for article ${ARTICLE_ID}"
+
       - name: Send LINE push message
-        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
+        id: send_line
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' && steps.article.outputs.reconcile_only != 'true' }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
@@ -194,6 +312,7 @@ jobs:
             '{to: $to, messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
 
           RETRY_KEY="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "no-retry-key")"
+          ACCEPTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           MAX_ATTEMPTS=3
           ATTEMPT=1
 
@@ -218,11 +337,14 @@ jobs:
 
             case "${HTTP_STATUS}" in
               2*)
+                {
+                  echo "line_request_id=${LINE_REQUEST_ID}"
+                  echo "accepted_at=${ACCEPTED_AT}"
+                } >> "${GITHUB_OUTPUT}"
                 echo "LINE push sent successfully."
                 exit 0
                 ;;
               408|429|500|502|503|504)
-                # Distinguish monthly quota exhaustion from transient 429
                 if [ "${HTTP_STATUS}" = "429" ]; then
                   BODY_MSG="$(jq -r '.message // ""' "${RESPONSE_BODY}" 2>/dev/null || true)"
                   if printf '%s' "${BODY_MSG}" | grep -qiE 'monthly|limit|quota'; then
@@ -244,8 +366,77 @@ jobs:
             exit 1
           done
 
+      - name: Persist accepted delivery receipt
+        if: ${{ !cancelled() && steps.send_line.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          ARTICLE_URL: ${{ steps.article.outputs.article_url }}
+          ARTICLE_PUBLISHED_AT: ${{ steps.article.outputs.article_published_at }}
+          LINE_REQUEST_ID: ${{ steps.send_line.outputs.line_request_id }}
+          ACCEPTED_AT: ${{ steps.send_line.outputs.accepted_at }}
+        run: |
+          set -euo pipefail
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_STATE" "accepted"
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" "${LINE_REQUEST_ID}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_ID" "${ARTICLE_ID}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_URL" "${ARTICLE_URL}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_PUBLISHED_AT" "${ARTICLE_PUBLISHED_AT}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_AT" "${ACCEPTED_AT}"
+
+          echo "Accepted delivery receipt persisted for article ${ARTICLE_ID}"
+
+      - name: Reconcile accepted pending article
+        id: reconcile_pending
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.reconcile_only == 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-reconcile-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-reconcile-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X PATCH "${SUPABASE_URL}/rest/v1/articles?id=eq.${ARTICLE_ID}&is_notified=eq.false" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            --data '{"is_notified":true}')"
+
+          echo "Supabase reconcile HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+          case "${HTTP_STATUS}" in
+            2*)
+              echo "Accepted pending article reconciled without resend."
+              ;;
+            *)
+              echo "::error::Failed to reconcile accepted pending article."
+              exit 1
+              ;;
+          esac
+
       - name: Mark article as notified in Supabase
-        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
+        id: mark_notified
+        if: ${{ !cancelled() && steps.send_line.outcome == 'success' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -257,7 +448,7 @@ jobs:
           RESPONSE_HEADERS="${RUNNER_TEMP}/articles-update-response.headers"
 
           HTTP_STATUS="$(curl -sS \
-            -X PATCH "${SUPABASE_URL}/rest/v1/articles?id=eq.${ARTICLE_ID}" \
+            -X PATCH "${SUPABASE_URL}/rest/v1/articles?id=eq.${ARTICLE_ID}&is_notified=eq.false" \
             -D "${RESPONSE_HEADERS}" \
             -o "${RESPONSE_BODY}" \
             -w "%{http_code}" \
@@ -279,6 +470,30 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Clear pending delivery lock
+        if: ${{ !cancelled() && (steps.mark_notified.outcome == 'success' || steps.reconcile_pending.outcome == 'success') }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_ID" ""
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_AT" ""
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_STATE" ""
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" ""
+
+          echo "Pending delivery lock cleared."
 
       - name: Observe LINE quota and consumption
         if: ${{ always() }}
@@ -308,7 +523,6 @@ jobs:
             cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
           done
 
-          # Quota threshold check
           QUOTA_FILE="${RUNNER_TEMP}/line-quota.json"
           CONSUMPTION_FILE="${RUNNER_TEMP}/line-quota-consumption.json"
           if [ -f "${QUOTA_FILE}" ] && [ -f "${CONSUMPTION_FILE}" ]; then

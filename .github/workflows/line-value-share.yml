@@ -32,7 +32,6 @@ jobs:
           gate_pass="true"
           skip_reason=""
 
-          # 1. Check delivery pause flag
           paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
             --jq '.value' 2>/dev/null || echo "false")
           if [ "${paused}" = "true" ]; then
@@ -41,7 +40,6 @@ jobs:
             skip_reason="delivery_paused"
           fi
 
-          # 2. Quota + friend-count check (broadcast costs friends_count messages)
           if [ "${gate_pass}" = "true" ] && [ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
             AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
 
@@ -55,12 +53,10 @@ jobs:
 
             remaining=$((quota_value - total_usage))
 
-            # 3. Estimate friend count via followers API
             friends=$(curl -s --connect-timeout 5 --max-time 10 \
               -H "${AUTH}" "https://api.line.me/v2/bot/followers/ids" \
               | jq '[.userIds // [] | length] | .[0] // 0' 2>/dev/null || echo "0")
 
-            # Fallback to stored estimate if API failed or returned 0
             if echo "${friends}" | grep -qE '^[0-9]+$' && [ "${friends}" -gt 0 ]; then
               { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_ESTIMATED_FRIENDS" \
                   -f name="LINE_ESTIMATED_FRIENDS" -f value="${friends}" 2>/dev/null \
@@ -73,7 +69,6 @@ jobs:
 
             echo "LINE quota: ${total_usage}/${quota_value} (remaining: ${remaining}), friends: ${friends}"
 
-            # 4. Gate decision
             if [ "${remaining}" -lt "${friends}" ] 2>/dev/null; then
               gate_pass="false"
               skip_reason="insufficient_quota (remaining=${remaining}, friends=${friends})"
@@ -108,6 +103,7 @@ jobs:
           fi
 
           RAW_INDEX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" --jq '.value' 2>/dev/null || printf '0')"
+          LAST_SENT_INDEX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_LAST_VALUE_SHARE_SENT_INDEX" --jq '.value' 2>/dev/null || printf '')"
           if ! [[ "${RAW_INDEX}" =~ ^[0-9]+$ ]]; then
             echo "::warning::LINE_VALUE_SHARE_INDEX is not an integer. Resetting to 0."
             RAW_INDEX="0"
@@ -122,16 +118,26 @@ jobs:
           MESSAGE_JSON="$(jq -c --argjson idx "${CURRENT_INDEX}" '.[$idx]' "${CONFIG_FILE}")"
           MESSAGE_LABEL="$(printf '%s' "${MESSAGE_JSON}" | jq -r '.label')"
           MESSAGE_TEXT="$(printf '%s' "${MESSAGE_JSON}" | jq -r '.text')"
+          DUPLICATE_GUARD="false"
+          SKIP_REASON=""
 
           if [ -z "${MESSAGE_TEXT}" ] || [ "${MESSAGE_TEXT}" = "null" ]; then
             echo "::error::Message text is empty at index ${CURRENT_INDEX}."
             exit 1
           fi
 
+          if [[ "${LAST_SENT_INDEX}" =~ ^[0-9]+$ ]] && [ "${LAST_SENT_INDEX}" -eq "${CURRENT_INDEX}" ]; then
+            DUPLICATE_GUARD="true"
+            SKIP_REASON="duplicate_send_guard_same_index"
+            echo "::notice::Duplicate-send guard matched LINE value rotation index ${CURRENT_INDEX}; skipping resend and healing index."
+          fi
+
           {
             echo "current_index=${CURRENT_INDEX}"
             echo "next_index=${NEXT_INDEX}"
             echo "total_messages=${TOTAL_MESSAGES}"
+            echo "skip_duplicate=${DUPLICATE_GUARD}"
+            echo "skip_reason=${SKIP_REASON}"
             echo "message_label<<EOF"
             printf '%s\n' "${MESSAGE_LABEL}"
             echo "EOF"
@@ -144,7 +150,7 @@ jobs:
           echo "Selected message label: ${MESSAGE_LABEL}"
 
       - name: Broadcast LINE value message
-        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.rotation.outputs.skip_duplicate != 'true' }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           MESSAGE_TEXT: ${{ steps.rotation.outputs.message_text }}
@@ -193,7 +199,6 @@ jobs:
                 exit 0
                 ;;
               408|429|500|502|503|504)
-                # Distinguish monthly quota exhaustion from transient 429
                 if [ "${HTTP_STATUS}" = "429" ]; then
                   BODY_MSG="$(jq -r '.message // ""' "${RESPONSE_BODY}" 2>/dev/null || true)"
                   if printf '%s' "${BODY_MSG}" | grep -qiE 'monthly|limit|quota'; then
@@ -215,21 +220,43 @@ jobs:
             exit 1
           done
 
-      - name: Persist next rotation index
-        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' }}
+      - name: Heal rotation index after duplicate guard
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.rotation.outputs.skip_duplicate == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
           NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
         run: |
           set -euo pipefail
 
-          gh api \
-            -X PATCH \
-            "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
-            -f name="LINE_VALUE_SHARE_INDEX" \
-            -f value="${NEXT_INDEX}" >/dev/null
+          { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
+              -f name="LINE_VALUE_SHARE_INDEX" -f value="${NEXT_INDEX}" >/dev/null 2>&1 \
+            || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+              -f name="LINE_VALUE_SHARE_INDEX" -f value="${NEXT_INDEX}" >/dev/null 2>&1; }
 
-          echo "Persisted LINE_VALUE_SHARE_INDEX=${NEXT_INDEX}"
+          echo "Healed LINE_VALUE_SHARE_INDEX=${NEXT_INDEX} after duplicate guard"
+
+      - name: Persist next rotation index
+        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' && steps.rotation.outputs.skip_duplicate != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
+          CURRENT_INDEX: ${{ steps.rotation.outputs.current_index }}
+        run: |
+          set -euo pipefail
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          upsert_var "LINE_VALUE_SHARE_INDEX" "${NEXT_INDEX}"
+          upsert_var "LINE_LAST_VALUE_SHARE_SENT_INDEX" "${CURRENT_INDEX}"
+
+          echo "Persisted LINE_VALUE_SHARE_INDEX=${NEXT_INDEX} and LINE_LAST_VALUE_SHARE_SENT_INDEX=${CURRENT_INDEX}"
 
       - name: Observe LINE quota and consumption
         if: ${{ always() }}
@@ -259,7 +286,6 @@ jobs:
             cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
           done
 
-          # Quota threshold check
           QUOTA_FILE="${RUNNER_TEMP}/line-quota.json"
           CONSUMPTION_FILE="${RUNNER_TEMP}/line-quota-consumption.json"
           if [ -f "${QUOTA_FILE}" ] && [ -f "${CONSUMPTION_FILE}" ]; then
