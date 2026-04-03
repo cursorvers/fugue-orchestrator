@@ -20,4 +20,8 @@ upsert_var "LINE_NOTE_ARTICLE_PENDING_AT" ""
 upsert_var "LINE_NOTE_ARTICLE_PENDING_STATE" ""
 upsert_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" ""
 
-echo "Cleared LINE_NOTE_ARTICLE_PENDING_* variables for ${GITHUB_REPOSITORY}"
+cat <<EOF
+Cleared LINE_NOTE_ARTICLE_PENDING_* variables for ${GITHUB_REPOSITORY}
+Note: line-send-note-article now claims delivery in Supabase via claim_article_for_line_delivery.
+These variables are retained for audit compatibility and no longer control send eligibility.
+EOF

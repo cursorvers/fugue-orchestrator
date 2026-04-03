@@ -2,7 +2,7 @@ name: LINE Value Share
 
 on:
   schedule:
-    - cron: '0 2 * * 4'
+    - cron: '0 2 * * 2'
   workflow_dispatch: {}
 
 permissions:
@@ -22,19 +22,63 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Ensure LINE state variables
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          ensure_var() {
+            local name="$1"
+            local value="$2"
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" --jq '.name' >/dev/null 2>&1; then
+              return 0
+            fi
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+              -f name="${name}" \
+              -f value="${value}" >/dev/null
+          }
+
+          ensure_var "LINE_DELIVERY_PAUSED" "false"
+          ensure_var "LINE_VALUE_SHARE_INDEX" "0"
+          ensure_var "LINE_LAST_VALUE_SHARE_SENT_INDEX" ""
+          ensure_var "LINE_VALUE_SHARE_PENDING_INDEX" ""
+          ensure_var "LINE_VALUE_SHARE_PENDING_AT" ""
+          ensure_var "LINE_VALUE_SHARE_PENDING_STATE" ""
+
+          current_index="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" --jq '.value')"
+          if ! [[ "${current_index}" =~ ^[0-9]+$ ]]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
+              -f name="LINE_VALUE_SHARE_INDEX" \
+              -f value="0" >/dev/null
+            echo "::notice::Healed LINE_VALUE_SHARE_INDEX to 0 because the stored value was invalid."
+          fi
+
       - name: Quota gate
         id: quota_gate
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || github.token }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           gate_pass="true"
           skip_reason=""
 
-          paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
-            --jq '.value' 2>/dev/null || echo "false")
-          if [ "${paused}" = "true" ]; then
+          if [ "${RUN_ATTEMPT:-1}" -gt 1 ] 2>/dev/null; then
+            echo "::notice::Blocking rerun attempt ${RUN_ATTEMPT} for LINE Value Share."
+            gate_pass="false"
+            skip_reason="rerun_blocked"
+          fi
+
+          paused="__missing__"
+          if paused_value="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" --jq '.value' 2>/dev/null)"; then
+            paused="${paused_value}"
+          fi
+          if [ "${gate_pass}" = "true" ] && [ "${paused}" = "__missing__" ]; then
+            echo "::error::LINE_DELIVERY_PAUSED is unavailable. Refusing to continue."
+            exit 1
+          elif [ "${paused}" = "true" ]; then
             echo "::notice::LINE delivery paused by delivery-audit"
             gate_pass="false"
             skip_reason="delivery_paused"
@@ -86,6 +130,7 @@ jobs:
         id: rotation
         env:
           GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          LINE_VALUE_SHARE_PENDING_TTL_SECONDS: ${{ vars.LINE_VALUE_SHARE_PENDING_TTL_SECONDS || '21600' }}
         run: |
           set -euo pipefail
 
@@ -102,11 +147,34 @@ jobs:
             exit 1
           fi
 
-          RAW_INDEX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" --jq '.value' 2>/dev/null || printf '0')"
-          LAST_SENT_INDEX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_LAST_VALUE_SHARE_SENT_INDEX" --jq '.value' 2>/dev/null || printf '')"
+          normalize_int() {
+            local value="$1"
+            local fallback="$2"
+            if [[ "${value}" =~ ^[0-9]+$ ]]; then
+              printf '%s' "${value}"
+            else
+              printf '%s' "${fallback}"
+            fi
+          }
+
+          read_var() {
+            local name="$1"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" --jq '.value'
+          }
+
+          RAW_INDEX="$(read_var "LINE_VALUE_SHARE_INDEX")"
+          LAST_SENT_INDEX="$(read_var "LINE_LAST_VALUE_SHARE_SENT_INDEX")"
+          PENDING_INDEX="$(read_var "LINE_VALUE_SHARE_PENDING_INDEX")"
+          PENDING_STATE="$(read_var "LINE_VALUE_SHARE_PENDING_STATE")"
+          PENDING_AT_RAW="$(read_var "LINE_VALUE_SHARE_PENDING_AT")"
+          TTL_SECONDS="$(normalize_int "${LINE_VALUE_SHARE_PENDING_TTL_SECONDS:-21600}" "21600")"
+          PENDING_AGE=-1
+          if [[ "${PENDING_AT_RAW}" =~ ^[0-9]+$ ]]; then
+            PENDING_AGE=$(( $(date +%s) - PENDING_AT_RAW ))
+          fi
           if ! [[ "${RAW_INDEX}" =~ ^[0-9]+$ ]]; then
-            echo "::warning::LINE_VALUE_SHARE_INDEX is not an integer. Resetting to 0."
-            RAW_INDEX="0"
+            echo "::error::LINE_VALUE_SHARE_INDEX must be an integer. Refusing to broadcast."
+            exit 1
           fi
 
           CURRENT_INDEX=$(( RAW_INDEX % TOTAL_MESSAGES ))
@@ -123,6 +191,11 @@ jobs:
 
           if [ -z "${MESSAGE_TEXT}" ] || [ "${MESSAGE_TEXT}" = "null" ]; then
             echo "::error::Message text is empty at index ${CURRENT_INDEX}."
+            exit 1
+          fi
+
+          if [ -n "${PENDING_INDEX}" ] && [ "${PENDING_INDEX}" = "${CURRENT_INDEX}" ] && [ "${PENDING_STATE}" = "prepared" ] && [ "${PENDING_AGE}" -ge 0 ] && [ "${PENDING_AGE}" -lt "${TTL_SECONDS}" ]; then
+            echo "::error::Pending rotation lock is still active for index ${CURRENT_INDEX}. Refusing to broadcast."
             exit 1
           fi
 
@@ -149,8 +222,48 @@ jobs:
           echo "Selected message index: ${CURRENT_INDEX}"
           echo "Selected message label: ${MESSAGE_LABEL}"
 
-      - name: Broadcast LINE value message
+      - name: Persist prepared rotation lock
+        id: persist_rotation_lock
         if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.rotation.outputs.skip_duplicate != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          CURRENT_INDEX: ${{ steps.rotation.outputs.current_index }}
+          NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
+        run: |
+          set -euo pipefail
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+              -f name="${name}" -f value="${value}" >/dev/null
+          }
+
+          rollback_reservation() {
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_INDEX" \
+              -f name="LINE_VALUE_SHARE_PENDING_INDEX" -f value="" >/dev/null 2>&1 || true
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_AT" \
+              -f name="LINE_VALUE_SHARE_PENDING_AT" -f value="" >/dev/null 2>&1 || true
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_STATE" \
+              -f name="LINE_VALUE_SHARE_PENDING_STATE" -f value="" >/dev/null 2>&1 || true
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
+              -f name="LINE_VALUE_SHARE_INDEX" -f value="${CURRENT_INDEX}" >/dev/null 2>&1 || true
+          }
+
+          trap 'rollback_reservation' ERR
+
+          upsert_var "LINE_VALUE_SHARE_PENDING_INDEX" "${CURRENT_INDEX}"
+          upsert_var "LINE_VALUE_SHARE_PENDING_AT" "$(date +%s)"
+          upsert_var "LINE_VALUE_SHARE_PENDING_STATE" "prepared"
+          upsert_var "LINE_VALUE_SHARE_INDEX" "${NEXT_INDEX}"
+
+          trap - ERR
+
+          echo "Reserved LINE_VALUE_SHARE_INDEX=${NEXT_INDEX} before broadcast."
+
+      - name: Broadcast LINE value message
+        id: send_broadcast
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.rotation.outputs.skip_duplicate != 'true' && steps.persist_rotation_lock.outcome == 'success' }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           MESSAGE_TEXT: ${{ steps.rotation.outputs.message_text }}
@@ -166,11 +279,27 @@ jobs:
           RESPONSE_BODY="${RUNNER_TEMP}/line-broadcast-response.json"
           RESPONSE_HEADERS="${RUNNER_TEMP}/line-broadcast-response.headers"
 
+          build_retry_key() {
+            local seed="$1"
+            local digest
+            if command -v sha256sum >/dev/null 2>&1; then
+              digest="$(printf '%s' "${seed}" | sha256sum | awk '{print $1}')"
+            else
+              digest="$(printf '%s' "${seed}" | shasum -a 256 | awk '{print $1}')"
+            fi
+            printf '%s-%s-%s-%s-%s' \
+              "${digest:0:8}" \
+              "${digest:8:4}" \
+              "${digest:12:4}" \
+              "${digest:16:4}" \
+              "${digest:20:12}"
+          }
+
           jq -n \
             --arg text "${MESSAGE_TEXT}" \
             '{messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
 
-          RETRY_KEY="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "no-retry-key")"
+          RETRY_KEY="$(build_retry_key "line-value-share:${{ steps.rotation.outputs.current_index }}:${MESSAGE_TEXT}")"
           MAX_ATTEMPTS=3
           ATTEMPT=1
 
@@ -189,6 +318,7 @@ jobs:
             cat "${RESPONSE_BODY}" | jq . 2>/dev/null || cat "${RESPONSE_BODY}" || true
 
             LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+            LINE_ACCEPTED_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-accepted-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
             if [ -n "${LINE_REQUEST_ID:-}" ]; then
               echo "LINE request id: ${LINE_REQUEST_ID}"
             fi
@@ -214,6 +344,13 @@ jobs:
                   continue
                 fi
                 ;;
+              409)
+                echo "::notice::LINE broadcast request was already accepted for retry key ${RETRY_KEY}."
+                if [ -n "${LINE_ACCEPTED_REQUEST_ID:-}" ]; then
+                  echo "Accepted LINE request id: ${LINE_ACCEPTED_REQUEST_ID}"
+                fi
+                exit 0
+                ;;
             esac
 
             echo "::error::LINE broadcast failed with status ${HTTP_STATUS}."
@@ -235,11 +372,11 @@ jobs:
 
           echo "Healed LINE_VALUE_SHARE_INDEX=${NEXT_INDEX} after duplicate guard"
 
-      - name: Persist next rotation index
-        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' && steps.rotation.outputs.skip_duplicate != 'true' }}
+      - name: Persist broadcast receipt
+        id: persist_broadcast_receipt
+        if: ${{ success() && steps.send_broadcast.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
-          NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
           CURRENT_INDEX: ${{ steps.rotation.outputs.current_index }}
         run: |
           set -euo pipefail
@@ -253,10 +390,71 @@ jobs:
                 -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
           }
 
-          upsert_var "LINE_VALUE_SHARE_INDEX" "${NEXT_INDEX}"
           upsert_var "LINE_LAST_VALUE_SHARE_SENT_INDEX" "${CURRENT_INDEX}"
 
-          echo "Persisted LINE_VALUE_SHARE_INDEX=${NEXT_INDEX} and LINE_LAST_VALUE_SHARE_SENT_INDEX=${CURRENT_INDEX}"
+          echo "Persisted LINE_LAST_VALUE_SHARE_SENT_INDEX=${CURRENT_INDEX}"
+
+      - name: Pause delivery after ambiguous broadcast state
+        if: ${{ always() && steps.send_broadcast.outcome == 'success' && steps.persist_broadcast_receipt.outcome != 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" --jq '.name' >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="true" >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="true" >/dev/null
+          fi
+
+          echo "::error::Paused LINE delivery because LINE broadcast succeeded but receipt persistence failed."
+          exit 1
+
+      - name: Clear rotation lock
+        if: ${{ success() && steps.send_broadcast.outcome == 'success' && steps.persist_broadcast_receipt.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          upsert_var "LINE_VALUE_SHARE_PENDING_INDEX" ""
+          upsert_var "LINE_VALUE_SHARE_PENDING_AT" ""
+          upsert_var "LINE_VALUE_SHARE_PENDING_STATE" ""
+
+          echo "Cleared LINE value share rotation lock."
+
+      - name: Clear rotation lock after failed reservation or send
+        if: ${{ always() && steps.persist_rotation_lock.outcome == 'success' && steps.send_broadcast.outcome != 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          clear_var() {
+            local name="$1"
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+              -f name="${name}" -f value="" >/dev/null
+          }
+
+          clear_var "LINE_VALUE_SHARE_PENDING_INDEX"
+          clear_var "LINE_VALUE_SHARE_PENDING_AT"
+          clear_var "LINE_VALUE_SHARE_PENDING_STATE"
+
+          echo "Cleared LINE value share rotation lock after failed reservation or send."
 
       - name: Observe LINE quota and consumption
         if: ${{ always() }}
