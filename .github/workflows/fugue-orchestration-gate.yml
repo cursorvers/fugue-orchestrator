@@ -3,6 +3,7 @@ name: fugue-orchestration-gate
 on:
   pull_request:
     paths:
+      - '.github/workflows/**'
       - '.github/workflows/fugue-orchestration-gate.yml'
       - '.github/workflows/fugue-orchestrator-canary.yml'
       - '.github/workflows/fugue-watchdog.yml'
@@ -64,6 +65,7 @@ on:
     branches:
       - main
     paths:
+      - '.github/workflows/**'
       - '.github/workflows/fugue-orchestration-gate.yml'
       - '.github/workflows/fugue-orchestrator-canary.yml'
       - '.github/workflows/fugue-watchdog.yml'
@@ -212,18 +214,11 @@ jobs:
       - name: Workflow YAML parse checks
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import yaml
-
-          files = sorted(Path(".github/workflows").glob("*.yml"))
-          files.extend(sorted(Path(".github/workflows").glob("*.yaml")))
-
-          for p in files:
-              with p.open("r", encoding="utf-8") as f:
-                  yaml.safe_load(f)
-          print("workflow-yaml-parse-ok")
-          PY
+          if rg -n '^(<<<<<<<|=======|>>>>>>>)' .github/workflows; then
+            echo "workflow-conflict-markers-found" >&2
+            exit 1
+          fi
+          ruby -e 'require "yaml"; Dir[".github/workflows/**/*.{yml,yaml}"].sort.each { |f| YAML.load_file(f) }; puts "workflow-yaml-parse-ok"'
 
       - name: Matrix parity checks
         run: |
