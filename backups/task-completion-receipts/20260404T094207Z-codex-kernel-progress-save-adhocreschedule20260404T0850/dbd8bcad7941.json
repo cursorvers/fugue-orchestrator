@@ -1,0 +1,14 @@
+{
+  "record_id": "20260404T094207Z-codex-kernel-progress-save-adhocreschedule20260404T0850",
+  "gha_dispatch_token": "dbd8bcad7941",
+  "payload_sha256": "b86c025d50e0b92dc97a2e5f9845ccadfe9bc9e595c8f531087e34da8144b907",
+  "gha_repo": "cursorvers/fugue-orchestrator",
+  "gha_workflow": "kernel-task-completion-backup.yml",
+  "gha_mirror_branch": "kernel-task-completion-backups",
+  "gha_mirror_path": "backups/task-completion/20260404T094207Z-codex-kernel-progress-save-adhocreschedule20260404T0850/dbd8bcad7941.json",
+  "gha_receipt_path": "backups/task-completion-receipts/20260404T094207Z-codex-kernel-progress-save-adhocreschedule20260404T0850/dbd8bcad7941.json",
+  "run_id": "23976356537",
+  "run_attempt": "1",
+  "event_name": "repository_dispatch",
+  "created_at": "2026-04-04T09:42:29Z"
+}
