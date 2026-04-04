@@ -214,11 +214,11 @@ jobs:
       - name: Workflow YAML parse checks
         run: |
           set -euo pipefail
-          if rg -n '^(<<<<<<<|=======|>>>>>>>)' .github/workflows; then
+          if rg -n '^(<{7}(?: [^\r\n]+)?|[|]{7}(?: [^\r\n]+)?|={7}|>{7}(?: [^\r\n]+)?)$' .github/workflows; then
             echo "workflow-conflict-markers-found" >&2
             exit 1
           fi
-          ruby -e 'require "yaml"; Dir[".github/workflows/**/*.{yml,yaml}"].sort.each { |f| YAML.load_file(f) }; puts "workflow-yaml-parse-ok"'
+          ruby -e 'require "yaml"; Dir[".github/workflows/**/*.{yml,yaml}"].sort.each { |f| YAML.safe_load(File.read(f), permitted_classes: [], permitted_symbols: [], aliases: true, filename: f) }; puts "workflow-yaml-parse-ok"'
 
       - name: Matrix parity checks
         run: |
