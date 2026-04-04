@@ -1,0 +1,463 @@
+{
+  "version": "2.0",
+  "categories": {
+    "A": {
+      "name": "シンプル宣言型",
+      "description": "告知・実績報告。数字+感嘆符でインパクト",
+      "templates": [
+        {
+          "id": "A1",
+          "name": "実績告知",
+          "promptTemplate": "#テキスト:\n- サブテキスト: {subCopy}\n- メインテキスト: {mainCopy}\n- サブテキスト2: {supplementary}\n\n# アイキャッチ:\n- {eyecatch}\n\n# レイアウト:\n- テキスト: 上部\n- アイキャッチ: 画面中央と下部\n\n# 配色:\n- 背景: {bgColor}\n- 文字: #FFFFFF\n\n# スタイル:\n- フラットデザイン, ベタ塗り\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K高画質",
+          "layout": "L3",
+          "typography": {"mainFont": "江戸文字 or 太ゴシック", "jumpRatio": "3x"},
+          "colorStrategy": "ビビッドソリッド",
+          "prohibitions": ["複雑なグラデーション", "3Dエフェクト", "フォトリアリスティック描写", "ダーク/ムーディーなトーン"],
+          "example": {"mainCopy": "800名突破！", "subCopy": "記事生成プロンプトのnote購入者数", "bgColor": "#ff4500", "eyecatch": "800人の老若男女、フラットベクターイラスト"}
+        },
+        {
+          "id": "A2",
+          "name": "和風告知",
+          "promptTemplate": "# テキスト:\n- メインテキスト: {mainCopy}\n- サブテキスト: {subCopy}\n\n# アイキャッチ:\n- {eyecatch}\n\n# 背景:\n- {background}\n\n# フォント:\n- 筆文字 or 江戸文字\n\n# 配色:\n- 背景: {bgColor}\n- 文字: {textColor}\n\n# スタイル:\n- 平面, フラットデザイン, ベタ塗り, 和風\n\n# 仕様:\n- アスペクト比: {aspectRatio}\n- 画質: 4K",
+          "layout": "L4",
+          "typography": {"mainFont": "筆文字/江戸文字", "jumpRatio": "3x"},
+          "colorStrategy": "和風(赤×金×白 or 朱×黒)",
+          "prohibitions": ["グラデーション", "3D", "洋風フォント"],
+          "example": {"mainCopy": "意味", "subCopy": "令和八年の漢字", "bgColor": "#000000", "aspectRatio": "3:4"}
+        }
+      ]
+    },
+    "B": {
+      "name": "エージェントWF型",
+      "description": "2段階AI分析: ターゲット分析→プロンプト自動生成",
+      "templates": [
+        {
+          "id": "B1",
+          "name": "ターゲット分析→設計",
+          "promptTemplate": "# Phase1出力:\n- 目的: {purpose}\n- ターゲット: {targetPersona}\n- 提供価値: {value}\n- コンセプトフック: {conceptHook}\n\n# Phase2: 画像生成プロンプト\n# 仕様:\n- 水平画像\n- アスペクト比: 16:9\n\n# 全体の印象:\n- ビジネスパーソンにアピールする知的でスタイリッシュなデザイン\n- プロフェッショナルなデザイナー品質\n- 高品質、高解像度、4K画質\n\n# タイポグラフィー:\n- 視認性が高いフォントを使用\n- メインコピーとサブコピーのサイズ比率: 1.5倍以上\n- 画面に大きく配置\n- フォント: Noto Sans JP\n\n## メインコピー:\n- {mainCopy}\n- エフェクト: 斜体、フチあり、シャドウ\n\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ:\n- {eyecatch}\n\n# 背景画像:\n- {background}\n\n# 配色:\n- ベース(70%): {bgColor}\n- メイン(25%): {mainColor}\n- アクセント(5%): {accentColor}\n- コントラスト: 高い\n\n# レイアウト:\n- 上下左右に80pxの余白\n- デザインの4原則を守る",
+          "layout": "L5",
+          "typography": {"mainFont": "Noto Sans JP Bold", "jumpRatio": "1.5x+"},
+          "colorStrategy": "提案型",
+          "prohibitions": ["子供っぽい/カジュアルな要素", "手書きフォント", "ストックフォト透かし"],
+          "example": {"mainCopy": "AI画像生成の革命", "subCopy": "編集の壁を破壊する「Lovart」の新機能とは"}
+        },
+        {
+          "id": "B2",
+          "name": "ペルソナ深掘り→コンセプト設計",
+          "promptTemplate": "# Phase1: ペルソナ深掘り\n- ターゲット: {targetPersona}\n- ニーズ段階: {needsLevel}(1-9)\n- 心理障壁: {psychBarrier}\n- 感情トリガー: {emotionTrigger}\n\n# Phase2: コンセプト設計\n- フック型: {hookType}(H1-H6)\n- 視覚メタファー: {visualMetaphor}\n\n# Phase3: 画像生成\n# 仕様:\n- 水平画像, 16:9\n\n# テキスト:\n## メインコピー:\n- {mainCopy}\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ:\n- {eyecatch}\n- ターゲットペルソナに寄せた人物描写\n\n# 背景:\n- {background}\n\n# フォント:\n- メイン: Noto Sans JP Black\n- サブ: Noto Sans JP Medium\n\n# 配色:\n- ベース(70%): {bgColor}\n- メイン(25%): {mainColor}\n- アクセント(5%): {accentColor}\n\n# レイアウト:\n- {layoutDescription}\n- デザインの4原則を守る\n\n# 仕様:\n- 画質: 4K高画質",
+          "layout": "L1 or L5",
+          "typography": {"mainFont": "Noto Sans JP Black", "jumpRatio": "2x+"},
+          "colorStrategy": "ペルソナ心理に連動",
+          "prohibitions": ["ターゲット不在の汎用デザイン", "感情トリガーと矛盾する配色", "ペルソナと乖離した人物描写"],
+          "example": {"targetPersona": "AI導入を検討中の中小企業経営者(50代)", "needsLevel": "4", "hookType": "H5", "mainCopy": "稟議書、3回目で通った理由", "subCopy": "AI導入の壁は技術ではなく「提案構成」だった"}
+        }
+      ]
+    },
+    "C": {
+      "name": "記事ベース型",
+      "description": "記事内容から自動抽出してサムネイル生成",
+      "templates": [
+        {
+          "id": "C1",
+          "name": "記事→サムネイル",
+          "promptTemplate": "# 指示:\n- 以下の記事を理解し、サムネイル画像を作成\n\n# 仕様:\n- 水平画像, アスペクト比: 16:9\n\n# 印象:\n- ビジネスパーソンにアピールする知的でスタイリッシュなデザイン\n- プロフェッショナルなデザイナー品質\n\n# アイキャッチ画像:\n- {eyecatch}\n- 強い意図がなければ人物（20〜30代、日本人）を入れる\n\n# タイポグラフィー:\n- 7~13文字\n- タイトルと全く同じは禁止\n- 文字サイズのコントラストを高く\n- 最も目立たせたい文字は四角の帯を敷く\n\n# 背景画像:\n- {background}\n- タイポグラフィーの視認性が優先\n\n# 配色:\n- ベースカラー70%: {bgColor}\n- メインカラー25%: {mainColor}\n- アクセントカラー5%: {accentColor}\n- 彩度が高い、鮮やか\n\n# レイアウト:\n- {layoutPattern}\n- 上下左右に80pxの余白\n\n# 記事:\n- {articleContent}",
+          "layout": "auto",
+          "typography": {"mainFont": "Noto Sans JP Bold", "maxChars": 13},
+          "colorStrategy": "記事トーンから自動",
+          "prohibitions": ["タイトルそのままのコピー"],
+          "example": {}
+        },
+        {
+          "id": "C2",
+          "name": "記事要約シネマティック",
+          "promptTemplate": "# 指示:\n- 記事内容を分析し、最もインパクトのあるフレーズを抽出\n\n# テキスト:\n## メインコピー:\n- {mainCopy}\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ:\n- {eyecatch}\n- 被写界深度を浅く、背景ソフトボケ\n\n# 背景:\n- {background}\n\n# フォント:\n- メイン: 極太ゴシック体、画面幅60%以上\n- サブ: 丸ゴシック、太い黄色マーカー付き\n\n# レイアウト:\n- 人物を左右に大きく配置\n- 中央にメインコピー\n- サムネイルとして目を引くインパクト重視\n\n# 配色:\n- 背景: 鮮やかなグラデーション(青→紫、一部オレンジ)\n- テキスト: 濃紺/黒、強調部分は鮮やかな青と白\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n\n# 記事:\n- {articleContent}",
+          "layout": "L7",
+          "typography": {"mainFont": "極太ゴシック体", "jumpRatio": "3x+"},
+          "colorStrategy": "ビビッドグラデーション",
+          "prohibitions": ["ポップアート", "文字サイズが小さい"],
+          "example": {"mainCopy": "つい読んでしまう\n「AI × 脳科学」\n文章術"}
+        }
+      ]
+    },
+    "D": {
+      "name": "リクエストベース型",
+      "description": "依頼文から構造化プロンプトを生成",
+      "templates": [
+        {
+          "id": "D1",
+          "name": "依頼→構造化",
+          "promptTemplate": "# ワークフロー:\n1. 依頼を分析\n2. 画像生成プロンプトを依頼に最適化\n\n# 仕様:\n- 水平画像, アスペクト比: {aspectRatio}\n\n# 全体の印象:\n- {impression}\n- 高品質、高解像度、4K画質\n\n# タイポグラフィー:\n- 視認性が高いフォント\n- メインコピーとサブコピーのサイズ比率: 1.5倍以上\n- フォント: Noto Sans JP\n\n## メインコピー:\n- {mainCopy}\n\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ:\n- {eyecatch}\n\n# 背景:\n- {background}\n\n# 配色:\n- ベース(70%): {bgColor}\n- メイン(25%): {mainColor}\n- アクセント(5%): {accentColor}\n\n# レイアウト:\n- {layoutInstructions}\n\n# 依頼:\n- {request}",
+          "layout": "auto",
+          "typography": {"mainFont": "Noto Sans JP", "jumpRatio": "1.5x+"},
+          "colorStrategy": "依頼から推論",
+          "prohibitions": ["テキストがキャンバス端からはみ出す", "ストックフォト透かし", "低コントラストテキスト"],
+          "example": {"request": "冬に使う保湿液を紹介する記事"}
+        },
+        {
+          "id": "D2",
+          "name": "広告バナー(1:1)",
+          "promptTemplate": "# サイズ:\n- 幅1000px, 高さ1000px\n\n# テキスト:\n## メインコピー:\n- {mainCopy}\n## サブコピー:\n- {subCopy}\n## 行動喚起ボタン:\n- {cta}\n\n# アイキャッチ:\n- {eyecatch}\n\n# レイアウト:\n- メインコピー・サブコピー: 上段\n- アイキャッチ: 中段\n- CTAボタン: 下段\n\n# タイポグラフィ:\n- フォント: 丸ゴシック, Bold\n- メインコピー: 少しアーチ状、強調文字は1.2倍\n- サブコピー: 白い罫線の枠\n\n# 配色:\n- 背景: {bgColor}\n- 文字: #FFFFFF\n- CTAボタン: 明るい金のグラデーション, 文字は#000000\n\n# スタイル:\n- フラットデザイン\n\n# 禁止:\n- ドロップシャドウ, 縁取り, 立体感",
+          "layout": "L3",
+          "typography": {"mainFont": "丸ゴシック Bold", "jumpRatio": "2x"},
+          "colorStrategy": "ビビッドソリッド+金CTA",
+          "prohibitions": ["ドロップシャドウ", "縁取り", "立体感"],
+          "example": {"mainCopy": "100円で記事作成を\n10倍効率化", "cta": "記事はリプに掲載中", "bgColor": "#ff0000"}
+        }
+      ]
+    },
+    "E": {
+      "name": "エディトリアル/雑誌型",
+      "description": "NewsPicks/WIRED/Forbes風。権威・信頼・プレミアム",
+      "templates": [
+        {
+          "id": "E1",
+          "name": "ダークシネマティック",
+          "promptTemplate": "# コンセプト定義:\n- ターゲット: {targetPersona}\n- 狙い: {emotionalGoal}\n\n# 画像に掲載する文字:\n## メインコピー:\n- 1行目: {mainLine1}\n- 2行目: {mainLine2}\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ画像:\n- {eyecatch}\n\n# 背景画像:\n- {background}\n\n# フォント:\n- メインコピー: {mainFont}\n- サブコピー: {subFont}\n\n# レイアウト:\n- {layoutPattern}\n- 要素は密度高く配置\n- アイキャッチと文字は重なるほど大きく配置\n\n# 配色:\n- 背景: {bgColor}\n- メインコピー: {textColor}\n- アクセント: {accentColor}\n- コントラスト強め\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K高画質\n- スタイル: {styleKeywords}\n\n# 160x90pxでの見え方:\n- メインコピーが判読可能であること\n- {thumbnailCheck}",
+          "layout": "L1 or L7",
+          "typography": {"mainFont": "極太明朝体 or Noto Sans JP Black", "jumpRatio": "3x+"},
+          "colorStrategy": "ダークモード",
+          "prohibitions": ["ポップアート", "アニメ", "パステル"],
+          "example": {"mainLine1": "X投稿術", "mainLine2": "2倍拡散", "bgColor": "#000000", "styleKeywords": "ドキュメンタリー, 硬派, Forbes/WIRED的"}
+        },
+        {
+          "id": "E2",
+          "name": "ブライトエディトリアル",
+          "promptTemplate": "# 画像に掲載する文字:\n## メインコピー:\n- 1行目: {mainLine1}\n- 2行目: {mainLine2}\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ画像:\n- {eyecatch}\n\n# 背景:\n- {background}\n\n# フォント:\n- メインコピー: Noto Sans JP Black, 画面幅の60%以上\n- サブコピー: Noto Sans JP Bold\n\n# レイアウト:\n- {layoutPattern}\n- ファッション雑誌のようにスタイリッシュ\n- テキストは画面上部に幅いっぱいに大きく配置\n\n# 配色:\n- 背景: {bgColor}\n- テキスト: {textColor}\n- アクセント: {accentColor}\n\n# スタイル:\n- ウォームペーパー / エディトリアル / プレミアム\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n\n# 禁止:\n- グラデーション, 3D, グロー, ネオン",
+          "layout": "L1 or L8",
+          "typography": {"mainFont": "Noto Sans JP Black", "jumpRatio": "3x+"},
+          "colorStrategy": "ウォームペーパー or ブライトベース",
+          "prohibitions": ["グラデーション", "3D", "グロー", "ネオン"],
+          "example": {"mainLine1": "会社が変わる", "subCopy": "MicrosoftにClaudeが入る", "bgColor": "#F5F0E8"}
+        }
+      ]
+    },
+    "F": {
+      "name": "タイポグラフィック型",
+      "description": "文字のみ。サイズ・色のコントラストが全て",
+      "templates": [
+        {
+          "id": "F1",
+          "name": "極大フレーズ",
+          "promptTemplate": "# テキスト:\n- Line 1: {line1}\n- Line 2: {line2}\n- Line 3: {line3}\n\n# 背景: ソリッド {bgColor}\n# アイキャッチ: なし\n\n# フォント:\n- Noto Sans JP Black（Regular禁止）\n\n# サイズ設計:\n- Line 2(ヒーロー): 画像高さの20-28%\n- Line 1: Line 2の40-50%\n- Line 3: Line 2の20-25%\n\n# 配色:\n- 背景: {bgColor}\n- Line 1: {line1Color}\n- Line 2: {line2Color}\n- Line 3: {line3Color}\n\n# レイアウト:\n- 全テキスト中央揃え、垂直中央\n- Line 1-2間: タイト(8px)\n- Line 2-3間: 余裕あり(30px)\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n\n# 禁止:\n- シャドウ, フチ文字, 3D, グロー, グラデーション, レンズフレア, イラスト, 写真, 装飾要素一切",
+          "layout": "L4 or L8",
+          "typography": {"mainFont": "Noto Sans JP Black", "regularProhibited": true, "heroSize": "20-28% of image height"},
+          "colorStrategy": "2色+ミュートグレー",
+          "prohibitions": ["シャドウ", "フチ文字", "3D", "グロー", "グラデーション", "レンズフレア", "イラスト", "写真"],
+          "example": {"line1": "使いこなす人ほど", "line2": "触っていない。", "line3": "9割が勘違いしている、AIとの正しい距離。", "bgColor": "#121210", "line1Color": "#F0ECE2", "line2Color": "#E23D28", "line3Color": "#6B6560"}
+        },
+        {
+          "id": "F2",
+          "name": "ブランドカラーソリッド",
+          "promptTemplate": "# テキスト:\n- メイン: {mainCopy}\n- サブ: {subCopy}\n\n# 背景: ソリッド {bgColor}\n\n# フォント:\n- Noto Sans JP Black, 画面幅85-100%\n\n# 配色:\n- 背景: {bgColor}\n- メインテキスト: #FFFFFF\n- ヒーロー文字: {accentColor}\n\n# レイアウト:\n- 中央揃え、画面いっぱいの大きさ\n\n# 仕様:\n- アスペクト比: 16:9\n\n# 禁止:\n- 装飾一切, テキスト以外の要素",
+          "layout": "L4",
+          "typography": {"mainFont": "Noto Sans JP Black", "width": "85-100%"},
+          "colorStrategy": "ブランドカラーソリッド",
+          "prohibitions": ["装飾一切"],
+          "example": {"mainCopy": "設定5分。効果 ∞", "subCopy": "Claude Code Hooks", "bgColor": "#2B5CE6", "accentColor": "#FFD600"}
+        }
+      ]
+    },
+    "G": {
+      "name": "プロダクト/テック型",
+      "description": "ターミナルUI/フラットアイコン/デバイスモックアップ",
+      "templates": [
+        {
+          "id": "G1",
+          "name": "ターミナル+テキスト",
+          "promptTemplate": "# テキスト:\n- メイン: {mainCopy}\n- サブ: {subCopy}\n- プロダクト名: {productName}\n\n# アイキャッチ:\n- ターミナルウィンドウ風のUI要素\n- 角丸長方形(#1E1E1E)、上部に赤黄緑ドット\n- 内部にモノスペースフォントで: {terminalContent}\n- ブリンクカーソル\n\n# 背景: {bgColor}\n\n# フォント:\n- メイン: Noto Sans JP Black\n- ターミナル: SF Mono or JetBrains Mono風\n\n# レイアウト:\n- 左55%テキスト、右45%ターミナルモックアップ\n\n# 配色:\n- 背景: {bgColor}\n- テキスト: #FFFFFF\n- アクセント: {accentColor}\n- ターミナルテキスト: {terminalTextColor}\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n- スタイル: ミニマル, フラット, プレミアム",
+          "layout": "L1",
+          "typography": {"mainFont": "Noto Sans JP Black", "monoFont": "monospace"},
+          "colorStrategy": "ダークチャコール or ブライトホワイト",
+          "prohibitions": ["ネオン過度", "光沢過度", "複雑な3D"],
+          "example": {"mainCopy": "curl 1つで\nAIが常駐する。", "productName": "NVIDIA NemoClaw", "bgColor": "#F5F5F0", "accentColor": "#76B900", "terminalContent": "$ curl -fsSL install.nemoclaw.dev | sh"}
+        },
+        {
+          "id": "G2",
+          "name": "プロダクトアナウンス",
+          "promptTemplate": "# テキスト:\n- メイン: {mainCopy}\n- サブ: {subCopy}\n\n# アイキャッチ:\n- {productVisual}\n- フラットアイコンスタイル\n\n# 背景: {bgColor}\n\n# レイアウト:\n- {layoutDescription}\n\n# 配色:\n- 背景: {bgColor}\n- テキスト: #FFFFFF\n- アクセント: {accentColor}\n\n# スタイル:\n- スリーク, ミニマル, プレミアムダークモード\n\n# 仕様:\n- アスペクト比: 16:9\n\n# 禁止:\n- グラデーション, 3D, フォトリアリズム",
+          "layout": "L1 or L4",
+          "typography": {"mainFont": "Noto Sans JP Black"},
+          "colorStrategy": "ダークモード+ブランドアクセント",
+          "prohibitions": ["グラデーション", "3D", "フォトリアリズム"],
+          "example": {"mainCopy": "寝てる間も止まらない。", "subCopy": "Claude Code 新機能", "bgColor": "#1E0A3C", "accentColor": "#E87040"}
+        }
+      ]
+    },
+    "H": {
+      "name": "データビジュアル型",
+      "description": "統計・数字インパクト。インフォグラフィック要素",
+      "templates": [
+        {
+          "id": "H1",
+          "name": "巨大数字インパクト",
+          "promptTemplate": "# テキスト:\n- セットアップ: {setupText}\n- ヒーロー数字: {heroNumber}\n- 回収: {payoffText}\n\n# アイキャッチ:\n- {dataVisual}\n\n# 背景: {bgColor}\n\n# フォント:\n- ヒーロー数字: Noto Sans JP Black, 画像高さの22-30%\n- セットアップ: 同フォント, 7%高さ\n- 回収: 同フォント, 18%高さ\n\n# レイアウト:\n- 中央積み上げ or 左テキスト/右データ\n\n# 配色:\n- 背景: {bgColor}\n- ヒーロー数字: {numberColor}\n- テキスト: {textColor}\n- データ要素: {dataColor}\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n\n# 160x90pxチェック:\n- 巨大数字が最小サイズでも判読可能であること",
+          "layout": "L4 or L5",
+          "typography": {"mainFont": "Noto Sans JP Black", "heroSize": "22-30% of image height"},
+          "colorStrategy": "ダークベース+アクセント数字",
+          "prohibitions": ["小さく判読不能な数字", "数字への装飾フォント使用(Impact/Black weight必須)", "数字のコントラスト不足"],
+          "example": {"setupText": "3月だけで", "heroNumber": "14件", "payoffText": "更新。", "bgColor": "#0E0E0E", "numberColor": "#D97706"}
+        },
+        {
+          "id": "H2",
+          "name": "エディトリアルデータ",
+          "promptTemplate": "# テキスト:\n- 1行目: {line1}\n- 2行目(ヒーロー): {line2}\n- 3行目: {line3}\n- 4行目: {line4}\n\n# データ要素:\n- {dataElement}\n\n# 背景:\n- {bgColor}\n- 左側に縦帯: {sidebarColor}\n\n# レイアウト:\n- テキスト: 垂直中央、左寄せ(25-85%範囲)\n- データ要素: 右下\n\n# 配色:\n- 背景: {bgColor}\n- ヒーロー: {accentColor}\n- テキスト: {textColor}\n\n# スタイル:\n- ビジネスレポートの表紙、クリーン、権威的\n\n# 禁止:\n- グラデーション, テクスチャ, 影, グロー\n\n# 仕様:\n- アスペクト比: 16:9",
+          "layout": "L5",
+          "typography": {"mainFont": "Noto Sans JP Black/Bold"},
+          "colorStrategy": "ホワイト+レッド+ブラック 3色",
+          "prohibitions": ["グラデーション", "テクスチャ", "影", "グロー"],
+          "example": {"line1": "AI施策の75%は", "line2": "失敗している。", "line3": "残り25%の共通点は", "line4": "経営者の直接関与。", "bgColor": "#FFFFFF", "accentColor": "#B91C1C"}
+        }
+      ]
+    },
+    "I": {
+      "name": "コンセプトメタファー型",
+      "description": "抽象概念の視覚化。象徴的オブジェクト+テキスト",
+      "templates": [
+        {
+          "id": "I1",
+          "name": "対比メタファー",
+          "promptTemplate": "# コンセプト定義:\n- メタファー: {metaphorDescription}\n- 対比: {contrastDescription}\n\n# テキスト:\n- メイン: {mainCopy}\n- サブ: {subCopy}\n\n# アイキャッチ:\n- {metaphorVisual}\n- {lightingDescription}\n\n# 背景: {bgColor}\n\n# フォント:\n- メイン: {mainFont}\n\n# レイアウト:\n- テキスト: {textPosition}\n- アイキャッチ: {visualPosition}\n\n# 配色:\n- 背景: {bgColor}\n- テキスト: {textColor}\n- アクセント: {accentColor}\n- 意味のある色: {meaningfulColor}\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n- スタイル: コンセプチュアル, ミニマル",
+          "layout": "L2 or L4",
+          "typography": {"mainFont": "varies by mood"},
+          "colorStrategy": "メタファーに連動",
+          "prohibitions": ["写実的/フォトリアリスティック描写(メタファーは様式化すること)", "ごちゃついた背景", "過剰なテキスト量"],
+          "example": {"mainCopy": "機能で負けたら、意味で勝て。", "subCopy": "AI時代の生存戦略は「ロウソク」が教えてくれる", "metaphorVisual": "暗闘の中で一本のロウソクが灯っている。隣に消灯したLEDライト", "bgColor": "#1A1A1A"}
+        },
+        {
+          "id": "I2",
+          "name": "浮遊オブジェクト",
+          "promptTemplate": "# コンセプト:\n- {conceptDescription}\n\n# テキスト:\n- メイン: {mainCopy}\n- サブ: {subCopy}\n\n# アイキャッチ:\n- {floatingObject}\n- 半透明のガラスモーフィズムパネル\n- 柔らかなグロー\n\n# 背景:\n- {bgGradient}\n- 微細なグリッドパターン(1%透明度)\n\n# フォント:\n- メイン: Noto Sans JP Black\n- サブ: Noto Sans JP Medium\n\n# レイアウト:\n- テキスト: 左45%、左寄せ\n- オブジェクト: 右55%、垂直中央\n\n# 配色:\n- 背景: {bgColor}\n- テキスト: {textColor}\n- アクセント: {accentColor}\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n- スタイル: コンセプチュアル, エアリー, モダン",
+          "layout": "L1",
+          "typography": {"mainFont": "Noto Sans JP Black"},
+          "colorStrategy": "パステルグラデーション or ブライトベース",
+          "prohibitions": ["ダークモード(このスタイルでは)", "重厚なテクスチャ"],
+          "example": {"mainCopy": "判断を手放す。\n欲求だけ。", "floatingObject": "透明なガラス球、内部にアンバーゴールドの光", "bgColor": "#E8F0FE→#FAF7F2"}
+        }
+      ]
+    },
+    "J": {
+      "name": "コラージュ/ミックス型",
+      "description": "複合表現。BRUTUS/POPEYE/ZINE風。異質なフォント混在",
+      "templates": [
+        {
+          "id": "J1",
+          "name": "雑誌コラージュ",
+          "promptTemplate": "# テキスト:\n## メインコピー:\n- {mainCopy}\n## サブコピー:\n- {subCopy}\n\n# アイキャッチ:\n- {collageDescription}\n\n# 背景:\n- {backgroundTexture}\n\n# フォント:\n- メインコピー: {fontMix}\n- 異質なフォントを組み合わせる\n\n# レイアウト:\n- 雑誌の表紙風\n- 要素が重なり合う賑やかな構成\n- 文字の背景には白の座布団を敷いて可読性確保\n\n# 配色:\n- 背景: {bgColor}\n- コラージュ部分: ビビッドなサイケデリックカラー\n- 文字: 黒インク色\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K\n- スタイル: {styleReference}",
+          "layout": "L7 or L9",
+          "typography": {"fontMix": "明朝+手書き+デジタル"},
+          "colorStrategy": "ビビッド多色(上限守る)",
+          "prohibitions": ["統一感のありすぎるレイアウト(意図的な雑さが必要)", "写実的な写真素材(コラージュ素材はイラスト/切り抜き風)", "単一フォントのみの使用(混在がスタイルの核)", "パステル一辺倒(ビビッドなコントラストが必要)"],
+          "example": {"mainCopy": "AI × X × note", "subCopy": "給料が上がらない時代の最強の武器", "backgroundTexture": "方眼紙テクスチャ、マスキングテープ、手書き矢印", "styleReference": "BRUTUS/POPEYE風, ZINEスタイル"}
+        },
+        {
+          "id": "J2",
+          "name": "オーガニックデジタル",
+          "promptTemplate": "# テキスト:\n- メイン: {mainCopy}\n- サブ: {subCopy}\n\n# アイキャッチ:\n- {illustration}\n- 筆圧を感じる太めブラシストローク\n- 一筆書き風ラフタッチ\n- デジタル要素(カーソル等)はシャープな白ベタ塗り\n\n# 背景:\n- {bgColor}\n- ノイズ/粒子テクスチャ(画用紙風)\n\n# フォント:\n- ヘッダー: 手書き風ディスプレイフォント\n- 本文: 丸みのあるサンセリフ体\n- 強調: 手書きストロークのアンダーライン/丸囲み\n\n# レイアウト:\n- 広めのネガティブスペース\n- アシンメトリー配置\n\n# 配色:\n- 背景: {bgColor}\n- テキスト・線画: {inkColor}\n- アクセント: {accentColor}\n\n# 仕様:\n- アスペクト比: 16:9\n- 画質: 4K",
+          "layout": "L8",
+          "typography": {"fontMix": "手書き+サンセリフ"},
+          "colorStrategy": "テラコッタ/ウォームトーン+インクブラック",
+          "prohibitions": ["幾何学的正円", "均一な線", "完璧な対称"],
+          "example": {"mainCopy": "Claude Code\nそろそろ使った方が良い？", "bgColor": "#CF7658", "inkColor": "#151515", "accentColor": "#FFFFFF"}
+        }
+      ]
+    }
+  },
+  "qualityDefaults": {
+    "minFileSize": 102400,
+    "targetFileSize": 204800,
+    "resolution": {"width": 1280, "height": 670},
+    "maxRetries": 2,
+    "models": ["gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"],
+    "japaneseDefensePrompt": "日本語テキストは正確にレンダリングしてください。簡体字は使用せず、日本語の標準字体を使用してください。Linuxの字体は使用しないでください。全てのテキストは鮮明で、サムネイルサイズ(160x90px)でも判読可能にしてください。",
+    "commonProhibitions": ["テキスト以外の文字をフレーム内に入れない", "指示文をフレーム内にレンダリングしない", "5色以上の同時使用禁止", "エアブラシ加工禁止", "テキストが画面端で切れない", "ストックフォト透かし禁止"]
+  },
+  "titleStyleMapping": {
+    "contrarian": ["A", "F"],
+    "relatable": ["B", "D"],
+    "howto-reveal": ["C", "G"],
+    "breaking": ["A", "E"],
+    "numbers-impact": ["C", "H"],
+    "authority": ["E", "G"],
+    "problem": ["B", "F"],
+    "before-after": ["D", "I"]
+  },
+  "integrations": {
+    "x-auto": {
+      "version": "1.0",
+      "description": "x-auto KAWAI式カテゴリ→スタイルA-Jマッピング。generate-images-nb2.jsから参照",
+      "designSystem": "KAWAI式 人物×ベタ塗り分割",
+      "defaultLayout": "左3/5テキスト + 右2/5人物",
+      "categories": {
+        "医療AI": {"style": "E", "accent": "#06B6D4", "emotion": "好奇心+信頼", "bgStyle": "白+シアン帯", "person": "白衣医師", "personPose": "タブレット持握", "overhang": "タブレット+手"},
+        "医療AI法規制/ガバナンス": {"style": "E", "accent": "#06B6D4", "emotion": "好奇心+信頼", "bgStyle": "白+シアン帯", "person": "白衣医師", "personPose": "腕組み", "overhang": "聴診器"},
+        "医療AIニュース": {"style": "A", "accent": "#EF4444", "emotion": "不安+速報性", "bgStyle": "黒+赤バー", "person": "スーツビジネスパーソン", "personPose": "データ指差し", "overhang": "指差す手"},
+        "医療AIニュース/論文解説": {"style": "H", "accent": "#EF4444", "emotion": "不安+速報性", "bgStyle": "黒+赤バー", "person": "スーツビジネスパーソン", "personPose": "データ分析", "overhang": "指差す手"},
+        "AI開発ツール": {"style": "G", "accent": "#8B5CF6", "emotion": "好奇心", "bgStyle": "ダークパープル", "person": "カジュアルエンジニア", "personPose": "ノートPC操作", "overhang": "ノートPC画面"},
+        "AI開発ツール/ノウハウ": {"style": "G", "accent": "#8B5CF6", "emotion": "好奇心", "bgStyle": "ダークパープル", "person": "カジュアルエンジニア", "personPose": "コーヒー片手", "overhang": "ノートPC画面"},
+        "AIツールレビュー": {"style": "G", "accent": "#8B5CF6", "emotion": "好奇心", "bgStyle": "ダークパープル+評価メーター", "person": "カジュアルエンジニア", "personPose": "比較検討", "overhang": "ツール画面"},
+        "AI時代の人間論": {"style": "I", "accent": "#F59E0B", "emotion": "希望+内省", "bgStyle": "暖色ベージュ/クリーム", "person": "思慮深い専門職", "personPose": "顎に手+本抱え", "overhang": "本・腕"},
+        "X運用": {"style": "D", "accent": "#3B82F6", "emotion": "好奇心", "bgStyle": "白+ブルーカード", "person": "スマホ操作の若者", "personPose": "笑顔+SNS画面", "overhang": "スマホ画面"},
+        "X運用/note戦略": {"style": "D", "accent": "#3B82F6", "emotion": "好奇心", "bgStyle": "白+ブルーカード", "person": "スマホ操作の若者", "personPose": "戦略マップ参照", "overhang": "スマホ画面"},
+        "キャリア": {"style": "E", "accent": "#F59E0B", "emotion": "希望+成功", "bgStyle": "白+ゴールドライン", "person": "スーツビジネスパーソン", "personPose": "前向き歩行/握手", "overhang": "鞄・手"},
+        "キャリア/マインドセット": {"style": "I", "accent": "#F59E0B", "emotion": "希望+成功", "bgStyle": "白+ゴールドライン", "person": "スーツビジネスパーソン", "personPose": "視線を上に", "overhang": "手"},
+        "ビジネス": {"style": "H", "accent": "#10B981", "emotion": "信頼+成長", "bgStyle": "白+エメラルド帯", "person": "スーツ経営者", "personPose": "プレゼン+グラフ指し", "overhang": "グラフ・ポインター"},
+        "ビジネス/ソロプレナー": {"style": "H", "accent": "#10B981", "emotion": "信頼+成長", "bgStyle": "白+エメラルド帯", "person": "スーツ経営者", "personPose": "頂上に立つ", "overhang": "手"},
+        "推薦共感": {"style": "D", "accent": "#8B5CF6", "emotion": "共感", "bgStyle": "ウォームペーパー", "person": "握手シルエット", "personPose": "推薦バッジ", "overhang": "バッジ"}
+      },
+      "compositionRules": {
+        "layout": "左3/5テキスト + 右2/5人物",
+        "personPosition": "upper half only",
+        "overhangDirection": "右→左 境界線越え",
+        "overhangOpacity": "fully opaque",
+        "numberImpact": "数字は画面30%+、斜め配置、アクセント色",
+        "accentOneChar": "メインコピーの最重要1文字だけアクセント色"
+      },
+      "colorClashPrevention": {
+        "whiteGroup": ["医療AI", "医療AI法規制/ガバナンス", "X運用", "X運用/note戦略", "キャリア", "キャリア/マインドセット", "ビジネス", "ビジネス/ソロプレナー"],
+        "darkGroup": ["医療AIニュース", "医療AIニュース/論文解説", "AI開発ツール", "AI開発ツール/ノウハウ", "AIツールレビュー"],
+        "warmGroup": ["AI時代の人間論", "推薦共感"],
+        "rule": "同系統3連続禁止。白系2連続後は暗色系/暖色系を優先"
+      }
+    }
+  },
+  "styleAutoDetect": {
+    "rules": [
+      {"pattern": "Claude|Codex|API|SDK|CLI|terminal|curl", "style": "G"},
+      {"pattern": "突破|達成|おめでとう|告知", "style": "A"},
+      {"pattern": "WIRED|Forbes|NewsPicks|シネマ|エディトリアル", "style": "E"},
+      {"pattern": "文字だけ|テキストのみ|タイポグラフィ|ミニマル", "style": "F"},
+      {"pattern": "メタファー|喩え|象徴|対比", "style": "I"},
+      {"pattern": "コラージュ|ZINE|雑誌風|ミックス", "style": "J"},
+      {"pattern": "\\d+%|\\$\\d+|\\d+[万億兆]|\\d+件|\\d+名", "style": "H"},
+      {"pattern": "ターゲット|ペルソナ|ニーズ", "style": "B"},
+      {"pattern": "記事|note記事|ブログ", "style": "C"},
+      {"pattern": ".*", "style": "D"}
+    ]
+  },
+  "hookVisualMapping": {
+    "description": "HOOK_FRAMEWORK.md H1-H6 → 視覚階層・レイアウト・タイポグラフィ優先度のマッピング",
+    "hooks": {
+      "H1": {
+        "name": "PQR型",
+        "visualPriority": "問題描写を最大化、解決の予告を控えめに",
+        "layoutPreference": ["L1", "L5"],
+        "typographyHint": "問題文を最大フォント、解決示唆をミュートカラー",
+        "colorMood": "tension → resolution (赤系→青系グラデ or 暗→明)",
+        "styleAffinity": ["B", "C", "D", "F", "G"]
+      },
+      "H2": {
+        "name": "Open Loop型",
+        "visualPriority": "結果/数字を巨大表示、理由は意図的に隠す",
+        "layoutPreference": ["L3", "L4"],
+        "typographyHint": "ヒーロー数字を画面30%+、文脈テキストを小さく",
+        "colorMood": "impact (ビビッド単色 or ダーク+アクセント)",
+        "styleAffinity": ["A", "H", "E", "G"]
+      },
+      "H3": {
+        "name": "逆説オープニング型",
+        "visualPriority": "視覚的逆転 — 期待の裏切り、認知的不協和",
+        "layoutPreference": ["L4", "L8", "L10"],
+        "typographyHint": "断言文を極太で中央配置、反証を対比的に",
+        "colorMood": "unexpected contrast (通常と逆の色使い)",
+        "styleAffinity": ["F", "I", "E"]
+      },
+      "H4": {
+        "name": "In Medias Res型",
+        "visualPriority": "場面描写・臨場感を写真的/シネマティックに",
+        "layoutPreference": ["L7", "L2"],
+        "typographyHint": "場面描写テキストを映画字幕風に下部配置",
+        "colorMood": "cinematic (ダークモード + 暖色スポット光)",
+        "styleAffinity": ["E", "I", "C", "J"]
+      },
+      "H5": {
+        "name": "If-Then型",
+        "visualPriority": "ターゲットを直接指す — コールアウト/吹き出し",
+        "layoutPreference": ["L1", "L5"],
+        "typographyHint": "対象条件を帯+大文字、解決策をサブに",
+        "colorMood": "direct address (ブライトベース + 強アクセント)",
+        "styleAffinity": ["B", "D", "A"]
+      },
+      "H6": {
+        "name": "数字リード型",
+        "visualPriority": "衝撃数字を画面支配、文脈は最小限",
+        "layoutPreference": ["L4", "L3", "L9"],
+        "typographyHint": "数字は画面高さ25-35%、斜め配置でダイナミズム",
+        "colorMood": "data impact (ダーク背景 + 数字だけビビッドアクセント)",
+        "styleAffinity": ["H", "A", "E"]
+      }
+    }
+  },
+  "pillarDetect": {
+    "description": "コンテンツPillar (P1-P3) の自動検出ルール。スタイル選択の第2層として使用",
+    "rules": [
+      {"pattern": "法令|ガイドライン|基準|厚労省|規制|承認|PMDA|FDA|通達|省令|告示|審査", "pillar": "P1", "styleHint": ["E", "H", "G"]},
+      {"pattern": "速報|ついに|発表|解禁|爆誕|リリース|公開|新機能", "pillar": "P1-news", "styleHint": ["A", "E"]},
+      {"pattern": "ツール|方法|手順|設定|使い方|マニュアル|ガイド|実装|コード|構築", "pillar": "P2", "styleHint": ["G", "C", "D"]},
+      {"pattern": "本質|理由|なぜ|構造|哲学|問い|意味|人間|生存|奪われ", "pillar": "P3", "styleHint": ["F", "I"]}
+    ],
+    "pillarStylePreference": {
+      "P1": {"recommended": ["E", "H", "G"], "avoid": ["J"]},
+      "P1-news": {"recommended": ["A", "E", "H"], "avoid": ["F", "I"]},
+      "P2": {"recommended": ["G", "C", "D"], "avoid": ["J", "I"]},
+      "P3": {"recommended": ["F", "I", "E"], "avoid": ["A", "D"]}
+    }
+  },
+  "powerwordVisualMapping": {
+    "description": "パワーワード感情→視覚強度マッピング (TITLE_FRAMEWORK.mdパワーワード辞書準拠)",
+    "emotions": {
+      "緊急": {
+        "words": ["速報", "ついに", "今すぐ", "締切", "もう遅い"],
+        "colorStrategy": ["ビビッドソリッド", "ダークモード"],
+        "accentColors": ["#FF0000", "#FF6600", "#EF4444"],
+        "favoredStyles": ["A", "H"],
+        "layoutPreference": ["L3", "L6"],
+        "typographyIntensity": "maximum"
+      },
+      "好奇心": {
+        "words": ["裏側", "本当の理由", "誰も言わない", "全公開"],
+        "colorStrategy": ["グラデーション", "ウォームペーパー"],
+        "accentColors": ["#8B5CF6", "#3B82F6"],
+        "favoredStyles": ["C", "I", "G"],
+        "layoutPreference": ["L2", "L7"],
+        "typographyIntensity": "moderate"
+      },
+      "恐怖": {
+        "words": ["知らないと損", "放置すると", "取り返しがつかない"],
+        "colorStrategy": ["ダークモード"],
+        "accentColors": ["#DC2626", "#991B1B"],
+        "favoredStyles": ["F", "E"],
+        "layoutPreference": ["L4", "L8"],
+        "typographyIntensity": "high"
+      },
+      "希望": {
+        "words": ["〜だけで", "たった", "完全攻略", "最短ルート"],
+        "colorStrategy": ["ブライトベース", "グラデーション"],
+        "accentColors": ["#10B981", "#06B6D4", "#3B82F6"],
+        "favoredStyles": ["E", "I", "D"],
+        "layoutPreference": ["L4", "L8"],
+        "typographyIntensity": "moderate"
+      },
+      "権威": {
+        "words": ["研究で判明", "省庁が公表", "Nature", "Lancet"],
+        "colorStrategy": ["ダークモード", "ブライトベース"],
+        "accentColors": ["#F59E0B", "#1E3A5F"],
+        "favoredStyles": ["E", "G", "H"],
+        "layoutPreference": ["L1", "L5"],
+        "typographyIntensity": "restrained"
+      }
+    }
+  },
+  "titleHookMapping": {
+    "description": "タイトルパターン(T1-T8) → 推奨フック型(H1-H6) のマッピング",
+    "mappings": {
+      "contrarian":    {"hooks": ["H3", "H1"], "visualHint": "逆転表現 — 常識の破壊を視覚化"},
+      "relatable":     {"hooks": ["H5", "H1"], "visualHint": "ターゲット直接指名 — 共感の顔"},
+      "howto-reveal":  {"hooks": ["H2", "H6"], "visualHint": "結果先出し — 全体像を匂わせる"},
+      "breaking":      {"hooks": ["H4", "H6"], "visualHint": "速報感 — 臨場感とインパクト数字"},
+      "numbers-impact":{"hooks": ["H6", "H2"], "visualHint": "数字支配 — 画面30%+占有"},
+      "authority":     {"hooks": ["H1", "H6"], "visualHint": "権威付け — ロゴ/肩書き/引用"},
+      "problem":       {"hooks": ["H3", "H1"], "visualHint": "問題の可視化 — 構造的課題を図示"},
+      "before-after":  {"hooks": ["H4", "H2"], "visualHint": "変化の対比 — ビフォーアフター分割"}
+    }
+  }
+}

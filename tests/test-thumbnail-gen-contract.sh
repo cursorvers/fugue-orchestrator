@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export TEST_ROOT="${ROOT_DIR}"
 SKILL_FILE="${ROOT_DIR}/claude-config/assets/skills/thumbnail-gen/SKILL.md"
 POLICY_FILE="${ROOT_DIR}/claude-config/assets/skills/thumbnail-gen/policy.md"
 ADAPTER_FILE="${ROOT_DIR}/local-shared-skills/thumbnail-gen/SKILL.md"
@@ -76,17 +77,23 @@ test_shared_manus_runtime_authority_present() {
 test_load_manus_client_path_priority() {
   local out_env out_fallback
   out_env="$(node --input-type=module <<'EOF'
-process.env.THUMBNAIL_MANUS_CLIENT_PATH = '/Users/masayuki_otawara/Dev/claude-config/assets/skills/slide/scripts/manus-api-client.js';
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
+process.env.THUMBNAIL_MANUS_CLIENT_PATH = `${root}/claude-config/assets/skills/slide/scripts/manus-api-client.js`;
 process.env.THUMBNAIL_ENABLE_LEGACY_SKILL_PATHS = '0';
-const { loadManusClient } = await import('/Users/masayuki_otawara/Dev/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js');
+const { loadManusClient } = await import(pathToFileURL(`${root}/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js`).href);
 const mod = loadManusClient();
 console.log(JSON.stringify({ hasMakeRequest: typeof mod?.makeRequest === 'function' }));
 EOF
 )"
   out_fallback="$(node --input-type=module <<'EOF'
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
 process.env.THUMBNAIL_MANUS_CLIENT_PATH = '/tmp/does-not-exist-manus-client.js';
 process.env.THUMBNAIL_ENABLE_LEGACY_SKILL_PATHS = '0';
-const { loadManusClient } = await import('/Users/masayuki_otawara/Dev/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js');
+const { loadManusClient } = await import(pathToFileURL(`${root}/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js`).href);
 const mod = loadManusClient();
 console.log(JSON.stringify({ hasMakeRequest: typeof mod?.makeRequest === 'function' }));
 EOF
@@ -113,7 +120,10 @@ test_esm_package_boundaries_present() {
 test_should_use_manus_semantics() {
   local out
   out="$(node --input-type=module <<'EOF'
-import { shouldUseManus } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js';
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
+const { shouldUseManus } = await import(pathToFileURL(`${root}/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js`).href);
 
 process.env.MANUS_API_KEY = 'test-key';
 delete process.env.THUMBNAIL_ENABLE_MANUS_AUTO;
@@ -139,8 +149,11 @@ EOF
 test_profiled_should_use_manus_semantics() {
   local out
   out="$(node --input-type=module <<'EOF'
-import { shouldUseManus as shouldUseThumbnail } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js';
-import { shouldUseManus as shouldUseNote } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/note-generate/scripts/note-thumbnail-manus.js';
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
+const { shouldUseManus: shouldUseThumbnail } = await import(pathToFileURL(`${root}/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js`).href);
+const { shouldUseManus: shouldUseNote } = await import(pathToFileURL(`${root}/claude-config/assets/skills/note-generate/scripts/note-thumbnail-manus.js`).href);
 
 delete process.env.MANUS_API_KEY;
 delete process.env.MANUS_MCP_API_KEY;
@@ -206,8 +219,11 @@ test_note_manus_threshold_aligned() {
 test_profiled_prompt_contracts() {
   local out
   out="$(node --input-type=module <<'EOF'
-import { enhancePromptForManus as enhanceThumbnail } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js';
-import { enhancePromptForManus as enhanceNote } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/note-generate/scripts/note-thumbnail-manus.js';
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
+const { enhancePromptForManus: enhanceThumbnail } = await import(pathToFileURL(`${root}/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js`).href);
+const { enhancePromptForManus: enhanceNote } = await import(pathToFileURL(`${root}/claude-config/assets/skills/note-generate/scripts/note-thumbnail-manus.js`).href);
 
 const library = {
   qualityDefaults: {
@@ -267,7 +283,10 @@ EOF
 test_soft_safety_sanitize_contracts() {
   local out
   out="$(node --input-type=module <<'EOF'
-import { sanitizePromptForSafety } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js';
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
+const { sanitizePromptForSafety } = await import(pathToFileURL(`${root}/claude-config/assets/skills/thumbnail-gen/scripts/thumbnail-manus.js`).href);
 
 delete process.env.THUMBNAIL_SAFETY_SANITIZE;
 const safe = sanitizePromptForSafety('高品質なビジネスサムネイル');
@@ -307,7 +326,10 @@ test_note_manus_poll_options_semantics() {
   local out
   out="$(node --input-type=module <<'EOF'
 import fs from 'node:fs';
-import { generateImageManus } from '/Users/masayuki_otawara/Dev/claude-config/assets/skills/note-generate/scripts/note-thumbnail-manus.js';
+import { pathToFileURL } from 'node:url';
+
+const root = process.env.TEST_ROOT;
+const { generateImageManus } = await import(pathToFileURL(`${root}/claude-config/assets/skills/note-generate/scripts/note-thumbnail-manus.js`).href);
 
 let capturedTaskId = null;
 let capturedOptions = null;
@@ -350,8 +372,9 @@ test_manus_client_abort_rejects_immediately() {
   node --input-type=module <<'EOF'
 import { createRequire } from 'node:module';
 
+const root = process.env.TEST_ROOT;
 const require2 = createRequire(import.meta.url);
-const { pollTaskCompletion } = require2('/Users/masayuki_otawara/Dev/claude-config/assets/skills/slide/scripts/manus-api-client.js');
+const { pollTaskCompletion } = require2(`${root}/claude-config/assets/skills/slide/scripts/manus-api-client.js`);
 const ac = new AbortController();
 ac.abort();
 
@@ -374,8 +397,9 @@ test_extract_output_files_ignores_malformed_urls() {
   node --input-type=module <<'EOF'
 import { createRequire } from 'node:module';
 
+const root = process.env.TEST_ROOT;
 const require2 = createRequire(import.meta.url);
-const { extractOutputFiles } = require2('/Users/masayuki_otawara/Dev/claude-config/assets/skills/slide/scripts/manus-api-client.js');
+const { extractOutputFiles } = require2(`${root}/claude-config/assets/skills/slide/scripts/manus-api-client.js`);
 const files = extractOutputFiles({
   output_files: [
     'not-a-valid-url',
