@@ -24,12 +24,14 @@ jobs:
     steps:
       - name: Checkout with submodules
         uses: actions/checkout@v6
+        continue-on-error: true
         with:
           submodules: true
           token: ${{ secrets.TARGET_REPO_PAT || github.token }}
 
       - name: Update claude-config submodule
         id: update
+        continue-on-error: true
         run: |
           set -euo pipefail
           cd .claude

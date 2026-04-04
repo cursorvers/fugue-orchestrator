@@ -682,7 +682,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
-          NEXT_STATE_JSON: ${{ steps.claims.outputs.next_state_json }}
+          NEXT_STATE_JSON: ${{ steps.claims.outputs.next_state_json || '{}' }}
           FAILED_ISSUE_NUMBERS_JSON: ${{ steps.dispatch.outputs.failed_issue_numbers_json || '[]' }}
         run: |
           set -euo pipefail
