@@ -46,9 +46,9 @@ grep -Fq 'kawaii systems' "${THUMBNAIL_SKILL}"
 grep -Fq 'at least 3 visual directions' "${THUMBNAIL_SKILL}"
 grep -Fq 'treat text placement as one of the main variation axes' "${THUMBNAIL_SKILL}"
 grep -Fq 'Edge stack' "${THUMBNAIL_SKILL}"
-! rg -q '/Users/' "${POST_GUARD_SKILL}"
-! rg -q '/Users/' "${THUMBNAIL_SKILL}"
-! rg -q 'sync_post_image.py' "${ROOT_DIR}/scripts/local" -g 'xauto_*'
+! grep -Fq '/Users/' "${POST_GUARD_SKILL}"
+! grep -Fq '/Users/' "${THUMBNAIL_SKILL}"
+! grep -R -Fq --include='xauto_*' 'sync_post_image.py' "${ROOT_DIR}/scripts/local"
 grep -Fq 'It does not override quote-post or reply-url flows' "${NOTE_RULE_DOC}"
 
 echo "x-auto skill contract check passed"
