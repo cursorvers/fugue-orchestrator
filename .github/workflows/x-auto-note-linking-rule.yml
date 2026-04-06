@@ -9,8 +9,11 @@ on:
       - 'docs/ADR-005-x-article-defer-note-consolidation.md'
       - 'skills/x-auto-post-guard/SKILL.md'
       - 'skills/x-auto-thumbnail-art-director/SKILL.md'
+      - 'scripts/eval/x-auto-health.sh'
+      - 'scripts/eval/x-auto-health.py'
       - 'tests/test-x-auto-note-linking-rule.sh'
       - 'tests/test-x-auto-skill-contract.sh'
+      - 'tests/test-x-auto-health-contract.sh'
   push:
     branches:
       - main
@@ -21,8 +24,11 @@ on:
       - 'docs/ADR-005-x-article-defer-note-consolidation.md'
       - 'skills/x-auto-post-guard/SKILL.md'
       - 'skills/x-auto-thumbnail-art-director/SKILL.md'
+      - 'scripts/eval/x-auto-health.sh'
+      - 'scripts/eval/x-auto-health.py'
       - 'tests/test-x-auto-note-linking-rule.sh'
       - 'tests/test-x-auto-skill-contract.sh'
+      - 'tests/test-x-auto-health-contract.sh'
 
 permissions:
   contents: read
@@ -40,9 +46,11 @@ jobs:
           set -euo pipefail
           bash -n tests/test-x-auto-note-linking-rule.sh
           bash -n tests/test-x-auto-skill-contract.sh
+          bash -n tests/test-x-auto-health-contract.sh
 
       - name: Rule check
         run: |
           set -euo pipefail
           bash tests/test-x-auto-note-linking-rule.sh
           bash tests/test-x-auto-skill-contract.sh
+          bash tests/test-x-auto-health-contract.sh

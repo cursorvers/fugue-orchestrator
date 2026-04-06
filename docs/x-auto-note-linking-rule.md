@@ -8,6 +8,7 @@
 
 This rule applies to `X Post Queue` entries that serve as lead posts for a `note.com` article.
 The Notion database is the operational source of truth for these queue rows.
+It does not override quote-post or reply-url flows; those are governed by `docs/agents/x-auto-contract.md`.
 
 ## Rule
 
