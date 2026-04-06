@@ -20,6 +20,9 @@ HEARTBEAT_MAX_AGE_SECONDS = 120
 FAILURES: list[str] = []
 WARNINGS: list[str] = []
 COLLISION_WINDOW = timedelta(minutes=3)
+FIXED_SLOTS = {"06:50", "11:50", "16:50", "21:00"}
+RESERVED_NOTE_WEEKDAYS = {0, 3}
+RESERVED_NOTE_SLOT = "06:50"
 
 
 def _safe_run(argv: list[str]) -> subprocess.CompletedProcess[str] | None:
@@ -185,6 +188,15 @@ def check_heartbeat() -> None:
     else:
         ok(f"Queue: {approved} approved / {depth} total")
 
+    pid_file = BASE_DIR / ".scheduler.pid"
+    if pid_file.exists():
+        try:
+            pid_text = pid_file.read_text(encoding="utf-8").strip()
+            if pid_text and str(data.get("pid", "")) and pid_text != str(data.get("pid", "")):
+                warn(f"PID file / heartbeat mismatch: pidfile={pid_text}, heartbeat={data.get('pid')}")
+        except OSError:
+            warn("Could not read .scheduler.pid")
+
 
 def check_queue_health() -> None:
     if not QUEUE_FILE.exists():
@@ -220,6 +232,23 @@ def check_queue_health() -> None:
 
     today = datetime.now().strftime("%Y-%m-%d")
     today_posts = [p for p in approved if p.get("scheduled_for", "").startswith(today)]
+    unexpected_offslot = []
+    explicit_override = []
+    today_date = datetime.now().date()
+    valid_slots = set(FIXED_SLOTS)
+    if today_date.weekday() in RESERVED_NOTE_WEEKDAYS:
+        valid_slots.discard(RESERVED_NOTE_SLOT)
+    for post in today_posts:
+        scheduled_for = str(post.get("scheduled_for", "") or "")
+        hhmm = scheduled_for[11:] if len(scheduled_for) >= 16 else ""
+        schedule_mode = str(post.get("schedule_mode", "fixed_slots") or "fixed_slots").strip()
+        if hhmm in valid_slots:
+            continue
+        if schedule_mode == "operator_override":
+            explicit_override.append(post)
+        else:
+            unexpected_offslot.append(post)
+
     if today_posts:
         ok(f"Today's schedule ({today}):")
         for post in sorted(today_posts, key=lambda item: item.get("scheduled_for", "")):
@@ -227,6 +256,13 @@ def check_queue_health() -> None:
             scheduled_for = post.get("scheduled_for", "")
             has_image = "img" if post.get("image_path") else "NO-IMG"
             print(f"         {scheduled_for[11:]} | [{has_image}] {title}")
+    if explicit_override:
+        warn(f"{len(explicit_override)} approved posts use explicit operator_override schedule today")
+    if unexpected_offslot:
+        fail(f"{len(unexpected_offslot)} approved posts are off fixed slots without operator_override")
+        for post in unexpected_offslot[:5]:
+            title = post.get("title", "") or post.get("text", "")[:30]
+            print(f"         {post.get('scheduled_for', '')} | {title}")
 
 
 def check_secrets() -> None:
@@ -245,12 +281,16 @@ def check_launchd() -> None:
         fail(f"Plist not found: {PLIST}")
         return
 
+    service_text = _launchctl_service_text()
+    launchd_uses_direct_scheduler = "scheduler.py" in service_text and str(LAUNCHER) not in service_text
     if not LAUNCHER.exists():
-        warn(f"Launcher script not found: {LAUNCHER}")
+        if launchd_uses_direct_scheduler:
+            ok("launchd uses direct scheduler.py invocation (no launcher wrapper)")
+        else:
+            warn(f"Launcher script not found: {LAUNCHER}")
     else:
         ok(f"Launcher script: {LAUNCHER}")
 
-    service_text = _launchctl_service_text()
     if service_text:
         ok("launchd agent registered")
         working_dir = _launchd_working_directory()
@@ -278,11 +318,13 @@ def check_logs() -> None:
         for error in errors[-3:]:
             print(f"         {error[:80]}")
 
-    if ERR_LOG_FILE.exists():
-        err_lines = ERR_LOG_FILE.read_text(encoding="utf-8").strip().split("\n")
-        cutoff = datetime.now() - COLLISION_WINDOW
-        collisions = []
-        for line in err_lines[-200:]:
+    cutoff = datetime.now() - COLLISION_WINDOW
+    collisions = []
+    for candidate in (LOG_FILE, ERR_LOG_FILE):
+        if not candidate.exists():
+            continue
+        candidate_lines = candidate.read_text(encoding="utf-8").strip().split("\n")
+        for line in candidate_lines[-200:]:
             if "Another scheduler is running" not in line:
                 continue
             try:
@@ -290,11 +332,13 @@ def check_logs() -> None:
             except ValueError:
                 timestamp = None
             if timestamp is None or timestamp >= cutoff:
-                collisions.append(line)
-        if collisions:
-            fail(
-                f"launchd/manual collision detected: {len(collisions)} recent duplicate scheduler starts"
-            )
+                collisions.append((candidate.name, line))
+    if collisions:
+        fail(
+            f"launchd/manual collision detected: {len(collisions)} recent duplicate scheduler starts"
+        )
+        for source, line in collisions[-3:]:
+            print(f"         [{source}] {line[:120]}")
 
 
 def check_images() -> None:
