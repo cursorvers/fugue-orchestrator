@@ -48,9 +48,17 @@ jobs:
           bash -n tests/test-x-auto-skill-contract.sh
           bash -n tests/test-x-auto-health-contract.sh
 
-      - name: Rule check
+      - name: Note linking rule check
         run: |
           set -euo pipefail
           bash tests/test-x-auto-note-linking-rule.sh
+
+      - name: Skill contract check
+        run: |
+          set -euo pipefail
           bash tests/test-x-auto-skill-contract.sh
+
+      - name: Health contract check
+        run: |
+          set -euo pipefail
           bash tests/test-x-auto-health-contract.sh
