@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
+GUARD_BIN="${KERNEL_GUARD_BIN_UNDER_TEST:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 SESSION_A="fugue-orchestrator__alpha"
 SESSION_B="fugue-orchestrator__beta"
 trap 'tmux kill-session -t "${SESSION_A}" >/dev/null 2>&1 || true; tmux kill-session -t "${SESSION_B}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
@@ -15,6 +16,7 @@ export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/runtime-ledger.json"
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm-state.json"
 export KERNEL_OPTIONAL_LANE_LEDGER_FILE="${TMP_DIR}/optional-ledger.json"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export KERNEL_PROVIDER_TEST_AUTO_ATTEST=true
 export KERNEL_RUNTIME_LEDGER_AUTO_COMPACT=false
 export KERNEL_RUN_ID="doctor-missing-receipt"
 export GEMINI_BIN=printf
@@ -24,6 +26,11 @@ export CURSOR_BIN=false
 export COPILOT_BIN=false
 export ZAI_API_KEY="dummy"
 export KERNEL_DOCTOR_SKIP_TMUX_CHECK=true
+export KERNEL_RUNTIME_HEALTH_SKIP_TMUX_CHECK=true
+export KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="codex,glm,gemini-cli"
+export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
+export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
+export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 
 tmux new-session -d -s "${SESSION_A}" >/dev/null 2>&1 || true
 tmux new-session -d -s "${SESSION_B}" >/dev/null 2>&1 || true
@@ -40,22 +47,39 @@ EOF
 
 KERNEL_RUN_ID="run-alpha" bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 KERNEL_RUN_ID="run-alpha" bash "${LEDGER_SCRIPT}" scheduler-state retry_queued "doctor-alpha" "/tmp/run-alpha-workspace.json" >/dev/null
+KERNEL_RUN_ID="run-beta" KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="codex,glm,cursor-cli" bash "${RECEIPT_SCRIPT}" write 6 codex,glm,cursor-cli normal >/dev/null
+KERNEL_RUN_ID="run-beta" bash "${LEDGER_SCRIPT}" record-provider codex success launch run-driver >/dev/null
+KERNEL_RUN_ID="run-beta" bash "${LEDGER_SCRIPT}" record-provider glm success critic glm-exec >/dev/null
+KERNEL_RUN_ID="run-beta" bash "${LEDGER_SCRIPT}" record-provider cursor-cli success specialist optional-lane-exec >/dev/null
+KERNEL_RUN_ID="run-beta" bash "${LEDGER_SCRIPT}" scheduler-state running "doctor-beta" "/tmp/run-beta-workspace.json" >/dev/null
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor)"
+out="$("${GUARD_BIN}" doctor)"
+grep -Fq 'kernel run id: run-beta' <<<"${out}"
 grep -Fq 'active runs:' <<<"${out}"
 beta_line="$(printf '%s\n' "${out}" | awk '/^  - run_id=run-beta /{print; exit}')"
 grep -Fq 'purpose=beta' <<<"${beta_line}"
 grep -Fq 'runtime=fugue' <<<"${beta_line}"
+grep -Fq 'age=' <<<"${beta_line}"
 grep -Fq 'scheduler_state=running' <<<"${beta_line}"
 grep -Fq 'workspace_receipt=false' <<<"${beta_line}"
+grep -Fq 'doctor summary:' <<<"${out}"
+grep -Fq 'longest_visible_run:' <<<"${out}"
 grep -Fq 'bootstrap receipt status:' <<<"${out}"
-grep -Fq 'present: false' <<<"${out}"
+grep -Fq '  - run id: run-beta' <<<"${out}"
+grep -Fq 'present: true' <<<"${out}"
 grep -Fq 'runtime health status:' <<<"${out}"
+grep -Fq 'codex provider success: 1' <<<"${out}"
+grep -Fq 'glm provider success: 1' <<<"${out}"
+grep -Fq 'specialist provider success count: 1' <<<"${out}"
 grep -Fq 'compact artifact status:' <<<"${out}"
+grep -Fq 'scheduler state: running' <<<"${out}"
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor --run run-alpha)"
+out="$("${GUARD_BIN}" doctor --run run-alpha)"
+grep -Fq 'kernel run id: run-alpha' <<<"${out}"
 grep -Fq 'doctor scope run id: run-alpha' <<<"${out}"
 grep -Fq 'run detail:' <<<"${out}"
+grep -Fq 'updated_age: ' <<<"${out}"
+grep -Fq 'stale: false' <<<"${out}"
 grep -Fq 'scheduler_state_compact: retry_queued' <<<"${out}"
 grep -Fq 'workspace_receipt_path_compact: /tmp/run-alpha-workspace.json' <<<"${out}"
 grep -Fq 'phase_artifacts: plan_report_path=/tmp/run-alpha-plan.md | critic_report_path=/tmp/run-alpha-critic.md' <<<"${out}"

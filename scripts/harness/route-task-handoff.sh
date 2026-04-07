@@ -531,6 +531,10 @@ bridge_handoff_script="scripts/harness/fugue-bridge-handoff.sh"
 if [[ ! -x "${bridge_handoff_script}" && -x ".fugue-orchestrator/scripts/harness/fugue-bridge-handoff.sh" ]]; then
   bridge_handoff_script=".fugue-orchestrator/scripts/harness/fugue-bridge-handoff.sh"
 fi
+kernel_handoff_script="scripts/harness/kernel-handoff.sh"
+if [[ ! -x "${kernel_handoff_script}" && -x ".fugue-orchestrator/scripts/harness/kernel-handoff.sh" ]]; then
+  kernel_handoff_script=".fugue-orchestrator/scripts/harness/kernel-handoff.sh"
+fi
 
 if [[ "${handoff_target}" == "fugue-bridge" ]]; then
   if [[ ! -x "${bridge_handoff_script}" ]]; then
@@ -561,6 +565,37 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     bridge_args+=(--subscription-offline-policy-override "${subscription_offline_policy_override}")
   fi
   bash "${bridge_handoff_script}" "${bridge_args[@]}" >/dev/null
+elif [[ -x "${kernel_handoff_script}" ]]; then
+  kernel_args=(
+    --repo "${GITHUB_REPOSITORY}"
+    --issue-number "${ISSUE_NUMBER}"
+    --dispatch-nonce "${dispatch_nonce}"
+    --requested-execution-mode "${mode}"
+    --implement-request "${wants_implement}"
+    --implement-confirmed "${confirm_implement}"
+    --vote-command "${IS_VOTE_COMMAND}"
+    --intake-source "${intake_source}"
+    --execution-mode-override "${resolved_execution_mode_override}"
+  )
+  if [[ -n "${trust_subject}" ]]; then
+    kernel_args+=(--trust-subject "${trust_subject}")
+  fi
+  if [[ -n "${vote_instruction_b64}" ]]; then
+    kernel_args+=(--vote-instruction-b64 "${vote_instruction_b64}")
+  fi
+  if [[ -n "${kernel_run_id_input}" ]]; then
+    kernel_args+=(--kernel-run-id "${kernel_run_id_input}")
+  fi
+  if [[ "${IS_VOTE_COMMAND}" == "true" || "${allow_processing_rerun_input}" == "true" ]]; then
+    kernel_args+=(--allow-processing-rerun)
+  fi
+  if [[ -n "${subscription_offline_policy_override}" ]]; then
+    kernel_args+=(--subscription-offline-policy-override "${subscription_offline_policy_override}")
+  fi
+  bash "${kernel_handoff_script}" "${kernel_args[@]}" >/dev/null
+elif [[ "${handoff_target}" == "kernel" ]]; then
+  echo "kernel handoff requested, but adapter script is missing: ${kernel_handoff_script}" >&2
+  exit 1
 else
   gh workflow run fugue-tutti-caller.yml "${dispatch_args[@]}" >/dev/null
 fi

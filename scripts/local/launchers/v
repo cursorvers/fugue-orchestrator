@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${launcher_dir}/orchestrator-entrypoint-hint" v || true
+
+exec "${launcher_dir}/codex-prompt-launch" v "$@"

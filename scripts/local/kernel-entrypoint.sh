@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FOUR_PANE_LAUNCH_SCRIPT="${KERNEL_4PANE_LAUNCH_SCRIPT:-${ROOT_DIR}/scripts/local/kernel-4pane-launch.sh}"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 PROMPT_LAUNCH_BIN="${KERNEL_CODEX_PROMPT_LAUNCH_BIN:-$HOME/bin/codex-prompt-launch}"
+GUARD_BIN="${KERNEL_GUARD_BIN:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 STALE_HOURS="${KERNEL_STALE_HOURS:-24}"
 
 usage() {
@@ -128,6 +129,10 @@ exec_prompt_launch() {
   exec "${PROMPT_LAUNCH_BIN}" kernel "$@"
 }
 
+exec_memory_query() {
+  exec bash "${GUARD_BIN}" memory-query "$@"
+}
+
 exec_4pane_launch() {
   exec bash "${FOUR_PANE_LAUNCH_SCRIPT}" "$@"
 }
@@ -169,6 +174,10 @@ main() {
     echo "prompt launcher not found: ${PROMPT_LAUNCH_BIN}" >&2
     exit 1
   }
+
+  if [[ "${1:-}" == "memory-query" ]]; then
+    exec_memory_query "${@:2}"
+  fi
 
   if ! in_repo_context || ! auto_4pane_enabled || inside_managed_tmux || needs_prompt_passthrough "$@"; then
     exec_prompt_launch "$@"
