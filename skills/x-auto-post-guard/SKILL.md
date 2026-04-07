@@ -54,6 +54,15 @@ For quote posts:
 - the scheduler or manual flow posts that URL as a reply
 - if the body contains a quote URL, stop and fix it before posting
 
+### 2.1 Note-lead URL rule
+
+For `note.com` lead posts:
+
+- keep the public `note.com` URL in the main body
+- keep the same canonical URL in `source_url` / Notion `Source URLs`
+- keep `reply_url` / Notion `Reply URLs` empty
+- if a stale `Reply URLs` value remains on the row, clear it before calling the row scheduler-safe
+
 ### 3. Notion is the hub
 
 Any change to text, image, status, or tweet linkage must be reflected in Notion in the same action window.
@@ -84,13 +93,19 @@ When an emergency manual publish is approved:
 If the draft is meant to be a viable x-auto candidate for later approval or scheduling:
 
 - treat `800-1500字` as the safe default target
+- for `note.com` lead posts, aim for the shortest viable approved form rather than filling the full band
+- note leads should read like a teaser that opens the article, not a self-contained summary that satisfies the whole curiosity loop
+- prefer one sharp hook, one concrete operational tension, and one forward pull into the article over exhaustive bullet dumping
 - do not rely on older `500-800字` drafting guidance when it conflicts with scheduler behavior
 - if a shorter draft is requested for ideation only, label it explicitly as a non-posting draft
+- short `note.com` lead posts are runtime-exempt from the general `800字` gate, but still require the usual explicit approval-state and schedule review before they are treated as scheduler-safe
 
 Reason:
 
 - runtime safety wins over prompt/profile looseness
-- a sub-800 draft may read fine but still fail later in scheduler validation
+- non-note sub-800 drafts may read fine but still fail later in scheduler validation
+- note leads have a different editorial goal from standalone value posts: they should create momentum into the article, not consume the full appetite on X
+- medical or AI-diagnostic framing is not exempt from source discipline just because it avoids explicit percentages or `研究` wording
 
 ### 6. Long-form line breaks are part of quality, not a final cosmetic pass
 
@@ -107,6 +122,25 @@ When drafting `800-1500字` posts, decide paragraph breaks while writing.
 - if using `第一に / 第二に / 第三に`, either break the items visually or compress them into a clearly grouped block
 - for English-default posts, use the same cadence: short hook, compact evidence blocks, one pivot, short landing
 
+For `note.com` lead posts specifically:
+
+- compress aggressively; do not spend the full length budget unless the post becomes unclear without it
+- withhold at least one meaningful layer of explanation for the article itself
+- avoid turning the lead into a mini-article with every key point already resolved
+- end with a pull-forward line that makes the click feel necessary, not decorative
+
+### 6.1 Japanese tone balance should stay in the middle register
+
+For publish-facing Japanese body copy, follow `docs/agents/x-auto-contract.md` and keep the tone between over-assertive and overly polite.
+
+- default to calm plain-form Japanese for the body
+- do not stack hard assertions in consecutive sentences
+- use softening only where uncertainty or scope limits justify it
+- prefer `〜と見てよい`, `〜になりやすい`, `〜かもしれない`, `〜と考えられる`, `〜だろう`
+- avoid absolutes such as `絶対`, `必ず`, `明らかに`, `完全に`, `〜しかない`, `断言できる`
+- avoid over-polite filler such as repeated `〜と思います`, repeated `〜かもしれません`, `恐縮ですが`, `〜いただけますと幸いです`
+- keep `です/ます` mostly for short reader-facing landing lines, not the entire body
+
 ## Mandatory Preflight
 
 Before any publish action, verify all of the following and state any mismatch:
@@ -115,10 +149,12 @@ Before any publish action, verify all of the following and state any mismatch:
 2. Schedule: if a slot like `22:00` was mentioned, confirm whether it should still be preserved
 3. Body language: English body vs Japanese body vs both
 4. Quote handling: if this is a quote post, body has no X URL and `Source URLs` is present
+   For note leads, also verify that the public `note.com` URL is in the body while `Reply URLs` is empty.
 5. Thumbnail policy: whether the post should have an image, and whether the image already matches the final text
 6. Notion target: existing row update vs creating a new row
 7. Proper-noun leakage status for `Body` / `Body JA`: pass/fail, blocked terms found, and whether explicit user approval exists
    When the user requested abstraction/generalization, this check also covers source-derived branded phrases and site headlines.
+   For medical or AI-diagnostic framing, also verify whether the copy implies patient-facing or clinical conclusions that require a non-X/non-note primary source before approval.
 8. Runtime target: which live x-auto runtime is authoritative right now
    Check the active checkout's queue, heartbeat, logs, and process state before concluding that posting is broken. Do not rely only on legacy `Documents` paths or old launchd assumptions.
 9. Metadata drift: whether the failure is truly missing assets vs stale QA flags
@@ -129,8 +165,11 @@ If any item is ambiguous, stop before posting.
 For new draft generation, also verify:
 
 10. body length target: whether this draft is intended to be schedulable later (`800-1500字`) or just a short ideation stub
+    For note leads, also ask whether the copy is the shortest viable approved teaser or an over-explained summary.
 11. pillar/category/pattern mix: avoid overconcentrating on one pillar or one rhetorical pattern across a batch
 12. line-break rhythm: whether the draft has a readable cadence rather than equal-sized walls of text
+13. tone balance: whether the draft avoids both hard-assertion streaks and over-polite filler
+    For Japanese body copy, verify that the default voice stays plain-form with selective softening instead of all-`です/ます`.
 
 ## English-for-auto-translation Rule
 
