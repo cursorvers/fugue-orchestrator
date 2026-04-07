@@ -93,6 +93,7 @@ cat > "${REGISTRY_SEED}" <<'JSON'
 JSON
 
 REGISTRY_OUT="${TMP_DIR}/registry.out"
+env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_ACCESS_TOKEN \
 bash "${SCRIPT}" \
   --mode smoke \
   --generator-mode registry-local \
@@ -123,6 +124,7 @@ grep -Fq 'blocked_summary=' "${TMP_DIR}/registry-run/xauto-draft-only.meta"
 grep -Fq 'tone_profile=polite' "${TMP_DIR}/registry-run/xauto-draft-only.meta"
 
 REGISTRY_EXEC_OUT="${TMP_DIR}/registry-exec.out"
+env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_ACCESS_TOKEN \
 bash "${SCRIPT}" \
   --mode execute \
   --generator-mode registry-local \
@@ -134,6 +136,10 @@ bash "${SCRIPT}" \
 jq -e '.dispatchable | length == 1' "${TMP_DIR}/registry-exec-run/xauto-draft-only.dispatch.json" >/dev/null
 jq -e '.dispatchable[0].promotable == true and .dispatchable[0].dispatchable == true' "${TMP_DIR}/registry-exec-run/xauto-draft-only.dispatch.json" >/dev/null
 jq -e '.closeout.operator_next_actions | length >= 1' "${TMP_DIR}/registry-exec-run/xauto-draft-only.dispatch.json" >/dev/null
+grep -Fq 'quoted_author_sync_status=deferred-missing-creds' "${TMP_DIR}/registry-exec-run/xauto-draft-only.meta"
+grep -Fq 'quoted_author_sync_bridge_status=deferred-missing-creds' "${TMP_DIR}/registry-exec-run/xauto-draft-only.meta"
+grep -Fq 'quoted_author_sync_meta_path=' "${TMP_DIR}/registry-exec-run/xauto-draft-only.meta"
+test -f "${TMP_DIR}/registry-exec-run/quoted-author-sync/xauto-quoted-author-sync.meta"
 
 BLOCKED_ONLY_SEED="${TMP_DIR}/registry-blocked-only.json"
 cat > "${BLOCKED_ONLY_SEED}" <<'JSON'
@@ -155,6 +161,7 @@ JSON
 
 BLOCKED_EXEC_OUT="${TMP_DIR}/registry-blocked-exec.out"
 set +e
+env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_ACCESS_TOKEN \
 bash "${SCRIPT}" \
   --mode execute \
   --generator-mode registry-local \
@@ -207,6 +214,7 @@ JSON
 BLOCKED_RECOVER_EXEC_OUT="${TMP_DIR}/registry-blocked-recover-exec.out"
 X_AUTO_DRAFT_ENABLE_BLOCKED_RECOVERY=true \
 X_AUTO_DRAFT_BLOCKED_RECOVERY_POSTS_SEED_DIR="${TMP_DIR}/blocked-recovery-posts" \
+env -u SUPABASE_URL -u SUPABASE_SERVICE_ROLE_KEY -u SUPABASE_ACCESS_TOKEN \
 bash "${SCRIPT}" \
   --mode execute \
   --generator-mode registry-local \

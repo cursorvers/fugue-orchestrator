@@ -27,11 +27,13 @@ BLOCKED_RECOVERY_POSTS_SEED_DIR="${X_AUTO_DRAFT_BLOCKED_RECOVERY_POSTS_SEED_DIR:
 BLOCKED_RECOVERY_REGISTRY_INPUT="${X_AUTO_DRAFT_BLOCKED_RECOVERY_REGISTRY_INPUT:-}"
 BLOCKED_RECOVERY_EXTRACT_MODE="${X_AUTO_DRAFT_BLOCKED_RECOVERY_EXTRACT_MODE:-${LOCAL_EXTRACT_MODE}}"
 BLOCKED_RECOVERY_GENERATE_MODE="${X_AUTO_DRAFT_BLOCKED_RECOVERY_GENERATE_MODE:-${LOCAL_GENERATE_MODE}}"
+AUTO_SYNC_QUOTED_AUTHOR_REGISTRY="${X_AUTO_DRAFT_AUTO_SYNC_QUOTED_AUTHOR_REGISTRY:-true}"
 X_AUTO_DIR="${X_AUTO_DIR:-${HOME}/Dev/x-auto}"
 PYTHON_BIN="${X_AUTO_PYTHON:-${X_AUTO_DIR}/venv/bin/python}"
 GENERATOR="${X_AUTO_DRAFT_GENERATOR:-${X_AUTO_DIR}/scripts/generate_draft_candidates.py}"
 LOCAL_GENERATOR="${X_AUTO_DRAFT_LOCAL_GENERATOR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/xauto_generate_drafts_from_registry.py}"
 BLOCKED_RECOVERY_SCRIPT="${X_AUTO_DRAFT_BLOCKED_RECOVERY_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/xauto-blocked-recovery.sh}"
+QUOTED_AUTHOR_SYNC_SCRIPT="${X_AUTO_DRAFT_QUOTED_AUTHOR_SYNC_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/xauto-quoted-author-sync.sh}"
 
 usage() {
   cat <<'EOF'
@@ -54,6 +56,8 @@ Options:
   --limit <n>                 X post fetch limit for registry-local mode
   --from-date <YYYY-MM-DD>    Optional inclusive start date for registry-local mode
   --to-date <YYYY-MM-DD>      Optional inclusive end date for registry-local mode
+  --auto-sync-quoted-author-registry <true|false>
+                              Run advisory quoted-author registry sync after execute registry-local runs (default: true)
   -h, --help                  Show help
 EOF
 }
@@ -124,6 +128,10 @@ while [[ $# -gt 0 ]]; do
       TO_DATE="${2:-}"
       shift 2
       ;;
+    --auto-sync-quoted-author-registry)
+      AUTO_SYNC_QUOTED_AUTHOR_REGISTRY="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -161,6 +169,10 @@ if [[ "${LOCAL_EXTRACT_MODE}" != "auto" && "${LOCAL_EXTRACT_MODE}" != "xai" && "
 fi
 if [[ "${TONE_PROFILE}" != "middle" && "${TONE_PROFILE}" != "polite" ]]; then
   echo "Error: --tone-profile must be middle|polite" >&2
+  exit 2
+fi
+if [[ "${AUTO_SYNC_QUOTED_AUTHOR_REGISTRY}" != "true" && "${AUTO_SYNC_QUOTED_AUTHOR_REGISTRY}" != "false" ]]; then
+  echo "Error: --auto-sync-quoted-author-registry must be true|false" >&2
   exit 2
 fi
 if ! [[ "${FETCH_LIMIT}" =~ ^[0-9]+$ ]] || (( FETCH_LIMIT < 1 )); then
@@ -274,6 +286,9 @@ blocked_count="0"
 rejected_count="0"
 created_count="0"
 recovery_summary='{}'
+quoted_author_sync_status="skipped"
+quoted_author_sync_bridge_status=""
+quoted_author_sync_meta_path=""
 if command -v jq >/dev/null 2>&1; then
   accepted_count="$(printf '%s\n' "${result}" | jq -r '.accepted | length' 2>/dev/null || printf '0')"
   promotable_count="$(printf '%s\n' "${result}" | jq -r '(.promotable // .accepted) | length' 2>/dev/null || printf '0')"
@@ -331,6 +346,71 @@ if [[ "${MODE}" == "execute" && "${GENERATOR_MODE}" == "registry-local" && "${EN
   fi
 fi
 
+quoted_author_sync_seed_input=""
+if [[ -n "${REGISTRY_SEED_INPUT}" ]]; then
+  quoted_author_sync_seed_input="${REGISTRY_SEED_INPUT}"
+elif [[ -n "${RUN_DIR}" && -f "${RUN_DIR}/xauto-draft-only.registry.json" ]]; then
+  quoted_author_sync_seed_input="${RUN_DIR}/xauto-draft-only.registry.json"
+fi
+
+if [[ "${MODE}" == "execute" && "${GENERATOR_MODE}" == "registry-local" && "${AUTO_SYNC_QUOTED_AUTHOR_REGISTRY}" == "true" && -n "${quoted_author_sync_seed_input}" ]]; then
+  if [[ -f "${QUOTED_AUTHOR_SYNC_SCRIPT}" ]]; then
+    sync_run_dir=""
+    if [[ -n "${RUN_DIR}" ]]; then
+      sync_run_dir="${RUN_DIR}/quoted-author-sync"
+    elif [[ -n "${auto_run_dir:-}" ]]; then
+      sync_run_dir="${auto_run_dir}/quoted-author-sync"
+    fi
+    sync_cmd=(
+      "bash"
+      "${QUOTED_AUTHOR_SYNC_SCRIPT}"
+      --mode "${MODE}"
+      --seed-input "${quoted_author_sync_seed_input}"
+      --handle "${HANDLE}"
+      --limit "${FETCH_LIMIT}"
+      --extract-mode "${LOCAL_EXTRACT_MODE}"
+    )
+    if [[ -n "${sync_run_dir}" ]]; then
+      sync_cmd+=(--run-dir "${sync_run_dir}")
+    fi
+    if [[ -n "${POSTS_SEED_INPUT}" ]]; then
+      sync_cmd+=(--posts-seed-input "${POSTS_SEED_INPUT}")
+    fi
+    if [[ -n "${FROM_DATE}" ]]; then
+      sync_cmd+=(--from-date "${FROM_DATE}")
+    fi
+    if [[ -n "${TO_DATE}" ]]; then
+      sync_cmd+=(--to-date "${TO_DATE}")
+    fi
+    set +e
+    sync_output="$("${sync_cmd[@]}" 2>&1)"
+    sync_rc=$?
+    set -e
+    if (( sync_rc != 0 )); then
+      quoted_author_sync_status="failed"
+    fi
+    if [[ -n "${sync_run_dir}" ]]; then
+      quoted_author_sync_meta_path="${sync_run_dir}/xauto-quoted-author-sync.meta"
+      if [[ -f "${quoted_author_sync_meta_path}" ]]; then
+        quoted_author_sync_bridge_status="$(awk -F= '/^bridge_status=/{print $2}' "${quoted_author_sync_meta_path}" | tail -n1)"
+      fi
+    fi
+    if (( sync_rc == 0 )); then
+      if [[ -n "${quoted_author_sync_bridge_status}" ]]; then
+        quoted_author_sync_status="${quoted_author_sync_bridge_status}"
+      else
+        quoted_author_sync_status="completed-no-bridge-status"
+      fi
+    fi
+    if [[ "${quoted_author_sync_status}" == "failed" ]]; then
+      echo "xauto-draft-only: advisory quoted-author sync failed" >&2
+      echo "${sync_output}" >&2
+    fi
+  else
+    quoted_author_sync_status="missing-script"
+  fi
+fi
+
 printf '%s\n' "${result}"
 
 if [[ -n "${RUN_DIR}" ]]; then
@@ -372,6 +452,14 @@ if [[ -n "${RUN_DIR}" ]]; then
     echo "blocked_recovery_only_reason=${BLOCKED_RECOVERY_ONLY_REASON}"
     echo "blocked_recovery_extract_mode=${BLOCKED_RECOVERY_EXTRACT_MODE}"
     echo "blocked_recovery_generate_mode=${BLOCKED_RECOVERY_GENERATE_MODE}"
+    echo "auto_sync_quoted_author_registry=${AUTO_SYNC_QUOTED_AUTHOR_REGISTRY}"
+    echo "quoted_author_sync_status=${quoted_author_sync_status}"
+    if [[ -n "${quoted_author_sync_bridge_status}" ]]; then
+      echo "quoted_author_sync_bridge_status=${quoted_author_sync_bridge_status}"
+    fi
+    if [[ -n "${quoted_author_sync_meta_path}" ]]; then
+      echo "quoted_author_sync_meta_path=${quoted_author_sync_meta_path}"
+    fi
     echo "issue_title=${FUGUE_ISSUE_TITLE:-}"
     echo "issue_url=${FUGUE_ISSUE_URL:-}"
     if [[ -n "${SEED_INPUT}" ]]; then
