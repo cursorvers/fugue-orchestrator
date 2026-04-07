@@ -184,9 +184,9 @@ def check_heartbeat() -> None:
     approved = data.get("approved_count", 0)
     depth = data.get("queue_depth", 0)
     if approved < 3:
-        warn(f"Low approved count: {approved} (queue depth: {depth})")
+        warn(f"Low approved count in heartbeat snapshot: {approved} (queue depth: {depth})")
     else:
-        ok(f"Queue: {approved} approved / {depth} total")
+        ok(f"Heartbeat snapshot: {approved} approved / {depth} total")
 
     pid_file = BASE_DIR / ".scheduler.pid"
     if pid_file.exists():
@@ -207,6 +207,18 @@ def check_queue_health() -> None:
     total = len(posts)
     pending = [p for p in posts if not p.get("posted", False)]
     approved = [p for p in pending if p.get("status") == "approved"]
+
+    if HEARTBEAT_FILE.exists():
+        try:
+            heartbeat = json.loads(HEARTBEAT_FILE.read_text(encoding="utf-8"))
+            hb_total = heartbeat.get("queue_depth")
+            hb_approved = heartbeat.get("approved_count")
+            if hb_total is not None and int(hb_total) != total:
+                warn(f"Heartbeat queue_depth={hb_total} differs from live queue total={total}")
+            if hb_approved is not None and int(hb_approved) != len(approved):
+                warn(f"Heartbeat approved_count={hb_approved} differs from live approved={len(approved)}")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            warn("Could not compare heartbeat snapshot with live queue")
 
     date_only = []
     missing_time = []
