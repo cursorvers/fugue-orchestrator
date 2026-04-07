@@ -35,6 +35,23 @@ grep -Fq '"orchestration_compliance":"kernel-run-complete"' "${journal}"
 
 bash "${RUNNER}" \
   --assistant codex \
+  --source kernel-run-complete \
+  --session-id record-session \
+  --summary "Kernel fallback backup smoke duplicate" \
+  --cwd "${ROOT_DIR}" \
+  --title "Fallback Smoke Duplicate" \
+  --no-gha \
+  --dry-run
+
+kernel_run_complete_count="$(grep -c '"source":"kernel-run-complete"' "${journal}")"
+[[ "${kernel_run_complete_count}" == "1" ]]
+if grep -Fq '"summary_text":"Kernel fallback backup smoke duplicate"' "${journal}"; then
+  echo "terminal completion backup should be deduped for the same session/source window" >&2
+  exit 1
+fi
+
+bash "${RUNNER}" \
+  --assistant codex \
   --source kernel-progress-save \
   --session-id record-session \
   --summary "Kernel progress backup smoke" \
@@ -44,5 +61,32 @@ bash "${RUNNER}" \
   --dry-run
 
 grep -Fq '"orchestration_compliance":"kernel-progress-save"' "${journal}"
+
+bash "${RUNNER}" \
+  --assistant codex \
+  --source kernel-progress-save \
+  --session-id record-session \
+  --summary "Kernel progress backup smoke" \
+  --cwd "${ROOT_DIR}" \
+  --title "Fallback Progress" \
+  --no-gha \
+  --dry-run
+
+kernel_progress_count="$(grep -c '"source":"kernel-progress-save"' "${journal}")"
+[[ "${kernel_progress_count}" == "1" ]]
+
+bash "${RUNNER}" \
+  --assistant codex \
+  --source kernel-progress-save \
+  --session-id record-session \
+  --summary "Kernel progress backup smoke v2" \
+  --cwd "${ROOT_DIR}" \
+  --title "Fallback Progress" \
+  --no-gha \
+  --dry-run
+
+kernel_progress_count="$(grep -c '"source":"kernel-progress-save"' "${journal}")"
+[[ "${kernel_progress_count}" == "2" ]]
+grep -Fq '"summary_text":"Kernel progress backup smoke v2"' "${journal}"
 
 echo "kernel task completion backup fallback check passed"

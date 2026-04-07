@@ -12,18 +12,23 @@ COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 RECOVERY_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-run-recovery.sh"
 PHASE_GATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-phase-gate.sh"
 RUN_COMPLETE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-run-complete.sh"
+MEMORY_QUERY_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-memory-query.sh"
 BUDGET_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-optional-lane-budget.sh"
 ADOPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-session-adopt.sh"
 GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
 SHARED_SECRETS_SCRIPT="${ROOT_DIR}/scripts/lib/load-shared-secrets.sh"
 THREAD_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-codex-thread.sh"
+LAUNCH_QUORUM_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-launch-quorum.sh"
+SCHEDULER_SCRIPT="${ROOT_DIR}/scripts/kernel-scheduler.sh"
+CLAIM_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-claim.sh"
 STATIC_CHECK_SCRIPT="${ROOT_DIR}/tests/test-codex-kernel-prompt.sh"
 
 DEFAULT_LANE_COUNT="${KERNEL_BOOTSTRAP_LANE_COUNT:-6}"
 DEFAULT_STALE_HOURS="${KERNEL_STALE_HOURS:-24}"
 STATIC_CHECK_TIMEOUT_SEC="${DOCTOR_STATIC_CHECK_TIMEOUT_SEC:-45}"
 SUMMARY_TIMEOUT_SEC="${KERNEL_DOCTOR_SUMMARY_TIMEOUT_SEC:-15}"
+DOCTOR_TIMEOUTS=0
 
 resolve_codex_bin() {
   local preferred="${CODEX_BIN:-}"
@@ -67,6 +72,7 @@ Usage:
   codex-kernel-guard.sh doctor --run <run_id>
   codex-kernel-guard.sh recover-run <run_id>
   codex-kernel-guard.sh attach-context <run_id> <reference_path> [label]
+  codex-kernel-guard.sh memory-query [--limit N] [--run <run_id>] [--format <text|json>] <query>
   codex-kernel-guard.sh phase-check <phase> [--uiux]
   codex-kernel-guard.sh phase-complete <phase> [--uiux]
   codex-kernel-guard.sh run-complete --summary <text> [--title <text>] [--uiux] [--no-gha] [--dry-run]
@@ -161,6 +167,10 @@ ensure_default_env() {
   export KERNEL_ROOT="${ROOT_DIR}"
 }
 
+interactive_tty_available() {
+  [[ -t 0 && -t 1 && "${TERM:-}" != "dumb" ]]
+}
+
 compact_dir() {
   printf '%s\n' "${KERNEL_COMPACT_DIR:-$(bash "${STATE_PATH_SCRIPT}" compact-dir)}"
 }
@@ -181,6 +191,69 @@ jq_safe_string() {
   local expr="${1:?expr required}"
   local file="${2:?file required}"
   jq -r "${expr} // \"\"" "${file}"
+}
+
+epoch_from_iso8601() {
+  local value="${1:-}"
+  [[ -n "${value}" ]] || return 1
+  python3 - "${value}" <<'PY'
+import datetime
+import sys
+
+try:
+    dt = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ")
+except ValueError:
+    raise SystemExit(1)
+print(int(dt.replace(tzinfo=datetime.timezone.utc).timestamp()))
+PY
+}
+
+age_seconds_from_iso8601() {
+  local value="${1:-}"
+  local updated_epoch now_epoch
+  updated_epoch="$(epoch_from_iso8601 "${value}" 2>/dev/null || true)"
+  [[ "${updated_epoch}" =~ ^[0-9]+$ ]] || return 1
+  now_epoch="$(date -u '+%s')"
+  if (( now_epoch < updated_epoch )); then
+    printf '0\n'
+    return 0
+  fi
+  printf '%s\n' "$(( now_epoch - updated_epoch ))"
+}
+
+format_age_seconds() {
+  local seconds="${1:-}"
+  local days hours minutes
+  [[ "${seconds}" =~ ^[0-9]+$ ]] || {
+    printf 'unknown\n'
+    return 0
+  }
+  if (( seconds < 60 )); then
+    printf '%ss\n' "${seconds}"
+    return 0
+  fi
+  minutes=$(( seconds / 60 ))
+  if (( minutes < 60 )); then
+    printf '%sm\n' "${minutes}"
+    return 0
+  fi
+  hours=$(( minutes / 60 ))
+  minutes=$(( minutes % 60 ))
+  if (( hours < 24 )); then
+    if (( minutes == 0 )); then
+      printf '%sh\n' "${hours}"
+    else
+      printf '%sh%sm\n' "${hours}" "${minutes}"
+    fi
+    return 0
+  fi
+  days=$(( hours / 24 ))
+  hours=$(( hours % 24 ))
+  if (( hours == 0 )); then
+    printf '%sd\n' "${days}"
+  else
+    printf '%sd%sh\n' "${days}" "${hours}"
+  fi
 }
 
 json_compact_files() {
@@ -227,9 +300,32 @@ PY
   (( age_sec >= stale_cutoff ))
 }
 
+compact_age_seconds() {
+  local file="${1:?file required}"
+  local updated_at
+  updated_at="$(jq -r '.updated_at // ""' "${file}")"
+  age_seconds_from_iso8601 "${updated_at}" 2>/dev/null || printf '%s\n' "-1"
+}
+
 workspace_receipt_exists() {
   local path="${1:-}"
   [[ -n "${path}" && -f "${path}" ]]
+}
+
+run_context_exists() {
+  local run_id="${1:-}"
+  local compact_path receipt_path ledger_json
+  [[ -n "${run_id}" && "${run_id}" != "unknown-run" ]] || return 1
+  compact_path="$(compact_path_for "${run_id}")"
+  if [[ -f "${compact_path}" ]]; then
+    return 0
+  fi
+  receipt_path="$(receipt_path_for "${run_id}")"
+  if [[ -f "${receipt_path}" ]]; then
+    return 0
+  fi
+  ledger_json="$(ledger_json_for_run "${run_id}" 2>/dev/null || true)"
+  [[ -n "${ledger_json}" && "${ledger_json}" != "{}" ]]
 }
 
 ledger_json_for_run() {
@@ -281,6 +377,18 @@ print_compact_status() {
   printf '  - path: %s\n' "${path}"
 }
 
+print_run_context_status() {
+  local run_id="${1:-}"
+  printf 'run context status:\n'
+  if run_context_exists "${run_id}"; then
+    printf '  - resolved: true\n'
+    printf '  - run id: %s\n' "${run_id}"
+  else
+    printf '  - resolved: false\n'
+    printf '  - reason: no-active-run-context\n'
+  fi
+}
+
 print_runtime_health_status() {
   local run_id="${1:?run_id required}"
   local out rc
@@ -291,6 +399,7 @@ print_runtime_health_status() {
   set -e
   if [[ "${rc}" -eq 124 ]]; then
     DOCTOR_FAILURE=1
+    DOCTOR_TIMEOUTS=$((DOCTOR_TIMEOUTS + 1))
     printf '  - timeout after %ss\n' "${SUMMARY_TIMEOUT_SEC}"
     return 0
   fi
@@ -319,6 +428,7 @@ print_runtime_status_surface() {
   set -e
   if [[ "${rc}" -eq 124 ]]; then
     DOCTOR_FAILURE=1
+    DOCTOR_TIMEOUTS=$((DOCTOR_TIMEOUTS + 1))
     printf '  - timeout after %ss\n' "${SUMMARY_TIMEOUT_SEC}"
     return 0
   fi
@@ -369,6 +479,57 @@ print_recent_events() {
     | .[]
     | "  - at=\(.at // "") | actor=\(.actor // "") | command=\(.command // "") | summary=\(.summary // "")"
   ' "${file}"
+}
+
+print_doctor_summary() {
+  local scope="${1:?scope required}"
+  local total_runs="${2:-0}"
+  local visible_runs="${3:-0}"
+  local stale_runs="${4:-0}"
+  local hidden_stale_runs="${5:-0}"
+  local oldest_stale_run="${6:-}"
+  local oldest_stale_age="${7:-}"
+  local longest_visible_run="${8:-}"
+  local longest_visible_age="${9:-}"
+
+  printf 'doctor summary:\n'
+  printf '  - total_runs: %s\n' "${total_runs}"
+  printf '  - visible_runs: %s\n' "${visible_runs}"
+  printf '  - stale_runs: %s\n' "${stale_runs}"
+  if [[ "${scope}" == "active" ]]; then
+    printf '  - stale_hidden_from_default: %s\n' "${hidden_stale_runs}"
+  fi
+  if [[ -n "${oldest_stale_run}" && "${oldest_stale_age}" =~ ^[0-9]+$ && "${oldest_stale_age}" -ge 0 ]]; then
+    printf '  - oldest_stale_run: %s (%s)\n' "${oldest_stale_run}" "$(format_age_seconds "${oldest_stale_age}")"
+  fi
+  if [[ -n "${longest_visible_run}" && "${longest_visible_age}" =~ ^[0-9]+$ && "${longest_visible_age}" -ge 0 ]]; then
+    printf '  - longest_visible_run: %s (%s)\n' "${longest_visible_run}" "$(format_age_seconds "${longest_visible_age}")"
+  fi
+}
+
+print_doctor_recovery_hints() {
+  local oldest_stale_run="${1:-}"
+  local longest_visible_run="${2:-}"
+  local recovery_target=""
+
+  if [[ -n "${oldest_stale_run}" ]]; then
+    recovery_target="${oldest_stale_run}"
+  elif [[ -n "${longest_visible_run}" ]]; then
+    recovery_target="${longest_visible_run}"
+  fi
+
+  if [[ -z "${recovery_target}" && "${DOCTOR_TIMEOUTS}" -eq 0 ]]; then
+    return 0
+  fi
+
+  printf 'recovery hints:\n'
+  if [[ -n "${recovery_target}" ]]; then
+    printf '  - inspect: codex-kernel-guard doctor --run %s\n' "${recovery_target}"
+    printf '  - recover: codex-kernel-guard recover-run %s\n' "${recovery_target}"
+  fi
+  if (( DOCTOR_TIMEOUTS > 0 )); then
+    printf '  - doctor surface timed out %s time(s); re-run with: codex-kernel-guard doctor --all-runs\n' "${DOCTOR_TIMEOUTS}"
+  fi
 }
 
 specialist_available() {
@@ -456,6 +617,68 @@ launch_providers_and_models() {
   printf '%s\n%s\n' "${providers_csv}" "${active_models_csv}"
 }
 
+launch_identity() {
+  local run_id="${1:?run id required}"
+  local project="${KERNEL_PROJECT:-$(basename "${ROOT_DIR}")}"
+  printf '%s@%s/launch\n' "${project}" "${run_id}"
+}
+
+build_launch_quorum_command() {
+  local run_id="${1:?run id required}"
+  local mode="${2:?mode required}"
+  local providers_csv="${3:?providers required}"
+  local purpose="${4:?purpose required}"
+  shift 4 || true
+  local command_string=""
+  printf -v command_string 'env KERNEL_RUN_ID=%q bash %q run %q %q %q' \
+    "${run_id}" "${LAUNCH_QUORUM_SCRIPT}" "${mode}" "${providers_csv}" "${purpose}"
+  local focus
+  for focus in "$@"; do
+    printf -v command_string '%s %q' "${command_string}" "${focus}"
+  done
+  printf '%s\n' "${command_string}"
+}
+
+print_codex_launch_command() {
+  local run_id="${1:?run id required}"
+  local prompt
+  prompt="$(env KERNEL_RUN_ID="${run_id}" bash "${THREAD_SCRIPT}" prompt "${run_id}")"
+  printf '%s -C %q %q\n' "$(resolve_codex_bin)" "${ROOT_DIR}" "${prompt}"
+}
+
+stop_launch_driver() {
+  local driver_pid="${1:-}"
+  [[ -n "${driver_pid}" && "${driver_pid}" =~ ^[0-9]+$ ]] || return 0
+  kill "${driver_pid}" 2>/dev/null || true
+}
+
+wait_for_run_driver_envelope() {
+  local driver_pid="${1:-}"
+  local envelope_path="${2:-}"
+  local timeout_sec="${KERNEL_LAUNCH_PRECHECK_TIMEOUT_SEC:-90}"
+  local elapsed=0
+
+  [[ -n "${driver_pid}" && "${driver_pid}" =~ ^[0-9]+$ ]] || return 1
+  [[ -n "${envelope_path}" ]] || return 1
+
+  while (( elapsed < timeout_sec )); do
+    if kill -0 "${driver_pid}" 2>/dev/null; then
+      sleep 1
+      elapsed=$((elapsed + 1))
+      continue
+    fi
+    if [[ -f "${envelope_path}" ]]; then
+      cat "${envelope_path}"
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  [[ -f "${envelope_path}" ]] && cat "${envelope_path}"
+  return 1
+}
+
 launch_validate_shape() {
   local mode="${1:?mode required}"
   local providers_csv="${2:?providers required}"
@@ -491,7 +714,9 @@ cmd_launch() {
   local purpose="${1:-launch}"
   shift || true
   local focus=("$@")
-  local mode providers_csv active_models_csv prompt run_id manifest_lane_count
+  local mode providers_csv active_models_csv run_id manifest_lane_count
+  local command_string queue_json scheduler_out envelope_json envelope_state launch_identity_value
+  local driver_pid envelope_path
 
   ensure_default_env
 
@@ -530,13 +755,65 @@ cmd_launch() {
   export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="${KERNEL_BOOTSTRAP_SUBAGENT_LABELS:-true}"
 
   KERNEL_RUN_ID="${run_id}" bash "${RECEIPT_SCRIPT}" write "${DEFAULT_LANE_COUNT}" "${providers_csv}" "${mode}" "codex-kernel-guard launch" >/dev/null
-  KERNEL_RUN_ID="${run_id}" bash "${LEDGER_SCRIPT}" record-provider codex success launch >/dev/null
-  KERNEL_RUN_ID="${run_id}" bash "${LEDGER_SCRIPT}" scheduler-state claimed "codex-kernel-guard launch" >/dev/null
   KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" update status_changed "Kernel launch prepared" >/dev/null
 
+  command_string="$(build_launch_quorum_command "${run_id}" "${mode}" "${providers_csv}" "${purpose}" "${focus[@]+"${focus[@]}"}")"
+  launch_identity_value="$(launch_identity "${run_id}")"
+  queue_json="$(
+    jq -n \
+      --arg identity "${launch_identity_value}" \
+      --arg project "${KERNEL_PROJECT}" \
+      --arg run_id "${run_id}" \
+      --arg command_string "${command_string}" \
+      --arg provider "codex" \
+      '{
+        items: [
+          {
+            identity: $identity,
+            project: $project,
+            task_key: "launch",
+            run_id: $run_id,
+            authorized: true,
+            eligible: true,
+            dispatchable: true,
+            continuity_owner: "local-primary",
+            command_string: $command_string,
+            provider: $provider
+          }
+        ]
+      }'
+  )"
+
   if [[ "${ORCH_DRY_RUN:-0}" == "1" ]]; then
-    prompt="$(env KERNEL_RUN_ID="${run_id}" bash "${THREAD_SCRIPT}" prompt "${run_id}")"
-    printf '%s -C %q %q\n' "$(resolve_codex_bin)" "${ROOT_DIR}" "${prompt}"
+    print_codex_launch_command "${run_id}"
+    return 0
+  fi
+
+  scheduler_out="$(bash "${SCHEDULER_SCRIPT}" once --queue-json "${queue_json}")"
+  if [[ "$(jq -r '(.launched | length) // 0' <<<"${scheduler_out}")" == "0" ]]; then
+    local deferred_reason
+    deferred_reason="$(jq -r '.deferred[0].deferred_reason // "kernel-launch-not-dispatched"' <<<"${scheduler_out}")"
+    KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" update status_changed "Kernel launch deferred" >/dev/null
+    die "${deferred_reason}" 1
+  fi
+  driver_pid="$(jq -r '.launched[0].claim.run_driver_pid // ""' <<<"${scheduler_out}")"
+  envelope_path="$(jq -r '.launched[0].envelope_path // .launched[0].claim.envelope_path // ""' <<<"${scheduler_out}")"
+  envelope_json="$(wait_for_run_driver_envelope "${driver_pid}" "${envelope_path}")" || {
+    stop_launch_driver "${driver_pid}"
+    KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" update status_changed "Kernel launch preflight timed out" >/dev/null
+    die "kernel-launch-preflight-timeout:${launch_identity_value}" 1
+  }
+  envelope_state="$(jq -r '.scheduler_state // ""' <<<"${envelope_json}")"
+  if [[ "${envelope_state}" != "terminal" ]]; then
+    stop_launch_driver "${driver_pid}"
+    KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" update status_changed "Kernel launch preflight failed" >/dev/null
+    jq -r '.reason // "kernel-launch-preflight-failed"' <<<"${envelope_json}" >&2
+    exit 1
+  fi
+  KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" update status_changed "Kernel launch quorum verified" >/dev/null
+
+  if ! interactive_tty_available; then
+    print_codex_launch_command "${run_id}"
     return 0
   fi
 
@@ -546,9 +823,11 @@ cmd_launch() {
 cmd_doctor() {
   local scope="active"
   local run_id=""
-  local file json line_count
+  local file json line_count total_runs stale_runs hidden_stale_runs age_seconds age_text stale_flag doctor_focus_run_id
+  local longest_visible_run="" longest_visible_age=-1 oldest_stale_run="" oldest_stale_age=-1
   ensure_default_env
   DOCTOR_FAILURE=0
+  DOCTOR_TIMEOUTS=0
 
   while (($#)); do
     case "$1" in
@@ -578,13 +857,37 @@ cmd_doctor() {
 
   printf '%s runs:\n' "${scope}"
   line_count=0
+  total_runs=0
+  stale_runs=0
+  hidden_stale_runs=0
+  doctor_focus_run_id=""
   while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
-    if [[ "${scope}" == "active" ]] && is_stale_compact "${file}"; then
+    total_runs=$((total_runs + 1))
+    stale_flag=false
+    if is_stale_compact "${file}"; then
+      stale_flag=true
+      stale_runs=$((stale_runs + 1))
+    fi
+    age_seconds="$(compact_age_seconds "${file}")"
+    age_text="$(format_age_seconds "${age_seconds}")"
+    if [[ "${stale_flag}" == "true" && "${age_seconds}" =~ ^[0-9]+$ && "${age_seconds}" -gt "${oldest_stale_age}" ]]; then
+      oldest_stale_age="${age_seconds}"
+      oldest_stale_run="$(jq -r '.run_id // ""' "${file}")"
+    fi
+    if [[ "${scope}" == "active" && "${stale_flag}" == "true" ]]; then
+      hidden_stale_runs=$((hidden_stale_runs + 1))
       continue
     fi
+    if [[ "${stale_flag}" != "true" && "${age_seconds}" =~ ^[0-9]+$ && "${age_seconds}" -gt "${longest_visible_age}" ]]; then
+      longest_visible_age="${age_seconds}"
+      longest_visible_run="$(jq -r '.run_id // ""' "${file}")"
+    fi
     json="$(jq -c '.' "${file}")"
-    printf '  - run_id=%s | project=%s | purpose=%s | tmux_session=%s | phase=%s | mode=%s | runtime=%s | next_action=%s | updated_at=%s | stale=%s | scheduler_state=%s | workspace_receipt=%s\n' \
+    if [[ -z "${doctor_focus_run_id}" ]]; then
+      doctor_focus_run_id="$(jq -r '.run_id // ""' <<<"${json}")"
+    fi
+    printf '  - run_id=%s | project=%s | purpose=%s | tmux_session=%s | phase=%s | mode=%s | runtime=%s | next_action=%s | updated_at=%s | age=%s | stale=%s | scheduler_state=%s | workspace_receipt=%s\n' \
       "$(jq -r '.run_id // ""' <<<"${json}")" \
       "$(jq -r '.project // ""' <<<"${json}")" \
       "$(jq -r '.purpose // ""' <<<"${json}")" \
@@ -594,7 +897,8 @@ cmd_doctor() {
       "$(jq -r '.runtime // "kernel"' <<<"${json}")" \
       "$(jq -r '(.next_action // [])[0] // ""' <<<"${json}")" \
       "$(jq -r '.updated_at // ""' <<<"${json}")" \
-      "$(if is_stale_compact "${file}"; then printf 'true'; else printf 'false'; fi)" \
+      "${age_text}" \
+      "${stale_flag}" \
       "$(jq -r '.scheduler_state // "unknown"' <<<"${json}")" \
       "$(if workspace_receipt_exists "$(jq -r '.workspace_receipt_path // ""' <<<"${json}")"; then printf 'true'; else printf 'false'; fi)"
     line_count=$((line_count + 1))
@@ -606,12 +910,31 @@ cmd_doctor() {
   if (( line_count == 0 )); then
     printf '  - none\n'
   fi
+  if [[ -z "${doctor_focus_run_id}" ]]; then
+    if run_context_exists "${KERNEL_RUN_ID:-}"; then
+      doctor_focus_run_id="${KERNEL_RUN_ID}"
+    else
+      doctor_focus_run_id=""
+    fi
+  fi
+  if [[ -n "${doctor_focus_run_id}" ]]; then
+    printf 'kernel run id: %s\n' "${doctor_focus_run_id}"
+  else
+    printf 'kernel run id: none\n'
+  fi
+  print_doctor_summary "${scope}" "${total_runs}" "${line_count}" "${stale_runs}" "${hidden_stale_runs}" "${oldest_stale_run}" "${oldest_stale_age}" "${longest_visible_run}" "${longest_visible_age}"
 
   print_shared_secrets_status
-  print_bootstrap_receipt_status "${KERNEL_RUN_ID:-unknown-run}"
-  print_runtime_health_status "${KERNEL_RUN_ID:-unknown-run}"
-  print_runtime_status_surface "${KERNEL_RUN_ID:-unknown-run}"
-  print_compact_status "${KERNEL_RUN_ID:-unknown-run}"
+  print_run_context_status "${doctor_focus_run_id}"
+  if [[ -n "${doctor_focus_run_id}" ]] && run_context_exists "${doctor_focus_run_id}"; then
+    print_bootstrap_receipt_status "${doctor_focus_run_id}"
+    print_runtime_health_status "${doctor_focus_run_id}"
+    print_runtime_status_surface "${doctor_focus_run_id}"
+    print_compact_status "${doctor_focus_run_id}"
+  else
+    print_runtime_status_surface
+  fi
+  print_doctor_recovery_hints "${oldest_stale_run}" "${longest_visible_run}"
   return "${DOCTOR_FAILURE}"
 }
 
@@ -622,6 +945,7 @@ cmd_doctor_run() {
 
   ensure_default_env
   DOCTOR_FAILURE=0
+  DOCTOR_TIMEOUTS=0
   compact_path="$(compact_path_for "${run_id}")"
   [[ -f "${compact_path}" ]] || die "compact artifact missing for run: ${run_id}" 1
   json="$(jq -c '.' "${compact_path}")"
@@ -636,6 +960,7 @@ cmd_doctor_run() {
   scheduler_reason="$(ledger_json_for_run "${run_id}" 2>/dev/null | jq -r '.scheduler_reason // ""' 2>/dev/null || printf '')"
   workspace_receipt_path="$(ledger_json_for_run "${run_id}" 2>/dev/null | jq -r '.workspace_receipt_path // ""' 2>/dev/null || printf '')"
 
+  printf 'kernel run id: %s\n' "${run_id}"
   printf 'doctor scope run id: %s\n' "${run_id}"
   print_static_contract_status
   print_shared_secrets_status
@@ -656,6 +981,8 @@ cmd_doctor_run() {
   printf '  - next_action: %s\n' "$(jq -r '(.next_action // [])[0] // ""' <<<"${json}")"
   printf '  - summary: %s\n' "$(jq -r '(.summary // []) | join(" || ")' <<<"${json}")"
   printf '  - updated_at: %s\n' "$(jq -r '.updated_at // ""' <<<"${json}")"
+  printf '  - updated_age: %s\n' "$(format_age_seconds "$(age_seconds_from_iso8601 "$(jq -r '.updated_at // ""' <<<"${json}")" 2>/dev/null || printf '%s\n' "-1")")"
+  printf '  - stale: %s\n' "$(if is_stale_compact "${compact_path}"; then printf 'true'; else printf 'false'; fi)"
   printf '  - scheduler_state_compact: %s\n' "${scheduler_state_compact}"
   printf '  - workspace_receipt_path_compact: %s\n' "${workspace_receipt_path_compact}"
   printf '  - phase_artifacts: %s\n' "${phase_artifacts}"
@@ -672,6 +999,7 @@ cmd_doctor_run() {
   printf '  - project: %s\n' "$(jq -r '.project // ""' <<<"${json}")"
   printf '  - purpose: %s\n' "$(jq -r '.purpose // ""' <<<"${json}")"
   print_recent_events "${run_id}"
+  print_doctor_recovery_hints "$(if is_stale_compact "${compact_path}"; then printf '%s' "${run_id}"; fi)" "${run_id}"
   return "${DOCTOR_FAILURE}"
 }
 
@@ -686,7 +1014,7 @@ cmd_attach_context() {
   local run_id="${1:-}"
   local reference_path="${2:-}"
   local label="${3:-}"
-  local compact_path kind default_label issue_number existing_path existing_kind existing_label
+  local compact_path kind default_label issue_number post_id existing_path existing_kind existing_label
   [[ -n "${run_id}" ]] || die "attach-context requires <run_id> <reference_path> [label]" 2
   [[ -n "${reference_path}" ]] || die "attach-context requires <run_id> <reference_path> [label]" 2
   [[ -f "${reference_path}" ]] || die "context reference not found: ${reference_path}" 1
@@ -697,9 +1025,12 @@ cmd_attach_context() {
 
   kind="$(jq -r '.kind // "external-reference"' "${reference_path}" 2>/dev/null || printf 'external-reference')"
   issue_number="$(jq -r '.issue_number // ""' "${reference_path}" 2>/dev/null || printf '')"
+  post_id="$(jq -r '.post_id // ""' "${reference_path}" 2>/dev/null || printf '')"
   default_label="${kind}"
   if [[ -n "${issue_number}" ]]; then
     default_label="${default_label} #${issue_number}"
+  elif [[ -n "${post_id}" ]]; then
+    default_label="${default_label} #${post_id}"
   fi
   if [[ -z "${label}" ]]; then
     label="${default_label}"
@@ -785,6 +1116,11 @@ cmd_adopt_run() {
   exec bash "${ADOPT_SCRIPT}" adopt "${target}" "${purpose}"
 }
 
+cmd_memory_query() {
+  ensure_default_env
+  exec bash "${MEMORY_QUERY_SCRIPT}" search "$@"
+}
+
 main() {
   local cmd="${1:-help}"
   shift || true
@@ -800,6 +1136,9 @@ main() {
       ;;
     attach-context)
       cmd_attach_context "$@"
+      ;;
+    memory-query)
+      cmd_memory_query "$@"
       ;;
     phase-check)
       cmd_phase_check "$@"

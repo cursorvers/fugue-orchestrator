@@ -150,6 +150,185 @@ verify_rollback_case="false"
 plan_only="$(normalize_bool "${CANARY_PLAN_ONLY:-false}")"
 primary_handoff_target="kernel"
 rollback_handoff_target="fugue-bridge"
+canary_started_epoch="$(date -u '+%s')"
+report_dir="${CANARY_REPORT_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fugue-orchestrator-canary}"
+report_json="${report_dir}/canary-report.json"
+report_md="${report_dir}/canary-report.md"
+case_results_file="${report_dir}/case-results.jsonl"
+progress_file="${report_dir}/progress-events.jsonl"
+mkdir -p "${report_dir}"
+: >"${case_results_file}"
+: >"${progress_file}"
+
+record_case_result() {
+  local case_name="$1"
+  local status="$2"
+  local reason="$3"
+  local requested_main="$4"
+  local expected_main="$5"
+  local expected_assist="$6"
+  local expected_profile="$7"
+  local expected_runner="$8"
+  local expected_handoff_target="$9"
+  local expected_mode_source="${10}"
+  local expected_task_size_tier="${11}"
+  local actual_main="${12}"
+  local actual_assist="${13}"
+  local actual_profile="${14}"
+  local actual_runner="${15}"
+  local actual_lanes="${16}"
+  local actual_handoff_target="${17}"
+  local actual_mode_source="${18}"
+  local actual_task_size_tier="${19}"
+  local issue_number="${20}"
+
+  jq -cn \
+    --arg case_name "${case_name}" \
+    --arg status "${status}" \
+    --arg reason "${reason}" \
+    --arg requested_main "${requested_main}" \
+    --arg expected_main "${expected_main}" \
+    --arg expected_assist "${expected_assist}" \
+    --arg expected_profile "${expected_profile}" \
+    --arg expected_runner "${expected_runner}" \
+    --arg expected_handoff_target "${expected_handoff_target}" \
+    --arg expected_mode_source "${expected_mode_source}" \
+    --arg expected_task_size_tier "${expected_task_size_tier}" \
+    --arg actual_main "${actual_main}" \
+    --arg actual_assist "${actual_assist}" \
+    --arg actual_profile "${actual_profile}" \
+    --arg actual_runner "${actual_runner}" \
+    --arg actual_lanes "${actual_lanes}" \
+    --arg actual_handoff_target "${actual_handoff_target}" \
+    --arg actual_mode_source "${actual_mode_source}" \
+    --arg actual_task_size_tier "${actual_task_size_tier}" \
+    --arg issue_number "${issue_number}" \
+    '{
+      case: $case_name,
+      status: $status,
+      reason: $reason,
+      requested_main: $requested_main,
+      expected: {
+        main: $expected_main,
+        assist: $expected_assist,
+        profile: $expected_profile,
+        runner: $expected_runner,
+        handoff_target: $expected_handoff_target,
+        multi_agent_mode_source: $expected_mode_source,
+        task_size_tier: $expected_task_size_tier
+      },
+      actual: {
+        main: $actual_main,
+        assist: $actual_assist,
+        profile: $actual_profile,
+        runner: $actual_runner,
+        lanes: $actual_lanes,
+        handoff_target: $actual_handoff_target,
+        multi_agent_mode_source: $actual_mode_source,
+        task_size_tier: $actual_task_size_tier
+      },
+      issue_number: (if $issue_number == "" then null else ($issue_number | tonumber) end)
+    }' >>"${case_results_file}"
+}
+
+record_canary_progress() {
+  local phase="$1"
+  local detail="$2"
+  local status="${3:-running}"
+  jq -cn \
+    --arg at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    --arg phase "${phase}" \
+    --arg detail "${detail}" \
+    --arg status "${status}" \
+    '{
+      at: $at,
+      phase: $phase,
+      detail: $detail,
+      status: $status
+    }' >>"${progress_file}"
+  printf 'Canary progress [%s] %s\n' "${phase}" "${detail}" >&2
+}
+
+write_canary_report() {
+  local final_status="$1"
+  local elapsed_seconds
+  elapsed_seconds="$(( $(date -u '+%s') - canary_started_epoch ))"
+
+  jq -n \
+    --arg generated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    --arg repo "${repo}" \
+    --arg canary_mode "${canary_mode}" \
+    --arg final_status "${final_status}" \
+    --arg default_main_provider "${default_main_provider:-}" \
+    --arg canary_alternate_main "${canary_alternate_main:-}" \
+    --arg primary_handoff_target "${primary_handoff_target:-}" \
+    --arg rollback_handoff_target "${rollback_handoff_target:-}" \
+    --arg github_run_id "${GITHUB_RUN_ID:-}" \
+    --arg github_ref_name "${GITHUB_REF_NAME:-}" \
+    --arg report_dir "${report_dir}" \
+    --argjson plan_only "$( [[ "${plan_only}" == "true" ]] && printf 'true' || printf 'false' )" \
+    --argjson run_force_case "$( [[ "${run_force_case}" == "true" ]] && printf 'true' || printf 'false' )" \
+    --argjson verify_rollback_case "$( [[ "${verify_rollback_case}" == "true" ]] && printf 'true' || printf 'false' )" \
+    --argjson failures "${failures}" \
+    --argjson elapsed_seconds "${elapsed_seconds}" \
+    --slurpfile cases "${case_results_file}" \
+    --slurpfile progress "${progress_file}" \
+    '{
+      version: 1,
+      generated_at: $generated_at,
+      repository: $repo,
+      canary_mode: $canary_mode,
+      final_status: $final_status,
+      plan_only: $plan_only,
+      run_force_case: $run_force_case,
+      verify_rollback_case: $verify_rollback_case,
+      failures: $failures,
+      elapsed_seconds: $elapsed_seconds,
+      default_main_provider: $default_main_provider,
+      alternate_main_provider: $canary_alternate_main,
+      primary_handoff_target: $primary_handoff_target,
+      rollback_handoff_target: $rollback_handoff_target,
+      github_run_id: (if $github_run_id == "" then null else $github_run_id end),
+      github_ref_name: (if $github_ref_name == "" then null else $github_ref_name end),
+      report_dir: $report_dir,
+      progress: ($progress // []),
+      cases: ($cases // [])
+    }' >"${report_json}"
+
+  {
+    echo "## Fugue Orchestrator Canary"
+    echo ""
+    echo "- Status: ${final_status}"
+    echo "- Repository: ${repo}"
+    echo "- Mode: ${canary_mode}"
+    echo "- Plan only: ${plan_only}"
+    echo "- Failures: ${failures}"
+    echo "- Elapsed seconds: ${elapsed_seconds}"
+    echo "- Default main: ${default_main_provider}"
+    echo "- Alternate main: ${canary_alternate_main}"
+    echo ""
+    echo "### Progress"
+    jq -r '
+      (.progress // [])
+      | if length == 0 then
+          "- none"
+        else
+          .[] | "- [\(.status)] \(.phase): \(.detail) (\(.at))"
+        end
+    ' "${report_json}"
+    echo ""
+    echo "| Case | Status | Reason | Expected Main | Actual Main | Expected Runner | Actual Runner | Issue |"
+    echo "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    jq -r '
+      .cases[]
+      | "| \(.case) | \(.status) | \(.reason) | \(.expected.main // "") | \(.actual.main // "") | \(.expected.runner // "") | \(.actual.runner // "") | \(.issue_number // "-") |"
+    ' "${report_json}"
+  } >"${report_md}"
+
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    cat "${report_md}" >>"${GITHUB_STEP_SUMMARY}"
+  fi
+}
 
 claude_state="$(lower_trim "$(gh_var_default "${repo}" "${CLAUDE_RATE_LIMIT_STATE:-}" "FUGUE_CLAUDE_RATE_LIMIT_STATE" "ok")")"
 canary_mode="$(lower_trim "${CANARY_MODE_INPUT:-full}")"
@@ -260,6 +439,7 @@ if [[ "${plan_only}" != "true" ]]; then
     exit 0
   fi
 fi
+record_canary_progress "bootstrap" "inputs normalized for mode=${canary_mode}, plan_only=${plan_only}" "ok"
 
 # --- Runner availability check ---
 
@@ -298,6 +478,7 @@ fi
 if (( online_count > 0 )); then
   self_hosted_online="true"
 fi
+record_canary_progress "runner-probe" "self_hosted_online=${self_hosted_online}, online_count=${online_count}, offline_policy=${subscription_offline_policy}" "ok"
 
 # --- Policy resolution (regular case) ---
 
@@ -306,7 +487,7 @@ eval "$(
     --main "${default_main_provider}" \
     --assist "claude" \
     --default-main "${default_main_provider}" \
-    --default-assist "claude" \
+    --default-assist "none" \
     --claude-state "${claude_state}" \
     --force-claude "false" \
     --assist-policy "${main_assist_policy}" \
@@ -346,7 +527,7 @@ eval "$(
     --main "${canary_alternate_main}" \
     --assist "claude" \
     --default-main "${default_main_provider}" \
-    --default-assist "claude" \
+    --default-assist "none" \
     --claude-state "${claude_state}" \
     --force-claude "${canary_alternate_force}" \
     --assist-policy "${main_assist_policy}" \
@@ -440,6 +621,7 @@ if [[ "${primary_handoff_target}" == "fugue-bridge" && "${verify_rollback_case}"
   expected_force_mode_source="${expected_rollback_mode_source}"
   expected_force_task_size_tier="${expected_rollback_task_size_tier}"
 fi
+record_canary_progress "policy-resolution" "regular=${expected_regular_main}/${expected_regular_profile}, alternate=${expected_force_main}/${expected_force_profile}, rollback_enabled=${verify_rollback_case}" "ok"
 
 print_plan_case() {
   local case_name="$1"
@@ -475,13 +657,21 @@ print_plan_case() {
 }
 
 if [[ "${plan_only}" == "true" ]]; then
-  print_plan_case "regular" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}"
+  regular_plan_case="$(print_plan_case "regular" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}")"
+  printf '%s\n' "${regular_plan_case}"
+  record_case_result "regular" "planned" "plan-only" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" ""
   if [[ "${run_force_case}" == "true" ]]; then
-    print_plan_case "alternate" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}"
+    force_plan_case="$(print_plan_case "alternate" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}")"
+    printf '%s\n' "${force_plan_case}"
+    record_case_result "alternate" "planned" "plan-only" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" ""
   fi
   if [[ "${verify_rollback_case}" == "true" ]]; then
-    print_plan_case "rollback" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}"
+    rollback_plan_case="$(print_plan_case "rollback" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}")"
+    printf '%s\n' "${rollback_plan_case}"
+    record_case_result "rollback" "planned" "plan-only" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" ""
   fi
+  record_canary_progress "plan-only" "resolved planned cases and wrote report" "ok"
+  write_canary_report "planned"
   exit 0
 fi
 
@@ -540,6 +730,7 @@ create_issue() {
   fi
   echo "Canary: dispatching tutti caller for issue #${issue_num} handoff=${handoff_target}" >&2
   GH_TOKEN="${gh_ops_token}" gh_timeout_cmd 30s "${run_cmd[@]}" >/dev/null
+  record_canary_progress "dispatch" "issue=${issue_num}, requested_main=${orch_provider}, handoff=${handoff_target}" "ok"
   echo "${issue_num}"
 }
 
@@ -735,6 +926,9 @@ if wait "${regular_wait_pid}"; then
   regular_pair="$(tail -n1 "${regular_pair_file}" | tr -d '\r')"
   regular_wait_ok="true"
   echo "Canary: regular issue #${regular_issue} resolved -> ${regular_pair}"
+  record_canary_progress "case-regular-wait" "issue=${regular_issue}, resolved=${regular_pair}" "ok"
+else
+  record_canary_progress "case-regular-wait" "issue=${regular_issue}, timeout-no-integrated-review" "failed"
 fi
 
 force_pair=""
@@ -745,6 +939,9 @@ elif wait "${force_wait_pid}"; then
   force_pair="$(tail -n1 "${force_pair_file}" | tr -d '\r')"
   force_wait_ok="true"
   echo "Canary: alternate issue #${force_issue} resolved -> ${force_pair}"
+  record_canary_progress "case-alternate-wait" "issue=${force_issue}, resolved=${force_pair}" "ok"
+else
+  record_canary_progress "case-alternate-wait" "issue=${force_issue}, timeout-no-integrated-review" "failed"
 fi
 
 rollback_pair=""
@@ -755,6 +952,9 @@ elif wait "${rollback_wait_pid}"; then
   rollback_pair="$(tail -n1 "${rollback_pair_file}" | tr -d '\r')"
   rollback_wait_ok="true"
   echo "Canary: rollback issue #${rollback_issue} resolved -> ${rollback_pair}"
+  record_canary_progress "case-rollback-wait" "issue=${rollback_issue}, resolved=${rollback_pair}" "ok"
+else
+  record_canary_progress "case-rollback-wait" "issue=${rollback_issue}, timeout-no-integrated-review" "failed"
 fi
 
 # --- Verify regular case ---
@@ -799,12 +999,15 @@ if [[ "${regular_wait_ok}" == "true" && -n "${regular_pair}" ]]; then
   fi
   if [[ "${regular_ok}" == "true" ]]; then
     conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "true" "regular" "ok"
+    record_case_result "regular" "passed" "ok" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "${regular_issue}"
   else
     conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "false" "regular" "${regular_reason}"
+    record_case_result "regular" "failed" "${regular_reason}" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "${regular_main}" "${regular_assist}" "${regular_profile}" "${regular_runner}" "${regular_lanes}" "${regular_handoff_target}" "${regular_mode_source}" "${regular_task_size_tier}" "${regular_issue}"
     failures="$((failures + 1))"
   fi
 else
   conclude_issue "${regular_issue}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" "false" "regular" "timeout-no-integrated-review"
+  record_case_result "regular" "failed" "timeout-no-integrated-review" "${default_main_provider}" "${expected_regular_main}" "${expected_regular_assist_effective}" "${expected_regular_profile}" "${expected_regular_runner}" "${expected_regular_handoff_target}" "${expected_regular_mode_source}" "${expected_regular_task_size_tier}" "" "" "" "" "" "" "" "" "${regular_issue}"
   failures="$((failures + 1))"
 fi
 
@@ -852,12 +1055,15 @@ elif [[ "${force_wait_ok}" == "true" && -n "${force_pair}" ]]; then
   fi
   if [[ "${force_ok}" == "true" ]]; then
     conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "true" "force" "ok"
+    record_case_result "alternate" "passed" "ok" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "${force_issue}"
   else
     conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "false" "force" "${force_reason}"
+    record_case_result "alternate" "failed" "${force_reason}" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "${force_main}" "${force_assist}" "${force_profile}" "${force_runner}" "${force_lanes}" "${force_handoff_target}" "${force_mode_source}" "${force_task_size_tier}" "${force_issue}"
     failures="$((failures + 1))"
   fi
 else
   conclude_issue "${force_issue}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" "false" "force" "timeout-no-integrated-review"
+  record_case_result "alternate" "failed" "timeout-no-integrated-review" "${canary_alternate_main}" "${expected_force_main}" "${expected_force_assist_effective}" "${expected_force_profile}" "${expected_force_runner}" "${expected_force_handoff_target}" "${expected_force_mode_source}" "${expected_force_task_size_tier}" "" "" "" "" "" "" "" "" "${force_issue}"
   failures="$((failures + 1))"
 fi
 
@@ -911,18 +1117,23 @@ elif [[ "${rollback_wait_ok}" == "true" && -n "${rollback_pair}" ]]; then
   fi
   if [[ "${rollback_ok}" == "true" ]]; then
     conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "true" "rollback" "ok"
+    record_case_result "rollback" "passed" "ok" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "${rollback_issue}"
   else
     conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "false" "rollback" "${rollback_reason}"
+    record_case_result "rollback" "failed" "${rollback_reason}" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "${rollback_main}" "${rollback_assist}" "${rollback_profile}" "${rollback_runner}" "${rollback_lanes}" "${rollback_handoff_target_actual}" "${rollback_mode_source_actual}" "${rollback_task_size_tier_actual}" "${rollback_issue}"
     failures="$((failures + 1))"
   fi
 else
   conclude_issue "${rollback_issue}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" "false" "rollback" "timeout-no-integrated-review"
+  record_case_result "rollback" "failed" "timeout-no-integrated-review" "${legacy_main_provider}" "${expected_rollback_main}" "${expected_rollback_assist_effective}" "${expected_rollback_profile}" "${expected_rollback_runner}" "${expected_rollback_handoff_target}" "${expected_rollback_mode_source}" "${expected_rollback_task_size_tier}" "" "" "" "" "" "" "" "" "${rollback_issue}"
   failures="$((failures + 1))"
 fi
 
 # --- Final result ---
 
 if [[ "${failures}" -gt 0 ]]; then
+  record_canary_progress "finalize" "failures=${failures}" "failed"
+  write_canary_report "failed"
   echo "Canary failed: ${failures} case(s)"
   exit 1
 fi
@@ -933,7 +1144,11 @@ if [[ "${verify_rollback_case}" == "true" ]]; then
 fi
 
 if [[ "${run_force_case}" == "true" ]]; then
+  record_canary_progress "finalize" "all cases passed (alternate included)" "ok"
+  write_canary_report "passed"
   echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner},handoff=${expected_regular_handoff_target}), alternate(main=${expected_force_main},assist_effective=${expected_force_assist_effective},profile=${expected_force_profile},runner=${expected_force_runner},handoff=${expected_force_handoff_target}), ${rollback_summary}, default_main=${default_main_provider}, alternate_main=${canary_alternate_main}, strict_expected=${strict_expected}"
 else
+  record_canary_progress "finalize" "all required cases passed (alternate skipped)" "ok"
+  write_canary_report "passed"
   echo "Canary passed (${canary_mode}): regular(main=${expected_regular_main},assist_effective=${expected_regular_assist_effective},profile=${expected_regular_profile},runner=${expected_regular_runner},handoff=${expected_regular_handoff_target}), alternate=skipped, ${rollback_summary}, default_main=${default_main_provider}, strict_expected=${strict_expected}"
 fi
