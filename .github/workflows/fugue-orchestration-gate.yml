@@ -223,6 +223,7 @@ permissions:
 
 jobs:
   fast-gate:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_x_auto_prod_verify }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -527,31 +528,32 @@ jobs:
             --mode smoke \
             --run-dir "${RUN_ROOT}/schema"
 
-      - name: Run linked-system execute path
+      - name: Run x-auto execute path
         run: |
           set -euo pipefail
-          POST_ISSUE_COMMENT=false \
+          FUGUE_ISSUE_NUMBER="${{ inputs.x_auto_issue_number }}" \
+          FUGUE_ISSUE_TITLE="x-auto prod verify" \
+          FUGUE_ISSUE_URL="https://github.com/${{ github.repository }}/issues/${{ inputs.x_auto_issue_number }}" \
           X_AUTO_DRAFT_GENERATOR_MODE=registry-local \
           X_AUTO_DRAFT_LOCAL_GENERATE_MODE=heuristic \
           X_AUTO_WRITE_NOTION_ON_EXECUTE=false \
           X_AUTO_DRAFT_REGISTRY_SEED_INPUT="${{ steps.prep.outputs.seed_file }}" \
           X_AUTO_QUOTED_AUTHOR_SYNC_WRITE_MODE=required \
-          scripts/local/run-linked-systems.sh \
-            --issue "${{ inputs.x_auto_issue_number }}" \
-            --repo "${{ github.repository }}" \
+          scripts/local/integrations/xauto-draft-only.sh \
             --mode execute \
-            --systems x-auto-draft-only \
-            --max-parallel 2 \
-            --out-dir "${RUN_ROOT}"
+            --generator-mode registry-local \
+            --generate-mode heuristic \
+            --registry-seed-input "${{ steps.prep.outputs.seed_file }}" \
+            --run-dir "${RUN_ROOT}/x-auto-draft-only"
 
       - name: Verify linked run artifacts
         id: artifact_check
         run: |
           set -euo pipefail
-          run_dir="$(ls -dt "${RUN_ROOT}"/linked-issue-"${{ inputs.x_auto_issue_number }}"-* | head -n1)"
+          run_dir="${RUN_ROOT}/x-auto-draft-only"
           test -n "${run_dir}"
-          grep -Fq 'quoted_author_sync_status=applied' "${run_dir}/systems/x-auto-draft-only/xauto-draft-only.meta"
-          grep -Fq 'bridge_status=applied' "${run_dir}/systems/x-auto-draft-only/quoted-author-sync/xauto-quoted-author-sync.meta"
+          grep -Fq 'quoted_author_sync_status=applied' "${run_dir}/xauto-draft-only.meta"
+          grep -Fq 'bridge_status=applied' "${run_dir}/quoted-author-sync/xauto-quoted-author-sync.meta"
           echo "run_dir=${run_dir}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify live quote event
