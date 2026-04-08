@@ -104,6 +104,7 @@ done
 snapshot_path="$(bash "${STATUS_SCRIPT}" path)"
 [[ -f "${snapshot_path}" ]]
 grep -Fq '"retrying"' "${snapshot_path}"
-[[ "$(jq -r '.summary.blocked' "${snapshot_path}")" == "1" ]]
+[[ "$(jq -r '.summary.blocked' "${snapshot_path}")" == "2" ]]
+[[ "$(jq -r '.blocked | map(.identity) | sort | join(",")' "${snapshot_path}")" == "plain#13,unauthorized#15" ]]
 
 echo "kernel scheduler check passed"
