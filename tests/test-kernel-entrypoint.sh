@@ -11,6 +11,7 @@ mkdir -p "${HOME}/bin" "${TMP_DIR}/repo" "${TMP_DIR}/state" "${TMP_DIR}/compact"
 
 PROMPT_LOG="${TMP_DIR}/prompt.log"
 FOUR_PANE_LOG="${TMP_DIR}/4pane.log"
+GUARD_LOG="${TMP_DIR}/guard.log"
 TMUX_STATE_FILE="${TMP_DIR}/tmux-sessions.txt"
 touch "${TMUX_STATE_FILE}"
 
@@ -75,6 +76,14 @@ printf '%s\n' "$*" >> "${FOUR_PANE_LOG}"
 EOF
 chmod +x "${stub_4pane}"
 
+stub_guard="${TMP_DIR}/stub-guard.sh"
+cat > "${stub_guard}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${GUARD_LOG}"
+EOF
+chmod +x "${stub_guard}"
+
 cat > "${TMP_DIR}/state/4pane-active.json" <<'EOF'
 {"run_id":"run-active","tmux_session":"kernel__active"}
 EOF
@@ -82,7 +91,7 @@ cat > "${TMP_DIR}/workspace-receipt-active.json" <<'EOF'
 {"ok":true}
 EOF
 cat > "${TMP_DIR}/compact/run-active.json" <<'EOF'
-{"run_id":"run-active","tmux_session":"kernel__active","updated_at":"2026-03-31T01:00:00Z","workspace_receipt_path":"WORKSPACE_ACTIVE_PLACEHOLDER"}
+{"run_id":"run-active","tmux_session":"kernel__active","updated_at":"2099-03-31T01:00:00Z","workspace_receipt_path":"WORKSPACE_ACTIVE_PLACEHOLDER"}
 EOF
 python3 - "${TMP_DIR}/compact/run-active.json" "${TMP_DIR}/workspace-receipt-active.json" <<'PY'
 import pathlib
@@ -102,8 +111,10 @@ export TMUX_STATE_FILE
 export ROOT_DIR
 export KERNEL_CODEX_PROMPT_LAUNCH_BIN="${HOME}/bin/codex-prompt-launch"
 export KERNEL_4PANE_LAUNCH_SCRIPT="${stub_4pane}"
+export KERNEL_GUARD_BIN="${stub_guard}"
 export KERNEL_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_COMPACT_DIR="${TMP_DIR}/compact"
+export GUARD_LOG
 
 (
   cd "${ROOT_DIR}"
@@ -140,7 +151,7 @@ cat > "${TMP_DIR}/workspace-receipt.json" <<'EOF'
 {"ok":true}
 EOF
 cat > "${TMP_DIR}/compact/run-latest.json" <<'EOF'
-{"run_id":"run-latest","tmux_session":"kernel__latest","updated_at":"2026-03-31T02:00:00Z","workspace_receipt_path":"WORKSPACE_RECEIPT_PLACEHOLDER"}
+{"run_id":"run-latest","tmux_session":"kernel__latest","updated_at":"2099-03-31T02:00:00Z","workspace_receipt_path":"WORKSPACE_RECEIPT_PLACEHOLDER"}
 EOF
 python3 - "${TMP_DIR}/compact/run-latest.json" "${TMP_DIR}/workspace-receipt.json" <<'PY'
 import pathlib
@@ -183,5 +194,12 @@ export TMUX=/tmp/tmux-sock
 )
 grep -Fq 'kernel inside-tmux' "${PROMPT_LOG}"
 unset TMUX
+
+: > "${GUARD_LOG}"
+(
+  cd "${ROOT_DIR}"
+  bash "${SCRIPT}" memory-query auth rollback
+)
+grep -Fq 'memory-query auth rollback' "${GUARD_LOG}"
 
 echo "kernel entrypoint check passed"

@@ -65,4 +65,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
+          CANARY_REPORT_DIR: ${{ runner.temp }}/fugue-orchestrator-canary
         run: bash scripts/harness/run-canary.sh
+
+      - name: Upload canary report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fugue-orchestrator-canary-report
+          path: ${{ runner.temp }}/fugue-orchestrator-canary
+          if-no-files-found: warn

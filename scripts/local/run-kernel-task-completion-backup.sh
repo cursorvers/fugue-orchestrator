@@ -13,6 +13,9 @@ GHA_DISPATCH_MODE="${GHA_DISPATCH_MODE:-auto}"
 RECENT_DAYS="${RECENT_DAYS:-7}"
 NO_GHA="${NO_GHA:-false}"
 DRY_RUN="${DRY_RUN:-false}"
+TERMINAL_COMPLETION_DEDUPE_SEC=300
+PHASE_COMPLETION_DEDUPE_SEC=900
+PROGRESS_SAVE_DEDUPE_SEC=900
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required" >&2
@@ -75,8 +78,91 @@ fallback_orchestration_compliance() {
   esac
 }
 
+completion_journal_path() {
+  printf '%s/task-completion-journal.jsonl\n' "${STATE_ROOT}"
+}
+
+source_dedupe_window_sec() {
+  case "${1:-}" in
+    kernel-run-complete|fugue-run-complete)
+      printf '%s\n' "${TERMINAL_COMPLETION_DEDUPE_SEC}"
+      ;;
+    kernel-phase-complete|fugue-phase-complete)
+      printf '%s\n' "${PHASE_COMPLETION_DEDUPE_SEC}"
+      ;;
+    kernel-progress-save|fugue-progress-save)
+      printf '%s\n' "${PROGRESS_SAVE_DEDUPE_SEC}"
+      ;;
+    *)
+      printf '0\n'
+      ;;
+  esac
+}
+
+recent_explicit_record_exists() {
+  local journal_path="${1:-}"
+  local session_id="${2:-}"
+  local source_name="${3:-}"
+  local summary_text="${4:-}"
+  local title_text="${5:-}"
+  local completed_value="${6:-}"
+  local cooldown
+  [[ -f "${journal_path}" ]] || return 1
+  cooldown="$(source_dedupe_window_sec "${source_name}")"
+  [[ "${cooldown}" =~ ^[0-9]+$ ]] || cooldown=0
+  (( cooldown > 0 )) || return 1
+  python3 - "${journal_path}" "${session_id}" "${source_name}" "${summary_text}" "${title_text}" "${completed_value}" "${cooldown}" <<'PY'
+import datetime
+import json
+import sys
+
+journal_path, session_id, source_name, summary_text, title_text, completed_value, cooldown_raw = sys.argv[1:]
+cooldown = int(cooldown_raw)
+
+def parse_ts(value: str):
+    if not value:
+        return None
+    try:
+        return int(datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp())
+    except ValueError:
+        return None
+
+current_ts = parse_ts(completed_value)
+if current_ts is None:
+    current_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+terminal_sources = {"kernel-run-complete", "fugue-run-complete"}
+
+latest = None
+with open(journal_path, "r", encoding="utf-8") as fh:
+    for raw in fh:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            item = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if item.get("session_id") != session_id or item.get("source") != source_name:
+            continue
+        if source_name not in terminal_sources and (
+            item.get("summary_text") != summary_text or item.get("title") != title_text
+        ):
+            continue
+        ts = parse_ts(item.get("completed_at", ""))
+        if ts is None:
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+
+if latest is not None and current_ts - latest < cooldown:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 fallback_write_record() {
-  local record_id dispatch_token mirror_path receipt_path payload_path payload_b64 observed_models_json orchestration_compliance
+  local record_id dispatch_token mirror_path receipt_path payload_path observed_models_json orchestration_compliance
   local completed_value="${completed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
   record_id="$(fallback_record_id)"
@@ -87,9 +173,9 @@ fallback_write_record() {
   observed_models_json="$(fallback_observed_models_json "${session_id}")"
   orchestration_compliance="$(fallback_orchestration_compliance)"
 
-  python3 - "$record_id" "$assistant" "$source_name" "$session_id" "$completed_value" "$summary" "$cwd" "$title" "$GHA_REPO" "$GHA_WORKFLOW" "$dispatch_token" "$mirror_path" "$receipt_path" "$observed_models_json" "$payload_path" "$orchestration_compliance" <<'PY'
+  python3 - "$record_id" "$assistant" "$source_name" "$session_id" "$completed_value" "$summary" "$cwd" "$title" "$GHA_REPO" "$GHA_WORKFLOW" "$dispatch_token" "$mirror_path" "$receipt_path" "$observed_models_json" "$payload_path" "$orchestration_compliance" "$project_os_ticket_id" "$acceptance_text" "$authority_scope" <<'PY'
 import json, sys
-record_id, assistant, source_name, session_id, completed_at, summary, cwd, title, gha_repo, gha_workflow, token, mirror_path, receipt_path, observed_models_json, payload_path, orchestration_compliance = sys.argv[1:]
+record_id, assistant, source_name, session_id, completed_at, summary, cwd, title, gha_repo, gha_workflow, token, mirror_path, receipt_path, observed_models_json, payload_path, orchestration_compliance, project_os_ticket_id, acceptance_text, authority_scope = sys.argv[1:]
 payload = {
     "record_id": record_id,
     "assistant": assistant,
@@ -105,6 +191,9 @@ payload = {
     "gha_mirror_path": mirror_path,
     "gha_receipt_path": receipt_path,
     "orchestration_compliance": orchestration_compliance,
+    "project_os_ticket_id": project_os_ticket_id,
+    "project_os_acceptance_text": acceptance_text,
+    "project_os_authority_scope": authority_scope,
     "observed_models": json.loads(observed_models_json),
 }
 with open(payload_path, "w", encoding="utf-8") as fh:
@@ -156,6 +245,9 @@ summary=""
 cwd="${REPO_ROOT}"
 title=""
 completed_at=""
+project_os_ticket_id="${KERNEL_PROJECT_OS_TICKET_ID:-}"
+acceptance_text="${KERNEL_PROJECT_OS_ACCEPTANCE:-}"
+authority_scope="${KERNEL_PROJECT_OS_AUTHORITY_SCOPE:-}"
 lock_dir="${STATE_ROOT}/task-completion-backup.lock"
 
 usage() {
@@ -171,6 +263,11 @@ Options:
   --cwd <path>           Working directory metadata for explicit records
   --title <text>         Title metadata for explicit records
   --completed-at <iso>   Completion timestamp override
+  --project-os-ticket-id <id>
+                         Optional Project OS ticket id for bound kernel records
+  --acceptance <text>    Optional Project OS acceptance text for bound kernel records
+  --authority-scope <scope>
+                         Optional Project OS authority scope for bound kernel records
   --no-gha               Skip GitHub Actions dispatch
   --dry-run              Mark dispatch success without calling GitHub
   -h, --help
@@ -206,6 +303,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --completed-at)
       completed_at="${2:-}"
+      shift 2
+      ;;
+    --project-os-ticket-id)
+      project_os_ticket_id="${2:-}"
+      shift 2
+      ;;
+    --acceptance)
+      acceptance_text="${2:-}"
+      shift 2
+      ;;
+    --authority-scope)
+      authority_scope="${2:-}"
       shift 2
       ;;
     --no-gha)
@@ -259,6 +368,10 @@ if [[ "${mode}" == "record" ]]; then
     echo "explicit record mode requires --assistant, --source, --session-id, and --summary" >&2
     exit 2
   fi
+  if recent_explicit_record_exists "$(completion_journal_path)" "${session_id}" "${source_name}" "${summary}" "${title}" "${completed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; then
+    echo "task completion backup deduped for source ${source_name} session ${session_id}" >&2
+    exit 0
+  fi
   if [[ "${EXTERNAL_BACKUP_TOOL_AVAILABLE}" == "true" ]]; then
     record_args=(
       --assistant "${assistant}"
@@ -270,6 +383,15 @@ if [[ "${mode}" == "record" ]]; then
     )
     if [[ -n "${completed_at}" ]]; then
       record_args+=(--completed-at "${completed_at}")
+    fi
+    if [[ -n "${project_os_ticket_id}" ]]; then
+      record_args+=(--project-os-ticket-id "${project_os_ticket_id}")
+    fi
+    if [[ -n "${acceptance_text}" ]]; then
+      record_args+=(--acceptance "${acceptance_text}")
+    fi
+    if [[ -n "${authority_scope}" ]]; then
+      record_args+=(--authority-scope "${authority_scope}")
     fi
     python3 -m codex_kernel_guard.cli backup-record \
       "${record_args[@]}" \

@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  codex-skill-launch <skill-name> [focus text ...]
+  skill <skill-name> [focus text ...]
+
+Tip:
+  When invoked via a symlink named after a skill (for example `note-manuscript`),
+  the launcher uses that basename as the skill name automatically.
+EOF
+}
+
+resolve_codex_bin() {
+  local preferred="${CODEX_BIN:-}"
+  local candidate
+
+  if [[ -n "${preferred}" ]]; then
+    candidate="$(command -v "${preferred}" 2>/dev/null || true)"
+    if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    if [[ -x "${preferred}" ]]; then
+      printf '%s\n' "${preferred}"
+      return 0
+    fi
+  fi
+
+  candidate="$(command -v codex 2>/dev/null || true)"
+  if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_prompt_root() {
+  local repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "${repo_root}" ]]; then
+    printf '%s\n' "${repo_root}"
+    return 0
+  fi
+  printf '%s\n' "${PWD}"
+}
+
+find_skill_dir() {
+  local skill_name="${1:?skill name is required}"
+  local repo_root candidate
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+  for candidate in \
+    "${PWD}/.codex/skills/${skill_name}" \
+    "${repo_root:+${repo_root}/.codex/skills/${skill_name}}" \
+    "${repo_root:+${repo_root}/skills/${skill_name}}" \
+    "${CODEX_SKILLS_DIR:-${HOME}/.codex/skills}/${skill_name}"
+  do
+    [[ -n "${candidate}" ]] || continue
+    if [[ -f "${candidate}/SKILL.md" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+skill_name_from_argv() {
+  local invoked_as
+  invoked_as="$(basename "$0")"
+  case "${invoked_as}" in
+    codex-skill-launch|skill)
+      printf '%s\n' "${1:-}"
+      ;;
+    *)
+      printf '%s\n' "${CODEX_SKILL_NAME:-${invoked_as}}"
+      ;;
+  esac
+}
+
+codex_exec_needs_skip_git_repo_check() {
+  git -C "${1:?prompt root is required}" rev-parse --show-toplevel >/dev/null 2>&1 && return 1
+  return 0
+}
+
+main() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+
+  local inferred_skill_name skill_name skill_dir skill_md prompt_root codex_bin arguments prompt_text
+  inferred_skill_name="$(skill_name_from_argv "${1:-}")"
+  skill_name="${inferred_skill_name}"
+  if [[ "$(basename "$0")" == "codex-skill-launch" || "$(basename "$0")" == "skill" ]]; then
+    shift || true
+  fi
+  [[ -n "${skill_name}" ]] || {
+    usage >&2
+    exit 2
+  }
+
+  skill_dir="$(find_skill_dir "${skill_name}")" || {
+    echo "skill '${skill_name}' not found in the current repo skill roots or ${CODEX_SKILLS_DIR:-${HOME}/.codex/skills}" >&2
+    exit 1
+  }
+  skill_md="${skill_dir}/SKILL.md"
+  prompt_root="$(resolve_prompt_root)"
+  codex_bin="$(resolve_codex_bin)" || {
+    echo "codex executable not found in PATH" >&2
+    exit 1
+  }
+  arguments="${*:-}"
+
+  prompt_text="$(
+  SKILL_NAME="${skill_name}" SKILL_FILE="${skill_md}" SKILL_DIR="${skill_dir}" ARGUMENTS="${arguments}" python3 - <<'PY'
+from pathlib import Path
+import os
+
+skill_name = os.environ["SKILL_NAME"]
+skill_file = Path(os.environ["SKILL_FILE"])
+skill_dir = os.environ["SKILL_DIR"]
+arguments = os.environ.get("ARGUMENTS", "").strip()
+skill_text = skill_file.read_text(encoding="utf-8").rstrip()
+focus_line = arguments if arguments else "(no extra focus provided)"
+
+print(
+    f"""Use the skill `{skill_name}` for the current task.
+
+Skill root: `{skill_dir}`
+Skill file: `{skill_file}`
+Current focus: {focus_line}
+
+Follow the skill exactly. Resolve relative references from the skill root and load only the files needed.
+
+Skill contents:
+{skill_text}"""
+)
+PY
+  )"
+
+  if codex_exec_needs_skip_git_repo_check "${prompt_root}"; then
+    exec "${codex_bin}" exec -C "${prompt_root}" --skip-git-repo-check "${prompt_text}"
+  fi
+  exec "${codex_bin}" exec -C "${prompt_root}" "${prompt_text}"
+}
+
+main "$@"

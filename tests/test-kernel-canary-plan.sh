@@ -10,9 +10,16 @@ CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-caller.yml"
 TUTTI_CALLER_WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-tutti-caller.yml"
 RESOLVE_CONTEXT_SCRIPT="${ROOT_DIR}/scripts/harness/resolve-orchestration-context.sh"
 COMMENT_SCRIPT="${ROOT_DIR}/scripts/harness/generate-tutti-comment.sh"
+KERNEL_HANDOFF_SCRIPT="${ROOT_DIR}/scripts/harness/kernel-handoff.sh"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
 
 if [[ ! -x "${CANARY_SCRIPT}" ]]; then
   echo "FAIL: missing executable script ${CANARY_SCRIPT}" >&2
+  exit 1
+fi
+if [[ ! -x "${KERNEL_HANDOFF_SCRIPT}" ]]; then
+  echo "FAIL: missing executable script ${KERNEL_HANDOFF_SCRIPT}" >&2
   exit 1
 fi
 
@@ -22,6 +29,18 @@ grep -q "DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: .*'codex'" "${CANARY_WORKFLOW}" || 
 }
 grep -q "CANARY_VERIFY_ROLLBACK" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing rollback verification env" >&2
+  exit 1
+}
+grep -q "CANARY_REPORT_DIR: .*runner.temp" "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow missing report dir env" >&2
+  exit 1
+}
+grep -q "Upload canary report" "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow missing report upload step" >&2
+  exit 1
+}
+grep -q "actions/upload-artifact@v7" "${CANARY_WORKFLOW}" || {
+  echo "FAIL: canary workflow should upload report artifact" >&2
   exit 1
 }
 grep -q "CANARY_EXECUTION_MODE_OVERRIDE: .*'primary'" "${CANARY_WORKFLOW}" || {
@@ -38,6 +57,22 @@ grep -q "gh_var_default" "${CANARY_SCRIPT}" || {
 }
 grep -q 'FUGUE_CANARY_EXECUTION_MODE_OVERRIDE' "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script missing execution override hydration" >&2
+  exit 1
+}
+grep -q 'write_canary_report()' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing durable report writer" >&2
+  exit 1
+}
+grep -q 'record_canary_progress()' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing progress event recorder" >&2
+  exit 1
+}
+grep -q 'progress-events.jsonl' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing durable progress event file" >&2
+  exit 1
+}
+grep -q 'GITHUB_STEP_SUMMARY' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script should append report to GITHUB_STEP_SUMMARY when available" >&2
   exit 1
 }
 grep -q 'execution_mode_override="\${canary_execution_mode_override}"' "${CANARY_SCRIPT}" || {
@@ -94,6 +129,14 @@ if head -n 8 "${CALLER_WORKFLOW}" | grep -q 'opened'; then
 fi
 grep -q 'HAS_FUGUE}" != "true" && "${IS_VOTE_COMMAND}" != "true"' "${TASK_ROUTER_WORKFLOW}" || {
   echo "FAIL: task router should allow /vote to bypass missing fugue-task label" >&2
+  exit 1
+}
+grep -q 'kernel_handoff_script=' "${ROOT_DIR}/scripts/harness/route-task-handoff.sh" || {
+  echo "FAIL: route-task-handoff should resolve a dedicated kernel handoff adapter" >&2
+  exit 1
+}
+grep -q 'bash "\${kernel_handoff_script}" "\${kernel_args\[@\]}" >/dev/null' "${ROOT_DIR}/scripts/harness/route-task-handoff.sh" || {
+  echo "FAIL: route-task-handoff should dispatch kernel handoff through the kernel adapter" >&2
   exit 1
 }
 
@@ -220,6 +263,8 @@ plan_output="$(
   CANARY_WAIT_FAST_SLEEP_SEC="1" \
     CANARY_WAIT_SLOW_ATTEMPTS="0" \
     CANARY_WAIT_SLOW_SLEEP_SEC="1" \
+    CANARY_REPORT_DIR="${TMP_DIR}/report" \
+    GITHUB_STEP_SUMMARY="${TMP_DIR}/summary.md" \
     bash "${CANARY_SCRIPT}"
   )
 )"
@@ -260,6 +305,52 @@ rollback_task_size="$(printf '%s\n' "${plan_output}" | jq -r 'select(.case == "r
 }
 [[ "${rollback_task_size}" == "small" ]] || {
   echo "FAIL: rollback case should pin small task size tier, got ${rollback_task_size}" >&2
+  exit 1
+}
+[[ -f "${TMP_DIR}/report/canary-report.json" ]] || {
+  echo "FAIL: expected canary report json output" >&2
+  exit 1
+}
+[[ -f "${TMP_DIR}/report/canary-report.md" ]] || {
+  echo "FAIL: expected canary report markdown output" >&2
+  exit 1
+}
+[[ -f "${TMP_DIR}/report/progress-events.jsonl" ]] || {
+  echo "FAIL: expected canary progress event output" >&2
+  exit 1
+}
+report_status="$(jq -r '.final_status' "${TMP_DIR}/report/canary-report.json")"
+[[ "${report_status}" == "planned" ]] || {
+  echo "FAIL: expected planned final status in canary report, got ${report_status}" >&2
+  exit 1
+}
+report_case_count="$(jq -r '.cases | length' "${TMP_DIR}/report/canary-report.json")"
+[[ "${report_case_count}" == "3" ]] || {
+  echo "FAIL: expected 3 cases in canary report, got ${report_case_count}" >&2
+  exit 1
+}
+jq -e '.progress | length >= 4' "${TMP_DIR}/report/canary-report.json" >/dev/null || {
+  echo "FAIL: expected progress events in canary report json" >&2
+  exit 1
+}
+grep -Fq '"phase":"bootstrap"' "${TMP_DIR}/report/progress-events.jsonl" || {
+  echo "FAIL: expected bootstrap progress event in canary progress log" >&2
+  exit 1
+}
+grep -Fq '"phase":"plan-only"' "${TMP_DIR}/report/progress-events.jsonl" || {
+  echo "FAIL: expected plan-only progress event in canary progress log" >&2
+  exit 1
+}
+grep -Fq '| regular | planned | plan-only | codex |  |' "${TMP_DIR}/report/canary-report.md" || {
+  echo "FAIL: expected regular case row in canary markdown report" >&2
+  exit 1
+}
+grep -Fq '### Progress' "${TMP_DIR}/report/canary-report.md" || {
+  echo "FAIL: expected progress section in canary markdown report" >&2
+  exit 1
+}
+grep -Fq '### Progress' "${TMP_DIR}/summary.md" || {
+  echo "FAIL: expected progress section in GitHub step summary output" >&2
   exit 1
 }
 echo "PASS [plan-only-cases]"
