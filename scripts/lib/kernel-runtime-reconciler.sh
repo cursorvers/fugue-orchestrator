@@ -234,10 +234,11 @@ is_stale_claim_candidate() {
   if [[ -n "${compact_path}" ]]; then
     compact_tmux_session="$(jq -r '.tmux_session // ""' "${compact_path}" 2>/dev/null || true)"
     if [[ -n "${compact_tmux_session}" ]]; then
-      if tmux_session_exists "${compact_tmux_session}"; then
+      tmux_session_exists "${compact_tmux_session}"
+      tmux_status=$?
+      if (( tmux_status == 0 )); then
         return 1
       fi
-      tmux_status=$?
       if (( tmux_status > 1 )); then
         return 1
       fi

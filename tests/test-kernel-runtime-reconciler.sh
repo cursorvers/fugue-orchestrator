@@ -65,6 +65,21 @@ path.write_text(json.dumps(data))
 PY
 }
 
+mark_compact_stale() {
+  local compact_path="${1:?compact path required}"
+  python3 - "${compact_path}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data["updated_at"] = "2026-04-01T00:00:00Z"
+data.pop("tmux_session", None)
+path.write_text(json.dumps(data))
+PY
+}
+
 bash "${CLAIM_SCRIPT}" claim --project demo --issue-number 8 --run-id run-8 --command-string "printf later" >/dev/null
 bash "${CLAIM_SCRIPT}" set-state --identity 'demo#8' --state running --reason "started" >/dev/null
 workspace_receipt_path="$(KERNEL_RUN_ID=run-8 bash "${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh" write run-8)"
@@ -92,6 +107,7 @@ claim_json="$(bash "${CLAIM_SCRIPT}" status --identity 'demo#8')"
 bash "${CLAIM_SCRIPT}" set-state --identity 'demo#8' --state running --reason "restarted" >/dev/null
 claim_path="$(bash "${CLAIM_SCRIPT}" path --identity 'demo#8')"
 mark_claim_stale "${claim_path}"
+mark_compact_stale "${compact_path}"
 
 out="$(bash "${RECONCILER_SCRIPT}" reconcile --queue-json '{"items":[]}' --ttl-seconds 60 --archive-ttl-seconds 60)"
 released="$(jq -r '.released' <<<"${out}")"

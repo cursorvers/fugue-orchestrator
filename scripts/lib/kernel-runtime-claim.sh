@@ -5,10 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 STATE_PATHS_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 STATE_ROOT="${KERNEL_SUBSTRATE_STATE_ROOT:-$(bash "${STATE_PATHS_SCRIPT}" state-root)}"
 CLAIMS_DIR="${KERNEL_RUNTIME_CLAIMS_DIR:-${STATE_ROOT}/claims}"
 LOCK_DIR="${KERNEL_RUNTIME_CLAIMS_LOCK_DIR:-${CLAIMS_DIR}/.lock}"
 LOCK_OWNER_FILE="${LOCK_DIR}/owner.pid"
+TMUX_BIN="${TMUX_BIN:-tmux}"
 LOCK_HELD=0
 source "${SCRIPT_DIR}/kernel-lock.sh"
 
@@ -55,6 +57,21 @@ utc_timestamp() {
 
 epoch_now() {
   date -u '+%s'
+}
+
+epoch_from_iso8601() {
+  local value="${1:-}"
+  [[ -n "${value}" ]] || return 1
+  python3 - "${value}" <<'PY'
+import datetime
+import sys
+
+try:
+    dt = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ")
+except ValueError:
+    raise SystemExit(1)
+print(int(dt.replace(tzinfo=datetime.timezone.utc).timestamp()))
+PY
 }
 
 normalize_state() {
@@ -166,6 +183,90 @@ claim_status_active() {
     terminal|"") return 1 ;;
     *) return 0 ;;
   esac
+}
+
+compact_path_for_run() {
+  local run_id="${1:-}"
+  [[ -n "${run_id}" ]] || return 1
+  KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" path "${run_id}" 2>/dev/null || true
+}
+
+compact_path_for_claim() {
+  local claim_json="${1:-}"
+  local compact_path run_id workspace_receipt_path
+  compact_path="$(jq -r '.compact_artifact_path // ""' <<<"${claim_json}")"
+  if [[ -n "${compact_path}" && -f "${compact_path}" ]]; then
+    printf '%s\n' "${compact_path}"
+    return 0
+  fi
+  workspace_receipt_path="$(jq -r '.workspace_receipt_path // ""' <<<"${claim_json}")"
+  if [[ -n "${workspace_receipt_path}" && -f "${workspace_receipt_path}" ]]; then
+    compact_path="$(jq -r '.compact_artifact_path // ""' "${workspace_receipt_path}" 2>/dev/null || true)"
+    if [[ -n "${compact_path}" && -f "${compact_path}" ]]; then
+      printf '%s\n' "${compact_path}"
+      return 0
+    fi
+  fi
+  run_id="$(jq -r '.run_id // ""' <<<"${claim_json}")"
+  if [[ -n "${run_id}" ]]; then
+    compact_path="$(compact_path_for_run "${run_id}")"
+    if [[ -n "${compact_path}" && -f "${compact_path}" ]]; then
+      printf '%s\n' "${compact_path}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+compact_updated_epoch() {
+  local compact_path="${1:-}"
+  local updated_at
+  [[ -n "${compact_path}" && -f "${compact_path}" ]] || return 1
+  updated_at="$(jq -r '.updated_at // ""' "${compact_path}" 2>/dev/null || true)"
+  epoch_from_iso8601 "${updated_at}" 2>/dev/null || return 1
+}
+
+tmux_session_exists() {
+  local session_name="${1:-}"
+  [[ -n "${session_name}" ]] || return 1
+  command -v "${TMUX_BIN}" >/dev/null 2>&1 || return 2
+  "${TMUX_BIN}" has-session -t "=${session_name}" 2>/dev/null
+  return $?
+}
+
+claim_release_safe() {
+  local claim_json="${1:-}"
+  local ttl_seconds="${2:-3600}"
+  local now compact_path compact_tmux_session compact_updated tmux_status
+
+  compact_path="$(compact_path_for_claim "${claim_json}" || true)"
+  if [[ -z "${compact_path}" ]]; then
+    return 0
+  fi
+
+  compact_tmux_session="$(jq -r '.tmux_session // ""' "${compact_path}" 2>/dev/null || true)"
+  if [[ -n "${compact_tmux_session}" ]]; then
+    tmux_session_exists "${compact_tmux_session}"
+    tmux_status=$?
+    if (( tmux_status == 0 )); then
+      return 1
+    fi
+    if (( tmux_status > 1 )); then
+      return 1
+    fi
+  fi
+
+  compact_updated="$(compact_updated_epoch "${compact_path}" || true)"
+  if [[ ! "${compact_updated}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  now="$(epoch_now)"
+  if (( now - compact_updated < ttl_seconds )); then
+    return 1
+  fi
+
+  return 0
 }
 
 resolve_existing_run_id() {
@@ -570,7 +671,7 @@ cmd_rebuild() {
     if [[ "${live_pid}" == "true" ]]; then
       continue
     fi
-    if claim_status_active "${status}" && (( age >= ttl_seconds )); then
+    if claim_status_active "${status}" && (( age >= ttl_seconds )) && claim_release_safe "${claim_json}" "${ttl_seconds}"; then
       cmd_release --identity "${identity}" --reason "stale-claim-released" >/dev/null
       released=$((released + 1))
     fi
