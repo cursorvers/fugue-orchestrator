@@ -177,7 +177,7 @@ normalize_queue_json() {
         terminal: inferred_terminal,
         dispatchable: (
           if .dispatchable == null then (inferred_authorized and inferred_eligible and (inferred_terminal | not))
-          else (.dispatchable | bool_or(false))
+          else ((.dispatchable | bool_or(false)) and inferred_authorized and inferred_eligible and (inferred_terminal | not))
           end
         ),
         refresh_token: (.refresh_token // .refresh_requested_at // .updated_at // .etag // ""),
@@ -360,13 +360,14 @@ tick_once() {
 
   while IFS= read -r item_json; do
     [[ -n "${item_json}" ]] || continue
-    local identity project dispatchable terminal eligible existing_claim busy_identity launch_result action
+    local identity project authorized dispatchable terminal eligible existing_claim busy_identity launch_result action
     identity="$(jq -r '.identity' <<<"${item_json}")"
     project="$(jq -r '.project' <<<"${item_json}")"
+    authorized="$(jq -r '.authorized // false' <<<"${item_json}")"
     dispatchable="$(jq -r '.dispatchable // false' <<<"${item_json}")"
     terminal="$(jq -r '.terminal // false' <<<"${item_json}")"
     eligible="$(jq -r '.eligible // true' <<<"${item_json}")"
-    if [[ "${terminal}" == "true" || "${eligible}" != "true" || "${dispatchable}" != "true" ]]; then
+    if [[ "${terminal}" == "true" || "${authorized}" != "true" || "${eligible}" != "true" || "${dispatchable}" != "true" ]]; then
       continue
     fi
     existing_claim="$(claim_by_identity "${claims_json}" "${identity}")"

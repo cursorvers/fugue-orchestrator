@@ -565,7 +565,7 @@ if [[ "${handoff_target}" == "fugue-bridge" ]]; then
     bridge_args+=(--subscription-offline-policy-override "${subscription_offline_policy_override}")
   fi
   bash "${bridge_handoff_script}" "${bridge_args[@]}" >/dev/null
-elif [[ -x "${kernel_handoff_script}" ]]; then
+elif [[ "${handoff_target}" == "kernel" && -x "${kernel_handoff_script}" ]]; then
   kernel_args=(
     --repo "${GITHUB_REPOSITORY}"
     --issue-number "${ISSUE_NUMBER}"

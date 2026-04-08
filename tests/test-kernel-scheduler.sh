@@ -58,6 +58,14 @@ cat >"${queue_file}" <<'EOF'
       "provider": "codex"
     },
     {
+      "project": "unauthorized",
+      "issue_number": 15,
+      "authorized": false,
+      "dispatchable": true,
+      "command_string": "printf should-not-run",
+      "provider": "codex"
+    },
+    {
       "project": "alt",
       "issue_number": 14,
       "start_signal": "/vote",
@@ -76,10 +84,12 @@ claim_one="$(bash "${CLAIM_SCRIPT}" status --identity 'demo#11')"
 claim_two="$(bash "${CLAIM_SCRIPT}" status --identity 'demo#12')"
 claim_three="$(bash "${CLAIM_SCRIPT}" status --identity 'alt#14')"
 claim_plain="$(bash "${CLAIM_SCRIPT}" status --identity 'plain#13' || true)"
+claim_unauthorized="$(bash "${CLAIM_SCRIPT}" status --identity 'unauthorized#15' || true)"
 [[ "$(jq -r '.claim.status' <<<"${claim_one}")" == "running" ]]
 [[ "$(jq -r '.claim.status' <<<"${claim_two}")" == "retry_queued" ]]
 [[ "$(jq -r '.claim.status' <<<"${claim_three}")" == "running" ]]
 [[ "$(jq -r '.present // false' <<<"${claim_plain}")" == "false" ]]
+[[ "$(jq -r '.present // false' <<<"${claim_unauthorized}")" == "false" ]]
 test -f "$(jq -r '.claim.topology_path' <<<"${claim_one}")"
 test -f "$(jq -r '.claim.topology_path' <<<"${claim_three}")"
 

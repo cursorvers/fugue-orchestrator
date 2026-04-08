@@ -106,7 +106,7 @@ normalize_queue_json() {
         stop_reason: (.stop_reason // .reason // ""),
         dispatchable: (
           if .dispatchable == null then (inferred_authorized and inferred_eligible and (inferred_terminal | not))
-          else (.dispatchable | bool_or(false))
+          else ((.dispatchable | bool_or(false)) and inferred_authorized and inferred_eligible and (inferred_terminal | not))
           end
         )
       })

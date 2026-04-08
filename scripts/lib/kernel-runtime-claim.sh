@@ -317,23 +317,23 @@ claim_upsert() {
 
   state="$(normalize_state "${state}")"
   claim_path="$(claim_path_for_identity "${identity}")"
-  existing_json="$(load_claim_json "${claim_path}")"
   now="$(utc_timestamp)"
   now_epoch="$(epoch_now)"
   identity_hash="$(hash_text "${identity}")"
   identity_slug="$(slugify "${identity}")"
+  claim_token="claim:${identity_hash:0:16}"
+
+  acquire_lock "kernel runtime claims"
+  existing_json="$(load_claim_json "${claim_path}")"
   existing_run_id="$(resolve_existing_run_id "${existing_json}")"
   if [[ -n "${existing_run_id}" && -z "${run_id}" ]]; then
     run_id="${existing_run_id}"
   fi
-  claim_token="claim:${identity_hash:0:16}"
   if [[ "$(jq -r '((.claim_active // false) and ((.status // "") != "terminal"))' <<<"${existing_json}")" == "true" ]]; then
     action="coalesced"
   else
     action="claimed"
   fi
-
-  acquire_lock "kernel runtime claims"
   local next_json
   next_json="$(
     jq -n \
@@ -429,11 +429,11 @@ set_state_for_identity() {
 
   requested_state="$(normalize_state "${requested_state}")"
   claim_path="$(claim_path_for_identity "${identity}")"
-  existing_json="$(load_claim_json "${claim_path}")"
   now="$(utc_timestamp)"
   now_epoch="$(epoch_now)"
 
   acquire_lock "kernel runtime claims"
+  existing_json="$(load_claim_json "${claim_path}")"
   next_json="$(
     jq -n \
       --argjson prev "${existing_json}" \

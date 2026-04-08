@@ -17,9 +17,21 @@ second="$(bash "${SCRIPT}" claim --project demo --issue-number 101 --run-id run-
 [[ "$(jq -r '.action' <<<"${second}")" == "coalesced" ]]
 [[ "$(jq -r '.claim.refresh_count' <<<"${second}")" == "2" ]]
 
+pids=()
+for idx in {1..8}; do
+  (
+    bash "${SCRIPT}" claim --project demo --issue-number 101 --run-id run-101 --command-string "printf ok" --refresh-token "parallel-${idx}" >/dev/null
+  ) &
+  pids+=("$!")
+done
+for pid in "${pids[@]}"; do
+  wait "${pid}"
+done
+
 list_json="$(bash "${SCRIPT}" list --active-only)"
 [[ "$(jq 'length' <<<"${list_json}")" == "1" ]]
 [[ "$(jq -r '.[0].identity' <<<"${list_json}")" == "demo#101" ]]
+[[ "$(jq -r '.[0].refresh_count' <<<"${list_json}")" == "10" ]]
 
 bash "${SCRIPT}" release --identity 'demo#101' --reason "finished" >/dev/null
 status_json="$(bash "${SCRIPT}" status --identity 'demo#101')"

@@ -78,7 +78,7 @@ normalize_queue_json() {
         task_key: (.task_key // ""),
         dispatchable: (
           if .dispatchable == null then (inferred_authorized and inferred_eligible and (inferred_terminal | not))
-          else (.dispatchable | bool_or(false))
+          else ((.dispatchable | bool_or(false)) and inferred_authorized and inferred_eligible and (inferred_terminal | not))
           end
         ),
         authorized: inferred_authorized,
