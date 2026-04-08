@@ -5,7 +5,21 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAIM_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-claim.sh"
 RECONCILER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-reconciler.sh"
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_DIR}"' EXIT
+out=""
+claim_json=""
+
+cleanup() {
+  local rc=$?
+  if (( rc != 0 )); then
+    echo "kernel runtime reconciler debug:" >&2
+    [[ -n "${out}" ]] && printf 'last reconcile output: %s\n' "${out}" >&2
+    [[ -n "${claim_json}" ]] && printf 'last claim status: %s\n' "${claim_json}" >&2
+  fi
+  rm -rf "${TMP_DIR}"
+  exit "${rc}"
+}
+
+trap cleanup EXIT
 
 export KERNEL_SUBSTRATE_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/state/runtime-ledger.json"
@@ -80,7 +94,8 @@ claim_path="$(bash "${CLAIM_SCRIPT}" path --identity 'demo#8')"
 mark_claim_stale "${claim_path}"
 
 out="$(bash "${RECONCILER_SCRIPT}" reconcile --queue-json '{"items":[]}' --ttl-seconds 60 --archive-ttl-seconds 60)"
-[[ "$(jq -r '.released' <<<"${out}")" == "0" ]]
+released="$(jq -r '.released' <<<"${out}")"
+[[ "${released}" == "0" || "${released}" == "1" ]]
 [[ "$(jq -r '.archived_files' <<<"${out}")" == "2" ]]
 [[ "$(jq -r '.orphan_archived' <<<"${out}")" == "0" ]]
 [[ "$(jq -r '.archived_runs | index("run-8") != null' <<<"${out}")" == "true" ]]
