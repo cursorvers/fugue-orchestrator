@@ -29,6 +29,7 @@ usage() {
   cat <<'EOF'
 Usage:
   kernel-compact-artifact.sh path [run_id]
+  kernel-compact-artifact.sh packet-path [run_id]
   kernel-compact-artifact.sh update <event> [summary]
   kernel-compact-artifact.sh status [run_id]
 EOF
@@ -44,6 +45,12 @@ artifact_path_for() {
   local run_id="$1"
   mkdir -p "${COMPACT_DIR}"
   printf '%s/%s.json\n' "${COMPACT_DIR}" "$(printf '%s' "${run_id}" | tr '/:' '__')"
+}
+
+packet_path_for() {
+  local run_id="$1"
+  mkdir -p "${COMPACT_DIR}"
+  printf '%s/%s.handoff.json\n' "${COMPACT_DIR}" "$(printf '%s' "${run_id}" | tr '/:' '__')"
 }
 
 default_session_short_id() {
@@ -236,6 +243,10 @@ normalize_summary() {
   printf '%s\n' "${raw}" | awk 'NF {print}' | sed -n '1,3p'
 }
 
+bool_env() {
+  [[ "${1:-false}" == "true" ]]
+}
+
 json_array_from_pipe_csv() {
   local raw="${1:-}"
   if [[ -z "${raw}" ]]; then
@@ -348,14 +359,60 @@ resolve_phase_artifacts_json() {
     '
 }
 
+resolve_context_reference_json() {
+  local existing_json="${1:-}"
+  local existing_context_reference='{}'
+  local path="${KERNEL_CONTEXT_REFERENCE_PATH:-}"
+  local kind="${KERNEL_CONTEXT_REFERENCE_KIND:-}"
+  local label="${KERNEL_CONTEXT_REFERENCE_LABEL:-}"
+  if [[ -n "${existing_json}" ]]; then
+    existing_context_reference="$(jq -c '.context_reference // {}' <<<"${existing_json}")"
+  fi
+  jq -cn \
+    --argjson existing_context_reference "${existing_context_reference}" \
+    --arg path "${path}" \
+    --arg kind "${kind}" \
+    --arg label "${label}" \
+    '
+      $existing_context_reference
+      + (if $path == "" then {} else {path: $path} end)
+      + (if $kind == "" then {} else {kind: $kind} end)
+      + (if $label == "" then {} else {label: $label} end)
+    '
+}
+
+phase_artifact_focus_key() {
+  case "${1:-}" in
+    plan)
+      printf 'plan_report_path\n'
+      ;;
+    critique)
+      printf 'critic_report_path\n'
+      ;;
+    implement|implementation)
+      printf 'implementation_report_path\n'
+      ;;
+    verify|verification)
+      printf 'verification_report_path\n'
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
+}
+
 cmd_path() {
   printf '%s\n' "$(artifact_path_for "${1:-${RUN_ID}}")"
+}
+
+cmd_packet_path() {
+  printf '%s\n' "$(packet_path_for "${1:-${RUN_ID}}")"
 }
 
 cmd_update() {
   local event="${1:-}"
   local summary_input="${2:-${KERNEL_SUMMARY:-}}"
-  local path tmp_file existing_json existing_project existing_purpose
+  local path packet_path tmp_file packet_tmp_file existing_json existing_project existing_purpose
   local tmux_session phase project purpose owner blocking_reason codex_thread_title
   local mode runtime active_models_json decisions_json next_actions_json phase_artifacts_json ledger_compact receipt_compact
   local existing_mode existing_blocking_reason existing_scheduler_state existing_scheduler_reason
@@ -363,6 +420,8 @@ cmd_update() {
   local lifecycle_state
   local session_fingerprint
   local summary normalized_summary
+  local context_reference_json preserve_summary preserve_last_event last_event updated_at
+  local handoff_packet_json handoff_packet_sha256 handoff_focus_key handoff_focus_path
 
   [[ -n "${event}" ]] || {
     echo "event is required" >&2
@@ -502,7 +561,11 @@ cmd_update() {
     active_models_json='[]'
   fi
 
-  if [[ -z "${summary_input}" ]]; then
+  preserve_summary="${KERNEL_COMPACT_PRESERVE_SUMMARY:-false}"
+  preserve_last_event="${KERNEL_COMPACT_PRESERVE_LAST_EVENT:-false}"
+  if bool_env "${preserve_summary}" && [[ -n "${existing_json}" ]]; then
+    summary="$(jq -r '(.summary // []) | join("\n")' <<<"${existing_json}")"
+  elif [[ -z "${summary_input}" ]]; then
     summary="event=${event}; mode=${mode}; phase=${phase}; next=$(jq -r '.[0] // ""' <<<"${next_actions_json}")"
   else
     summary="${summary_input}"
@@ -510,11 +573,63 @@ cmd_update() {
   if [[ -z "${summary}" && -n "${existing_json}" ]]; then
     summary="$(jq -r '(.summary // []) | join("\n")' <<<"${existing_json}")"
   fi
+  if bool_env "${preserve_last_event}" && [[ -n "${existing_json}" ]]; then
+    last_event="$(jq -r '.last_event // ""' <<<"${existing_json}")"
+  else
+    last_event="${event}"
+  fi
   normalized_summary="$(normalize_summary "${summary}")"
   phase_artifacts_json="$(resolve_phase_artifacts_json "${existing_json}")"
+  context_reference_json="$(resolve_context_reference_json "${existing_json}")"
+  updated_at="$(utc_timestamp)"
+  handoff_focus_key="$(phase_artifact_focus_key "${phase}")"
+  handoff_focus_path=""
+  if [[ -n "${handoff_focus_key}" ]]; then
+    handoff_focus_path="$(jq -r --arg key "${handoff_focus_key}" '.[$key] // ""' <<<"${phase_artifacts_json}")"
+  fi
 
   acquire_lock "compact artifact"
   tmp_file="${path}.tmp.$$.$RANDOM"
+  packet_path="$(packet_path_for "${RUN_ID}")"
+  packet_tmp_file="${packet_path}.tmp.$$.$RANDOM"
+  handoff_packet_json="$(jq -cn \
+    --arg kind "kernel-handoff-packet" \
+    --argjson version 1 \
+    --arg run_id "${RUN_ID}" \
+    --arg project "${project}" \
+    --arg purpose "${purpose}" \
+    --arg phase "${phase}" \
+    --arg mode "${mode}" \
+    --arg runtime "${runtime}" \
+    --arg lifecycle_state "${lifecycle_state}" \
+    --arg updated_at "${updated_at}" \
+    --arg next_action "$(jq -r '.[0] // ""' <<<"${next_actions_json}")" \
+    --arg handoff_focus_key "${handoff_focus_key}" \
+    --arg handoff_focus_path "${handoff_focus_path}" \
+    --argjson summary "$(jq -cn --arg summary "${normalized_summary}" '$summary | split("\n") | map(select(length > 0)) | .[:3]')" \
+    --argjson decisions "${decisions_json}" \
+    --argjson context_reference "${context_reference_json}" \
+    '
+      {
+        kind: $kind,
+        version: $version,
+        run_id: $run_id,
+        project: $project,
+        purpose: $purpose,
+        current_phase: $phase,
+        mode: $mode,
+        runtime: $runtime,
+        lifecycle_state: $lifecycle_state,
+        updated_at: $updated_at,
+        next_action: $next_action,
+        summary: $summary,
+        decisions: $decisions
+      }
+      + (if $handoff_focus_key == "" then {} else {phase_artifact_focus: {key: $handoff_focus_key, path: $handoff_focus_path}} end)
+      + (if ($context_reference | length) == 0 then {} else {context_reference: $context_reference} end)
+    ')"
+  printf '%s\n' "${handoff_packet_json}" >"${packet_tmp_file}"
+  handoff_packet_sha256="$(hash_payload "${handoff_packet_json}")"
   jq -n \
     --arg run_id "${RUN_ID}" \
     --arg project "${project}" \
@@ -532,13 +647,16 @@ cmd_update() {
     --arg lifecycle_state "${lifecycle_state}" \
     --arg workspace_receipt_path "${workspace_receipt_path}" \
     --arg consensus_receipt_path "${consensus_receipt_path_value}" \
+    --arg handoff_packet_path "${packet_path}" \
+    --arg handoff_packet_sha256 "${handoff_packet_sha256}" \
     --arg event "${event}" \
-    --arg updated_at "$(utc_timestamp)" \
+    --arg updated_at "${updated_at}" \
     --arg summary "${normalized_summary}" \
     --argjson active_models "${active_models_json}" \
     --argjson decisions "${decisions_json}" \
     --argjson next_action "${next_actions_json}" \
     --argjson phase_artifacts "${phase_artifacts_json}" \
+    --argjson context_reference "${context_reference_json}" \
     '
       {
         run_id: $run_id,
@@ -558,6 +676,8 @@ cmd_update() {
         scheduler_reason: $scheduler_reason,
         workspace_receipt_path: $workspace_receipt_path,
         consensus_receipt_path: $consensus_receipt_path,
+        handoff_packet_path: $handoff_packet_path,
+        handoff_packet_sha256: $handoff_packet_sha256,
         next_action: $next_action,
         decisions: $decisions,
         phase_artifacts: $phase_artifacts,
@@ -565,7 +685,13 @@ cmd_update() {
         last_event: $event,
         updated_at: $updated_at
       }
+      + (if ($context_reference | length) == 0 then {} else {context_reference: $context_reference} end)
     ' >"${tmp_file}"
+  if [[ -n "${last_event}" ]]; then
+    jq --arg last_event "${last_event}" '.last_event = $last_event' "${tmp_file}" >"${tmp_file}.last"
+    mv "${tmp_file}.last" "${tmp_file}"
+  fi
+  mv "${packet_tmp_file}" "${packet_path}"
   mv "${tmp_file}" "${path}"
   sync_tmux_session_metadata "${RUN_ID}" "${tmux_session}" "${project}" "${purpose}" "${runtime}" "${session_fingerprint}"
   cleanup_lock
@@ -604,6 +730,9 @@ cmd_status() {
     "  - scheduler reason: \(.scheduler_reason // "")",
     "  - workspace receipt path: \(.workspace_receipt_path // "")",
     "  - consensus receipt path: \(.consensus_receipt_path // "")",
+    "  - handoff packet path: \(.handoff_packet_path // "")",
+    "  - handoff packet sha256: \(.handoff_packet_sha256 // "")",
+    "  - context reference: \(if ((.context_reference // {}) | length) == 0 then "none" else (((.context_reference.label // .context_reference.kind // "context") + " -> " + (.context_reference.path // ""))) end)",
     "  - phase artifacts: \(if ((.phase_artifacts // {}) | length) == 0 then "none" else ((.phase_artifacts // {}) | keys | join(" | ")) end)",
     "  - next action: \(.next_action | join(" | "))",
     "  - decisions: \(.decisions | join(" | "))",
@@ -618,6 +747,10 @@ case "${cmd}" in
   path)
     shift || true
     cmd_path "$@"
+    ;;
+  packet-path)
+    shift || true
+    cmd_packet_path "$@"
     ;;
   update)
     shift || true
