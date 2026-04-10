@@ -31,8 +31,13 @@ EOF
 
 chmod +x "${TMP_DIR}/home/bin/"*
 export KERNEL_TEST_LOG="${TMP_DIR}/log/orchestrator.log"
+TEST_SHELL="${TEST_SHELL:-$(command -v zsh || command -v bash)}"
+[[ -n "${TEST_SHELL}" ]] || {
+  echo "missing zsh/bash for codex orchestrator snippet test" >&2
+  exit 1
+}
 
-zsh -lc '
+"${TEST_SHELL}" -lc '
   export HOME="'"${TMP_DIR}/home"'"
   export PATH="${HOME}/bin:/opt/homebrew/bin:/usr/bin:/bin"
   export KERNEL_TEST_LOG="'"${TMP_DIR}/log/orchestrator.log"'"
@@ -47,7 +52,7 @@ if grep -Fq 'raw-codex smoke-route' "${KERNEL_TEST_LOG}"; then
 fi
 
 : > "${KERNEL_TEST_LOG}"
-zsh -lc '
+"${TEST_SHELL}" -lc '
   export HOME="'"${TMP_DIR}/home"'"
   export PATH="${HOME}/bin:/opt/homebrew/bin:/usr/bin:/bin"
   export KERNEL_TEST_LOG="'"${TMP_DIR}/log/orchestrator.log"'"
@@ -58,7 +63,7 @@ zsh -lc '
 grep -Fq 'raw-codex exec print only' "${KERNEL_TEST_LOG}"
 
 : > "${KERNEL_TEST_LOG}"
-zsh -lc '
+"${TEST_SHELL}" -lc '
   export HOME="'"${TMP_DIR}/home"'"
   export PATH="/usr/bin:/bin"
   export KERNEL_TEST_LOG="'"${TMP_DIR}/log/orchestrator.log"'"
@@ -69,7 +74,7 @@ zsh -lc '
 grep -Fq 'raw-codex smoke-home-fallback' "${KERNEL_TEST_LOG}"
 
 : > "${KERNEL_TEST_LOG}"
-zsh -lc '
+"${TEST_SHELL}" -lc '
   export HOME="'"${TMP_DIR}/home"'"
   export PATH="/usr/bin:/bin"
   export KERNEL_TEST_LOG="'"${TMP_DIR}/log/orchestrator.log"'"

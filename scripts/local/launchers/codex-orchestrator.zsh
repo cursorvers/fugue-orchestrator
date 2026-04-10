@@ -3,7 +3,7 @@ _orch_resolve_codex_bin() {
   local candidate
 
   if [[ -n "${preferred}" ]]; then
-    candidate="$(whence -p "${preferred}" 2>/dev/null || true)"
+    candidate="$(command -v "${preferred}" 2>/dev/null || true)"
     if [[ -n "${candidate}" && -x "${candidate}" ]]; then
       printf '%s\n' "${candidate}"
       return 0
@@ -14,7 +14,7 @@ _orch_resolve_codex_bin() {
     fi
   fi
 
-  candidate="$(whence -p codex 2>/dev/null || true)"
+  candidate="$(command -v codex 2>/dev/null || true)"
   if [[ -n "${candidate}" && -x "${candidate}" ]]; then
     printf '%s\n' "${candidate}"
     return 0
@@ -38,7 +38,7 @@ _orch_resolve_codex_bin() {
 codex-raw() {
   local codex_bin
   codex_bin="$(_orch_resolve_codex_bin "${RAW_CODEX_BIN:-${CODEX_BIN:-}}")" || {
-    print -u2 -- "Codex binary not found. Set CODEX_BIN or RAW_CODEX_BIN."
+    printf '%s\n' "Codex binary not found. Set CODEX_BIN or RAW_CODEX_BIN." >&2
     return 1
   }
   "${codex_bin}" "$@"
@@ -59,7 +59,7 @@ _orch_should_bypass_codex() {
 codex() {
   local codex_bin
   codex_bin="$(_orch_resolve_codex_bin "${CODEX_BIN:-}")" || {
-    print -u2 -- "Codex binary not found. Set CODEX_BIN."
+    printf '%s\n' "Codex binary not found. Set CODEX_BIN." >&2
     return 1
   }
   if [[ "${ORCH_BYPASS:-0}" == "1" ]] || _orch_should_bypass_codex "${1:-}"; then
