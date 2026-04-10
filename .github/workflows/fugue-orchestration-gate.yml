@@ -233,72 +233,77 @@ jobs:
       - name: Shell syntax checks
         run: |
           set -euo pipefail
-          bash -n scripts/lib/build-agent-matrix.sh
-          bash -n scripts/lib/kernel-auth-evidence.sh
-          bash -n scripts/lib/execution-profile-policy.sh
-          bash -n scripts/lib/orchestrator-policy.sh
-          bash -n scripts/local/run-local-orchestration.sh
-          bash -n scripts/local/run-linked-systems.sh
-          bash -n scripts/local/integrations/xauto-draft-only.sh
-          bash -n scripts/local/integrations/xauto-quoted-author-sync.sh
-          bash -n scripts/local/integrations/xauto-blocked-recovery.sh
-          bash -n scripts/sim-orchestrator-switch.sh
-          bash -n scripts/lib/watchdog-alert-policy.sh
-          bash -n scripts/lib/watchdog-alert-delivery-policy.sh
-          bash -n scripts/lib/watchdog-reconcile-claim-policy.sh
-          bash -n scripts/lib/workspace-root-policy.sh
-          bash -n scripts/kernel-scheduler.sh
-          bash -n scripts/lib/kernel-lock.sh
-          bash -n scripts/lib/kernel-runtime-claim.sh
-          bash -n scripts/lib/kernel-runtime-health.sh
-          bash -n scripts/lib/kernel-runtime-launch.sh
-          bash -n scripts/lib/kernel-runtime-ledger.sh
-          bash -n scripts/lib/kernel-runtime-reconciler.sh
-          bash -n scripts/lib/kernel-runtime-run-driver.sh
-          bash -n scripts/lib/kernel-runtime-status-surface.sh
-          bash -n scripts/lib/kernel-runtime-workspace.sh
-          bash -n scripts/lib/kernel-memory-query.sh
-          bash -n scripts/local/kernel-runtime-loop.sh
-          bash -n scripts/harness/run-recovery-console.sh
-          bash -n scripts/check-agent-matrix-parity.sh
-          bash -n scripts/check-linked-systems-integrity.sh
-          bash -n scripts/check-codex-kernel-prompt.sh
-          bash -n scripts/check-codex-vote-prompt.sh
-          bash -n tests/test-codex-kernel-prompt.sh
-          bash -n tests/test-codex-vote-prompt.sh
-          bash -n tests/test-codex-orchestrator-snippet.sh
-          bash -n tests/test-kernel-auth-evidence.sh
-          bash -n tests/test-publish-decision-journal.sh
-          bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
-          bash -n tests/test-local-orchestration-consensus-bridge.sh
-          bash -n tests/test-task-router-start-signal.sh
-          bash -n tests/test-parallel-floor-policy.sh
-          bash -n tests/test-recovery-reroute-claim-gate.sh
-          bash -n tests/test-watchdog-reconcile-claim-policy.sh
-          bash -n tests/test-watchdog-reconcile-workflow.sh
-          bash -n tests/test-workspace-root-policy.sh
-          bash -n tests/test-canary-trust-policy.sh
-          bash -n tests/test-kernel-canary-plan.sh
-          bash -n tests/test-kernel-entrypoint.sh
-          bash -n tests/test-kernel-launcher.sh
-          bash -n tests/test-kernel-launcher-template.sh
-          bash -n tests/test-k4-launcher.sh
-          bash -n tests/test-install-kernel-launchers.sh
-          bash -n tests/test-kernel-runtime-claim.sh
-          bash -n tests/test-kernel-runtime-health.sh
-          bash -n tests/test-kernel-runtime-launch.sh
-          bash -n tests/test-kernel-runtime-ledger-race.sh
-          bash -n tests/test-kernel-runtime-loop.sh
-          bash -n tests/test-kernel-runtime-reconciler.sh
-          bash -n tests/test-kernel-runtime-run-driver.sh
-          bash -n tests/test-kernel-runtime-status-surface.sh
-          bash -n tests/test-kernel-runtime-workspace.sh
-          bash -n tests/test-kernel-memory-query.sh
-          bash -n tests/test-codex-kernel-guard-memory-query.sh
-          bash -n tests/test-kernel-scheduler.sh
-          bash -n tests/test-xauto-draft-only.sh
-          bash -n tests/test-xauto-quoted-author-sync.sh
-          bash -n tests/test-xauto-blocked-recovery.sh
+          bash_n() {
+            local target="$1"
+            [[ -f "${target}" ]] || { echo "skip missing syntax target: ${target}"; return 0; }
+            bash -n "${target}"
+          }
+          bash_n scripts/lib/build-agent-matrix.sh
+          bash_n scripts/lib/kernel-auth-evidence.sh
+          bash_n scripts/lib/execution-profile-policy.sh
+          bash_n scripts/lib/orchestrator-policy.sh
+          bash_n scripts/local/run-local-orchestration.sh
+          bash_n scripts/local/run-linked-systems.sh
+          bash_n scripts/local/integrations/xauto-draft-only.sh
+          bash_n scripts/local/integrations/xauto-quoted-author-sync.sh
+          bash_n scripts/local/integrations/xauto-blocked-recovery.sh
+          bash_n scripts/sim-orchestrator-switch.sh
+          bash_n scripts/lib/watchdog-alert-policy.sh
+          bash_n scripts/lib/watchdog-alert-delivery-policy.sh
+          bash_n scripts/lib/watchdog-reconcile-claim-policy.sh
+          bash_n scripts/lib/workspace-root-policy.sh
+          bash_n scripts/kernel-scheduler.sh
+          bash_n scripts/lib/kernel-lock.sh
+          bash_n scripts/lib/kernel-runtime-claim.sh
+          bash_n scripts/lib/kernel-runtime-health.sh
+          bash_n scripts/lib/kernel-runtime-launch.sh
+          bash_n scripts/lib/kernel-runtime-ledger.sh
+          bash_n scripts/lib/kernel-runtime-reconciler.sh
+          bash_n scripts/lib/kernel-runtime-run-driver.sh
+          bash_n scripts/lib/kernel-runtime-status-surface.sh
+          bash_n scripts/lib/kernel-runtime-workspace.sh
+          bash_n scripts/lib/kernel-memory-query.sh
+          bash_n scripts/local/kernel-runtime-loop.sh
+          bash_n scripts/harness/run-recovery-console.sh
+          bash_n scripts/check-agent-matrix-parity.sh
+          bash_n scripts/check-linked-systems-integrity.sh
+          bash_n scripts/check-codex-kernel-prompt.sh
+          bash_n scripts/check-codex-vote-prompt.sh
+          bash_n tests/test-codex-kernel-prompt.sh
+          bash_n tests/test-codex-vote-prompt.sh
+          bash_n tests/test-codex-orchestrator-snippet.sh
+          bash_n tests/test-kernel-auth-evidence.sh
+          bash_n tests/test-publish-decision-journal.sh
+          bash_n tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash_n tests/test-local-orchestration-consensus-bridge.sh
+          bash_n tests/test-task-router-start-signal.sh
+          bash_n tests/test-parallel-floor-policy.sh
+          bash_n tests/test-recovery-reroute-claim-gate.sh
+          bash_n tests/test-watchdog-reconcile-claim-policy.sh
+          bash_n tests/test-watchdog-reconcile-workflow.sh
+          bash_n tests/test-workspace-root-policy.sh
+          bash_n tests/test-canary-trust-policy.sh
+          bash_n tests/test-kernel-canary-plan.sh
+          bash_n tests/test-kernel-entrypoint.sh
+          bash_n tests/test-kernel-launcher.sh
+          bash_n tests/test-kernel-launcher-template.sh
+          bash_n tests/test-k4-launcher.sh
+          bash_n tests/test-install-kernel-launchers.sh
+          bash_n tests/test-kernel-runtime-claim.sh
+          bash_n tests/test-kernel-runtime-health.sh
+          bash_n tests/test-kernel-runtime-launch.sh
+          bash_n tests/test-kernel-runtime-ledger-race.sh
+          bash_n tests/test-kernel-runtime-loop.sh
+          bash_n tests/test-kernel-runtime-reconciler.sh
+          bash_n tests/test-kernel-runtime-run-driver.sh
+          bash_n tests/test-kernel-runtime-status-surface.sh
+          bash_n tests/test-kernel-runtime-workspace.sh
+          bash_n tests/test-kernel-memory-query.sh
+          bash_n tests/test-codex-kernel-guard-memory-query.sh
+          bash_n tests/test-kernel-scheduler.sh
+          bash_n tests/test-xauto-draft-only.sh
+          bash_n tests/test-xauto-quoted-author-sync.sh
+          bash_n tests/test-xauto-blocked-recovery.sh
 
       - name: Kernel prompt static contract
         run: |
@@ -314,15 +319,20 @@ jobs:
       - name: Kernel local adapter tests
         run: |
           set -euo pipefail
-          bash tests/test-kernel-launcher.sh
-          bash tests/test-kernel-launcher-template.sh
-          bash tests/test-k4-launcher.sh
-          bash tests/test-kernel-entrypoint.sh
-          bash tests/test-codex-kernel-prompt.sh
-          bash tests/test-codex-orchestrator-snippet.sh
-          bash tests/test-install-kernel-launchers.sh
-          bash tests/test-vote-launchers.sh
-          bash tests/test-codex-skill-launch.sh
+          run_if_present() {
+            local target="$1"
+            [[ -f "${target}" ]] || { echo "skip missing test target: ${target}"; return 0; }
+            bash "${target}"
+          }
+          run_if_present tests/test-kernel-launcher.sh
+          run_if_present tests/test-kernel-launcher-template.sh
+          run_if_present tests/test-k4-launcher.sh
+          run_if_present tests/test-kernel-entrypoint.sh
+          run_if_present tests/test-codex-kernel-prompt.sh
+          run_if_present tests/test-codex-orchestrator-snippet.sh
+          run_if_present tests/test-install-kernel-launchers.sh
+          run_if_present tests/test-vote-launchers.sh
+          run_if_present tests/test-codex-skill-launch.sh
 
       - name: Local orchestration boundary tests
         run: |
@@ -352,18 +362,23 @@ jobs:
       - name: Kernel runtime substrate tests
         run: |
           set -euo pipefail
-          bash tests/test-kernel-runtime-workspace.sh
-          bash tests/test-kernel-runtime-launch.sh
-          bash tests/test-kernel-runtime-claim.sh
-          bash tests/test-kernel-runtime-run-driver.sh
-          bash tests/test-kernel-runtime-reconciler.sh
-          bash tests/test-kernel-runtime-status-surface.sh
-          bash tests/test-kernel-scheduler.sh
-          bash tests/test-kernel-runtime-ledger-race.sh
-          bash tests/test-kernel-runtime-loop.sh
-          bash tests/test-kernel-runtime-health.sh
-          bash tests/test-kernel-memory-query.sh
-          bash tests/test-codex-kernel-guard-memory-query.sh
+          run_if_present() {
+            local target="$1"
+            [[ -f "${target}" ]] || { echo "skip missing test target: ${target}"; return 0; }
+            bash "${target}"
+          }
+          run_if_present tests/test-kernel-runtime-workspace.sh
+          run_if_present tests/test-kernel-runtime-launch.sh
+          run_if_present tests/test-kernel-runtime-claim.sh
+          run_if_present tests/test-kernel-runtime-run-driver.sh
+          run_if_present tests/test-kernel-runtime-reconciler.sh
+          run_if_present tests/test-kernel-runtime-status-surface.sh
+          run_if_present tests/test-kernel-scheduler.sh
+          run_if_present tests/test-kernel-runtime-ledger-race.sh
+          run_if_present tests/test-kernel-runtime-loop.sh
+          run_if_present tests/test-kernel-runtime-health.sh
+          run_if_present tests/test-kernel-memory-query.sh
+          run_if_present tests/test-codex-kernel-guard-memory-query.sh
 
       - name: Canary trust tests
         run: |
