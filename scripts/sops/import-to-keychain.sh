@@ -67,6 +67,7 @@ map_to_acct() {
     SUPABASE_SERVICE_ROLE_KEY) echo "supabase-service-role-key" ;;
     LINE_CHANNEL_SECRET) echo "line-channel-secret" ;;
     LINE_HARNESS_API_KEY) echo "line-harness-api-key" ;;
+    ESTAT_API_ID)       echo "estat-app-id" ;;
     ESTAT_APP_ID)       echo "estat-app-id" ;;
     *)                  echo "" ;;
   esac

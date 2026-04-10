@@ -267,6 +267,7 @@ apply_secret repo TARGET_REPO_PAT optional TARGET_REPO_PAT
 apply_secret org ANTHROPIC_API_KEY optional ANTHROPIC_API_KEY
 apply_secret org GEMINI_API_KEY optional GEMINI_API_KEY
 apply_secret org XAI_API_KEY optional XAI_API_KEY XAI_API
+apply_secret org ESTAT_API_ID optional ESTAT_API_ID ESTAT_APP_ID
 
 # Ops and notification lifelines
 apply_secret org FUGUE_OPS_PAT optional FUGUE_OPS_PAT
