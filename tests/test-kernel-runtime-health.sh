@@ -150,6 +150,7 @@ export ORCH_DRY_RUN=1
 export KERNEL_RUN_ID="health-guard-launch"
 bash "${GLM_SCRIPT}" reset launch-ready >/dev/null
 bash "${GUARD_BIN}" launch smoke >/dev/null
+bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider codex success guard-test >/dev/null
 bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider glm success guard-test >/dev/null
 bash "${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh" record-provider gemini-cli success guard-test >/dev/null
 out="$(bash "${HEALTH_SCRIPT}" status)"

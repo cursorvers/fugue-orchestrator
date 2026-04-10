@@ -278,6 +278,12 @@ PY
 derive_lifecycle_state() {
   local mode="${1:-unknown}"
   local scheduler_state="${2:-unknown}"
+  case "${mode}" in
+    invalid|blocked|unknown)
+      printf 'blocked\n'
+      return 0
+      ;;
+  esac
   if [[ "${mode}" == "degraded-allowed" ]]; then
     case "${scheduler_state}" in
       running|continuity_degraded)
