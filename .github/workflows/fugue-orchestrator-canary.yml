@@ -56,6 +56,7 @@ jobs:
       CANARY_WAIT_FAST_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_FAST_SLEEP_SEC || '10' }}
       CANARY_WAIT_SLOW_ATTEMPTS: ${{ vars.FUGUE_CANARY_WAIT_SLOW_ATTEMPTS || '9' }}
       CANARY_WAIT_SLOW_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC || '20' }}
+      CANARY_REPORT_DIR: ${{ runner.temp }}/fugue-canary-report
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -66,3 +67,11 @@ jobs:
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
           CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
         run: bash scripts/harness/run-canary.sh
+
+      - name: Upload canary report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fugue-orchestrator-canary-report
+          path: ${{ env.CANARY_REPORT_DIR }}
+          if-no-files-found: ignore
