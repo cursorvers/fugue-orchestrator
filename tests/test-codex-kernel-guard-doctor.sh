@@ -26,12 +26,21 @@ export COPILOT_BIN=false
 export ZAI_API_KEY="dummy"
 export KERNEL_DOCTOR_SKIP_TMUX_CHECK=true
 
+utc_minutes_ago() {
+  local minutes="$1"
+  if date -u -d "${minutes} minutes ago" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+    date -u -d "${minutes} minutes ago" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -v-"${minutes}"M '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
 tmux new-session -d -s "${SESSION_A}" >/dev/null 2>&1 || true
 tmux new-session -d -s "${SESSION_B}" >/dev/null 2>&1 || true
 
 mkdir -p "${KERNEL_COMPACT_DIR}"
 NEWER_TS="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-OLDER_TS="$(date -u -v-1M '+%Y-%m-%dT%H:%M:%SZ')"
+OLDER_TS="$(utc_minutes_ago 1)"
 cat >"${KERNEL_COMPACT_DIR}/run-alpha.json" <<EOF
 {"run_id":"run-alpha","project":"fugue-orchestrator","purpose":"alpha","current_phase":"plan","mode":"healthy","runtime":"kernel","tmux_session":"${SESSION_A}","owner":"codex","active_models":["codex","glm","gemini-cli"],"blocking_reason":"","scheduler_state":"retry_queued","scheduler_reason":"doctor-alpha","workspace_receipt_path":"/tmp/run-alpha-workspace.json","phase_artifacts":{"plan_report_path":"/tmp/run-alpha-plan.md","critic_report_path":"/tmp/run-alpha-critic.md"},"next_action":["implement-a"],"decisions":["d1"],"summary":["s1"],"last_event":"status_changed","updated_at":"${OLDER_TS}"}
 EOF

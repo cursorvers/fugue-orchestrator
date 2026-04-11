@@ -27,6 +27,24 @@ export XAI_API_KEY=""
 export KERNEL_DOCTOR_SKIP_TMUX_CHECK=true
 export KERNEL_STALE_HOURS=24
 
+utc_hours_ago() {
+  local hours="$1"
+  if date -u -d "${hours} hours ago" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+    date -u -d "${hours} hours ago" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -v-"${hours}"H '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
+utc_days_ago() {
+  local days="$1"
+  if date -u -d "${days} days ago" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+    date -u -d "${days} days ago" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -v-"${days}"d '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
 mkdir -p "${KERNEL_COMPACT_DIR}"
 empty_out="$("${GUARD_BIN}" doctor --all-runs)"
 grep -Fq 'all runs:' <<<"${empty_out}"
@@ -46,8 +64,8 @@ if grep -Fq 'bootstrap receipt status:' <<<"${empty_out}"; then
 fi
 
 NOW_TS="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-MID_TS="$(date -u -v-1H '+%Y-%m-%dT%H:%M:%SZ')"
-OLD_TS="$(date -u -v-2d '+%Y-%m-%dT%H:%M:%SZ')"
+MID_TS="$(utc_hours_ago 1)"
+OLD_TS="$(utc_days_ago 2)"
 cat >"${KERNEL_COMPACT_DIR}/run-live.json" <<EOF
 {"run_id":"run-live","project":"fugue-orchestrator","purpose":"runtime-enforcement","current_phase":"implement","mode":"healthy","runtime":"kernel","tmux_session":"fugue-orchestrator__runtime-enforcement","owner":"codex","active_models":["codex","glm","gemini-cli"],"blocking_reason":"","next_action":["wire-provider-evidence"],"decisions":["d1"],"summary":["live summary"],"last_event":"status_changed","updated_at":"${NOW_TS}"}
 EOF
