@@ -4,8 +4,10 @@ set -euo pipefail
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+USER_HOME="${USER_HOME:-${HOME}}"
 export HOME="${TMP_DIR}/home"
 mkdir -p "${HOME}/bin" "${TMP_DIR}/compact" "${TMP_DIR}/state" "${TMP_DIR}/log"
+KN_WRAPPER="${KN_WRAPPER:-${USER_HOME}/bin/kn}"
 
 cat > "${HOME}/bin/k" <<'EOF'
 #!/usr/bin/env bash
@@ -45,7 +47,7 @@ cat > "${TMP_DIR}/compact/run-b.json" <<EOF
 {"run_id":"run-b","project":"fugue-orchestrator","purpose":"tmux-handoff","runtime":"fugue","tmux_session":"fugue-orchestrator__tmux-handoff","current_phase":"critique","mode":"degraded","next_action":["tighten doctor output"],"updated_at":"${TS_B}"}
 EOF
 
-out="$(/Users/masayuki_otawara/bin/kn)"
+out="$("${KN_WRAPPER}")"
 grep -Fq '進行中の開発一覧:' <<<"${out}"
 grep -Fq "1) fugue-orchestrator:secret-plane / runtime=kernel / tmux=fugue-orchestrator__secret-plane / フェーズ=implement / 状態=healthy / 次=wire secret loader / 更新=${TS_A}" <<<"${out}"
 grep -Fq "2) fugue-orchestrator:tmux-handoff / runtime=fugue / tmux=fugue-orchestrator__tmux-handoff / フェーズ=critique / 状態=degraded / 次=tighten doctor output / 更新=${TS_B}" <<<"${out}"

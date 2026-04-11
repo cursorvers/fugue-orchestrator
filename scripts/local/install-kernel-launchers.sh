@@ -7,8 +7,11 @@ ZSHRC_PATH="${HOME}/.zshrc"
 CODEX_PROMPTS_DIR="${HOME}/.codex/prompts"
 KERNEL_TARGET="${HOME_BIN}/kernel"
 K4_TARGET="${HOME_BIN}/k4"
+KERNEL_ROOT_TARGET="${HOME_BIN}/kernel-root"
+GUARD_TARGET="${HOME_BIN}/codex-kernel-guard"
 KERNEL_SOURCE="${ROOT_DIR}/scripts/local/launchers/kernel"
 K4_SOURCE="${ROOT_DIR}/scripts/local/launchers/k4"
+KERNEL_ROOT_SOURCE="${ROOT_DIR}/scripts/local/launchers/kernel-root"
 SNIPPET_SOURCE="${ROOT_DIR}/scripts/local/launchers/codex-orchestrator.zsh"
 SNIPPET_LINE="[[ -f \"${SNIPPET_SOURCE}\" ]] && source \"${SNIPPET_SOURCE}\""
 PROMPT_NAMES=(kernel k vote v)
@@ -71,6 +74,10 @@ done
   echo "missing k4 launcher source: ${K4_SOURCE}" >&2
   exit 1
 }
+[[ -f "${KERNEL_ROOT_SOURCE}" ]] || {
+  echo "missing kernel-root helper source: ${KERNEL_ROOT_SOURCE}" >&2
+  exit 1
+}
 [[ -f "${SNIPPET_SOURCE}" ]] || {
   echo "missing codex snippet source: ${SNIPPET_SOURCE}" >&2
   exit 1
@@ -88,6 +95,14 @@ kernel_matches() {
 
 k4_matches() {
   cmp -s "${K4_SOURCE}" "${K4_TARGET}"
+}
+
+kernel_root_matches() {
+  cmp -s "${KERNEL_ROOT_SOURCE}" "${KERNEL_ROOT_TARGET}"
+}
+
+guard_present() {
+  [[ -x "${GUARD_TARGET}" ]]
 }
 
 snippet_installed() {
@@ -140,9 +155,13 @@ if [[ "${CHECK_ONLY}" == "true" ]]; then
   if [[ "${PROMPTS_ONLY}" == "true" ]]; then
     echo "kernel launcher: skipped"
     echo "k4 launcher: skipped"
+    echo "kernel-root helper: skipped"
+    echo "codex kernel guard: skipped"
   else
     kernel_matches && echo "kernel launcher: ok" || echo "kernel launcher: drift"
     k4_matches && echo "k4 launcher: ok" || echo "k4 launcher: drift"
+    kernel_root_matches && echo "kernel-root helper: ok" || echo "kernel-root helper: drift"
+    guard_present && echo "codex kernel guard: present" || echo "codex kernel guard: missing"
   fi
   if [[ "${PROMPTS_ONLY}" == "true" || "${SKIP_ZSHRC}" == "true" ]]; then
     echo "zshrc snippet: skipped"
@@ -165,6 +184,8 @@ if [[ "${PROMPTS_ONLY}" != "true" ]]; then
   echo "installed: ${KERNEL_TARGET}"
   install -m 0755 "${K4_SOURCE}" "${K4_TARGET}"
   echo "installed: ${K4_TARGET}"
+  install -m 0755 "${KERNEL_ROOT_SOURCE}" "${KERNEL_ROOT_TARGET}"
+  echo "installed: ${KERNEL_ROOT_TARGET}"
 fi
 
 if [[ "${PROMPTS_ONLY}" != "true" && "${SKIP_ZSHRC}" != "true" ]]; then

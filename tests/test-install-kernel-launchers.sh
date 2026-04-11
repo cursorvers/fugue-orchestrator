@@ -36,6 +36,7 @@ mkdir -p "${HOME}"
 install_out="$(bash "${SCRIPT}")"
 assert_contains "${install_out}" "installed: ${HOME}/bin/kernel"
 assert_contains "${install_out}" "installed: ${HOME}/bin/k4"
+assert_contains "${install_out}" "installed: ${HOME}/bin/kernel-root"
 assert_contains "${install_out}" "updated: ${HOME}/.zshrc"
 for prompt_name in kernel k vote v; do
   assert_contains "${install_out}" "installed: ${HOME}/.codex/prompts/${prompt_name}.md"
@@ -43,6 +44,11 @@ done
 
 cmp -s "${ROOT_DIR}/scripts/local/launchers/kernel" "${HOME}/bin/kernel"
 cmp -s "${ROOT_DIR}/scripts/local/launchers/k4" "${HOME}/bin/k4"
+cmp -s "${ROOT_DIR}/scripts/local/launchers/kernel-root" "${HOME}/bin/kernel-root"
+[[ ! -e "${HOME}/bin/codex-kernel-guard" ]] || {
+  echo "install should not overwrite or manage existing codex kernel guard" >&2
+  exit 1
+}
 grep -Fqx "[[ -f \"${ROOT_DIR}/scripts/local/launchers/codex-orchestrator.zsh\" ]] && source \"${ROOT_DIR}/scripts/local/launchers/codex-orchestrator.zsh\"" "${HOME}/.zshrc"
 for prompt_name in kernel k vote v; do
   assert_symlink_to "${HOME}/.codex/prompts/${prompt_name}.md" "${ROOT_DIR}/.codex/prompts/${prompt_name}.md"
@@ -51,6 +57,8 @@ done
 check_out="$(bash "${SCRIPT}" --check)"
 assert_contains "${check_out}" "kernel launcher: ok"
 assert_contains "${check_out}" "k4 launcher: ok"
+assert_contains "${check_out}" "kernel-root helper: ok"
+assert_contains "${check_out}" "codex kernel guard: missing"
 assert_contains "${check_out}" "zshrc snippet: ok"
 assert_contains "${check_out}" "codex prompts: ok"
 
@@ -70,6 +78,14 @@ done
   echo "prompts-only should not install k4 launcher" >&2
   exit 1
 }
+[[ ! -e "${HOME}/bin/kernel-root" ]] || {
+  echo "prompts-only should not install kernel-root helper" >&2
+  exit 1
+}
+[[ ! -e "${HOME}/bin/codex-kernel-guard" ]] || {
+  echo "prompts-only should not install codex kernel guard" >&2
+  exit 1
+}
 [[ ! -e "${HOME}/.zshrc" ]] || {
   echo "prompts-only should not write ~/.zshrc" >&2
   exit 1
@@ -78,6 +94,8 @@ done
 prompts_check_out="$(bash "${SCRIPT}" --check --prompts-only)"
 assert_contains "${prompts_check_out}" "kernel launcher: skipped"
 assert_contains "${prompts_check_out}" "k4 launcher: skipped"
+assert_contains "${prompts_check_out}" "kernel-root helper: skipped"
+assert_contains "${prompts_check_out}" "codex kernel guard: skipped"
 assert_contains "${prompts_check_out}" "zshrc snippet: skipped"
 assert_contains "${prompts_check_out}" "codex prompts: ok"
 

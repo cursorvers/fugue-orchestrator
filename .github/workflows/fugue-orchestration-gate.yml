@@ -31,8 +31,12 @@ on:
       - 'scripts/lib/kernel-runtime-run-driver.sh'
       - 'scripts/lib/kernel-runtime-status-surface.sh'
       - 'scripts/lib/kernel-runtime-workspace.sh'
+      - 'scripts/lib/kernel-codex-thread.sh'
       - 'scripts/lib/kernel-memory-query.sh'
+      - 'scripts/lib/kernel-run-recovery.sh'
+      - 'scripts/codex-kernel-guard.sh'
       - 'scripts/local/install-kernel-launchers.sh'
+      - 'scripts/local/kernel-handoff-summary.sh'
       - 'scripts/local/launchers/**'
       - 'scripts/local/kernel-runtime-loop.sh'
       - 'scripts/check-agent-matrix-parity.sh'
@@ -47,8 +51,12 @@ on:
       - 'tests/test-codex-skill-launch.sh'
       - 'tests/test-codex-vote-prompt.sh'
       - 'tests/test-codex-orchestrator-snippet.sh'
+      - 'tests/test-codex-kernel-guard-doctor.sh'
+      - 'tests/test-codex-kernel-guard-matrix.sh'
+      - 'tests/test-codex-kernel-guard-state-fallback.sh'
       - 'tests/test-install-kernel-launchers.sh'
       - 'tests/test-kernel-auth-evidence.sh'
+      - 'tests/test-kernel-dr-continuation.sh'
       - 'tests/test-kernel-entrypoint.sh'
       - 'tests/test-kernel-launcher.sh'
       - 'tests/test-kernel-launcher-template.sh'
@@ -129,8 +137,12 @@ on:
       - 'scripts/lib/kernel-runtime-run-driver.sh'
       - 'scripts/lib/kernel-runtime-status-surface.sh'
       - 'scripts/lib/kernel-runtime-workspace.sh'
+      - 'scripts/lib/kernel-codex-thread.sh'
       - 'scripts/lib/kernel-memory-query.sh'
+      - 'scripts/lib/kernel-run-recovery.sh'
+      - 'scripts/codex-kernel-guard.sh'
       - 'scripts/local/install-kernel-launchers.sh'
+      - 'scripts/local/kernel-handoff-summary.sh'
       - 'scripts/local/launchers/**'
       - 'scripts/local/kernel-runtime-loop.sh'
       - 'scripts/check-agent-matrix-parity.sh'
@@ -145,8 +157,12 @@ on:
       - 'tests/test-codex-skill-launch.sh'
       - 'tests/test-codex-vote-prompt.sh'
       - 'tests/test-codex-orchestrator-snippet.sh'
+      - 'tests/test-codex-kernel-guard-doctor.sh'
+      - 'tests/test-codex-kernel-guard-matrix.sh'
+      - 'tests/test-codex-kernel-guard-state-fallback.sh'
       - 'tests/test-install-kernel-launchers.sh'
       - 'tests/test-kernel-auth-evidence.sh'
+      - 'tests/test-kernel-dr-continuation.sh'
       - 'tests/test-kernel-entrypoint.sh'
       - 'tests/test-kernel-launcher.sh'
       - 'tests/test-kernel-launcher-template.sh'
@@ -262,7 +278,11 @@ jobs:
           bash_n scripts/lib/kernel-runtime-run-driver.sh
           bash_n scripts/lib/kernel-runtime-status-surface.sh
           bash_n scripts/lib/kernel-runtime-workspace.sh
+          bash_n scripts/lib/kernel-codex-thread.sh
           bash_n scripts/lib/kernel-memory-query.sh
+          bash_n scripts/lib/kernel-run-recovery.sh
+          bash_n scripts/codex-kernel-guard.sh
+          bash_n scripts/local/kernel-handoff-summary.sh
           bash_n scripts/local/kernel-runtime-loop.sh
           bash_n scripts/harness/run-recovery-console.sh
           bash_n scripts/check-agent-matrix-parity.sh
@@ -272,7 +292,11 @@ jobs:
           bash_n tests/test-codex-kernel-prompt.sh
           bash_n tests/test-codex-vote-prompt.sh
           bash_n tests/test-codex-orchestrator-snippet.sh
+          bash_n tests/test-codex-kernel-guard-doctor.sh
+          bash_n tests/test-codex-kernel-guard-matrix.sh
+          bash_n tests/test-codex-kernel-guard-state-fallback.sh
           bash_n tests/test-kernel-auth-evidence.sh
+          bash_n tests/test-kernel-dr-continuation.sh
           bash_n tests/test-publish-decision-journal.sh
           bash_n tests/test-local-orchestration-heartbeat-cleanup.sh
           bash_n tests/test-local-orchestration-consensus-bridge.sh
@@ -331,6 +355,10 @@ jobs:
           run_if_present tests/test-codex-kernel-prompt.sh
           run_if_present tests/test-codex-orchestrator-snippet.sh
           run_if_present tests/test-install-kernel-launchers.sh
+          run_if_present tests/test-codex-kernel-guard-doctor.sh
+          run_if_present tests/test-codex-kernel-guard-matrix.sh
+          run_if_present tests/test-codex-kernel-guard-state-fallback.sh
+          run_if_present tests/test-kernel-dr-continuation.sh
           run_if_present tests/test-vote-launchers.sh
           run_if_present tests/test-codex-skill-launch.sh
 

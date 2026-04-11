@@ -4,8 +4,10 @@ set -euo pipefail
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+USER_HOME="${USER_HOME:-${HOME}}"
 export HOME="${TMP_DIR}/home"
 mkdir -p "${HOME}/bin" "${TMP_DIR}/compact" "${TMP_DIR}/log"
+KN_WRAPPER="${KN_WRAPPER:-${USER_HOME}/bin/kn}"
 
 cat > "${HOME}/bin/k" <<'EOF'
 #!/usr/bin/env bash
@@ -56,7 +58,7 @@ cat > "${TMP_DIR}/compact/run-stale.json" <<'EOF'
 {"run_id":"run-stale","project":"cmux","purpose":"stale-managed","tmux_session":"stale-managed","current_phase":"critique","mode":"degraded","next_action":["resume"],"updated_at":"2026-03-18T00:00:00Z"}
 EOF
 
-out="$(/Users/masayuki_otawara/bin/kn)"
+out="$("${KN_WRAPPER}")"
 grep -Fq '進行中の開発一覧:' <<<"${out}"
 grep -Fq '1) cmux:proj-a / 状態=unmanaged / 次=Kernel run に昇格' <<<"${out}"
 grep -Fq '2) cmux:proj-b / 状態=unmanaged / 次=Kernel run に昇格' <<<"${out}"

@@ -2,7 +2,43 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="${KERNEL_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+is_kernel_root() {
+  local candidate="${1:-}"
+  [[ -n "${candidate}" ]] || return 1
+  [[ -e "${candidate}/.git" ]] || return 1
+  [[ -f "${candidate}/.codex/prompts/kernel.md" ]] || return 1
+  [[ -f "${candidate}/scripts/lib/kernel-bootstrap-receipt.sh" ]] || return 1
+}
+
+resolve_kernel_root() {
+  local candidate="${KERNEL_ROOT:-}"
+  if is_kernel_root "${candidate}"; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  candidate="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  if is_kernel_root "${candidate}"; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  if [[ -x "${HOME}/bin/kernel-root" ]]; then
+    candidate="$(bash "${HOME}/bin/kernel-root" 2>/dev/null || true)"
+    if is_kernel_root "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+ROOT_DIR="$(resolve_kernel_root)" || {
+  echo "Kernel root not found. Set KERNEL_ROOT." >&2
+  exit 1
+}
 
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
@@ -896,7 +932,7 @@ cmd_doctor() {
       "$(jq -r '.current_phase // ""' <<<"${json}")" \
       "$(jq -r '.mode // ""' <<<"${json}")" \
       "$(jq -r '.runtime // "kernel"' <<<"${json}")" \
-      "$(jq -r '(.next_action // [])[0] // ""' <<<"${json}")" \
+      "$(jq -r '(.next_action // "") | if type == "array" then (.[0] // "") elif type == "string" then . else "" end' <<<"${json}")" \
       "$(jq -r '.updated_at // ""' <<<"${json}")" \
       "${age_text}" \
       "${stale_flag}" \
@@ -979,7 +1015,7 @@ cmd_doctor_run() {
   printf '  - codex_thread_title: %s\n' "$(jq -r '.codex_thread_title // ((.project // "") + ":" + (.purpose // ""))' <<<"${json}")"
   printf '  - active_models: %s\n' "$(jq -r '(.active_models // []) | join(",")' <<<"${json}")"
   printf '  - blocking_reason: %s\n' "$(jq -r '.blocking_reason // ""' <<<"${json}")"
-  printf '  - next_action: %s\n' "$(jq -r '(.next_action // [])[0] // ""' <<<"${json}")"
+  printf '  - next_action: %s\n' "$(jq -r '(.next_action // "") | if type == "array" then (.[0] // "") elif type == "string" then . else "" end' <<<"${json}")"
   printf '  - summary: %s\n' "$(jq -r '(.summary // []) | join(" || ")' <<<"${json}")"
   printf '  - updated_at: %s\n' "$(jq -r '.updated_at // ""' <<<"${json}")"
   printf '  - updated_age: %s\n' "$(format_age_seconds "$(age_seconds_from_iso8601 "$(jq -r '.updated_at // ""' <<<"${json}")" 2>/dev/null || printf '%s\n' "-1")")"

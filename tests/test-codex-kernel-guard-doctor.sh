@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
+GUARD_BIN="${KERNEL_GUARD_BIN:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 SESSION_A="fugue-orchestrator__alpha"
@@ -41,7 +42,7 @@ EOF
 KERNEL_RUN_ID="run-alpha" bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 KERNEL_RUN_ID="run-alpha" bash "${LEDGER_SCRIPT}" scheduler-state retry_queued "doctor-alpha" "/tmp/run-alpha-workspace.json" >/dev/null
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor)"
+out="$("${GUARD_BIN}" doctor)"
 grep -Fq 'active runs:' <<<"${out}"
 beta_line="$(printf '%s\n' "${out}" | awk '/^  - run_id=run-beta /{print; exit}')"
 grep -Fq 'purpose=beta' <<<"${beta_line}"
@@ -53,7 +54,7 @@ grep -Fq 'present: false' <<<"${out}"
 grep -Fq 'runtime health status:' <<<"${out}"
 grep -Fq 'compact artifact status:' <<<"${out}"
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor --run run-alpha)"
+out="$("${GUARD_BIN}" doctor --run run-alpha)"
 grep -Fq 'doctor scope run id: run-alpha' <<<"${out}"
 grep -Fq 'run detail:' <<<"${out}"
 grep -Fq 'scheduler_state_compact: retry_queued' <<<"${out}"

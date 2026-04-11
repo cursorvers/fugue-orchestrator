@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+is_kernel_root() {
+  local candidate="${1:-}"
+  [[ -n "${candidate}" ]] || return 1
+  [[ -e "${candidate}/.git" ]] || return 1
+  [[ -f "${candidate}/.codex/prompts/kernel.md" ]] || return 1
+  [[ -f "${candidate}/scripts/lib/kernel-bootstrap-receipt.sh" ]] || return 1
+}
+
+search_upward() {
+  local candidate="${PWD}"
+  while [[ "${candidate}" != "/" ]]; do
+    if is_kernel_root "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    candidate="$(dirname "${candidate}")"
+  done
+  return 1
+}
+
+search_preferred_roots() {
+  local candidate
+  for candidate in \
+    "${HOME}/Dev/fugue-orchestrator-public" \
+    "${HOME}/Dev/agent-feed-runner" \
+    "${HOME}/Dev/agent-orchestration"
+  do
+    if is_kernel_root "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+search_common_roots() {
+  local base="${1:-}"
+  [[ -d "${base}" ]] || return 1
+  while IFS= read -r marker; do
+    marker="${marker%/.codex/prompts/kernel.md}"
+    if is_kernel_root "${marker}"; then
+      printf '%s\n' "${marker}"
+      return 0
+    fi
+  done < <(find "${base}" -maxdepth 5 -type f -path '*/.codex/prompts/kernel.md' 2>/dev/null)
+  return 1
+}
+
+if is_kernel_root "${KERNEL_ROOT:-}"; then
+  printf '%s\n' "${KERNEL_ROOT}"
+  exit 0
+fi
+
+if search_upward >/dev/null; then
+  search_upward
+  exit 0
+fi
+
+if search_preferred_roots >/dev/null; then
+  search_preferred_roots
+  exit 0
+fi
+
+if search_common_roots "${HOME}/Dev" >/dev/null; then
+  search_common_roots "${HOME}/Dev"
+  exit 0
+fi
+
+if search_common_roots "${HOME}" >/dev/null; then
+  search_common_roots "${HOME}"
+  exit 0
+fi
+
+echo "Kernel root not found." >&2
+exit 1

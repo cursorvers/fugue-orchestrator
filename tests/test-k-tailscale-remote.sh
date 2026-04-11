@@ -4,8 +4,10 @@ set -euo pipefail
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+USER_HOME="${USER_HOME:-${HOME}}"
 export HOME="${TMP_DIR}/home"
 mkdir -p "${HOME}/bin" "${TMP_DIR}/log"
+K_WRAPPER="${K_WRAPPER:-${USER_HOME}/bin/k}"
 
 cat > "${TMP_DIR}/tailscale-stub" <<'EOF'
 #!/usr/bin/env bash
@@ -34,7 +36,7 @@ export KERNEL_REMOTE_TARGET="mini-tailnet"
 export KERNEL_REMOTE_BIN_DIR="/remote/bin"
 export KERNEL_TAILSCALE_BIN="${TMP_DIR}/tailscale-stub"
 
-out="$(/Users/masayuki_otawara/bin/k latest)"
+out="$("${K_WRAPPER}" latest)"
 grep -Fq 'remote-tailnet-run' <<<"${out}"
 grep -Fq 'ssh mini-tailnet' "${K_TS_LOG}"
 grep -Fq '/remote/bin/k' "${K_TS_LOG}"
@@ -43,7 +45,7 @@ grep -Fq 'actual_host=' "${K_TS_LOG}"
 grep -Fq 'mini-tailnet' "${K_TS_LOG}"
 
 : > "${K_TS_LOG}"
-out="$(/Users/masayuki_otawara/bin/k open remote-tailnet-run)"
+out="$("${K_WRAPPER}" open remote-tailnet-run)"
 grep -Fq 'tailscale attach ok' <<<"${out}"
 grep -Fq 'ssh mini-tailnet' "${K_TS_LOG}"
 grep -Fq '/remote/bin/k' "${K_TS_LOG}"
@@ -52,7 +54,7 @@ grep -Fq 'remote-tailnet-run' "${K_TS_LOG}"
 grep -Fq 'actual_host=' "${K_TS_LOG}"
 
 : > "${K_TS_LOG}"
-out="$(/Users/masayuki_otawara/bin/k new --runtime fugue remote-fugue)"
+out="$("${K_WRAPPER}" new --runtime fugue remote-fugue)"
 grep -Fq 'tailscale fugue new ok' <<<"${out}"
 grep -Fq '/remote/bin/k' "${K_TS_LOG}"
 grep -Fq -- '--runtime' "${K_TS_LOG}"
