@@ -31,7 +31,7 @@ grep -q "CANARY_VERIFY_ROLLBACK" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing rollback verification env" >&2
   exit 1
 }
-grep -q "CANARY_REPORT_DIR: .*runner.temp" "${CANARY_WORKFLOW}" || {
+grep -q "CANARY_REPORT_DIR: .*github.workspace" "${CANARY_WORKFLOW}" || {
   echo "FAIL: canary workflow missing report dir env" >&2
   exit 1
 }
