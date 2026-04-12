@@ -1,0 +1,422 @@
+name: fugue-status
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to post status into"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  issues: write
+  actions: read
+
+jobs:
+  report:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Resolve context and gate
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          EVENT="${GITHUB_EVENT_NAME}"
+          ISSUE_NUMBER=""
+          COMMENT_BODY=""
+          if [[ "${EVENT}" == "workflow_dispatch" ]]; then
+            ISSUE_NUMBER="${{ github.event.inputs.issue_number }}"
+            if [[ -z "${ISSUE_NUMBER}" ]]; then
+              echo "should_run=false" >> "${GITHUB_OUTPUT}"
+              echo "reason=missing-issue-number" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+          elif [[ "${EVENT}" == "issue_comment" ]]; then
+            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
+            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
+            COMMENT_BODY="$(jq -r '.comment.body // ""' "${GITHUB_EVENT_PATH}")"
+          else
+            issue_json="$(jq -c '.issue' "${GITHUB_EVENT_PATH}")"
+            ISSUE_NUMBER="$(echo "${issue_json}" | jq -r '.number')"
+          fi
+
+          HAS_STATUS="$(echo "${issue_json}" | jq -r '[.labels[].name] | index("fugue-status") != null')"
+          SHOULD_RUN="false"
+          REASON=""
+
+          if [[ "${EVENT}" == "issue_comment" ]]; then
+            # Only react to explicit commands, and only on fugue-status issues.
+            if [[ "${HAS_STATUS}" == "true" ]] && echo "${COMMENT_BODY}" | grep -Eqi '^(\/status|\/progress|進捗)\b'; then
+              SHOULD_RUN="true"
+            else
+              REASON="not-a-status-command-or-missing-label"
+            fi
+          elif [[ "${EVENT}" == "issues" ]]; then
+            # On open/label events, only run when fugue-status is present.
+            if [[ "${HAS_STATUS}" == "true" ]]; then
+              SHOULD_RUN="true"
+            else
+              REASON="missing-fugue-status-label"
+            fi
+          else
+            # workflow_dispatch already validated inputs.
+            SHOULD_RUN="true"
+          fi
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "should_run=${SHOULD_RUN}"
+            echo "reason=${REASON}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Skip
+        if: ${{ steps.ctx.outputs.should_run != 'true' }}
+        run: |
+          echo "Skip: ${{ steps.ctx.outputs.reason }}"
+
+      - name: Author trust gate (write/maintain/admin)
+        id: trust
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          AUTHOR="${GITHUB_ACTOR}"
+
+          PERM="none"
+          perm_json="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${AUTHOR}/permission" 2>/dev/null || echo '{}')"
+          if echo "${perm_json}" | jq -e '.permission' >/dev/null 2>&1; then
+            PERM="$(echo "${perm_json}" | jq -r '.permission')"
+          fi
+
+          TRUSTED="false"
+          if [[ "${PERM}" == "write" || "${PERM}" == "maintain" || "${PERM}" == "admin" ]]; then
+            TRUSTED="true"
+          fi
+
+          {
+            echo "permission=${PERM}"
+            echo "trusted=${TRUSTED}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Post untrusted notice
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.ctx.outputs.issue_number }}
+        run: |
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "Status report is restricted to trusted repo collaborators (write/maintain/admin). Current permission: '${{ steps.trust.outputs.permission }}'."
+
+      - name: Generate and post status report
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.trust.outputs.trusted == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.ctx.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          gh_api_retry() {
+            local endpoint="$1"
+            local attempts="${2:-5}"
+            local sleep_sec=2
+            local i out
+            for ((i=1; i<=attempts; i++)); do
+              if out="$(gh api "${endpoint}" 2>/dev/null)"; then
+                printf '%s\n' "${out}"
+                return 0
+              fi
+              if (( i == attempts )); then
+                return 1
+              fi
+              sleep "${sleep_sec}"
+              if (( sleep_sec < 16 )); then
+                sleep_sec=$((sleep_sec * 2))
+              fi
+            done
+            return 1
+          }
+
+          # Open fugue-task issues
+          issues_json="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:open&per_page=100" 5 || echo '{"items":[],"total_count":0}')"
+          total="$(echo "${issues_json}" | jq -r '.total_count // 0')"
+          processing="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "processing")] | length')"
+          needs_human="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-human")] | length')"
+          needs_review="$(echo "${issues_json}" | jq -r '[.items[] | select(.labels[].name == "needs-review")] | length')"
+          since_7d="$(date -u -d '7 days ago' +%Y-%m-%d)"
+          recent_json="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+created:>=${since_7d}&per_page=100" 5 || echo '{"items":[],"total_count":0}')"
+          recent_total="$(echo "${recent_json}" | jq -r '.total_count // 0')"
+          recent_needs_human="$(echo "${recent_json}" | jq -r '[.items[] | select((([.labels[]?.name] | index("needs-human")) != null))] | length')"
+          recent_implement="$(echo "${recent_json}" | jq -r '[.items[] | select((([.labels[]?.name] | index("implement")) != null) or (([.labels[]?.name] | index("codex-implement")) != null) or (([.labels[]?.name] | index("claude-implement")) != null))] | length')"
+          recent_confirmed="$(echo "${recent_json}" | jq -r '[.items[] | select((([.labels[]?.name] | index("implement-confirmed")) != null))] | length')"
+          recent_unconfirmed="${recent_implement}"
+          if (( recent_unconfirmed > recent_confirmed )); then
+            recent_unconfirmed=$((recent_unconfirmed - recent_confirmed))
+          else
+            recent_unconfirmed=0
+          fi
+          recent_closed_json="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+label:fugue-task+state:closed+closed:>=${since_7d}&per_page=100" 5 || echo '{"items":[],"total_count":0}')"
+          avg_lead_hours="$(echo "${recent_closed_json}" | jq -r '
+            [ .items[] | select(.closed_at != null and .created_at != null)
+              | ((.closed_at | fromdateiso8601) - (.created_at | fromdateiso8601)) / 3600 ] as $h
+            | if ($h | length) == 0 then 0 else (($h | add) / ($h | length)) end
+          ' 2>/dev/null || echo "0")"
+          fallback_mentions="$(gh_api_retry "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+%22auto-fallback%22+updated:>=${since_7d}&per_page=1" 5 | jq -r '.total_count // 0' 2>/dev/null || echo "0")"
+          confirmation_rate="0.0"
+          if (( recent_implement > 0 )); then
+            confirmation_rate="$(awk -v c="${recent_confirmed}" -v i="${recent_implement}" 'BEGIN { printf "%.1f", (c/i)*100 }')"
+          fi
+          needs_human_rate="0.0"
+          if (( recent_total > 0 )); then
+            needs_human_rate="$(awk -v n="${recent_needs_human}" -v t="${recent_total}" 'BEGIN { printf "%.1f", (n/t)*100 }')"
+          fi
+          fallback_rate="0.0"
+          if (( recent_total > 0 )); then
+            fallback_rate="$(awk -v f="${fallback_mentions}" -v t="${recent_total}" 'BEGIN { printf "%.1f", (f/t)*100 }')"
+          fi
+          main_default="$(gh variable get FUGUE_MAIN_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || true)"
+          legacy_default="$(gh variable get FUGUE_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || true)"
+          if [[ -z "${main_default}" ]]; then
+            main_default="${legacy_default}"
+          fi
+          if [[ -z "${main_default}" ]]; then
+            main_default="codex"
+          fi
+          assist_default="$(gh variable get FUGUE_ASSIST_ORCHESTRATOR_PROVIDER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "claude")"
+          ci_execution_engine="$(gh variable get FUGUE_CI_EXECUTION_ENGINE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "subscription")"
+          subscription_offline_policy="$(gh variable get FUGUE_SUBSCRIPTION_OFFLINE_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "continuity")"
+          subscription_runner_label="$(gh variable get FUGUE_SUBSCRIPTION_RUNNER_LABEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "fugue-subscription")"
+          codex_main_model="$(gh variable get FUGUE_CODEX_MAIN_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.4")"
+          codex_multi_agent_model="$(gh variable get FUGUE_CODEX_MULTI_AGENT_MODEL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "gpt-5.3-codex-spark")"
+          multi_agent_mode="$(gh variable get FUGUE_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "standard")"
+          glm_subagent_mode="$(gh variable get FUGUE_GLM_SUBAGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "paired")"
+          claude_main_assist_policy="$(gh variable get FUGUE_CLAUDE_MAIN_ASSIST_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "codex")"
+          claude_max_plan="$(gh variable get FUGUE_CLAUDE_MAX_PLAN --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
+          claude_assist_execution_policy="$(gh variable get FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "")"
+          claude_plan_tier="$(gh variable get FUGUE_CLAUDE_PLAN_TIER --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "max20")"
+          implement_refinement_cycles="$(gh variable get FUGUE_IMPLEMENT_REFINEMENT_CYCLES --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "3")"
+          implement_preflight_cycles_full="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "2")"
+          implement_preflight_cycles_claude="$(gh variable get FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "1")"
+          implement_dialogue_rounds="$(gh variable get FUGUE_IMPLEMENT_DIALOGUE_ROUNDS --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "2")"
+          implement_dialogue_rounds_claude="$(gh variable get FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "1")"
+          claude_light_multi_agent_mode="$(gh variable get FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "standard")"
+          claude_light_multi_agent_lock="$(gh variable get FUGUE_CLAUDE_LIGHT_MULTI_AGENT_LOCK --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "true")"
+          claude_translator_mode="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_MODE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "auto")"
+          claude_translator_threshold="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "75")"
+          claude_translator_threshold_degraded="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "88")"
+          claude_translator_threshold_claude_light="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "90")"
+          claude_translator_threshold_degraded_claude_light="$(gh variable get FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "95")"
+          claude_state="$(gh variable get FUGUE_CLAUDE_RATE_LIMIT_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || echo "ok")"
+          main_default="$(echo "${main_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          assist_default="$(echo "${assist_default}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          ci_execution_engine="$(echo "${ci_execution_engine}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_offline_policy="$(echo "${subscription_offline_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          subscription_runner_label="$(echo "${subscription_runner_label}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          codex_main_model="$(echo "${codex_main_model}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          codex_multi_agent_model="$(echo "${codex_multi_agent_model}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          multi_agent_mode="$(echo "${multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          glm_subagent_mode="$(echo "${glm_subagent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_main_assist_policy="$(echo "${claude_main_assist_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_max_plan="$(echo "${claude_max_plan}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_assist_execution_policy="$(echo "${claude_assist_execution_policy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_plan_tier="$(echo "${claude_plan_tier}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          implement_refinement_cycles="$(echo "${implement_refinement_cycles}" | tr -cd '0-9')"
+          implement_preflight_cycles_full="$(echo "${implement_preflight_cycles_full}" | tr -cd '0-9')"
+          implement_preflight_cycles_claude="$(echo "${implement_preflight_cycles_claude}" | tr -cd '0-9')"
+          implement_dialogue_rounds="$(echo "${implement_dialogue_rounds}" | tr -cd '0-9')"
+          implement_dialogue_rounds_claude="$(echo "${implement_dialogue_rounds_claude}" | tr -cd '0-9')"
+          claude_light_multi_agent_mode="$(echo "${claude_light_multi_agent_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_light_multi_agent_lock="$(echo "${claude_light_multi_agent_lock}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_translator_mode="$(echo "${claude_translator_mode}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          claude_translator_threshold="$(echo "${claude_translator_threshold}" | tr -cd '0-9')"
+          claude_translator_threshold_degraded="$(echo "${claude_translator_threshold_degraded}" | tr -cd '0-9')"
+          claude_translator_threshold_claude_light="$(echo "${claude_translator_threshold_claude_light}" | tr -cd '0-9')"
+          claude_translator_threshold_degraded_claude_light="$(echo "${claude_translator_threshold_degraded_claude_light}" | tr -cd '0-9')"
+          claude_state="$(echo "${claude_state}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${main_default}" != "codex" && "${main_default}" != "claude" ]]; then
+            main_default="codex"
+          fi
+          if [[ "${assist_default}" != "codex" && "${assist_default}" != "claude" && "${assist_default}" != "none" ]]; then
+            assist_default="claude"
+          fi
+          if [[ "${ci_execution_engine}" != "harness" && "${ci_execution_engine}" != "api" && "${ci_execution_engine}" != "subscription" ]]; then
+            ci_execution_engine="subscription"
+          fi
+          if [[ "${subscription_offline_policy}" != "hold" && "${subscription_offline_policy}" != "continuity" ]]; then
+            subscription_offline_policy="continuity"
+          fi
+          if [[ -z "${subscription_runner_label}" ]]; then
+            subscription_runner_label="fugue-subscription"
+          fi
+          if [[ -z "${codex_main_model}" ]]; then
+            codex_main_model="gpt-5.4"
+          fi
+          if [[ -z "${codex_multi_agent_model}" ]]; then
+            codex_multi_agent_model="gpt-5.3-codex-spark"
+          fi
+          if [[ "${multi_agent_mode}" != "standard" && "${multi_agent_mode}" != "enhanced" && "${multi_agent_mode}" != "max" ]]; then
+            multi_agent_mode="standard"
+          fi
+          if [[ "${glm_subagent_mode}" != "off" && "${glm_subagent_mode}" != "paired" && "${glm_subagent_mode}" != "symphony" ]]; then
+            glm_subagent_mode="paired"
+          fi
+          if [[ "${claude_main_assist_policy}" != "codex" && "${claude_main_assist_policy}" != "none" ]]; then
+            claude_main_assist_policy="codex"
+          fi
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
+          if [[ "${claude_assist_execution_policy}" != "direct" && "${claude_assist_execution_policy}" != "hybrid" && "${claude_assist_execution_policy}" != "proxy" ]]; then
+            if [[ "${claude_max_plan}" == "true" ]]; then
+              claude_assist_execution_policy="hybrid"
+            else
+              claude_assist_execution_policy="direct"
+            fi
+          fi
+          if [[ -z "${claude_plan_tier}" ]]; then
+            claude_plan_tier="max20"
+          fi
+          if [[ -z "${implement_refinement_cycles}" ]]; then
+            implement_refinement_cycles="3"
+          fi
+          if [[ -z "${implement_preflight_cycles_full}" ]]; then
+            implement_preflight_cycles_full="2"
+          fi
+          if [[ -z "${implement_preflight_cycles_claude}" ]]; then
+            implement_preflight_cycles_claude="1"
+          fi
+          if [[ -z "${implement_dialogue_rounds}" ]]; then
+            implement_dialogue_rounds="2"
+          fi
+          if [[ -z "${implement_dialogue_rounds_claude}" ]]; then
+            implement_dialogue_rounds_claude="1"
+          fi
+          if [[ "${claude_light_multi_agent_mode}" != "standard" && "${claude_light_multi_agent_mode}" != "enhanced" && "${claude_light_multi_agent_mode}" != "max" ]]; then
+            claude_light_multi_agent_mode="standard"
+          fi
+          if [[ "${claude_light_multi_agent_lock}" != "true" ]]; then
+            claude_light_multi_agent_lock="false"
+          fi
+          if [[ "${claude_translator_mode}" != "auto" && "${claude_translator_mode}" != "always" && "${claude_translator_mode}" != "off" ]]; then
+            claude_translator_mode="auto"
+          fi
+          if [[ -z "${claude_translator_threshold}" ]]; then
+            claude_translator_threshold="75"
+          fi
+          if [[ -z "${claude_translator_threshold_degraded}" ]]; then
+            claude_translator_threshold_degraded="88"
+          fi
+          if [[ -z "${claude_translator_threshold_claude_light}" ]]; then
+            claude_translator_threshold_claude_light="90"
+          fi
+          if [[ -z "${claude_translator_threshold_degraded_claude_light}" ]]; then
+            claude_translator_threshold_degraded_claude_light="95"
+          fi
+          if [[ "${claude_state}" != "ok" && "${claude_state}" != "degraded" && "${claude_state}" != "exhausted" ]]; then
+            claude_state="ok"
+          fi
+          self_hosted_online_count="n/a"
+          if [[ "${ci_execution_engine}" == "subscription" ]]; then
+            runners_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 5 || echo '{}')"
+            self_hosted_online_count="$(echo "${runners_json}" | jq -r --arg label "${subscription_runner_label}" '[.runners[]? | select(.status=="online" and .busy != true and ([.labels[]?.name] | index("self-hosted") != null) and ([.labels[]?.name] | index($label) != null))] | length' 2>/dev/null || echo "0")"
+            self_hosted_online_count="$(echo "${self_hosted_online_count}" | tr -cd '0-9')"
+            if [[ -z "${self_hosted_online_count}" ]]; then
+              self_hosted_online_count="0"
+            else
+              self_hosted_online_count="$((10#${self_hosted_online_count}))"
+            fi
+          fi
+
+          top="$(echo "${issues_json}" | jq -r '.items[:5] | map("- #\(.number) \(.title) (\(.html_url))") | join("\n")')"
+          if [[ -z "${top}" ]]; then
+            top="(none)"
+          fi
+
+          # Latest workflow runs
+          wf_line() {
+            local wf_file="$1"
+            local label="$2"
+            local run_json
+            run_json="$(gh_api_retry "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf_file}/runs?per_page=1" 4 || echo '{}')"
+            local concl url created
+            concl="$(echo "${run_json}" | jq -r '.workflow_runs[0].conclusion // ""')"
+            url="$(echo "${run_json}" | jq -r '.workflow_runs[0].html_url // ""')"
+            created="$(echo "${run_json}" | jq -r '.workflow_runs[0].created_at // ""')"
+            if [[ -z "${url}" ]]; then
+              echo "- ${label}: (no runs found)"
+              return 0
+            fi
+            if [[ -z "${concl}" || "${concl}" == "null" ]]; then
+              concl="(running)"
+            fi
+            echo "- ${label}: ${concl} (${created}) ${url}"
+          }
+
+          now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          report="$(cat <<EOF
+          FUGUE status report (${now})
+
+          **Open fugue-task issues**
+          - total: ${total}
+          - processing: ${processing}
+          - needs-human: ${needs_human}
+          - needs-review: ${needs_review}
+          - main_orchestrator_default: ${main_default}
+          - assist_orchestrator_default: ${assist_default}
+          - ci_execution_engine: ${ci_execution_engine}
+          - subscription_offline_policy: ${subscription_offline_policy}
+          - subscription_runner_label: ${subscription_runner_label}
+          - codex_main_model: ${codex_main_model}
+          - codex_multi_agent_model: ${codex_multi_agent_model}
+          - self_hosted_online_count: ${self_hosted_online_count}
+          - multi_agent_mode: ${multi_agent_mode}
+          - glm_subagent_mode: ${glm_subagent_mode}
+          - claude_main_assist_policy: ${claude_main_assist_policy}
+          - claude_max_plan_mode: ${claude_max_plan}
+          - claude_assist_execution_policy: ${claude_assist_execution_policy}
+          - claude_plan_tier: ${claude_plan_tier}
+          - implement_refinement_cycles: ${implement_refinement_cycles}
+          - implement_preflight_cycles (codex-full): ${implement_preflight_cycles_full}
+          - implement_preflight_cycles (claude-light): ${implement_preflight_cycles_claude}
+          - implement_dialogue_rounds (default): ${implement_dialogue_rounds}
+          - implement_dialogue_rounds (claude-main): ${implement_dialogue_rounds_claude}
+          - claude_light_multi_agent_mode: ${claude_light_multi_agent_mode}
+          - claude_light_multi_agent_lock: ${claude_light_multi_agent_lock}
+          - claude_translator_mode: ${claude_translator_mode}
+          - claude_translator_threshold (base/degraded): ${claude_translator_threshold}/${claude_translator_threshold_degraded}
+          - claude_translator_threshold (claude-light base/degraded): ${claude_translator_threshold_claude_light}/${claude_translator_threshold_degraded_claude_light}
+          - claude_rate_limit_state: ${claude_state}
+
+          **7d KPI snapshot (${since_7d}~)**
+          - tasks opened: ${recent_total}
+          - implement intents: ${recent_implement}
+          - implement confirmation rate: ${confirmation_rate}% (${recent_confirmed}/${recent_implement})
+          - implement intents pending confirmation: ${recent_unconfirmed}
+          - avg lead time (closed tasks): ${avg_lead_hours} hours
+          - fallback mention rate: ${fallback_rate}% (${fallback_mentions}/${recent_total})
+          - needs-human rate: ${needs_human_rate}% (${recent_needs_human}/${recent_total})
+
+          **Latest runs**
+          $(wf_line "fugue-tutti-caller.yml" "mainframe")
+          $(wf_line "fugue-caller.yml" "caller")
+          $(wf_line "fugue-watchdog.yml" "watchdog")
+          $(wf_line "googleworkspace-feed-sync.yml" "gws-shared-feed")
+          $(wf_line "googleworkspace-personal-feed-sync.yml" "gws-personal-feed")
+
+          **Top open issues**
+          ${top}
+
+          Tip: comment \`/status\` or \`進捗\` to refresh.
+          EOF
+          )"
+
+          gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body "${report}"

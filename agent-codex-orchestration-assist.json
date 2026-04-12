@@ -1,0 +1,23 @@
+{
+  "name": "codex-orchestration-assist",
+  "provider": "codex",
+  "api_url": "https://api.openai.com/v1/chat/completions",
+  "model": "gpt-5.3-codex-spark",
+  "agent_role": "orchestration-assistant",
+  "requested_provider": "codex",
+  "requested_model": "gpt-5.3-codex-spark",
+  "http_code": "dry-run",
+  "skipped": false,
+  "delegation_mode": "recursive",
+  "delegation_depth": 3,
+  "delegation_reason": "target-match",
+  "risk": "MEDIUM",
+  "approve": false,
+  "findings": [
+    "Recursive delegation dry-run active for codex lane"
+  ],
+  "recommendation": "Disable FUGUE_CODEX_RECURSIVE_DRY_RUN to execute real recursive codex delegation",
+  "rationale": "delegation_mode=recursive depth=3 dry_run=true",
+  "execution_engine": "harness",
+  "execution_route": "codex-api-recursive-dry-run"
+}

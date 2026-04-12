@@ -1,0 +1,303 @@
+name: LINE Value Share
+
+on:
+  schedule:
+    - cron: '0 2 * * 4'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: line-value-share
+  cancel-in-progress: false
+
+jobs:
+  broadcast-value:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Quota gate
+        id: quota_gate
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          gate_pass="true"
+          skip_reason=""
+
+          # 1. Check delivery pause flag
+          paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
+            --jq '.value' 2>/dev/null || echo "false")
+          if [ "${paused}" = "true" ]; then
+            echo "::notice::LINE delivery paused by delivery-audit"
+            gate_pass="false"
+            skip_reason="delivery_paused"
+          fi
+
+          # 2. Quota + friend-count check (broadcast costs friends_count messages)
+          if [ "${gate_pass}" = "true" ] && [ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+            quota_value=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/message/quota" \
+              | jq -r '.value // 0' 2>/dev/null || echo "0")
+
+            total_usage=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/message/quota/consumption" \
+              | jq -r '.totalUsage // 0' 2>/dev/null || echo "0")
+
+            remaining=$((quota_value - total_usage))
+
+            # 3. Estimate friend count via followers API
+            friends=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/followers/ids" \
+              | jq '[.userIds // [] | length] | .[0] // 0' 2>/dev/null || echo "0")
+
+            # Fallback to stored estimate if API failed or returned 0
+            if echo "${friends}" | grep -qE '^[0-9]+$' && [ "${friends}" -gt 0 ]; then
+              { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_ESTIMATED_FRIENDS" \
+                  -f name="LINE_ESTIMATED_FRIENDS" -f value="${friends}" 2>/dev/null \
+                || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                  -f name="LINE_ESTIMATED_FRIENDS" -f value="${friends}" 2>/dev/null; } || true
+            else
+              friends=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_ESTIMATED_FRIENDS" \
+                --jq '.value' 2>/dev/null || echo "50")
+            fi
+
+            echo "LINE quota: ${total_usage}/${quota_value} (remaining: ${remaining}), friends: ${friends}"
+
+            # 4. Gate decision
+            if [ "${remaining}" -lt "${friends}" ] 2>/dev/null; then
+              gate_pass="false"
+              skip_reason="insufficient_quota (remaining=${remaining}, friends=${friends})"
+              echo "::notice::Quota gate BLOCKED — ${skip_reason}"
+            fi
+          fi
+
+          {
+            echo "gate_pass=${gate_pass}"
+            echo "skip_reason=${skip_reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve rotation message
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
+        id: rotation
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          CONFIG_FILE="config/line-value-messages.json"
+
+          if [ ! -f "${CONFIG_FILE}" ]; then
+            echo "::error::${CONFIG_FILE} not found."
+            exit 1
+          fi
+
+          TOTAL_MESSAGES="$(jq 'length' "${CONFIG_FILE}")"
+          if ! [[ "${TOTAL_MESSAGES}" =~ ^[0-9]+$ ]] || [ "${TOTAL_MESSAGES}" -le 0 ]; then
+            echo "::error::${CONFIG_FILE} must contain a non-empty JSON array."
+            exit 1
+          fi
+
+          RAW_INDEX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" --jq '.value' 2>/dev/null || printf '0')"
+          if ! [[ "${RAW_INDEX}" =~ ^[0-9]+$ ]]; then
+            echo "::warning::LINE_VALUE_SHARE_INDEX is not an integer. Resetting to 0."
+            RAW_INDEX="0"
+          fi
+
+          CURRENT_INDEX=$(( RAW_INDEX % TOTAL_MESSAGES ))
+          NEXT_INDEX=$(( CURRENT_INDEX + 1 ))
+          if [ "${NEXT_INDEX}" -ge "${TOTAL_MESSAGES}" ]; then
+            NEXT_INDEX=0
+          fi
+
+          MESSAGE_JSON="$(jq -c --argjson idx "${CURRENT_INDEX}" '.[$idx]' "${CONFIG_FILE}")"
+          MESSAGE_LABEL="$(printf '%s' "${MESSAGE_JSON}" | jq -r '.label')"
+          MESSAGE_TEXT="$(printf '%s' "${MESSAGE_JSON}" | jq -r '.text')"
+
+          if [ -z "${MESSAGE_TEXT}" ] || [ "${MESSAGE_TEXT}" = "null" ]; then
+            echo "::error::Message text is empty at index ${CURRENT_INDEX}."
+            exit 1
+          fi
+
+          {
+            echo "current_index=${CURRENT_INDEX}"
+            echo "next_index=${NEXT_INDEX}"
+            echo "total_messages=${TOTAL_MESSAGES}"
+            echo "message_label<<EOF"
+            printf '%s\n' "${MESSAGE_LABEL}"
+            echo "EOF"
+            echo "message_text<<EOF"
+            printf '%s\n' "${MESSAGE_TEXT}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Selected message index: ${CURRENT_INDEX}"
+          echo "Selected message label: ${MESSAGE_LABEL}"
+
+      - name: Broadcast LINE value message
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          MESSAGE_TEXT: ${{ steps.rotation.outputs.message_text }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::error::LINE_CHANNEL_ACCESS_TOKEN is required."
+            exit 1
+          fi
+
+          REQUEST_BODY="${RUNNER_TEMP}/line-broadcast-request.json"
+          RESPONSE_BODY="${RUNNER_TEMP}/line-broadcast-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/line-broadcast-response.headers"
+
+          jq -n \
+            --arg text "${MESSAGE_TEXT}" \
+            '{messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
+
+          RETRY_KEY="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "no-retry-key")"
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
+
+          while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
+            HTTP_STATUS="$(curl -sS \
+              -X POST "https://api.line.me/v2/bot/message/broadcast" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+              -H "X-Line-Retry-Key: ${RETRY_KEY}" \
+              --data @"${REQUEST_BODY}")" || true
+
+            echo "LINE broadcast HTTP status: ${HTTP_STATUS} (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
+            cat "${RESPONSE_BODY}" | jq . 2>/dev/null || cat "${RESPONSE_BODY}" || true
+
+            LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+            if [ -n "${LINE_REQUEST_ID:-}" ]; then
+              echo "LINE request id: ${LINE_REQUEST_ID}"
+            fi
+
+            case "${HTTP_STATUS}" in
+              2*)
+                echo "LINE broadcast sent successfully."
+                exit 0
+                ;;
+              408|429|500|502|503|504)
+                # Distinguish monthly quota exhaustion from transient 429
+                if [ "${HTTP_STATUS}" = "429" ]; then
+                  BODY_MSG="$(jq -r '.message // ""' "${RESPONSE_BODY}" 2>/dev/null || true)"
+                  if printf '%s' "${BODY_MSG}" | grep -qiE 'monthly|limit|quota'; then
+                    echo "::error::LINE monthly quota exhausted (${BODY_MSG})"
+                    exit 1
+                  fi
+                fi
+                if [ "${ATTEMPT}" -lt "${MAX_ATTEMPTS}" ]; then
+                  BACKOFF=$(( 1 << (ATTEMPT - 1) ))
+                  echo "::warning::Transient error ${HTTP_STATUS}; retrying in ${BACKOFF}s (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
+                  sleep "${BACKOFF}"
+                  ATTEMPT=$(( ATTEMPT + 1 ))
+                  continue
+                fi
+                ;;
+            esac
+
+            echo "::error::LINE broadcast failed with status ${HTTP_STATUS}."
+            exit 1
+          done
+
+      - name: Persist next rotation index
+        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          NEXT_INDEX: ${{ steps.rotation.outputs.next_index }}
+        run: |
+          set -euo pipefail
+
+          gh api \
+            -X PATCH \
+            "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
+            -f name="LINE_VALUE_SHARE_INDEX" \
+            -f value="${NEXT_INDEX}" >/dev/null
+
+          echo "Persisted LINE_VALUE_SHARE_INDEX=${NEXT_INDEX}"
+
+      - name: Observe LINE quota and consumption
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::notice::LINE_CHANNEL_ACCESS_TOKEN is not set. Skipping quota observation."
+            exit 0
+          fi
+
+          for ENDPOINT in quota quota/consumption; do
+            RESPONSE_BODY="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.json"
+            RESPONSE_HEADERS="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.headers"
+
+            HTTP_STATUS="$(curl -sS \
+              -X GET "https://api.line.me/v2/bot/message/${ENDPOINT}" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}")"
+
+            echo "LINE ${ENDPOINT} HTTP status: ${HTTP_STATUS}"
+            cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+          done
+
+          # Quota threshold check
+          QUOTA_FILE="${RUNNER_TEMP}/line-quota.json"
+          CONSUMPTION_FILE="${RUNNER_TEMP}/line-quota-consumption.json"
+          if [ -f "${QUOTA_FILE}" ] && [ -f "${CONSUMPTION_FILE}" ]; then
+            QUOTA_VALUE="$(jq -r '.value // 0' "${QUOTA_FILE}" 2>/dev/null || echo 0)"
+            CONSUMPTION_VALUE="$(jq -r '.totalUsage // 0' "${CONSUMPTION_FILE}" 2>/dev/null || echo 0)"
+            if [ "${QUOTA_VALUE}" -gt 0 ] 2>/dev/null; then
+              USAGE_PCT=$(( CONSUMPTION_VALUE * 100 / QUOTA_VALUE ))
+              echo "LINE quota usage: ${CONSUMPTION_VALUE}/${QUOTA_VALUE} (${USAGE_PCT}%)"
+              if [ "${USAGE_PCT}" -ge 95 ]; then
+                echo "::error::LINE message quota ${USAGE_PCT}% consumed — approaching limit"
+              elif [ "${USAGE_PCT}" -ge 80 ]; then
+                echo "::warning::LINE message quota ${USAGE_PCT}% consumed"
+              fi
+            fi
+          fi
+
+      - name: Notify Discord on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::notice::DISCORD_WEBHOOK_URL not set. Skipping failure notification."
+            exit 0
+          fi
+          PAYLOAD="$(jq -n \
+            --arg content "[LINE Value Share] Workflow failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{content: $content}')"
+          HTTP_STATUS="$(curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+            --connect-timeout 5 \
+            --max-time 20 \
+            -o /dev/null \
+            -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")" || true
+          case "${HTTP_STATUS}" in
+            2*) echo "Discord failure notification sent." ;;
+            *)  echo "::warning::Discord failure notification failed (HTTP ${HTTP_STATUS:-N/A})." ;;
+          esac

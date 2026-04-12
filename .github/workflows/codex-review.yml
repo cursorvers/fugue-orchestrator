@@ -1,0 +1,358 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+        type: string
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  codex-review:
+    name: Codex Review (Codex)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PR_NUMBER="${{ inputs.pr_number }}"
+            BASE_REF=$(gh pr view "${PR_NUMBER}" --json baseRefName -q '.baseRefName')
+            HEAD_SHA=$(gh pr view "${PR_NUMBER}" --json headRefOid -q '.headRefOid')
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          fi
+
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+
+          gh pr diff "${PR_NUMBER}" > /tmp/pr_diff.txt
+
+          if [ ! -s /tmp/pr_diff.txt ]; then
+            git fetch --no-tags --prune --depth=1 origin "${BASE_REF}" || true
+            git fetch --no-tags --prune --depth=1 origin "${HEAD_SHA}" || true
+            git diff "origin/${BASE_REF}...${HEAD_SHA}" > /tmp/pr_diff.txt || true
+          fi
+
+          if [ ! -s /tmp/pr_diff.txt ]; then
+            echo "No diff available" > /tmp/pr_diff.txt
+          fi
+
+          if [ "$(wc -c < /tmp/pr_diff.txt)" -gt 51200 ]; then
+            head -c 51200 /tmp/pr_diff.txt > /tmp/pr_diff_truncated.txt
+            mv /tmp/pr_diff_truncated.txt /tmp/pr_diff.txt
+            echo "::warning::Diff truncated to 50KB"
+          fi
+
+      - name: Run Code Reviewer
+        id: code_review
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/code_review_prompt.md << 'PROMPT'
+          # Code Reviewer
+
+          You are a senior engineer reviewing code for:
+          - Accuracy (3pts): bugs, logic errors, edge cases
+          - Performance (2pts): N+1, unnecessary recomputation, memory leaks
+          - Maintainability (2pts): readability, naming, DRY
+
+          Return JSON in a ```json``` fence:
+          ```json
+          {
+            "scores": {"accuracy": <0-3>, "performance": <0-2>, "maintainability": <0-2>},
+            "total": <0-7>,
+            "issues": [{"severity": "critical|major|minor", "file": "", "line": "", "description": "", "suggestion": ""}],
+            "summary": ""
+          }
+          ```
+
+          ## Diff to review
+
+          PROMPT
+
+          cat /tmp/pr_diff.txt >> /tmp/code_review_prompt.md
+
+          USED_MODEL=""
+          API_RESPONSE=""
+
+          for model in gpt-5.3-codex-spark gpt-5-codex gpt-5.3-codex; do
+            REQUEST_BODY=$(jq -n \
+              --arg model "${model}" \
+              --arg prompt "$(cat /tmp/code_review_prompt.md)" \
+              '{
+                model: $model,
+                temperature: 0.1,
+                messages: [
+                  {role: "system", content: "You are a strict senior code reviewer. Return valid JSON only, wrapped in a json code fence."},
+                  {role: "user", content: $prompt}
+                ]
+              }')
+
+            raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${REQUEST_BODY}" 2>/dev/null || true)"
+            http_code="$(echo "${raw}" | tail -1)"
+            body="$(echo "${raw}" | sed '$d')"
+            if [ "${http_code}" = "200" ]; then
+              USED_MODEL="${model}"
+              API_RESPONSE="${body}"
+              break
+            fi
+          done
+
+          RESULT=$(echo "${API_RESPONSE}" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
+
+          if [ -z "${RESULT}" ]; then
+            RESULT='{"scores":{"accuracy":2,"performance":1,"maintainability":1},"total":4,"issues":[],"summary":"Review execution error"}'
+          fi
+
+          EXTRACTED=$(jq -Rn --arg s "${RESULT}" '
+            ($s | gsub("\r"; "") | gsub("^\\s+|\\s+$"; "")) as $t |
+            if ($t | test("```json")) then
+              (($t | split("```json") | .[1] // $t) | split("```") | .[0]) | gsub("^\\s+|\\s+$"; "")
+            else
+              $t
+            end
+          ')
+
+          if echo "${EXTRACTED}" | jq -e . >/dev/null 2>&1; then
+            echo "${EXTRACTED}" | jq -c . > /tmp/code_review.json
+          else
+            echo '{"scores":{"accuracy":2,"performance":1,"maintainability":1},"total":4,"issues":[],"summary":"JSON parse error in review result"}' > /tmp/code_review.json
+          fi
+
+          echo "used_model=${USED_MODEL:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "result=$(jq -c . /tmp/code_review.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Security Analyst
+        id: security_review
+        if: always()
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          cat > /tmp/security_prompt.md << 'PROMPT'
+          # Security Analyst
+
+          You are a security expert checking for:
+          - OWASP Top 10 vulnerabilities
+          - SQL injection, XSS, CSRF
+          - Auth/authz issues
+          - Hardcoded secrets
+          - Command injection, path traversal
+
+          Score: 0-3 points. Return JSON in a ```json``` fence:
+          ```json
+          {
+            "score": <0-3>,
+            "vulnerabilities": [{"severity": "critical|high|medium|low", "type": "", "file": "", "line": "", "description": "", "remediation": ""}],
+            "summary": ""
+          }
+          ```
+
+          ## Diff to review
+
+          PROMPT
+
+          cat /tmp/pr_diff.txt >> /tmp/security_prompt.md
+
+          USED_MODEL=""
+          API_RESPONSE=""
+
+          for model in gpt-5.3-codex-spark gpt-5-codex gpt-5.3-codex; do
+            REQUEST_BODY=$(jq -n \
+              --arg model "${model}" \
+              --arg prompt "$(cat /tmp/security_prompt.md)" \
+              '{
+                model: $model,
+                temperature: 0.1,
+                messages: [
+                  {role: "system", content: "You are a strict security analyst. Return valid JSON only, wrapped in a json code fence."},
+                  {role: "user", content: $prompt}
+                ]
+              }')
+
+            raw="$(curl -sS -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${REQUEST_BODY}" 2>/dev/null || true)"
+            http_code="$(echo "${raw}" | tail -1)"
+            body="$(echo "${raw}" | sed '$d')"
+            if [ "${http_code}" = "200" ]; then
+              USED_MODEL="${model}"
+              API_RESPONSE="${body}"
+              break
+            fi
+          done
+
+          RESULT=$(echo "${API_RESPONSE}" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
+
+          if [ -z "${RESULT}" ]; then
+            RESULT='{"score":2,"vulnerabilities":[],"summary":"Security analysis execution error"}'
+          fi
+
+          EXTRACTED=$(jq -Rn --arg s "${RESULT}" '
+            ($s | gsub("\r"; "") | gsub("^\\s+|\\s+$"; "")) as $t |
+            if ($t | test("```json")) then
+              (($t | split("```json") | .[1] // $t) | split("```") | .[0]) | gsub("^\\s+|\\s+$"; "")
+            else
+              $t
+            end
+          ')
+
+          if echo "${EXTRACTED}" | jq -e . >/dev/null 2>&1; then
+            echo "${EXTRACTED}" | jq -c . > /tmp/security_review.json
+          else
+            echo '{"score":2,"vulnerabilities":[],"summary":"JSON parse error in security result"}' > /tmp/security_review.json
+          fi
+
+          echo "used_model=${USED_MODEL:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "result=$(jq -c . /tmp/security_review.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate Consensus Score
+        id: consensus
+        if: always()
+        run: |
+          set -euo pipefail
+
+          # Parse scores from the temp JSON files to avoid shell-quoting issues
+          # when the review JSON contains apostrophes or other special characters.
+          CODE_TOTAL=$(jq -r '.total // 4' /tmp/code_review.json 2>/dev/null || echo "4")
+          SECURITY_SCORE=$(jq -r '.score // 2' /tmp/security_review.json 2>/dev/null || echo "2")
+
+          TOTAL=$((CODE_TOTAL + SECURITY_SCORE))
+
+          if [ "$TOTAL" -ge 9 ]; then
+            VERDICT="approved"
+            EMOJI="white_check_mark"
+            LABEL="Approved"
+          elif [ "$TOTAL" -ge 7 ]; then
+            VERDICT="approved_with_comments"
+            EMOJI="warning"
+            LABEL="Approved with Comments"
+          elif [ "$TOTAL" -ge 5 ]; then
+            VERDICT="changes_requested"
+            EMOJI="large_orange_diamond"
+            LABEL="Changes Suggested"
+          else
+            VERDICT="changes_required"
+            EMOJI="x"
+            LABEL="Changes Required"
+          fi
+
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "code_score=${CODE_TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "security_score=${SECURITY_SCORE}" >> "$GITHUB_OUTPUT"
+          echo "verdict=${VERDICT}" >> "$GITHUB_OUTPUT"
+          echo "emoji=${EMOJI}" >> "$GITHUB_OUTPUT"
+          echo "label=${LABEL}" >> "$GITHUB_OUTPUT"
+
+      - name: Post Review Comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ steps.diff.outputs.pr_number }}"
+
+          # IMPORTANT: Do not embed JSON directly into a heredoc without guarding
+          # against shell expansion. Model output may contain `$FOO` or `${BAR}`
+          # which breaks under `set -u` (unbound variable).
+          {
+            printf '%s\n\n' '## :robot: Codex Review'
+            printf '%s\n\n' "- Models: code=${{ steps.code_review.outputs.used_model }}, security=${{ steps.security_review.outputs.used_model }}"
+
+            printf '### :bar_chart: Consensus Score: %s/10 :%s: **%s**\n\n' \
+              "${{ steps.consensus.outputs.total }}" \
+              "${{ steps.consensus.outputs.emoji }}" \
+              "${{ steps.consensus.outputs.label }}"
+
+            printf '%s\n' '| Reviewer | Score | Details |'
+            printf '%s\n' '|----------|-------|---------|'
+            printf '| Code Reviewer | %s/7 | Accuracy, Performance, Maintainability |\n' "${{ steps.consensus.outputs.code_score }}"
+            printf '| Security Analyst | %s/3 | OWASP, Auth, Input Validation |\n\n' "${{ steps.consensus.outputs.security_score }}"
+
+            printf '%s\n\n' '---'
+
+            printf '%s\n' '<details>'
+            printf '%s\n\n' '<summary>:mag: Code Review Details</summary>'
+            printf '%s\n' '```json'
+            cat /tmp/code_review.json
+            printf '\n'
+            printf '%s\n\n' '```'
+            printf '%s\n\n' '</details>'
+
+            printf '%s\n' '<details>'
+            printf '%s\n\n' '<summary>:shield: Security Analysis Details</summary>'
+            printf '%s\n' '```json'
+            cat /tmp/security_review.json
+            printf '\n'
+            printf '%s\n\n' '```'
+            printf '%s\n\n' '</details>'
+
+            printf '%s\n\n' '---'
+
+            printf '%s\n' '| Score | Verdict |'
+            printf '%s\n' '|-------|---------|'
+            printf '%s\n' '| 9-10 | :white_check_mark: Approved |'
+            printf '%s\n' '| 7-8 | :warning: Approved with Comments |'
+            printf '%s\n' '| 5-6 | :large_orange_diamond: Changes Suggested |'
+            printf '%s\n\n' '| 0-4 | :x: Changes Required |'
+
+            printf '%s\n' '---'
+            printf '%s\n' '*Powered by Orchestra Delegator + OpenAI Chat Completions API (Codex)*'
+          } > /tmp/comment.md
+
+          gh pr comment "${PR_NUMBER}" --body-file /tmp/comment.md
+
+      - name: Set Review Status
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERDICT="${{ steps.consensus.outputs.verdict }}"
+
+          if [ "${VERDICT}" = "changes_required" ]; then
+            gh pr review "${{ github.event.pull_request.number }}" --request-changes --body "Codex Review: Changes required (Score: ${{ steps.consensus.outputs.total }}/10)"
+          elif [ "${VERDICT}" = "approved" ]; then
+            gh pr review "${{ github.event.pull_request.number }}" --approve --body "Codex Review: Approved (Score: ${{ steps.consensus.outputs.total }}/10)"
+          fi

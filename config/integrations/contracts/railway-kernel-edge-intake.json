@@ -1,0 +1,16 @@
+{
+  "id": "railway-kernel-edge-intake",
+  "description": "Public Railway ingress that normalizes requests into approved Kernel handoff contracts.",
+  "network_plane": "railway-public-edge",
+  "ingress_surface": "public-webhook",
+  "ingress_auth": "webhook-signature",
+  "routing_domain": "kernel-public-edge",
+  "accepts_signed_payload": true,
+  "dedupe_strategy": "provider-delivery-id-or-intent-hash",
+  "fail_closed": true,
+  "allowed_handoffs": [
+    "github-issue-intake",
+    "github-workflow-dispatch",
+    "kernel-documented-future-contract"
+  ]
+}

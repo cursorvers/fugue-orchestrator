@@ -1,0 +1,333 @@
+name: LINE Rich Menu Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      migrate_current:
+        description: "Fetch current Rich Menu image and recompose from 4-col to 3-col"
+        type: boolean
+        default: true
+      custom_image:
+        description: "Path to custom menu image in repo (leave empty for auto-generated)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run (validate only, do not deploy)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: line-richmenu-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-richmenu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate config
+        id: config
+        run: |
+          set -euo pipefail
+
+          CONFIG_FILE="config/line-rich-menu.json"
+          if [ ! -f "${CONFIG_FILE}" ]; then
+            echo "::error::${CONFIG_FILE} not found"
+            exit 1
+          fi
+
+          # Validate JSON structure
+          if ! jq -e '.menu.size and .menu.areas' "${CONFIG_FILE}" >/dev/null 2>&1; then
+            echo "::error::Invalid config: missing menu.size or menu.areas"
+            exit 1
+          fi
+
+          AREA_COUNT=$(jq '.menu.areas | length' "${CONFIG_FILE}")
+          echo "Config valid: ${AREA_COUNT} areas"
+
+          # Extract menu config for API
+          jq -c '{
+            size: .menu.size,
+            selected: (.menu.selected // false),
+            name: .menu.name,
+            chatBarText: .menu.chatBarText,
+            areas: [.menu.areas[] | {bounds: .bounds, action: .action}]
+          }' "${CONFIG_FILE}" > "${RUNNER_TEMP}/richmenu-request.json"
+
+          echo "config_file=${CONFIG_FILE}" >> "$GITHUB_OUTPUT"
+          echo "area_count=${AREA_COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Migrate current Rich Menu image (4→3 col)
+        id: migrate
+        if: ${{ inputs.migrate_current == true }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::warning::LINE_CHANNEL_ACCESS_TOKEN not set — cannot migrate current menu"
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+          # 1. Get current default Rich Menu ID
+          CURRENT_ID=$(curl -s --connect-timeout 10 --max-time 20 \
+            -H "${AUTH}" "https://api.line.me/v2/bot/user/all/richmenu" \
+            | jq -r '.richMenuId // empty' 2>/dev/null || true)
+
+          if [ -z "${CURRENT_ID}" ]; then
+            echo "::notice::No default Rich Menu found — skipping migration"
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Current Rich Menu ID: ${CURRENT_ID}"
+
+          # 2. Get current menu details (to know column count)
+          CURRENT_AREAS=$(curl -s --connect-timeout 10 --max-time 20 \
+            -H "${AUTH}" "https://api.line.me/v2/bot/richmenu/${CURRENT_ID}" \
+            | jq '.areas | length' 2>/dev/null || echo "0")
+          echo "Current menu has ${CURRENT_AREAS} areas"
+
+          # 3. Download current image
+          CURRENT_IMG="${RUNNER_TEMP}/current-richmenu.png"
+          curl -s --connect-timeout 10 --max-time 30 \
+            -H "${AUTH}" \
+            -o "${CURRENT_IMG}" \
+            "https://api-data.line.me/v2/bot/richmenu/${CURRENT_ID}/content"
+
+          if [ ! -s "${CURRENT_IMG}" ]; then
+            echo "::warning::Failed to download current menu image"
+            echo "migrated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 4. Recompose N-col → 3-col using Python/Pillow
+          pip install -q Pillow
+
+          MIGRATED_IMG="${RUNNER_TEMP}/migrated-richmenu.png"
+
+          python3 - "${CURRENT_IMG}" "${MIGRATED_IMG}" "${CURRENT_AREAS}" <<'PYEOF'
+          import sys
+          from PIL import Image
+
+          src_path, dst_path, n_areas = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          img = Image.open(src_path)
+          w, h = img.size
+          print(f"Current image: {w}x{h}, {n_areas} areas")
+
+          old_col = w // n_areas
+          new_w, new_h = 2500, 843
+          new_col = new_w // 3
+
+          # Pick 3 columns: first, second, last
+          cols = [0, 1, n_areas - 1]
+          out = Image.new("RGB", (new_w, new_h))
+
+          for i, col_idx in enumerate(cols):
+              x0 = col_idx * old_col
+              crop = img.crop((x0, 0, x0 + old_col, h))
+              resized = crop.resize((new_col, new_h), Image.LANCZOS)
+              out.paste(resized, (i * new_col, 0))
+
+          out.save(dst_path, "PNG")
+          print(f"Migrated: {out.size[0]}x{out.size[1]}")
+          PYEOF
+
+          echo "Image migration complete"
+
+          echo "migrated=true" >> "$GITHUB_OUTPUT"
+          echo "image_path=${MIGRATED_IMG}" >> "$GITHUB_OUTPUT"
+          echo "old_menu_id=${CURRENT_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate menu image
+        id: image
+        if: ${{ steps.migrate.outputs.migrated != 'true' }}
+        env:
+          CUSTOM_IMAGE: ${{ inputs.custom_image }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_PATH="${RUNNER_TEMP}/richmenu-image.png"
+          CONFIG_FILE="config/line-rich-menu.json"
+
+          # Use custom image if provided
+          if [ -n "${CUSTOM_IMAGE}" ] && [ -f "${CUSTOM_IMAGE}" ]; then
+            cp "${CUSTOM_IMAGE}" "${IMAGE_PATH}"
+            echo "Using custom image: ${CUSTOM_IMAGE}"
+            echo "image_path=${IMAGE_PATH}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Auto-generate image using Python/Pillow
+          pip install -q Pillow
+
+          python3 - "${CONFIG_FILE}" "${IMAGE_PATH}" <<'PYEOF'
+          import sys, json
+          from PIL import Image, ImageDraw, ImageFont
+
+          with open(sys.argv[1]) as f:
+              cfg = json.load(f)
+
+          W = cfg["menu"]["size"]["width"]
+          H = cfg["menu"]["size"]["height"]
+          areas = cfg["menu"]["areas"]
+          n = len(areas)
+          col_w = W // n
+          bg = cfg.get("image", {}).get("background_color", "#1a1a2e")
+
+          img = Image.new("RGB", (W, H), bg)
+          draw = ImageDraw.Draw(img)
+
+          # Dividers
+          for i in range(1, n):
+              x = col_w * i
+              draw.line([(x, 40), (x, H - 40)], fill="#333355", width=2)
+
+          # Labels (basic — no CJK font on ubuntu)
+          for i, area in enumerate(areas):
+              cx = col_w * i + col_w // 2
+              label = area["label"]
+              draw.text((cx - len(label) * 5, H // 2), label, fill="white")
+
+          img.save(sys.argv[2], "PNG")
+          print(f"Generated: {W}x{H}")
+          PYEOF
+
+          echo "Generated fallback menu image"
+          echo "image_path=${IMAGE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Rich Menu
+        if: ${{ inputs.dry_run != true }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          IMAGE_PATH: ${{ steps.migrate.outputs.migrated == 'true' && steps.migrate.outputs.image_path || steps.image.outputs.image_path }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::error::LINE_CHANNEL_ACCESS_TOKEN is required"
+            exit 1
+          fi
+
+          AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+          # 1. Create Rich Menu
+          echo "Creating rich menu..."
+          CREATE_RESP=$(curl -s -X POST "https://api.line.me/v2/bot/richmenu" \
+            --connect-timeout 10 --max-time 30 \
+            -H "${AUTH}" \
+            -H "Content-Type: application/json" \
+            -d @"${RUNNER_TEMP}/richmenu-request.json")
+
+          MENU_ID=$(echo "${CREATE_RESP}" | jq -r '.richMenuId // empty')
+          if [ -z "${MENU_ID}" ]; then
+            echo "::error::Failed to create rich menu: ${CREATE_RESP}"
+            exit 1
+          fi
+          echo "Created rich menu: ${MENU_ID}"
+
+          # 2. Upload image
+          echo "Uploading menu image..."
+          CONTENT_TYPE="image/png"
+          if [[ "${IMAGE_PATH}" == *.jpg ]] || [[ "${IMAGE_PATH}" == *.jpeg ]]; then
+            CONTENT_TYPE="image/jpeg"
+          fi
+
+          UPLOAD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "https://api-data.line.me/v2/bot/richmenu/${MENU_ID}/content" \
+            --connect-timeout 10 --max-time 60 \
+            -H "${AUTH}" \
+            -H "Content-Type: ${CONTENT_TYPE}" \
+            --data-binary @"${IMAGE_PATH}")
+
+          if [[ ! "${UPLOAD_STATUS}" =~ ^2 ]]; then
+            echo "::error::Failed to upload image (HTTP ${UPLOAD_STATUS})"
+            # Cleanup: delete the created menu
+            curl -s -X DELETE "https://api.line.me/v2/bot/richmenu/${MENU_ID}" \
+              -H "${AUTH}" || true
+            exit 1
+          fi
+          echo "Image uploaded successfully"
+
+          # 3. Get current default menu (for rollback info)
+          OLD_MENU_ID=$(curl -s -H "${AUTH}" \
+            "https://api.line.me/v2/bot/user/all/richmenu" \
+            | jq -r '.richMenuId // empty' 2>/dev/null || true)
+
+          if [ -n "${OLD_MENU_ID}" ]; then
+            echo "Previous default menu: ${OLD_MENU_ID}"
+          fi
+
+          # 4. Set as default
+          echo "Setting as default rich menu..."
+          SET_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "https://api.line.me/v2/bot/user/all/richmenu/${MENU_ID}" \
+            --connect-timeout 10 --max-time 30 \
+            -H "${AUTH}" \
+            -H "Content-Length: 0")
+
+          if [[ ! "${SET_STATUS}" =~ ^2 ]]; then
+            echo "::error::Failed to set default menu (HTTP ${SET_STATUS})"
+            exit 1
+          fi
+
+          echo "Rich menu deployed successfully!"
+          echo "New menu ID: ${MENU_ID}"
+          if [ -n "${OLD_MENU_ID}" ]; then
+            echo "Old menu ID (for rollback): ${OLD_MENU_ID}"
+          fi
+
+          # Summary
+          {
+            echo "## Rich Menu Deployed"
+            echo ""
+            echo "- **Menu ID**: \`${MENU_ID}\`"
+            echo "- **Previous Menu**: \`${OLD_MENU_ID:-none}\`"
+            echo "- **Areas**: ${{ steps.config.outputs.area_count }}"
+            echo ""
+            echo "### Rollback"
+            if [ -n "${OLD_MENU_ID}" ]; then
+              echo "To rollback, set previous menu as default:"
+              echo "\`\`\`"
+              echo "curl -X POST https://api.line.me/v2/bot/user/all/richmenu/${OLD_MENU_ID}"
+              echo "\`\`\`"
+            else
+              echo "No previous menu to rollback to."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          set -euo pipefail
+          echo "Dry run — validation passed"
+          echo "Config: ${{ steps.config.outputs.area_count }} areas"
+          echo "Image: ${{ steps.image.outputs.image_path }}"
+          cat "${RUNNER_TEMP}/richmenu-request.json" | jq .
+
+      - name: Notify Discord on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg content "[LINE Rich Menu Deploy] Failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{content: $content}')
+          curl -s -X POST "${DISCORD_WEBHOOK_URL}" \
+            --connect-timeout 5 --max-time 20 \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" || true

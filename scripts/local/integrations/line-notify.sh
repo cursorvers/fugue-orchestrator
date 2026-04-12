@@ -1,0 +1,624 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+
+MODE="smoke"
+RUN_DIR=""
+
+LINE_WEBHOOK_URL="${LINE_WEBHOOK_URL:-}"
+LINE_CHANNEL_ACCESS_TOKEN="${LINE_CHANNEL_ACCESS_TOKEN:-}"
+LINE_TO="${LINE_TO:-}"
+LINE_PUSH_API_URL="${LINE_PUSH_API_URL:-https://api.line.me/v2/bot/message/push}"
+LINE_BROADCAST_API_URL="${LINE_BROADCAST_API_URL:-https://api.line.me/v2/bot/message/broadcast}"
+LINE_NOTIFY_REQUIRED_ON_EXECUTE="${LINE_NOTIFY_REQUIRED_ON_EXECUTE:-true}"
+LINE_NOTIFY_SMOKE_SEND="${LINE_NOTIFY_SMOKE_SEND:-false}"
+LINE_NOTIFY_MESSAGE="${LINE_NOTIFY_MESSAGE:-}"
+LINE_NOTIFY_PURPOSE="${LINE_NOTIFY_PURPOSE:-}"
+LINE_NOTIFY_ALLOWED_PURPOSES="${LINE_NOTIFY_ALLOWED_PURPOSES:-user-facing,user-notification,content-broadcast,member-communication,customer-notification,marketing-broadcast}"
+LINE_NOTIFY_GUARD_ENABLED="${LINE_NOTIFY_GUARD_ENABLED:-true}"
+LINE_NOTIFY_GUARD_FILE="${LINE_NOTIFY_GUARD_FILE:-${ROOT_DIR}/.fugue/state/line-notify-guard.json}"
+LINE_NOTIFY_PREFER_PUSH="${LINE_NOTIFY_PREFER_PUSH:-false}"
+LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK="${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK:-false}"
+LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK:-false}"
+LINE_NOTIFY_DEDUP_TTL_SECONDS="${LINE_NOTIFY_DEDUP_TTL_SECONDS:-21600}"
+LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS:-3600}"
+LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS="${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS:-5}"
+LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS="${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS:-20}"
+LINE_NOTIFY_RETRY_MAX_ATTEMPTS="${LINE_NOTIFY_RETRY_MAX_ATTEMPTS:-3}"
+LINE_NOTIFY_RETRY_BASE_SECONDS="${LINE_NOTIFY_RETRY_BASE_SECONDS:-1}"
+LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="${LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS:-8}"
+LINE_NOTIFY_TRACE_ID="${LINE_NOTIFY_TRACE_ID:-}"
+LINE_NOTIFY_TRACE_PREFIX="${LINE_NOTIFY_TRACE_PREFIX:-fugue-line}"
+
+usage() {
+  cat <<'EOF'
+Usage: line-notify.sh [options]
+
+Options:
+  --mode <smoke|execute>   Run mode (default: smoke)
+  --run-dir <path>         FUGUE run directory (optional)
+  -h, --help               Show help
+
+Environment:
+  LINE_WEBHOOK_URL             Generic webhook endpoint (preferred when available)
+  LINE_CHANNEL_ACCESS_TOKEN    LINE Messaging API channel access token
+  LINE_TO                      LINE user/group ID for push messages
+  LINE_PUSH_API_URL            Override push endpoint (default: official LINE Messaging API)
+  LINE_BROADCAST_API_URL       Override broadcast endpoint (default: official LINE Messaging API)
+  LINE_NOTIFY_REQUIRED_ON_EXECUTE=true|false
+                               If true (default), execute mode fails when config is missing.
+  LINE_NOTIFY_SMOKE_SEND=true|false
+                               If true, smoke mode also sends a test message.
+  LINE_NOTIFY_MESSAGE             Optional custom text payload. If unset, default FUGUE message is used.
+  LINE_NOTIFY_PURPOSE             Required for execute/send mode. Must be a non-system purpose.
+  LINE_NOTIFY_ALLOWED_PURPOSES    Comma-separated allowlist for execute/send mode.
+  LINE_NOTIFY_GUARD_ENABLED=true|false
+                                  Suppress duplicate payloads and recent repeated failures (default: true).
+  LINE_NOTIFY_GUARD_FILE          Guard state file path (default: <repo>/.fugue/state/line-notify-guard.json).
+  LINE_NOTIFY_PREFER_PUSH=true|false
+                                  If true, prefer LINE push API over webhook when both are configured.
+  LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK=true|false
+                                  If true, fallback to LINE broadcast API when LINE_TO is unset.
+  LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true|false
+                                  If false (default), reject inbound webhook URLs such as /webhook/line-bot.
+  LINE_NOTIFY_DEDUP_TTL_SECONDS   Duplicate suppression window in seconds (default: 21600).
+  LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS
+                                  Failure cooldown window in seconds (default: 3600).
+  LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS
+                                  curl connect timeout seconds (default: 5).
+  LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS
+                                  curl max-time seconds (default: 20).
+  LINE_NOTIFY_RETRY_MAX_ATTEMPTS    Max send attempts for transient failures (default: 3).
+  LINE_NOTIFY_RETRY_BASE_SECONDS    Initial retry wait seconds (default: 1).
+  LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS
+                                  Max retry backoff seconds (default: 8).
+  LINE_NOTIFY_TRACE_ID             Optional fixed trace id for webhook correlation.
+  LINE_NOTIFY_TRACE_PREFIX         Trace id prefix when auto-generated (default: fugue-line).
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      MODE="${2:-}"
+      shift 2
+      ;;
+    --run-dir)
+      RUN_DIR="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "${MODE}" != "smoke" && "${MODE}" != "execute" ]]; then
+  echo "Error: --mode must be smoke|execute" >&2
+  exit 2
+fi
+
+to_bool() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${v}" == "true" || "${v}" == "1" || "${v}" == "yes" || "${v}" == "on" ]]; then
+    printf '%s' "true"
+  else
+    printf '%s' "false"
+  fi
+}
+
+normalize_non_negative_int() {
+  local value="${1:-}"
+  local fallback="${2:-0}"
+  if [[ "${value}" =~ ^[0-9]+$ ]]; then
+    printf '%s' "${value}"
+  else
+    printf '%s' "${fallback}"
+  fi
+}
+
+hash_text() {
+  local input="${1:-}"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "${input}" | shasum -a 256 | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    printf '%s' "${input}" | openssl dgst -sha256 | awk '{print $NF}'
+    return 0
+  fi
+  printf '%s' "${input}" | cksum | awk '{print $1}'
+}
+
+normalize_token() {
+  printf '%s' "${1:-}" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+    | tr ' _' '--' \
+    | sed -E 's/-+/-/g'
+}
+
+csv_contains_token() {
+  local csv="${1:-}"
+  local needle
+  needle="$(normalize_token "${2:-}")"
+  if [[ -z "${needle}" ]]; then
+    return 1
+  fi
+  local item
+  IFS=',' read -r -a items <<<"${csv}"
+  for item in "${items[@]}"; do
+    if [[ "$(normalize_token "${item}")" == "${needle}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+write_meta() {
+  local status="${1:-unknown}"
+  shift || true
+  if [[ -z "${RUN_DIR}" ]]; then
+    return 0
+  fi
+  mkdir -p "${RUN_DIR}"
+  {
+    echo "system=line-notify"
+    echo "mode=${MODE}"
+    echo "status=${status}"
+    while [[ $# -gt 0 ]]; do
+      echo "$1"
+      shift
+    done
+  } > "${RUN_DIR}/line-notify.meta"
+}
+
+read_guard_json() {
+  if [[ -f "${LINE_NOTIFY_GUARD_FILE}" ]] && jq -e . "${LINE_NOTIFY_GUARD_FILE}" >/dev/null 2>&1; then
+    cat "${LINE_NOTIFY_GUARD_FILE}"
+    return 0
+  fi
+  printf '%s' '{"entries":{}}'
+}
+
+save_guard_json() {
+  local json_input="${1:-}"
+  local guard_dir
+  local tmp_file
+  guard_dir="$(dirname "${LINE_NOTIFY_GUARD_FILE}")"
+  mkdir -p "${guard_dir}"
+  tmp_file="$(mktemp "${guard_dir}/line-notify-guard.XXXXXX.tmp")"
+  chmod 600 "${tmp_file}"
+  printf '%s' "${json_input}" > "${tmp_file}"
+  mv "${tmp_file}" "${LINE_NOTIFY_GUARD_FILE}"
+}
+
+LINE_NOTIFY_REQUIRED_ON_EXECUTE="$(to_bool "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}")"
+LINE_NOTIFY_SMOKE_SEND="$(to_bool "${LINE_NOTIFY_SMOKE_SEND}")"
+LINE_NOTIFY_PURPOSE="$(normalize_token "${LINE_NOTIFY_PURPOSE}")"
+LINE_NOTIFY_GUARD_ENABLED="$(to_bool "${LINE_NOTIFY_GUARD_ENABLED}")"
+LINE_NOTIFY_PREFER_PUSH="$(to_bool "${LINE_NOTIFY_PREFER_PUSH}")"
+LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK="$(to_bool "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}")"
+LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK="$(to_bool "${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK}")"
+LINE_NOTIFY_DEDUP_TTL_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_DEDUP_TTL_SECONDS}" "21600")"
+LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS}" "3600")"
+LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" "5")"
+LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" "20")"
+LINE_NOTIFY_RETRY_MAX_ATTEMPTS="$(normalize_non_negative_int "${LINE_NOTIFY_RETRY_MAX_ATTEMPTS}" "3")"
+LINE_NOTIFY_RETRY_BASE_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_RETRY_BASE_SECONDS}" "1")"
+LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="$(normalize_non_negative_int "${LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS}" "8")"
+if (( LINE_NOTIFY_RETRY_MAX_ATTEMPTS < 1 )); then
+  LINE_NOTIFY_RETRY_MAX_ATTEMPTS=1
+fi
+if (( LINE_NOTIFY_RETRY_BASE_SECONDS < 1 )); then
+  LINE_NOTIFY_RETRY_BASE_SECONDS=1
+fi
+if (( LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS < LINE_NOTIFY_RETRY_BASE_SECONDS )); then
+  LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS="${LINE_NOTIFY_RETRY_BASE_SECONDS}"
+fi
+
+if [[ "${MODE}" == "execute" || "${LINE_NOTIFY_SMOKE_SEND}" == "true" ]]; then
+  if [[ -z "${LINE_NOTIFY_PURPOSE}" ]]; then
+    echo "line-notify: LINE_NOTIFY_PURPOSE is required for execute/send mode." >&2
+    echo "line-notify: system logs, watchdog alerts, audit trails, and ops alerts must never be routed to LINE." >&2
+    write_meta "error-missing-purpose" "sent=false"
+    exit 1
+  fi
+
+  if csv_contains_token "system-log,system,ops-alert,operational-alert,audit-log,audit,incident-alert,watchdog-alert,watchdog" "${LINE_NOTIFY_PURPOSE}"; then
+    echo "line-notify: purpose '${LINE_NOTIFY_PURPOSE}' is prohibited." >&2
+    echo "line-notify: system logs, watchdog alerts, audit trails, and ops alerts must never be routed to LINE." >&2
+    write_meta "error-prohibited-purpose" "sent=false" "purpose=${LINE_NOTIFY_PURPOSE}"
+    exit 1
+  fi
+
+  if ! csv_contains_token "${LINE_NOTIFY_ALLOWED_PURPOSES}" "${LINE_NOTIFY_PURPOSE}"; then
+    echo "line-notify: purpose '${LINE_NOTIFY_PURPOSE}' is not in LINE_NOTIFY_ALLOWED_PURPOSES." >&2
+    echo "line-notify: LINE is reserved for explicit user-facing communication only." >&2
+    write_meta "error-disallowed-purpose" "sent=false" "purpose=${LINE_NOTIFY_PURPOSE}"
+    exit 1
+  fi
+fi
+
+transport="none"
+transport_selection="webhook-first"
+if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" ]]; then
+  transport_selection="push-first"
+  if [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
+    transport="push"
+  elif [[ "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}" == "true" && -n "${LINE_CHANNEL_ACCESS_TOKEN}" ]]; then
+    transport="broadcast"
+  elif [[ -n "${LINE_WEBHOOK_URL}" ]]; then
+    transport="webhook"
+  fi
+else
+  if [[ -n "${LINE_WEBHOOK_URL}" ]]; then
+    transport="webhook"
+  elif [[ -n "${LINE_CHANNEL_ACCESS_TOKEN}" && -n "${LINE_TO}" ]]; then
+    transport="push"
+  elif [[ "${LINE_NOTIFY_ALLOW_BROADCAST_FALLBACK}" == "true" && -n "${LINE_CHANNEL_ACCESS_TOKEN}" ]]; then
+    transport="broadcast"
+  fi
+fi
+
+if [[ "${LINE_NOTIFY_PREFER_PUSH}" == "true" && "${transport}" != "push" ]]; then
+  if [[ "${transport}" == "broadcast" ]]; then
+    echo "line-notify: LINE_TO is missing; using broadcast fallback."
+  elif [[ "${transport}" == "webhook" ]]; then
+    echo "line-notify: push credentials are missing; using webhook fallback."
+  fi
+fi
+
+if [[ "${transport}" == "none" ]]; then
+  if [[ "${MODE}" == "execute" && "${LINE_NOTIFY_REQUIRED_ON_EXECUTE}" == "true" ]]; then
+    echo "line-notify: missing config. Set LINE_WEBHOOK_URL or (LINE_CHANNEL_ACCESS_TOKEN + LINE_TO)." >&2
+    write_meta "error-missing-config" "sent=false" "transport_selection=${transport_selection}" "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
+    exit 1
+  fi
+  echo "line-notify: configuration is missing; skipping (${MODE})."
+  write_meta "skipped-missing-config" "sent=false" "transport_selection=${transport_selection}" "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
+  exit 0
+fi
+
+if [[ "${transport}" == "webhook" ]]; then
+  webhook_url_lc="$(printf '%s' "${LINE_WEBHOOK_URL}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK}" != "true" ]] && [[ "${webhook_url_lc}" =~ /webhook(-test)?/line-bot([/?#].*)?$ ]]; then
+    echo "line-notify: LINE_WEBHOOK_URL points to inbound line-bot webhook and is not suitable for outbound notifications." >&2
+    echo "line-notify: use LINE_CHANNEL_ACCESS_TOKEN + LINE_TO, or set LINE_NOTIFY_ALLOW_INBOUND_WEBHOOK=true to bypass." >&2
+    write_meta "error-inbound-webhook-url" \
+      "transport=webhook" \
+      "sent=false" \
+      "line_webhook_url=${LINE_WEBHOOK_URL}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}"
+    exit 1
+  fi
+fi
+
+should_send="false"
+if [[ "${MODE}" == "execute" || "${LINE_NOTIFY_SMOKE_SEND}" == "true" ]]; then
+  should_send="true"
+fi
+
+issue_number="${FUGUE_ISSUE_NUMBER:-unknown}"
+issue_title="${FUGUE_ISSUE_TITLE:-}"
+issue_url="${FUGUE_ISSUE_URL:-}"
+if [[ -n "${LINE_NOTIFY_MESSAGE}" ]]; then
+  message="${LINE_NOTIFY_MESSAGE}"
+else
+  message="FUGUE LINE notify (${MODE}) | issue=#${issue_number} | title=${issue_title}"
+  if [[ -n "${issue_url}" ]]; then
+    message="${message} | url=${issue_url}"
+  fi
+fi
+# LINE text payload limit protection.
+if (( ${#message} > 900 )); then
+  message="${message:0:897}..."
+fi
+
+message_hash="$(hash_text "${transport}|${LINE_TO}|${LINE_WEBHOOK_URL}|${LINE_PUSH_API_URL}|${LINE_BROADCAST_API_URL}|${message}")"
+guard_action="disabled"
+epoch_now="$(date +%s)"
+repo_slug="${GITHUB_REPOSITORY:-}"
+run_id="${GITHUB_RUN_ID:-}"
+run_attempt="${GITHUB_RUN_ATTEMPT:-}"
+workflow_name="${GITHUB_WORKFLOW:-}"
+run_url=""
+if [[ -n "${repo_slug}" && -n "${run_id}" ]]; then
+  run_url="https://github.com/${repo_slug}/actions/runs/${run_id}"
+fi
+if [[ -z "${LINE_NOTIFY_TRACE_ID}" ]]; then
+  trace_seed="${LINE_NOTIFY_TRACE_PREFIX}|${MODE}|${issue_number}|${message_hash}|${repo_slug}|${run_id}|${epoch_now}"
+  LINE_NOTIFY_TRACE_ID="$(hash_text "${trace_seed}" | cut -c1-20)"
+fi
+
+if [[ "${should_send}" == "true" && "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]]; then
+  guard_action="checked"
+  guard_json="$(read_guard_json)"
+  last_sent_at="$(printf '%s' "${guard_json}" | jq -r --arg key "${message_hash}" '.entries[$key].last_sent_at // 0')"
+  last_failure_at="$(printf '%s' "${guard_json}" | jq -r --arg key "${message_hash}" '.entries[$key].last_failure_at // 0')"
+  failure_count="$(printf '%s' "${guard_json}" | jq -r --arg key "${message_hash}" '.entries[$key].failure_count // 0')"
+
+  if (( LINE_NOTIFY_DEDUP_TTL_SECONDS > 0 )) && (( epoch_now - last_sent_at < LINE_NOTIFY_DEDUP_TTL_SECONDS )); then
+    echo "line-notify: suppressed duplicate send (hash=${message_hash}, ttl=${LINE_NOTIFY_DEDUP_TTL_SECONDS}s)."
+    write_meta "suppressed-duplicate" \
+      "transport=${transport}" \
+      "sent=false" \
+      "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+      "guard=duplicate-ttl"
+    exit 0
+  fi
+
+  if (( LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS > 0 )) && (( epoch_now - last_failure_at < LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS )); then
+    echo "line-notify: suppressed retry after recent failure (hash=${message_hash}, cooldown=${LINE_NOTIFY_FAILURE_COOLDOWN_SECONDS}s, failures=${failure_count})."
+    write_meta "suppressed-recent-failure" \
+      "transport=${transport}" \
+      "sent=false" \
+      "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+      "failure_count=${failure_count}" \
+      "guard=failure-cooldown"
+    exit 0
+  fi
+fi
+
+if [[ "${should_send}" == "true" ]]; then
+  http_status=""
+  curl_exit_code=0
+  response_body=""
+  line_request_id=""
+  max_attempts="${LINE_NOTIFY_RETRY_MAX_ATTEMPTS}"
+  attempt=1
+  retry_count=0
+  last_retry_reason=""
+
+  # Generate idempotent retry key (UUID v4) for LINE push/broadcast.
+  # Same key is reused across retries within this invocation.
+  generate_retry_key() {
+    if command -v uuidgen >/dev/null 2>&1; then
+      uuidgen | tr '[:upper:]' '[:lower:]'
+      return 0
+    fi
+    if [[ -r /proc/sys/kernel/random/uuid ]]; then
+      cat /proc/sys/kernel/random/uuid
+      return 0
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+      python3 -c "import uuid; print(uuid.uuid4())"
+      return 0
+    fi
+    # Fallback: construct pseudo-UUID from /dev/urandom
+    od -x /dev/urandom | head -1 | awk '{OFS="-"; print $2$3,$4,$5,$6,$7$8$9}'
+  }
+  retry_key=""
+  if [[ "${transport}" == "push" || "${transport}" == "broadcast" ]]; then
+    retry_key="$(generate_retry_key)"
+  fi
+
+  headers_file="$(mktemp)"
+  body_file="$(mktemp)"
+  chmod 600 "${headers_file}" "${body_file}"
+  trap 'rm -f "${headers_file}" "${body_file}"' EXIT
+
+  while :; do
+    : > "${headers_file}"
+    : > "${body_file}"
+
+    set +e
+    if [[ "${transport}" == "webhook" ]]; then
+      payload="$(jq -n \
+        --arg text "${message}" \
+        --arg mode "${MODE}" \
+        --arg issue_number "${issue_number}" \
+        --arg trace_id "${LINE_NOTIFY_TRACE_ID}" \
+        --arg message_hash "${message_hash}" \
+        --arg repo "${repo_slug}" \
+        --arg workflow "${workflow_name}" \
+        --arg run_id "${run_id}" \
+        --arg run_attempt "${run_attempt}" \
+        --arg run_url "${run_url}" \
+        '{
+          text:$text,
+          message:$text,
+          source:"fugue-line-notify",
+          mode:$mode,
+          issue_number:$issue_number,
+          trace_id:$trace_id,
+          message_hash:$message_hash,
+          repo:$repo,
+          workflow:$workflow,
+          run_id:$run_id,
+          run_attempt:$run_attempt,
+          run_url:$run_url
+        }')"
+      http_status="$(curl -sS -X POST "${LINE_WEBHOOK_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -d "${payload}")"
+      curl_exit_code=$?
+    elif [[ "${transport}" == "push" ]]; then
+      payload="$(jq -n --arg to "${LINE_TO}" --arg text "${message}" '{to:$to,messages:[{type:"text",text:$text}]}')"
+      http_status="$(curl -sS -X POST "${LINE_PUSH_API_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+        -H "X-Line-Retry-Key: ${retry_key}" \
+        -d "${payload}")"
+      curl_exit_code=$?
+    elif [[ "${transport}" == "broadcast" ]]; then
+      payload="$(jq -n --arg text "${message}" '{messages:[{type:"text",text:$text}]}')"
+      http_status="$(curl -sS -X POST "${LINE_BROADCAST_API_URL}" \
+        --connect-timeout "${LINE_NOTIFY_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${LINE_NOTIFY_REQUEST_TIMEOUT_SECONDS}" \
+        -D "${headers_file}" \
+        -o "${body_file}" \
+        --write-out '%{http_code}' \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+        -H "X-Line-Retry-Key: ${retry_key}" \
+        -d "${payload}")"
+      curl_exit_code=$?
+    fi
+    set -e
+
+    response_body="$(cat "${body_file}" 2>/dev/null || true)"
+    line_request_id="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${headers_file}")"
+    if (( curl_exit_code == 0 )) && [[ "${http_status}" =~ ^2[0-9]{2}$ ]]; then
+      break
+    fi
+
+    retry_reason=""
+    if (( attempt < max_attempts )); then
+      case "${curl_exit_code}" in
+        6|7|28|52|56)
+          retry_reason="curl-exit-${curl_exit_code}"
+          ;;
+      esac
+      if [[ -z "${retry_reason}" ]]; then
+        case "${http_status:-}" in
+          408|429|500|502|503|504)
+            retry_reason="http-${http_status}"
+            ;;
+        esac
+      fi
+    fi
+
+    if [[ -n "${retry_reason}" ]]; then
+      retry_count=$((retry_count + 1))
+      last_retry_reason="${retry_reason}"
+      sleep_seconds=$((LINE_NOTIFY_RETRY_BASE_SECONDS << (attempt - 1)))
+      if (( sleep_seconds > LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS )); then
+        sleep_seconds="${LINE_NOTIFY_RETRY_MAX_BACKOFF_SECONDS}"
+      fi
+      echo "line-notify: transient failure (${retry_reason}); retry ${attempt}/${max_attempts} after ${sleep_seconds}s."
+      attempt=$((attempt + 1))
+      sleep "${sleep_seconds}"
+      continue
+    fi
+
+    break
+  done
+
+  code_display="N/A"
+  if [[ "${http_status}" =~ ^[0-9]{3}$ ]] && [[ "${http_status}" != "000" ]]; then
+    code_display="${http_status}"
+  fi
+
+  if (( curl_exit_code == 0 )) && [[ "${http_status}" =~ ^2[0-9]{2}$ ]]; then
+    response_message="$(printf '%s' "${response_body}" | jq -r 'if type=="object" then (.message // .status // .result // empty) else empty end' 2>/dev/null || true)"
+    delivery_state="delivered"
+    if [[ "${transport}" == "webhook" && -z "${line_request_id}" ]]; then
+      delivery_state="accepted-upstream"
+      if [[ -n "${response_message}" ]]; then
+        echo "line-notify: upstream webhook accepted request (${response_message}); downstream LINE delivery must be confirmed by webhook system logs (trace_id=${LINE_NOTIFY_TRACE_ID})."
+      else
+        echo "line-notify: upstream webhook accepted request; downstream LINE delivery must be confirmed by webhook system logs (trace_id=${LINE_NOTIFY_TRACE_ID})."
+      fi
+    fi
+    if [[ "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]]; then
+      guard_json="$(read_guard_json)"
+      updated_guard="$(printf '%s' "${guard_json}" | jq --arg key "${message_hash}" --argjson now "${epoch_now}" '
+        .entries[$key] = ((.entries[$key] // {}) + {last_sent_at:$now, last_failure_at:0, failure_count:0})
+      ')"
+      save_guard_json "${updated_guard}"
+      guard_action="recorded-success"
+    fi
+    if (( retry_count > 0 )); then
+      echo "line-notify: recovered after retry count=${retry_count} (last=${last_retry_reason})."
+    fi
+    echo "line-notify: delivered (${MODE}) via ${transport} (code=${code_display})."
+    write_meta "ok" \
+      "transport=${transport}" \
+      "sent=true" \
+      "http_code=${code_display}" \
+      "line_request_id=${line_request_id}" \
+      "delivery_state=${delivery_state}" \
+      "response_message=${response_message}" \
+      "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "retry_key=${retry_key}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+      "retry_count=${retry_count}" \
+      "retry_last_reason=${last_retry_reason}" \
+      "guard=${guard_action}"
+  else
+    error_message="$(printf '%s' "${response_body}" | jq -r 'if type=="object" then (.message // .error // .error_description // .detail // .title // empty) else empty end' 2>/dev/null || true)"
+    if [[ -z "${error_message}" ]]; then
+      error_message="$(printf '%s' "${response_body}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | cut -c1-220)"
+    fi
+    if [[ -z "${error_message}" ]]; then
+      error_message="LINE API応答異常"
+    fi
+
+    if [[ "${LINE_NOTIFY_GUARD_ENABLED}" == "true" ]]; then
+      guard_json="$(read_guard_json)"
+      updated_guard="$(printf '%s' "${guard_json}" | jq --arg key "${message_hash}" --argjson now "${epoch_now}" '
+        .entries[$key] = ((.entries[$key] // {}) + {
+          last_failure_at:$now,
+          failure_count:((.entries[$key].failure_count // 0) + 1)
+        })
+      ')"
+      save_guard_json "${updated_guard}"
+      guard_action="recorded-failure"
+      failure_count="$(printf '%s' "${updated_guard}" | jq -r --arg key "${message_hash}" '.entries[$key].failure_count // 1')"
+    else
+      failure_count="1"
+    fi
+
+    write_meta "error" \
+      "transport=${transport}" \
+      "sent=false" \
+      "http_code=${code_display}" \
+      "curl_exit_code=${curl_exit_code}" \
+      "line_request_id=${line_request_id}" \
+      "message_hash=${message_hash}" \
+      "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+      "retry_key=${retry_key}" \
+      "run_url=${run_url}" \
+      "transport_selection=${transport_selection}" \
+      "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+      "retry_count=${retry_count}" \
+      "retry_last_reason=${last_retry_reason}" \
+      "failure_count=${failure_count}" \
+      "error_message=${error_message}" \
+      "guard=${guard_action}"
+    echo "line-notify: delivery failed (${MODE}) via ${transport}: ${error_message} (code: ${code_display}, curl_exit: ${curl_exit_code})." >&2
+    exit 1
+  fi
+else
+  echo "line-notify: smoke validation only (send disabled), transport=${transport}."
+  write_meta "ok" \
+    "transport=${transport}" \
+    "sent=false" \
+    "message_hash=${message_hash}" \
+    "trace_id=${LINE_NOTIFY_TRACE_ID}" \
+    "run_url=${run_url}" \
+    "transport_selection=${transport_selection}" \
+    "prefer_push=${LINE_NOTIFY_PREFER_PUSH}" \
+    "guard=${guard_action}"
+fi

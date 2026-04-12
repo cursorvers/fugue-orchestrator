@@ -1,0 +1,635 @@
+# Delivery Pipeline Health Audit
+# Daily audit of delivery channel health: GHA runs, LINE quota, Discord webhook, contract drift.
+# Schedule: 03:17 UTC (12:17 JST) daily.
+
+name: Delivery Audit
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      full_audit:
+        description: "Run full audit (includes extended history)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: delivery-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-delivery-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # ----------------------------------------------------------------
+      # 1. Checkout
+      # ----------------------------------------------------------------
+      - uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # 2. GHA Run Health Check
+      # ----------------------------------------------------------------
+      - name: GHA Run Health Check
+        id: gha_health
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKFLOWS=("LINE Send Note Article" "LINE Value Share" "fugue-watchdog")
+          overall_status="HEALTHY"
+          report_lines=""
+
+          for wf_name in "${WORKFLOWS[@]}"; do
+            wf_id=$(gh api \
+              "repos/${REPO}/actions/workflows" \
+              --jq ".workflows[] | select(.name == \"${wf_name}\") | .id" \
+              2>/dev/null || echo "")
+
+            if [[ -z "${wf_id}" ]]; then
+              echo "::warning::Workflow '${wf_name}' not found"
+              report_lines="${report_lines}| ${wf_name} | N/A | not found |\n"
+              continue
+            fi
+
+            result=$(gh api \
+              "repos/${REPO}/actions/workflows/${wf_id}/runs?per_page=10&status=completed" \
+              --jq '{
+                total: (.workflow_runs | length),
+                success: ([.workflow_runs[] | select(.conclusion == "success")] | length)
+              }' 2>/dev/null || echo '{"total":0,"success":0}')
+
+            total=$(echo "${result}" | jq -r '.total')
+            success=$(echo "${result}" | jq -r '.success')
+
+            if [[ "${total}" -eq 0 ]]; then
+              rate="N/A"
+              status="no runs"
+            else
+              rate=$(( (success * 100) / total ))
+              if [[ "${rate}" -lt 50 ]]; then
+                status="ERROR"
+                overall_status="ERROR"
+                echo "::error::Workflow '${wf_name}' success rate ${rate}% (<50%)"
+              elif [[ "${rate}" -lt 70 ]]; then
+                status="WARNING"
+                if [[ "${overall_status}" != "ERROR" ]]; then
+                  overall_status="WARNING"
+                fi
+                echo "::warning::Workflow '${wf_name}' success rate ${rate}% (<70%)"
+              else
+                status="ok"
+              fi
+              rate="${rate}%"
+            fi
+
+            report_lines="${report_lines}| ${wf_name} | ${rate} (${success}/${total}) | ${status} |\n"
+          done
+
+          echo "overall_status=${overall_status}" >> "$GITHUB_OUTPUT"
+          {
+            echo "report<<GHAHEALTHEOF"
+            echo -e "${report_lines}"
+            echo "GHAHEALTHEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # 3. LINE Quota Probe
+      # ----------------------------------------------------------------
+      - name: LINE Quota Probe
+        id: line_quota
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]]; then
+            echo "::notice::LINE_CHANNEL_ACCESS_TOKEN not set — skipping LINE quota probe"
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "report=| LINE Quota | skipped | token not configured |" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          AUTH_HEADER="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+          quota_json=$(curl -s --connect-timeout 5 --max-time 20 \
+            -H "${AUTH_HEADER}" \
+            "https://api.line.me/v2/bot/message/quota" || echo '{}')
+
+          consumption_json=$(curl -s --connect-timeout 5 --max-time 20 \
+            -H "${AUTH_HEADER}" \
+            "https://api.line.me/v2/bot/message/quota/consumption" || echo '{}')
+
+          quota_value=$(echo "${quota_json}" | jq -r '.value // 0')
+          total_usage=$(echo "${consumption_json}" | jq -r '.totalUsage // 0')
+
+          # Calculate prediction
+          day_of_month=$(date -u +%-d)
+          days_in_month=$(date -u -d "$(date -u +%Y-%m-01) +1 month -1 day" +%-d 2>/dev/null \
+            || date -u -d "$(date -u +%Y%m01) +1 month -1 day" +%-d 2>/dev/null \
+            || echo 30)
+          days_remaining=$(( days_in_month - day_of_month ))
+
+          # Guard against div-by-zero on day 1
+          if [[ "${day_of_month}" -le 0 ]]; then
+            day_of_month=1
+          fi
+
+          daily_average=$(( total_usage / day_of_month ))
+          predicted_total=$(( total_usage + (daily_average * days_remaining) ))
+
+          usage_pct=0
+          if [[ "${quota_value}" -gt 0 ]]; then
+            usage_pct=$(( (total_usage * 100) / quota_value ))
+          fi
+
+          predicted_pct=0
+          if [[ "${quota_value}" -gt 0 ]]; then
+            predicted_pct=$(( (predicted_total * 100) / quota_value ))
+          fi
+
+          # Determine status
+          status="ok"
+          overall="HEALTHY"
+          if [[ "${quota_value}" -gt 0 ]]; then
+            threshold_95=$(( quota_value * 95 / 100 ))
+            threshold_80=$(( quota_value * 80 / 100 ))
+            if [[ "${predicted_total}" -gt "${threshold_95}" ]]; then
+              status="ERROR"
+              overall="ERROR"
+              echo "::error::LINE quota exhaustion predicted: ${predicted_total}/${quota_value} (${predicted_pct}%)"
+            elif [[ "${predicted_total}" -gt "${threshold_80}" ]]; then
+              status="WARNING"
+              overall="WARNING"
+              echo "::warning::LINE quota usage high: predicted ${predicted_total}/${quota_value} (${predicted_pct}%)"
+            fi
+          fi
+
+          echo "status=${overall}" >> "$GITHUB_OUTPUT"
+          echo "usage=${total_usage}" >> "$GITHUB_OUTPUT"
+          echo "quota=${quota_value}" >> "$GITHUB_OUTPUT"
+          echo "usage_pct=${usage_pct}" >> "$GITHUB_OUTPUT"
+          echo "predicted=${predicted_total}" >> "$GITHUB_OUTPUT"
+          echo "predicted_pct=${predicted_pct}" >> "$GITHUB_OUTPUT"
+          echo "report=| LINE Quota | ${total_usage}/${quota_value} (${usage_pct}%) predicted ${predicted_total} (${predicted_pct}%) | ${status} |" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # 4. Discord Webhook Health Check
+      # ----------------------------------------------------------------
+      - name: Discord Webhook Health Check
+        id: discord_health
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "::notice::DISCORD_WEBHOOK_URL not set — skipping Discord webhook check"
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "report=| Discord Webhook | skipped | URL not configured |" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            --connect-timeout 5 --max-time 20 \
+            -X GET "${DISCORD_WEBHOOK_URL}" || echo "000")
+
+          if [[ "${http_code}" == "200" ]]; then
+            status="ok"
+            overall="HEALTHY"
+          elif [[ "${http_code}" == "404" ]]; then
+            status="ERROR — webhook revoked"
+            overall="ERROR"
+            echo "::error::Discord webhook returned 404 — webhook may be revoked"
+          else
+            status="WARNING — HTTP ${http_code}"
+            overall="WARNING"
+            echo "::warning::Discord webhook returned unexpected HTTP ${http_code}"
+          fi
+
+          echo "status=${overall}" >> "$GITHUB_OUTPUT"
+          echo "report=| Discord Webhook | HTTP ${http_code} | ${status} |" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # 5. Contract Drift Check
+      # ----------------------------------------------------------------
+      - name: Contract Drift Check
+        id: contract_drift
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          drift_found=false
+          drift_details=""
+
+          # Collect target files for deprecated API search
+          search_paths=()
+          for f in .github/workflows/line-*.yml scripts/local/integrations/line-*.sh; do
+            if [[ -e "${f}" ]]; then
+              search_paths+=("${f}")
+            fi
+          done
+
+          if [[ ${#search_paths[@]} -eq 0 ]]; then
+            echo "::notice::No LINE workflow/script files found to check"
+            echo "status=HEALTHY" >> "$GITHUB_OUTPUT"
+            echo "report=| Contract Drift | no files to check | ok |" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check for deprecated "notify-api.line.me"
+          notify_api_hits=$(grep -rn "notify-api\.line\.me" "${search_paths[@]}" 2>/dev/null || true)
+          if [[ -n "${notify_api_hits}" ]]; then
+            drift_found=true
+            drift_details="${drift_details}Deprecated notify-api.line.me found:\n${notify_api_hits}\n"
+            echo "::error::Deprecated API 'notify-api.line.me' found in delivery files"
+          fi
+
+          # Check for deprecated "LINE_NOTIFY_TOKEN"
+          notify_token_hits=$(grep -rn "LINE_NOTIFY_TOKEN" "${search_paths[@]}" 2>/dev/null || true)
+          if [[ -n "${notify_token_hits}" ]]; then
+            drift_found=true
+            drift_details="${drift_details}Deprecated LINE_NOTIFY_TOKEN found:\n${notify_token_hits}\n"
+            echo "::error::Deprecated secret 'LINE_NOTIFY_TOKEN' referenced in delivery files"
+          fi
+
+          if [[ "${drift_found}" == "true" ]]; then
+            echo "status=ERROR" >> "$GITHUB_OUTPUT"
+            {
+              echo "details<<DRIFTEOF"
+              echo -e "${drift_details}"
+              echo "DRIFTEOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "report=| Contract Drift | deprecated refs found | ERROR |" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=HEALTHY" >> "$GITHUB_OUTPUT"
+            echo "details=" >> "$GITHUB_OUTPUT"
+            echo "report=| Contract Drift | clean | ok |" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ----------------------------------------------------------------
+      # 6. Build Report + GITHUB_STEP_SUMMARY
+      # ----------------------------------------------------------------
+      - name: Build Report
+        id: build_report
+        env:
+          GHA_STATUS: ${{ steps.gha_health.outputs.overall_status }}
+          GHA_REPORT: ${{ steps.gha_health.outputs.report }}
+          LINE_STATUS: ${{ steps.line_quota.outputs.status }}
+          LINE_USAGE: ${{ steps.line_quota.outputs.usage }}
+          LINE_QUOTA: ${{ steps.line_quota.outputs.quota }}
+          LINE_USAGE_PCT: ${{ steps.line_quota.outputs.usage_pct }}
+          LINE_PREDICTED: ${{ steps.line_quota.outputs.predicted }}
+          LINE_PREDICTED_PCT: ${{ steps.line_quota.outputs.predicted_pct }}
+          LINE_REPORT: ${{ steps.line_quota.outputs.report }}
+          DISCORD_STATUS: ${{ steps.discord_health.outputs.status }}
+          DISCORD_REPORT: ${{ steps.discord_health.outputs.report }}
+          DRIFT_STATUS: ${{ steps.contract_drift.outputs.status }}
+          DRIFT_REPORT: ${{ steps.contract_drift.outputs.report }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          FULL_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Determine overall status
+          overall="HEALTHY"
+          for s in "${GHA_STATUS}" "${LINE_STATUS}" "${DISCORD_STATUS}" "${DRIFT_STATUS}"; do
+            if [[ "${s}" == "ERROR" ]]; then
+              overall="ERROR"
+              break
+            elif [[ "${s}" == "WARNING" && "${overall}" != "ERROR" ]]; then
+              overall="WARNING"
+            fi
+          done
+
+          # Status icon
+          case "${overall}" in
+            HEALTHY) status_icon="pass" ;;
+            WARNING) status_icon="warn" ;;
+            ERROR)   status_icon="fail" ;;
+            *)       status_icon="unknown" ;;
+          esac
+
+          today=$(date -u +%Y-%m-%d)
+
+          # Build GITHUB_STEP_SUMMARY
+          {
+            echo "## Delivery Audit - ${today} [${status_icon}]"
+            echo ""
+            echo "**Overall: ${overall}**"
+            echo ""
+            echo "### Results"
+            echo ""
+            echo "| Check | Detail | Status |"
+            echo "|-------|--------|--------|"
+            echo -e "${GHA_REPORT}"
+            echo "${LINE_REPORT}"
+            echo "${DISCORD_REPORT}"
+            echo "${DRIFT_REPORT}"
+            echo ""
+            echo "### GHA Workflow Success Rates"
+            echo ""
+            echo "| Workflow | Success Rate | Status |"
+            echo "|----------|-------------|--------|"
+            echo -e "${GHA_REPORT}"
+            echo ""
+            echo "---"
+            echo "*Run: [${RUN_ID}](${SERVER_URL}/${FULL_REPO}/actions/runs/${RUN_ID})*"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Build compact JSON for Discord step
+          json_summary=$(jq -n \
+            --arg date "${today}" \
+            --arg overall "${overall}" \
+            --arg gha_status "${GHA_STATUS}" \
+            --arg line_status "${LINE_STATUS}" \
+            --arg line_usage "${LINE_USAGE:-0}" \
+            --arg line_quota "${LINE_QUOTA:-0}" \
+            --arg line_usage_pct "${LINE_USAGE_PCT:-0}" \
+            --arg line_predicted "${LINE_PREDICTED:-0}" \
+            --arg line_predicted_pct "${LINE_PREDICTED_PCT:-0}" \
+            --arg discord_status "${DISCORD_STATUS}" \
+            --arg drift_status "${DRIFT_STATUS}" \
+            '{
+              date: $date,
+              overall: $overall,
+              gha: $gha_status,
+              line: { status: $line_status, usage: $line_usage, quota: $line_quota, usage_pct: $line_usage_pct, predicted: $line_predicted, predicted_pct: $line_predicted_pct },
+              discord: $discord_status,
+              drift: $drift_status
+            }')
+
+          echo "overall=${overall}" >> "$GITHUB_OUTPUT"
+          echo "today=${today}" >> "$GITHUB_OUTPUT"
+          {
+            echo "json<<JSONEOF"
+            echo "${json_summary}"
+            echo "JSONEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # 7. Notify Discord
+      # ----------------------------------------------------------------
+      - name: Notify Discord on anomaly
+        if: ${{ always() && steps.build_report.outputs.overall != 'HEALTHY' }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
+          OVERALL: ${{ steps.build_report.outputs.overall }}
+          TODAY: ${{ steps.build_report.outputs.today }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GHA_REPORT: ${{ steps.gha_health.outputs.report }}
+          LINE_STATUS: ${{ steps.line_quota.outputs.status }}
+          LINE_USAGE: ${{ steps.line_quota.outputs.usage }}
+          LINE_QUOTA_VAL: ${{ steps.line_quota.outputs.quota }}
+          LINE_USAGE_PCT: ${{ steps.line_quota.outputs.usage_pct }}
+          LINE_PREDICTED: ${{ steps.line_quota.outputs.predicted }}
+          LINE_PREDICTED_PCT: ${{ steps.line_quota.outputs.predicted_pct }}
+          DISCORD_STATUS: ${{ steps.discord_health.outputs.status }}
+          DRIFT_STATUS: ${{ steps.contract_drift.outputs.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "::notice::DISCORD_WEBHOOK_URL not set — skipping Discord notification"
+            exit 0
+          fi
+
+          # Build LINE quota line
+          if [[ "${LINE_STATUS}" == "skipped" ]]; then
+            line_line="LINE Quota: skipped (token not configured)"
+          else
+            line_line="LINE Quota: ${LINE_USAGE:-0}/${LINE_QUOTA_VAL:-0} (${LINE_USAGE_PCT:-0}%) — predicted ${LINE_PREDICTED:-0} (${LINE_PREDICTED_PCT:-0}%) [${LINE_STATUS}]"
+          fi
+
+          # Format GHA report lines for Discord (table rows -> bullet points)
+          gha_lines=$(echo -e "${GHA_REPORT}" | sed '/^$/d' | sed 's/^| /  - /;s/ |$//' | sed 's/ | / — /g')
+
+          # Compose message
+          message=$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n\n%s' \
+            "**[Delivery Audit] ${TODAY}**" \
+            "**Overall: ${OVERALL}**" \
+            "**GHA Run Health:**" \
+            "${gha_lines}" \
+            "**${line_line}**" \
+            "**Discord Webhook: ${DISCORD_STATUS}**" \
+            "**Contract Drift: ${DRIFT_STATUS}**" \
+            "Run: ${RUN_URL}")
+
+          payload=$(jq -n --arg content "${message}" '{"content": $content}')
+
+          http_status=$(curl -s -o /dev/null -w "%{http_code}" \
+            --connect-timeout 5 --max-time 20 \
+            -H "Content-Type: application/json" \
+            -d "${payload}" \
+            "${DISCORD_WEBHOOK_URL}" 2>/dev/null || echo "000")
+
+          if [[ "${http_status}" =~ ^2 ]]; then
+            echo "Discord anomaly notification sent."
+          else
+            echo "::warning::Primary webhook failed (HTTP ${http_status}); trying system webhook"
+            if [[ -n "${DISCORD_SYSTEM_WEBHOOK:-}" ]]; then
+              curl -s --connect-timeout 5 --max-time 20 \
+                -H "Content-Type: application/json" \
+                -d "${payload}" \
+                "${DISCORD_SYSTEM_WEBHOOK}" || echo "::warning::System webhook also failed"
+            else
+              echo "::warning::DISCORD_SYSTEM_WEBHOOK not set — Discord notification lost"
+            fi
+          fi
+
+      # ----------------------------------------------------------------
+      # 8. Remediation: Auto-rerun transient GHA failures
+      # ----------------------------------------------------------------
+      - name: Remediate transient GHA failures
+        if: ${{ always() && steps.gha_health.outputs.overall_status != 'HEALTHY' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKFLOWS=("LINE Send Note Article" "LINE Value Share" "fugue-watchdog")
+          rerun_count=0
+
+          for wf_name in "${WORKFLOWS[@]}"; do
+            wf_id=$(gh api "repos/${REPO}/actions/workflows" \
+              --jq ".workflows[] | select(.name == \"${wf_name}\") | .id" \
+              2>/dev/null || echo "")
+            [[ -z "${wf_id}" ]] && continue
+
+            # Get the most recent failed run
+            last_failed=$(gh api \
+              "repos/${REPO}/actions/workflows/${wf_id}/runs?per_page=1&status=completed&conclusion=failure" \
+              --jq '.workflow_runs[0] | {id, run_number, created_at}' 2>/dev/null || echo '{}')
+
+            run_id=$(echo "${last_failed}" | jq -r '.id // empty')
+            [[ -z "${run_id}" ]] && continue
+
+            # Fetch failed job logs (first 3000 chars to classify)
+            job_log=$(gh run view "${run_id}" --log-failed 2>/dev/null | head -100 || echo "")
+
+            # Classify: transient vs permanent
+            classification="unknown"
+            if echo "${job_log}" | grep -qiE 'monthly.*limit|quota.*exhaust|10018'; then
+              classification="permanent-quota"
+            elif echo "${job_log}" | grep -qiE '429|500|502|503|504|408|timeout|connection.*refuse'; then
+              classification="transient"
+            elif echo "${job_log}" | grep -qiE 'SyntaxError|command not found|permission denied'; then
+              classification="permanent-code"
+            fi
+
+            echo "Workflow '${wf_name}' last failure classified as: ${classification}"
+
+            if [[ "${classification}" == "transient" ]]; then
+              echo "::notice::Auto-rerunning transient failure for '${wf_name}' (run ${run_id})"
+              if gh run rerun "${run_id}" --repo "${REPO}" 2>/dev/null; then
+                rerun_count=$((rerun_count + 1))
+              else
+                echo "::warning::Rerun dispatch failed for '${wf_name}'"
+              fi
+            elif [[ "${classification}" == "permanent-quota" ]]; then
+              echo "::notice::Quota exhaustion in '${wf_name}' — skipping rerun (resets next month)"
+            elif [[ "${classification}" == "permanent-code" ]]; then
+              echo "::error::Code error in '${wf_name}' — requires manual fix"
+            fi
+          done
+
+          echo "Auto-rerun count: ${rerun_count}"
+
+      # ----------------------------------------------------------------
+      # 9. Remediation: Auto-pause LINE delivery on quota exhaustion
+      # ----------------------------------------------------------------
+      - name: Remediate LINE quota exhaustion
+        if: ${{ always() && steps.line_quota.outputs.status == 'ERROR' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT }}
+          REPO: ${{ github.repository }}
+          LINE_PREDICTED_PCT: ${{ steps.line_quota.outputs.predicted_pct }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::warning::FUGUE_OPS_PAT not set — cannot write LINE_DELIVERY_PAUSED variable"
+            exit 0
+          fi
+
+          current_paused=$(gh api "repos/${REPO}/actions/variables/LINE_DELIVERY_PAUSED" \
+            --jq '.value' 2>/dev/null || echo "false")
+
+          if [[ "${current_paused}" == "true" ]]; then
+            echo "LINE delivery already paused — no action needed"
+            exit 0
+          fi
+
+          echo "::warning::LINE quota predicted at ${LINE_PREDICTED_PCT}% — pausing LINE delivery"
+
+          # Create or update the pause variable
+          if gh api "repos/${REPO}/actions/variables/LINE_DELIVERY_PAUSED" --jq '.name' &>/dev/null; then
+            gh api -X PATCH "repos/${REPO}/actions/variables/LINE_DELIVERY_PAUSED" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="true" >/dev/null
+          else
+            gh api -X POST "repos/${REPO}/actions/variables" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="true" >/dev/null
+          fi
+
+          echo "LINE_DELIVERY_PAUSED set to true. Delivery workflows should check this variable."
+
+      # ----------------------------------------------------------------
+      # 10. Remediation: Auto-resume LINE delivery on month boundary
+      # ----------------------------------------------------------------
+      - name: Auto-resume LINE delivery on month reset
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT }}
+          REPO: ${{ github.repository }}
+          LINE_STATUS: ${{ steps.line_quota.outputs.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            exit 0
+          fi
+
+          day_of_month=$(date -u +%-d)
+          if [[ "${day_of_month}" -ne 1 ]]; then
+            exit 0
+          fi
+
+          current_paused=$(gh api "repos/${REPO}/actions/variables/LINE_DELIVERY_PAUSED" \
+            --jq '.value' 2>/dev/null || echo "false")
+
+          if [[ "${current_paused}" == "true" && "${LINE_STATUS}" != "ERROR" ]]; then
+            echo "::notice::Month boundary — resuming LINE delivery"
+            gh api -X PATCH "repos/${REPO}/actions/variables/LINE_DELIVERY_PAUSED" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="false" >/dev/null
+            echo "LINE_DELIVERY_PAUSED reset to false."
+          fi
+
+      # ----------------------------------------------------------------
+      # 11. Remediation: Auto-create issue for contract drift
+      # ----------------------------------------------------------------
+      - name: Create issue for contract drift
+        if: ${{ always() && steps.contract_drift.outputs.status == 'ERROR' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRIFT_DETAILS: ${{ steps.contract_drift.outputs.details }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Check for existing open drift issue to avoid duplicates
+          existing=$(gh issue list --repo "${REPO}" --label "contract-drift" --state open \
+            --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [[ -n "${existing}" ]]; then
+            echo "::notice::Contract drift issue #${existing} already open — adding comment"
+            comment_body="Contract drift still detected ($(date -u +%Y-%m-%d)):"
+            comment_body="${comment_body}"$'\n\n'"${DRIFT_DETAILS}"$'\n\n'"Run: ${RUN_URL}"
+            gh issue comment "${existing}" --repo "${REPO}" --body "${comment_body}"
+            exit 0
+          fi
+
+          issue_body="## Contract Drift Detected"
+          issue_body="${issue_body}"$'\n\n'"Deprecated API references found in delivery pipeline files."
+          issue_body="${issue_body}"$'\n\n'"### Details"$'\n'"${DRIFT_DETAILS}"
+          issue_body="${issue_body}"$'\n\n'"### Recommended Action"
+          issue_body="${issue_body}"$'\n'"Replace deprecated LINE Notify API references with LINE Messaging API (push/broadcast)."
+          issue_body="${issue_body}"$'\n\n'"### References"
+          issue_body="${issue_body}"$'\n'"- Delivery Audit Run: ${RUN_URL}"
+          issue_body="${issue_body}"$'\n\n'"_Auto-generated by delivery-audit workflow._"
+
+          gh issue create --repo "${REPO}" \
+            --title "[contract-drift] Deprecated API/secret reference in delivery pipeline" \
+            --label "fugue-task,contract-drift" \
+            --body "${issue_body}"
+
+          echo "::notice::Contract drift issue created"

@@ -1,0 +1,359 @@
+name: LINE Send Note Article
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: line-send-note-article
+  cancel-in-progress: false
+
+jobs:
+  send-article:
+    runs-on: ubuntu-latest
+<<<<<<< Updated upstream
+    timeout-minutes: 5
+=======
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+>>>>>>> Stashed changes
+
+    steps:
+      - name: Quota gate
+        id: quota_gate
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          gate_pass="true"
+
+          # 1. Check delivery pause flag
+          paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
+            --jq '.value' 2>/dev/null || echo "false")
+          if [ "${paused}" = "true" ]; then
+            echo "::notice::LINE delivery paused by delivery-audit"
+            gate_pass="false"
+          fi
+
+          # 2. Quota check (push costs 1 message)
+          if [ "${gate_pass}" = "true" ] && [ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
+
+            quota_value=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/message/quota" \
+              | jq -r '.value // 0' 2>/dev/null || echo "0")
+
+            total_usage=$(curl -s --connect-timeout 5 --max-time 10 \
+              -H "${AUTH}" "https://api.line.me/v2/bot/message/quota/consumption" \
+              | jq -r '.totalUsage // 0' 2>/dev/null || echo "0")
+
+            remaining=$((quota_value - total_usage))
+            echo "LINE quota: ${total_usage}/${quota_value} (remaining: ${remaining})"
+
+            if [ "${remaining}" -lt 1 ] 2>/dev/null; then
+              gate_pass="false"
+              echo "::notice::Quota gate BLOCKED — no remaining quota (${remaining})"
+            fi
+          fi
+
+          echo "gate_pass=${gate_pass}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve latest unpublished article
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
+        id: article
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::notice::SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set. Skipping gracefully."
+            {
+              echo "skip=true"
+              echo "skip_reason=missing_supabase_credentials"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-response.headers"
+
+          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published_at=not.is.null&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
+
+          HTTP_STATUS="$(curl -sS \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Accept: application/json" \
+            "${REQUEST_URL}")"
+
+          echo "Supabase select HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
+
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "::error::Failed to query Supabase articles table."
+            exit 1
+          fi
+
+          ARTICLE_COUNT="$(jq 'length' "${RESPONSE_BODY}")"
+          if [ "${ARTICLE_COUNT}" = "0" ]; then
+            echo "No unnotified published article found. Exiting successfully."
+            {
+              echo "skip=true"
+              echo "skip_reason=no_unnotified_article"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          ARTICLE_ID="$(jq -r '.[0].id' "${RESPONSE_BODY}")"
+          ARTICLE_TITLE="$(jq -r '.[0].title // "note記事"' "${RESPONSE_BODY}")"
+          ARTICLE_URL="$(jq -r '.[0].url // empty' "${RESPONSE_BODY}")"
+          ARTICLE_PUBLISHED_AT="$(jq -r '.[0].published_at // empty' "${RESPONSE_BODY}")"
+
+          if [ -z "${ARTICLE_ID}" ] || [ "${ARTICLE_ID}" = "null" ]; then
+            echo "::error::Article id is missing."
+            exit 1
+          fi
+
+          if [ -z "${ARTICLE_URL}" ] || [ "${ARTICLE_URL}" = "null" ]; then
+            echo "::error::Article url is missing."
+            exit 1
+          fi
+
+          MESSAGE_TEXT="$(
+            ARTICLE_TITLE="${ARTICLE_TITLE}" \
+            ARTICLE_URL="${ARTICLE_URL}" \
+            ARTICLE_PUBLISHED_AT="${ARTICLE_PUBLISHED_AT}" \
+            python3 - <<'PY'
+          import os
+
+          title = os.environ["ARTICLE_TITLE"].strip()
+          url = os.environ["ARTICLE_URL"].strip()
+          published_at = os.environ.get("ARTICLE_PUBLISHED_AT", "").strip()
+
+          lines = [
+              "note新着記事のお知らせ",
+              "",
+              title,
+          ]
+
+          if published_at:
+              lines.append(f"公開日時: {published_at}")
+
+          lines.extend([
+              "",
+              url,
+          ])
+
+          print("\n".join(lines))
+          PY
+          )"
+
+          {
+            echo "skip=false"
+            echo "article_id=${ARTICLE_ID}"
+            echo "article_title<<EOF"
+            printf '%s\n' "${ARTICLE_TITLE}"
+            echo "EOF"
+            echo "article_url=${ARTICLE_URL}"
+            echo "message_text<<EOF"
+            printf '%s\n' "${MESSAGE_TEXT}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Send LINE push message
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+          MESSAGE_TEXT: ${{ steps.article.outputs.message_text }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::error::LINE_CHANNEL_ACCESS_TOKEN is required."
+            exit 1
+          fi
+
+          if [ -z "${LINE_TO:-}" ]; then
+            echo "::error::LINE_TO is required for push delivery."
+            exit 1
+          fi
+
+          REQUEST_BODY="${RUNNER_TEMP}/line-push-request.json"
+          RESPONSE_BODY="${RUNNER_TEMP}/line-push-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/line-push-response.headers"
+
+          jq -n \
+            --arg to "${LINE_TO}" \
+            --arg text "${MESSAGE_TEXT}" \
+            '{to: $to, messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
+
+          RETRY_KEY="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "no-retry-key")"
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
+
+          while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
+            HTTP_STATUS="$(curl -sS \
+              -X POST "https://api.line.me/v2/bot/message/push" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \
+              -H "X-Line-Retry-Key: ${RETRY_KEY}" \
+              --data @"${REQUEST_BODY}")" || true
+
+            echo "LINE push HTTP status: ${HTTP_STATUS} (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
+            cat "${RESPONSE_BODY}" | jq . 2>/dev/null || cat "${RESPONSE_BODY}" || true
+
+            LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+            if [ -n "${LINE_REQUEST_ID:-}" ]; then
+              echo "LINE request id: ${LINE_REQUEST_ID}"
+            fi
+
+            case "${HTTP_STATUS}" in
+              2*)
+                echo "LINE push sent successfully."
+                exit 0
+                ;;
+              408|429|500|502|503|504)
+                # Distinguish monthly quota exhaustion from transient 429
+                if [ "${HTTP_STATUS}" = "429" ]; then
+                  BODY_MSG="$(jq -r '.message // ""' "${RESPONSE_BODY}" 2>/dev/null || true)"
+                  if printf '%s' "${BODY_MSG}" | grep -qiE 'monthly|limit|quota'; then
+                    echo "::error::LINE monthly quota exhausted (${BODY_MSG})"
+                    exit 1
+                  fi
+                fi
+                if [ "${ATTEMPT}" -lt "${MAX_ATTEMPTS}" ]; then
+                  BACKOFF=$(( 1 << (ATTEMPT - 1) ))
+                  echo "::warning::Transient error ${HTTP_STATUS}; retrying in ${BACKOFF}s (attempt ${ATTEMPT}/${MAX_ATTEMPTS})"
+                  sleep "${BACKOFF}"
+                  ATTEMPT=$(( ATTEMPT + 1 ))
+                  continue
+                fi
+                ;;
+            esac
+
+            echo "::error::LINE push failed with status ${HTTP_STATUS}."
+            exit 1
+          done
+
+      - name: Mark article as notified in Supabase
+        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-update-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-update-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X PATCH "${SUPABASE_URL}/rest/v1/articles?id=eq.${ARTICLE_ID}" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            --data '{"is_notified":true}')"
+
+          echo "Supabase update HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+          case "${HTTP_STATUS}" in
+            2*)
+              echo "Article marked as notified."
+              ;;
+            *)
+              echo "::error::Failed to mark article as notified."
+              exit 1
+              ;;
+          esac
+
+      - name: Observe LINE quota and consumption
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
+            echo "::notice::LINE_CHANNEL_ACCESS_TOKEN is not set. Skipping quota observation."
+            exit 0
+          fi
+
+          for ENDPOINT in quota quota/consumption; do
+            RESPONSE_BODY="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.json"
+            RESPONSE_HEADERS="${RUNNER_TEMP}/line-${ENDPOINT//\//-}.headers"
+
+            HTTP_STATUS="$(curl -sS \
+              -X GET "https://api.line.me/v2/bot/message/${ENDPOINT}" \
+              -D "${RESPONSE_HEADERS}" \
+              -o "${RESPONSE_BODY}" \
+              -w "%{http_code}" \
+              -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}")"
+
+            echo "LINE ${ENDPOINT} HTTP status: ${HTTP_STATUS}"
+            cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+          done
+
+          # Quota threshold check
+          QUOTA_FILE="${RUNNER_TEMP}/line-quota.json"
+          CONSUMPTION_FILE="${RUNNER_TEMP}/line-quota-consumption.json"
+          if [ -f "${QUOTA_FILE}" ] && [ -f "${CONSUMPTION_FILE}" ]; then
+            QUOTA_VALUE="$(jq -r '.value // 0' "${QUOTA_FILE}" 2>/dev/null || echo 0)"
+            CONSUMPTION_VALUE="$(jq -r '.totalUsage // 0' "${CONSUMPTION_FILE}" 2>/dev/null || echo 0)"
+            if [ "${QUOTA_VALUE}" -gt 0 ] 2>/dev/null; then
+              USAGE_PCT=$(( CONSUMPTION_VALUE * 100 / QUOTA_VALUE ))
+              echo "LINE quota usage: ${CONSUMPTION_VALUE}/${QUOTA_VALUE} (${USAGE_PCT}%)"
+              if [ "${USAGE_PCT}" -ge 95 ]; then
+                echo "::error::LINE message quota ${USAGE_PCT}% consumed — approaching limit"
+              elif [ "${USAGE_PCT}" -ge 80 ]; then
+                echo "::warning::LINE message quota ${USAGE_PCT}% consumed"
+              fi
+            fi
+          fi
+
+      - name: Notify Discord on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::notice::DISCORD_WEBHOOK_URL not set. Skipping failure notification."
+            exit 0
+          fi
+          PAYLOAD="$(jq -n \
+            --arg content "[LINE Send Note Article] Workflow failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{content: $content}')"
+          HTTP_STATUS="$(curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+            --connect-timeout 5 \
+            --max-time 20 \
+            -o /dev/null \
+            -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")" || true
+          case "${HTTP_STATUS}" in
+            2*) echo "Discord failure notification sent." ;;
+            *)  echo "::warning::Discord failure notification failed (HTTP ${HTTP_STATUS:-N/A})." ;;
+          esac

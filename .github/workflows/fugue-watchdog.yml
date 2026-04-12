@@ -1,0 +1,704 @@
+name: fugue-watchdog
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      force_line_alert:
+        description: "Force LINE alert once for manual delivery test"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      line_alert_message:
+        description: "Optional LINE alert message override when force_line_alert=true"
+        required: false
+        type: string
+
+permissions:
+  issues: write
+  # Needed to dispatch workflow runs for auto-recovery (reconcile job).
+  actions: write
+  contents: read
+
+concurrency:
+  group: fugue-watchdog
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      failover_state: ${{ steps.failover.outputs.failover_state }}
+      failover_reason: ${{ steps.failover.outputs.failover_reason }}
+      backup_router_execution_mode: ${{ steps.failover.outputs.backup_router_execution_mode }}
+      gha_execution_mode: ${{ steps.failover.outputs.gha_execution_mode }}
+      failover_variable_sync_status: ${{ steps.failover.outputs.failover_variable_sync_status }}
+
+    steps:
+      - name: Count pending work (for alert gating)
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          issues_json="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --label "fugue-task" \
+            --limit 200 \
+            --json number,labels)"
+
+          # Pending router work: issues that *should* be handled by `fugue-task-router`.
+          # Exclude terminal/handled states to avoid alert spam (e.g. vote-rejected drills).
+          pending_json="$(echo "${issues_json}" | jq -c '[.[] | select(
+            (([.labels[]? | .name] | index("processing")) == null) and
+            (([.labels[]? | .name] | index("completed")) == null) and
+            (([.labels[]? | .name] | index("needs-human")) == null) and
+            (([.labels[]? | .name] | index("needs-review")) == null) and
+            (([.labels[]? | .name] | index("vote-rejected")) == null) and
+            (([.labels[]? | .name] | index("tutti")) == null)
+          ) | .number]')"
+          pending_count="$(echo "${pending_json}" | jq 'length')"
+
+          # Pending mainframe work: open issue has `tutti` but is not in a terminal state.
+          mainframe_pending_json="$(echo "${issues_json}" | jq -c '[.[] | select(
+            (([.labels[]? | .name] | index("tutti")) != null) and
+            (([.labels[]? | .name] | index("completed")) == null) and
+            (([.labels[]? | .name] | index("needs-human")) == null) and
+            (([.labels[]? | .name] | index("needs-review")) == null) and
+            (([.labels[]? | .name] | index("vote-rejected")) == null)
+          ) | .number]')"
+          mainframe_pending_count="$(echo "${mainframe_pending_json}" | jq 'length')"
+
+          {
+            echo "pending_count=${pending_count}"
+            echo "mainframe_pending_count=${mainframe_pending_count}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: API connectivity check
+        id: connectivity
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+        run: |
+          set +e
+          OPENAI_OK="false"
+          ZAI_OK="false"
+          GEMINI_OK="skipped"
+          XAI_OK="skipped"
+          ANTHROPIC_OK="skipped"
+          claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
+
+          if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+            https://api.openai.com/v1/models \
+            -H "Authorization: Bearer ${OPENAI_API_KEY}" >/dev/null 2>&1; then
+            OPENAI_OK="true"
+          fi
+
+          if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+            https://api.z.ai/api/coding/paas/v4/models \
+            -H "Authorization: Bearer ${ZAI_API_KEY}" >/dev/null 2>&1; then
+            ZAI_OK="true"
+          fi
+
+          if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+            GEMINI_OK="false"
+            if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+              "https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}" >/dev/null 2>&1; then
+              GEMINI_OK="true"
+            fi
+          fi
+
+          if [[ -n "${XAI_API_KEY:-}" ]]; then
+            XAI_OK="false"
+            if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+              https://api.x.ai/v1/models \
+              -H "Authorization: Bearer ${XAI_API_KEY}" >/dev/null 2>&1; then
+              XAI_OK="true"
+            fi
+          fi
+
+          if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+            ANTHROPIC_OK="false"
+            if curl -fsS --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors \
+              https://api.anthropic.com/v1/models \
+              -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+              -H "anthropic-version: 2023-06-01" >/dev/null 2>&1; then
+              ANTHROPIC_OK="true"
+            fi
+          elif [[ "${claude_max_plan}" == "true" ]]; then
+            ANTHROPIC_OK="proxy"
+          fi
+
+          {
+            echo "openai_ok=${OPENAI_OK}"
+            echo "zai_ok=${ZAI_OK}"
+            echo "gemini_ok=${GEMINI_OK}"
+            echo "xai_ok=${XAI_OK}"
+            echo "anthropic_ok=${ANTHROPIC_OK}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Auto-recover Claude rate-limit state when stable
+        id: claude_state_guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+        run: |
+          set -euo pipefail
+
+          state="$(echo "${CLAUDE_RATE_LIMIT_STATE:-ok}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${state}" != "ok" && "${state}" != "degraded" && "${state}" != "exhausted" ]]; then
+            state="ok"
+          fi
+          state_effective="${state}"
+          recovered="false"
+          recover_reason="not-required"
+          age_hours="0"
+          fallback_mentions_24h="0"
+          can_manage_variables="false"
+
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+            can_manage_variables="true"
+          fi
+
+          claude_max_plan="$(echo "${CLAUDE_MAX_PLAN:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${claude_max_plan}" != "true" ]]; then
+            claude_max_plan="false"
+          fi
+
+          if [[ "${state}" != "ok" ]]; then
+            if [[ "${can_manage_variables}" == "true" ]]; then
+              var_updated_at="$(gh variable list --repo "${GITHUB_REPOSITORY}" 2>/dev/null | awk '$1=="FUGUE_CLAUDE_RATE_LIMIT_STATE"{print $3}' || true)"
+              if [[ -n "${var_updated_at}" ]]; then
+                now_epoch="$(date -u +%s)"
+                var_epoch="$(date -u -d "${var_updated_at}" +%s)"
+                age_hours="$(( (now_epoch - var_epoch) / 3600 ))"
+              fi
+            else
+              recover_reason="hold-no-ops-token"
+            fi
+
+            since_24h="$(date -u -d '1 day ago' +%Y-%m-%d)"
+            fallback_mentions_24h="$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:issue+%22auto-fallback%22+updated:>=${since_24h}&per_page=1" | jq -r '.total_count // 0')"
+
+            pending_count="${{ steps.pending.outputs.pending_count }}"
+            mainframe_pending_count="${{ steps.pending.outputs.mainframe_pending_count }}"
+            openai_ok="${{ steps.connectivity.outputs.openai_ok }}"
+            zai_ok="${{ steps.connectivity.outputs.zai_ok }}"
+            anthropic_ok="${{ steps.connectivity.outputs.anthropic_ok }}"
+
+            min_age_hours=12
+            if [[ "${state}" == "exhausted" ]]; then
+              min_age_hours=24
+            fi
+
+            has_pending="false"
+            if [[ "${pending_count}" != "0" || "${mainframe_pending_count}" != "0" ]]; then
+              has_pending="true"
+            fi
+
+            claude_path_ok="true"
+            if [[ "${anthropic_ok}" == "false" && "${claude_max_plan}" != "true" ]]; then
+              claude_path_ok="false"
+            fi
+
+            if [[ "${can_manage_variables}" == "true" &&
+                  "${age_hours}" -ge "${min_age_hours}" &&
+                  "${fallback_mentions_24h}" == "0" &&
+                  "${has_pending}" == "false" &&
+                  "${openai_ok}" == "true" &&
+                  "${zai_ok}" == "true" &&
+                  "${claude_path_ok}" == "true" ]]; then
+              if gh variable set FUGUE_CLAUDE_RATE_LIMIT_STATE \
+                --repo "${GITHUB_REPOSITORY}" \
+                --body "ok"; then
+                state_effective="ok"
+                recovered="true"
+                recover_reason="cooldown-auto-recover"
+              else
+                recover_reason="hold-variable-write-failed"
+              fi
+            else
+              if [[ "${recover_reason}" == "not-required" ]]; then
+                recover_reason="hold-${state}"
+              fi
+            fi
+          fi
+
+          {
+            echo "state_effective=${state_effective}"
+            echo "recovered=${recovered}"
+            echo "recover_reason=${recover_reason}"
+            echo "state_age_hours=${age_hours}"
+            echo "fallback_mentions_24h=${fallback_mentions_24h}"
+            echo "can_manage_variables=${can_manage_variables}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Get latest successful router run
+        id: last_success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/fugue-caller.yml/runs?status=success&per_page=1")"
+          LAST_TIME="$(echo "${RUNS_JSON}" | jq -r '.workflow_runs[0].created_at // empty')"
+
+          if [[ -z "${LAST_TIME}" ]]; then
+            echo "stale=true" >> "${GITHUB_OUTPUT}"
+            echo "hours_since=9999" >> "${GITHUB_OUTPUT}"
+            echo "minutes_since=999999" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          NOW_EPOCH="$(date -u +%s)"
+          LAST_EPOCH="$(date -u -d "${LAST_TIME}" +%s)"
+          DIFF_HOURS="$(( (NOW_EPOCH - LAST_EPOCH) / 3600 ))"
+          DIFF_MINUTES="$(( (NOW_EPOCH - LAST_EPOCH) / 60 ))"
+
+          STALE="false"
+          # Only page on router staleness when there is pending work to process.
+          if [[ "${DIFF_HOURS}" -ge 3 && "${{ steps.pending.outputs.pending_count }}" != "0" ]]; then
+            STALE="true"
+          fi
+
+          {
+            echo "stale=${STALE}"
+            echo "hours_since=${DIFF_HOURS}"
+            echo "minutes_since=${DIFF_MINUTES}"
+            echo "last_time=${LAST_TIME}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Get latest successful mainframe run
+        id: mainframe_success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUNS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/fugue-tutti-caller.yml/runs?status=success&per_page=1")"
+          LAST_TIME="$(echo "${RUNS_JSON}" | jq -r '.workflow_runs[0].created_at // empty')"
+
+          if [[ -z "${LAST_TIME}" ]]; then
+            echo "stale=true" >> "${GITHUB_OUTPUT}"
+            echo "hours_since=9999" >> "${GITHUB_OUTPUT}"
+            echo "minutes_since=999999" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          NOW_EPOCH="$(date -u +%s)"
+          LAST_EPOCH="$(date -u -d "${LAST_TIME}" +%s)"
+          DIFF_HOURS="$(( (NOW_EPOCH - LAST_EPOCH) / 3600 ))"
+          DIFF_MINUTES="$(( (NOW_EPOCH - LAST_EPOCH) / 60 ))"
+
+          STALE="false"
+          # Only page on mainframe staleness when there is pending mainframe work.
+          if [[ "${DIFF_HOURS}" -ge 3 && "${{ steps.pending.outputs.mainframe_pending_count }}" != "0" ]]; then
+            STALE="true"
+          fi
+
+          {
+            echo "stale=${STALE}"
+            echo "hours_since=${DIFF_HOURS}"
+            echo "minutes_since=${DIFF_MINUTES}"
+            echo "last_time=${LAST_TIME}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout repository for failover resolver
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Detect execution failover state
+        id: failover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          CURRENT_FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+          PRIMARY_HEARTBEAT_AT: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_AT || '' }}
+          PRIMARY_HEARTBEAT_TTL_MINUTES: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_TTL_MINUTES || '8' }}
+          PRIMARY_HEARTBEAT_GRACE_MULTIPLIER: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_GRACE_MULTIPLIER || '3' }}
+        run: |
+          set -euo pipefail
+
+          gha_execution_mode="${GHA_EXECUTION_MODE}"
+          current_state="${CURRENT_FAILOVER_STATE}"
+          failover_state="${CURRENT_FAILOVER_STATE}"
+          failover_reason="unresolved"
+          backup_router_execution_mode="auto"
+          heartbeat_status="unknown"
+          heartbeat_age_minutes="999999"
+          online_count=0
+          runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
+          if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
+            online_count_raw="$(echo "${runners_json}" | jq -r --arg label "${RUNNER_LABEL}" '[.runners[]? | objects | select(.status == "online") | select(any((.labels // [])[]?; .name == $label))] | length' 2>/dev/null || true)"
+            online_count="$(printf '%s\n' "${online_count_raw}" | awk 'NF { last=$0 } END { print last }')"
+            online_count="$(printf '%s' "${online_count}" | tr -cd '0-9')"
+            if [[ -z "${online_count}" ]]; then
+              online_count="0"
+            fi
+          fi
+          # shellcheck source=../scripts/lib/resolve-primary-heartbeat-state.sh
+          resolver_env="$(
+            scripts/lib/resolve-primary-heartbeat-state.sh \
+              --gha-execution-mode "${GHA_EXECUTION_MODE}" \
+              --current-state "${CURRENT_FAILOVER_STATE}" \
+              --runner-online-count "${online_count}" \
+              --pending-count "${{ steps.pending.outputs.pending_count }}" \
+              --mainframe-pending-count "${{ steps.pending.outputs.mainframe_pending_count }}" \
+              --router-stale "${{ steps.last_success.outputs.stale }}" \
+              --mainframe-stale "${{ steps.mainframe_success.outputs.stale }}" \
+              --heartbeat-at "${PRIMARY_HEARTBEAT_AT}" \
+              --heartbeat-ttl-minutes "${PRIMARY_HEARTBEAT_TTL_MINUTES}" \
+              --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
+              --format env
+          )"
+          eval "${resolver_env}"
+
+          can_manage_variables="true"
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+
+          failover_variable_sync_status="unchanged"
+          if [[ "${failover_state}" != "${current_state}" ]]; then
+            if gh variable set FUGUE_FAILOVER_STATE \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "${failover_state}" >/dev/null 2>&1; then
+              failover_variable_sync_status="updated"
+            else
+              failover_variable_sync_status="failed"
+              echo "::warning::Failed to sync FUGUE_FAILOVER_STATE to ${failover_state}" >&2
+            fi
+          fi
+
+          {
+            echo "failover_state=${failover_state}"
+            echo "failover_reason=${failover_reason}"
+            echo "backup_router_execution_mode=${backup_router_execution_mode}"
+            echo "online_count=${online_count}"
+            echo "gha_execution_mode=${gha_execution_mode}"
+            echo "heartbeat_status=${heartbeat_status}"
+            echo "heartbeat_age_minutes=${heartbeat_age_minutes}"
+            echo "can_manage_variables=${can_manage_variables}"
+            echo "failover_variable_sync_status=${failover_variable_sync_status}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Decide whether to alert (throttle + relevance)
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+          FORCE_LINE_ALERT: ${{ github.event.inputs.force_line_alert || 'false' }}
+          LINE_ALERT_MESSAGE: ${{ github.event.inputs.line_alert_message || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          watchdog_alert_state='{}'
+          watchdog_alert_persist="false"
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+          if gh variable list --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            watchdog_alert_persist="true"
+            watchdog_alert_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/FUGUE_WATCHDOG_ALERT_STATE" --jq '.value' 2>/dev/null || printf '{}')"
+          fi
+
+          policy_json="$(
+            bash scripts/lib/watchdog-alert-policy.sh \
+              --event-name "${EVENT_NAME}" \
+              --force-line-alert "${FORCE_LINE_ALERT}" \
+              --line-alert-message "${LINE_ALERT_MESSAGE}" \
+              --github-repository "${GITHUB_REPOSITORY}" \
+              --openai-ok "${{ steps.connectivity.outputs.openai_ok }}" \
+              --zai-ok "${{ steps.connectivity.outputs.zai_ok }}" \
+              --gemini-ok "${{ steps.connectivity.outputs.gemini_ok }}" \
+              --xai-ok "${{ steps.connectivity.outputs.xai_ok }}" \
+              --anthropic-ok "${{ steps.connectivity.outputs.anthropic_ok }}" \
+              --claude-state "${{ steps.claude_state_guard.outputs.state_effective }}" \
+              --claude-recovered "${{ steps.claude_state_guard.outputs.recovered }}" \
+              --claude-recover-reason "${{ steps.claude_state_guard.outputs.recover_reason }}" \
+              --claude-state-age-hours "${{ steps.claude_state_guard.outputs.state_age_hours }}" \
+              --claude-fallback-mentions-24h "${{ steps.claude_state_guard.outputs.fallback_mentions_24h }}" \
+              --claude-can-manage-variables "${{ steps.claude_state_guard.outputs.can_manage_variables }}" \
+              --claude-max-plan "${CLAUDE_MAX_PLAN}" \
+              --router-stale "${{ steps.last_success.outputs.stale }}" \
+              --mainframe-stale "${{ steps.mainframe_success.outputs.stale }}" \
+              --failover-state "${{ steps.failover.outputs.failover_state }}" \
+              --failover-reason "${{ steps.failover.outputs.failover_reason }}" \
+              --gha-execution-mode "${{ steps.failover.outputs.gha_execution_mode }}" \
+              --runner-online-count "${{ steps.failover.outputs.online_count }}" \
+              --heartbeat-status "${{ steps.failover.outputs.heartbeat_status }}" \
+              --heartbeat-age-minutes "${{ steps.failover.outputs.heartbeat_age_minutes }}" \
+              --router-hours "${{ steps.last_success.outputs.hours_since }}" \
+              --router-minutes "${{ steps.last_success.outputs.minutes_since }}" \
+              --router-last-success-at "${{ steps.last_success.outputs.last_time }}" \
+              --mainframe-hours "${{ steps.mainframe_success.outputs.hours_since }}" \
+              --mainframe-minutes "${{ steps.mainframe_success.outputs.minutes_since }}" \
+              --mainframe-last-success-at "${{ steps.mainframe_success.outputs.last_time }}" \
+              --pending-count "${{ steps.pending.outputs.pending_count }}" \
+              --mainframe-pending-count "${{ steps.pending.outputs.mainframe_pending_count }}" \
+              --persist-state "${watchdog_alert_persist}" \
+              --previous-state-json "${watchdog_alert_state}" \
+              --format json
+          )"
+
+          should_alert="$(printf '%s' "${policy_json}" | jq -r '.should_alert')"
+          force_line_alert="$(printf '%s' "${policy_json}" | jq -r '.force_line_alert')"
+          msg="$(printf '%s' "${policy_json}" | jq -r '.message')"
+          state_update_required="$(printf '%s' "${policy_json}" | jq -r '.state_update_required')"
+          next_state_json="$(printf '%s' "${policy_json}" | jq -c '.next_state')"
+          due_reasons_csv="$(printf '%s' "${policy_json}" | jq -r 'if (.due_reasons | length) == 0 then "" else (.due_reasons | join(",")) end')"
+          persist_state="$(printf '%s' "${policy_json}" | jq -r '.persist_state')"
+
+          {
+            echo "should_alert=${should_alert}"
+            echo "force_line_alert=${force_line_alert}"
+            echo "watchdog_alert_due_reasons=${due_reasons_csv}"
+            echo "watchdog_alert_persist=${persist_state}"
+            echo "watchdog_alert_state_update_required=${state_update_required}"
+            echo "watchdog_alert_next_state_json=${next_state_json}"
+            echo "message<<EOF"
+            echo "${msg}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Discord alert when unhealthy
+        id: discord_alert
+        if: ${{ steps.decide.outputs.should_alert == 'true' && steps.decide.outputs.force_line_alert != 'true' }}
+        env:
+          DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "sent=false"
+            echo "delivery=skipped"
+            echo "transport=discord-system-webhook"
+            echo "attempted=false"
+          } >> "${GITHUB_OUTPUT}"
+
+          webhook_url="${DISCORD_SYSTEM_WEBHOOK:-}"
+          if [[ -z "${webhook_url}" ]]; then
+            echo "delivery=missing-system-webhook" >> "${GITHUB_OUTPUT}"
+            echo "::warning::DISCORD_SYSTEM_WEBHOOK is required for fugue-watchdog system alerts." >&2
+            exit 0
+          fi
+          PAYLOAD="$(jq -n --arg content "${{ steps.decide.outputs.message }}" '{content:$content}')"
+          set +e
+          curl -fsS -X POST "${webhook_url}" \
+            --connect-timeout 5 \
+            --max-time 20 \
+            --retry 2 \
+            --retry-delay 2 \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}"
+          curl_exit_code=$?
+          set -e
+          echo "attempted=true" >> "${GITHUB_OUTPUT}"
+          if [[ "${curl_exit_code}" != "0" ]]; then
+            echo "delivery=error-curl-${curl_exit_code}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          {
+            echo "sent=true"
+            echo "delivery=ok"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Record LINE alert prohibition for system logs
+        id: line_alert
+        if: ${{ steps.decide.outputs.should_alert == 'true' }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "sent=false"
+            echo "status=disabled-by-policy"
+            echo "transport=prohibited"
+            echo "delivery_state=blocked-by-policy"
+            echo "attempted=false"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice::LINE delivery is prohibited for fugue-watchdog system alerts. Discord is the only alert transport."
+
+      - name: Persist watchdog alert state after confirmed delivery
+        if: ${{ steps.decide.outputs.should_alert == 'true' && steps.decide.outputs.watchdog_alert_persist == 'true' && steps.decide.outputs.watchdog_alert_state_update_required == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          NEXT_STATE_JSON: ${{ steps.decide.outputs.watchdog_alert_next_state_json }}
+          DISCORD_SENT: ${{ steps.discord_alert.outputs.sent }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+
+          discord_sent="$(printf '%s' "${DISCORD_SENT:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${discord_sent}" != "true" ]]; then
+            echo "::warning::Discord system webhook did not confirm delivery; skipping FUGUE_WATCHDOG_ALERT_STATE update." >&2
+            exit 0
+          fi
+
+          gh variable set FUGUE_WATCHDOG_ALERT_STATE \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${NEXT_STATE_JSON}" >/dev/null
+
+  reconcile:
+    needs: [health]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Find unprocessed fugue-task issues
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUES_JSON="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --label "fugue-task" \
+            --limit 200 \
+            --json number,labels)"
+
+          # Only retry issues that the router would actually pick up.
+          # Avoid retry loops on terminal/handled states (`needs-human`, `needs-review`, `vote-rejected`, `tutti`).
+          PENDING_JSON="$(echo "${ISSUES_JSON}" | jq -c '[.[] | select(
+            (([.labels[]? | .name] | index("processing")) == null) and
+            (([.labels[]? | .name] | index("completed")) == null) and
+            (([.labels[]? | .name] | index("needs-human")) == null) and
+            (([.labels[]? | .name] | index("needs-review")) == null) and
+            (([.labels[]? | .name] | index("vote-rejected")) == null) and
+            (([.labels[]? | .name] | index("tutti")) == null)
+          ) | .number]')"
+          COUNT="$(echo "${PENDING_JSON}" | jq 'length')"
+
+          {
+            echo "pending_count=${COUNT}"
+            echo "pending_json=${PENDING_JSON}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Plan reconcile dispatch claims
+        id: claims
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          PENDING_JSON: ${{ steps.find.outputs.pending_json }}
+        run: |
+          set -euo pipefail
+
+          reconcile_claim_state='{}'
+          reconcile_claim_persist="false"
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+          if gh variable list --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            reconcile_claim_persist="true"
+            reconcile_claim_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/FUGUE_RECONCILE_CLAIM_STATE" --jq '.value' 2>/dev/null || printf '{}')"
+          fi
+
+          eval "$(
+            bash scripts/lib/watchdog-reconcile-claim-policy.sh \
+              --pending-json "${PENDING_JSON}" \
+              --previous-state-json "${reconcile_claim_state}" \
+              --persist-state "${reconcile_claim_persist}" \
+              --now-epoch "$(date +%s)" \
+              --ttl-seconds 1800 \
+              --format env
+          )"
+
+          {
+            echo "dispatch_issue_numbers_json=${dispatch_issue_numbers_json}"
+            echo "dispatch_count=${dispatch_count}"
+            echo "state_update_required=${state_update_required}"
+            echo "persist_state=${persist_state}"
+            echo "next_state_json=${next_state_json}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Trigger caller for claimable issues
+        id: dispatch
+        if: ${{ steps.claims.outputs.dispatch_count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PENDING_JSON: ${{ steps.claims.outputs.dispatch_issue_numbers_json }}
+          EXECUTION_MODE_OVERRIDE: ${{ needs.health.outputs.backup_router_execution_mode }}
+        run: |
+          set -euo pipefail
+
+          echo "Found unprocessed issues: ${PENDING_JSON}"
+          failed_issue_numbers_json='[]'
+          succeeded_issue_numbers_json='[]'
+          for ISSUE_NUM in $(echo "${PENDING_JSON}" | jq -r '.[]'); do
+            echo "Triggering caller for issue #${ISSUE_NUM}"
+            cmd=(gh workflow run fugue-caller.yml --repo "${GITHUB_REPOSITORY}" -f issue_number="${ISSUE_NUM}")
+            if [[ -n "${EXECUTION_MODE_OVERRIDE:-}" && "${EXECUTION_MODE_OVERRIDE}" != "auto" ]]; then
+              cmd+=(-f execution_mode_override="${EXECUTION_MODE_OVERRIDE}")
+            fi
+            if "${cmd[@]}"; then
+              succeeded_issue_numbers_json="$(printf '%s' "${succeeded_issue_numbers_json}" | jq -c --argjson n "${ISSUE_NUM}" '. + [$n]')"
+            else
+              failed_issue_numbers_json="$(printf '%s' "${failed_issue_numbers_json}" | jq -c --argjson n "${ISSUE_NUM}" '. + [$n]')"
+            fi
+            sleep 2
+          done
+
+          {
+            echo "failed_issue_numbers_json=${failed_issue_numbers_json}"
+            echo "succeeded_issue_numbers_json=${succeeded_issue_numbers_json}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Persist reconcile claim state
+        if: ${{ steps.claims.outputs.persist_state == 'true' && steps.claims.outputs.state_update_required == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          NEXT_STATE_JSON: ${{ steps.claims.outputs.next_state_json }}
+          FAILED_ISSUE_NUMBERS_JSON: ${{ steps.dispatch.outputs.failed_issue_numbers_json || '[]' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+
+          persist_json="$(jq -cn \
+            --argjson state "${NEXT_STATE_JSON}" \
+            --argjson failed "${FAILED_ISSUE_NUMBERS_JSON}" '
+              reduce $failed[] as $issue ($state; .claims |= (del(.[($issue|tostring)])))
+            ')"
+
+          gh variable set FUGUE_RECONCILE_CLAIM_STATE \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${persist_json}" >/dev/null

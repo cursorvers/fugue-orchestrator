@@ -1,0 +1,781 @@
+name: Fugue Mainframe (Tutti + Optional Codex Implement)
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to process (used for automated handoff)"
+        required: true
+        type: string
+      kernel_run_id:
+        description: "Optional Kernel run id for compact artifact propagation"
+        required: false
+        type: string
+        default: ""
+      trust_subject:
+        description: "Optional trusted actor login for permission checks"
+        required: false
+        type: string
+        default: ""
+      canary_dispatch_run_id:
+        description: "Originating canary workflow run id for verified canary dispatches"
+        required: false
+        type: string
+        default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for this dispatch (hold|continuity)"
+        required: false
+        type: string
+        default: ""
+      vote_instruction_b64:
+        description: "Optional /vote instruction payload (base64-encoded)"
+        required: false
+        type: string
+        default: ""
+      requested_execution_mode:
+        description: "Resolved handoff mode snapshot (review|implement)"
+        required: false
+        type: string
+        default: ""
+      implement_request:
+        description: "Resolved implementation intent snapshot"
+        required: false
+        type: string
+        default: ""
+      implement_confirmed:
+        description: "Resolved implementation confirmation snapshot"
+        required: false
+        type: string
+        default: ""
+      vote_command:
+        description: "True when the handoff originated from `/vote`"
+        required: false
+        type: string
+        default: "false"
+      dispatch_nonce:
+        description: "Optional unique nonce to isolate workflow_dispatch concurrency groups"
+        required: false
+        type: string
+        default: ""
+      handoff_target:
+        description: "Sovereign handoff target (kernel|fugue-bridge)"
+        required: false
+        type: string
+        default: "kernel"
+      intake_source:
+        description: "Intake source marker for audit/policy"
+        required: false
+        type: string
+        default: ""
+      execution_mode_override:
+        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
+        required: false
+        type: string
+        default: "auto"
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: fugue-mainframe-${{ github.repository }}-${{ github.event.issue.number || github.event.inputs.issue_number || github.run_id }}-${{ github.event_name == 'issues' && format('label-{0}', github.event.label.name) || format('dispatch-{0}', github.event.inputs.dispatch_nonce || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'issues' }}
+
+jobs:
+  ctx:
+    # For issues:labeled, only run when the label event is `tutti`.
+    # For workflow_dispatch, treat the dispatch itself as the trigger.
+    if: ${{ github.event_name != 'issues' || github.event.label.name == 'tutti' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.ctx.outputs.should_run }}
+      skip_reason: ${{ steps.ctx.outputs.skip_reason }}
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      canary_dispatch_owned: ${{ steps.ctx.outputs.canary_dispatch_owned }}
+      canary_dispatch_run_id: ${{ steps.ctx.outputs.canary_dispatch_run_id }}
+      has_implement_request: ${{ steps.ctx.outputs.has_implement_request }}
+      has_implement_confirmed: ${{ steps.ctx.outputs.has_implement_confirmed }}
+      target_repo: ${{ steps.ctx.outputs.target_repo }}
+      orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
+      main_orchestrator_provider: ${{ steps.ctx.outputs.main_orchestrator_provider }}
+      assist_orchestrator_provider: ${{ steps.ctx.outputs.assist_orchestrator_provider }}
+      claude_fallback_applied: ${{ steps.ctx.outputs.main_claude_fallback_applied }}
+      claude_fallback_reason: ${{ steps.ctx.outputs.main_claude_fallback_reason }}
+      main_claude_fallback_applied: ${{ steps.ctx.outputs.main_claude_fallback_applied }}
+      main_claude_fallback_reason: ${{ steps.ctx.outputs.main_claude_fallback_reason }}
+      assist_claude_fallback_applied: ${{ steps.ctx.outputs.assist_claude_fallback_applied }}
+      assist_claude_fallback_reason: ${{ steps.ctx.outputs.assist_claude_fallback_reason }}
+      claude_pressure_guard_applied: ${{ steps.ctx.outputs.claude_pressure_guard_applied }}
+      claude_pressure_guard_reason: ${{ steps.ctx.outputs.claude_pressure_guard_reason }}
+      translation_gate_decision: ${{ steps.ctx.outputs.translation_gate_decision }}
+      translation_applied: ${{ steps.ctx.outputs.translation_applied }}
+      translation_provider: ${{ steps.ctx.outputs.translation_provider }}
+      translation_score: ${{ steps.ctx.outputs.translation_score }}
+      translation_threshold: ${{ steps.ctx.outputs.translation_threshold }}
+      orchestration_profile: ${{ steps.ctx.outputs.orchestration_profile }}
+      preflight_cycles: ${{ steps.ctx.outputs.preflight_cycles }}
+      multi_agent_mode_override: ${{ steps.ctx.outputs.multi_agent_mode_override }}
+      multi_agent_mode_lock: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
+      implementation_dialogue_rounds: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
+      task_size_tier: ${{ steps.ctx.outputs.task_size_tier }}
+      claude_teams_allowed: ${{ steps.ctx.outputs.claude_teams_allowed }}
+      claude_teams_reason: ${{ steps.ctx.outputs.claude_teams_reason }}
+      claude_teams_member_cap: ${{ steps.ctx.outputs.claude_teams_member_cap }}
+      claude_teams_max_invocations: ${{ steps.ctx.outputs.claude_teams_max_invocations }}
+      risk_tier: ${{ steps.ctx.outputs.risk_tier }}
+      risk_score: ${{ steps.ctx.outputs.risk_score }}
+      risk_reasons: ${{ steps.ctx.outputs.risk_reasons }}
+      lessons_required: ${{ steps.ctx.outputs.lessons_required }}
+      correction_signal: ${{ steps.ctx.outputs.correction_signal }}
+      context_budget_initial: ${{ steps.ctx.outputs.context_budget_initial }}
+      context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
+      context_budget_floor_initial: ${{ steps.ctx.outputs.context_budget_floor_initial }}
+      context_budget_floor_max: ${{ steps.ctx.outputs.context_budget_floor_max }}
+      context_budget_floor_span: ${{ steps.ctx.outputs.context_budget_floor_span }}
+      context_budget_guard_applied: ${{ steps.ctx.outputs.context_budget_guard_applied }}
+      context_budget_guard_reasons: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
+      assist_auto_selected: ${{ steps.ctx.outputs.assist_auto_selected }}
+      force_claude: ${{ steps.ctx.outputs.force_claude }}
+      execution_provider: ${{ steps.ctx.outputs.execution_provider }}
+      execution_profile: ${{ steps.ctx.outputs.execution_profile }}
+      hybrid_conductor_mode: ${{ steps.ctx.outputs.hybrid_conductor_mode }}
+      self_hosted_online_count: ${{ steps.ctx.outputs.self_hosted_online_count }}
+      subscription_runner_label: ${{ steps.ctx.outputs.subscription_runner_label }}
+      subscription_offline_policy: ${{ steps.ctx.outputs.subscription_offline_policy }}
+      trust_subject: ${{ steps.ctx.outputs.trust_subject }}
+      allow_processing_rerun: ${{ steps.ctx.outputs.allow_processing_rerun }}
+      handoff_target: ${{ steps.ctx.outputs.handoff_target }}
+      intake_source: ${{ steps.ctx.outputs.intake_source }}
+      vote_command: ${{ steps.ctx.outputs.vote_command }}
+      workspace_hint_applied: ${{ steps.ctx.outputs.workspace_hint_applied }}
+      workspace_action_hint: ${{ steps.ctx.outputs.workspace_action_hint }}
+      workspace_domain_hint: ${{ steps.ctx.outputs.workspace_domain_hint }}
+      workspace_reason: ${{ steps.ctx.outputs.workspace_reason }}
+      workspace_suggested_phases: ${{ steps.ctx.outputs.workspace_suggested_phases }}
+      workspace_readonly_actions: ${{ steps.ctx.outputs.workspace_readonly_actions }}
+      workspace_approval_required_actions: ${{ steps.ctx.outputs.workspace_approval_required_actions }}
+      vote_instruction: ${{ steps.ctx.outputs.vote_instruction }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER_FROM_DISPATCH: ${{ github.event.inputs.issue_number || '' }}
+          TRUST_SUBJECT_INPUT: ${{ github.event.inputs.trust_subject || '' }}
+          CANARY_DISPATCH_RUN_ID_INPUT: ${{ github.event.inputs.canary_dispatch_run_id || '' }}
+          ALLOW_PROCESSING_RERUN_INPUT: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
+          SUBSCRIPTION_OFFLINE_POLICY_OVERRIDE_INPUT: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
+          VOTE_INSTRUCTION_B64_INPUT: ${{ github.event.inputs.vote_instruction_b64 || '' }}
+          REQUESTED_EXECUTION_MODE_INPUT: ${{ github.event.inputs.requested_execution_mode || '' }}
+          IMPLEMENT_REQUEST_INPUT: ${{ github.event.inputs.implement_request || '' }}
+          IMPLEMENT_CONFIRMED_INPUT: ${{ github.event.inputs.implement_confirmed || '' }}
+          VOTE_COMMAND_INPUT: ${{ github.event.inputs.vote_command || 'false' }}
+          HANDOFF_TARGET_INPUT: ${{ github.event.inputs.handoff_target || 'kernel' }}
+          INTAKE_SOURCE_INPUT: ${{ github.event.inputs.intake_source || '' }}
+          ISSUE_NUMBER_FROM_ISSUE: ${{ github.event.issue.number || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || vars.FUGUE_ORCHESTRATOR_PROVIDER || 'codex' }}
+          EXECUTION_PROVIDER_DEFAULT: ${{ vars.FUGUE_EXECUTION_PROVIDER || '' }}
+          DEFAULT_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
+          CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+          CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+          CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
+          CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
+          CLAUDE_SUB_AUTO_ESCALATE: ${{ vars.FUGUE_CLAUDE_SUB_AUTO_ESCALATE || 'high' }}
+          CLAUDE_SUB_AMBIGUITY_MIN_SCORE: ${{ vars.FUGUE_CLAUDE_SUB_AMBIGUITY_MIN_SCORE || '90' }}
+          CLAUDE_MAX_PLAN: ${{ vars.FUGUE_CLAUDE_MAX_PLAN || 'true' }}
+          CLAUDE_TRANSLATOR_MODE: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODE || 'auto' }}
+          CLAUDE_TRANSLATOR_THRESHOLD: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD || '75' }}
+          CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED || '88' }}
+          CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_CLAUDE_LIGHT || '90' }}
+          CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_THRESHOLD_DEGRADED_CLAUDE_LIGHT || '95' }}
+          CLAUDE_TRANSLATOR_MAX_CHARS: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MAX_CHARS || '6000' }}
+          CLAUDE_TRANSLATOR_MODEL: ${{ vars.FUGUE_CLAUDE_TRANSLATOR_MODEL || 'claude-sonnet-4-6' }}
+          CODEX_MAIN_MODEL: ${{ vars.FUGUE_CODEX_MAIN_MODEL || 'gpt-5.4' }}
+          CODEX_MULTI_AGENT_MODEL: ${{ vars.FUGUE_CODEX_MULTI_AGENT_MODEL || 'gpt-5.3-codex-spark' }}
+          DEFAULT_MULTI_AGENT_MODE: ${{ vars.FUGUE_MULTI_AGENT_MODE || '' }}
+          DEFAULT_MULTI_AGENT_MODE_LOCK: ${{ vars.FUGUE_MULTI_AGENT_MODE_LOCK || 'false' }}
+          CLAUDE_LIGHT_MULTI_AGENT_MODE: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_MODE || 'standard' }}
+          CLAUDE_LIGHT_MULTI_AGENT_LOCK: ${{ vars.FUGUE_CLAUDE_LIGHT_MULTI_AGENT_LOCK || 'true' }}
+          IMPLEMENT_PREFLIGHT_CYCLES_FULL: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_FULL || '2' }}
+          IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_PREFLIGHT_CYCLES_CLAUDE || '1' }}
+          IMPLEMENT_DIALOGUE_ROUNDS_DEFAULT: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS || '2' }}
+          IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE: ${{ vars.FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE || '1' }}
+          FUGUE_CONTEXT_BUDGET_MIN_INITIAL: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_INITIAL || '6' }}
+          FUGUE_CONTEXT_BUDGET_MIN_MAX: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_MAX || '12' }}
+          FUGUE_CONTEXT_BUDGET_MIN_SPAN: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_SPAN || '6' }}
+          CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
+          SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'continuity' }}
+          EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
+          SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+        run: bash scripts/harness/resolve-orchestration-context.sh
+
+      - name: Comment when subscription strict is paused
+        if: ${{ steps.ctx.outputs.should_run != 'true' && steps.ctx.outputs.skip_reason == 'subscription-self-hosted-offline-strict' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ONLINE_COUNT: ${{ steps.ctx.outputs.self_hosted_online_count }}
+          RUNNER_LABEL: ${{ steps.ctx.outputs.subscription_runner_label }}
+        run: |
+          set -euo pipefail
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Subscription-strict pause: no online self-hosted runner detected for required label \`${RUNNER_LABEL}\` (online=${ONLINE_COUNT}). Task is kept pending; no API continuity fallback was executed. Local fallback: \`./scripts/local/run-local-orchestration.sh --issue ${ISSUE_NUMBER} --repo ${GITHUB_REPOSITORY} --mode enhanced --glm-mode paired --max-parallel 4\`"
+
+      - name: Comment translation gateway decision
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.translation_event == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          DECISION: ${{ steps.ctx.outputs.translation_gate_decision }}
+          APPLIED: ${{ steps.ctx.outputs.translation_applied }}
+          PROVIDER: ${{ steps.ctx.outputs.translation_provider }}
+          SCORE: ${{ steps.ctx.outputs.translation_score }}
+          THRESHOLD: ${{ steps.ctx.outputs.translation_threshold }}
+          REASON: ${{ steps.ctx.outputs.translation_reason }}
+          SKIP_REASON: ${{ steps.ctx.outputs.translation_skip_reason }}
+        run: |
+          set -euo pipefail
+          msg="Translation gateway evaluated by Codex. decision=\`${DECISION}\`, applied=\`${APPLIED}\`, provider=\`${PROVIDER}\`, score=\`${SCORE}\` (threshold=\`${THRESHOLD}\`), reason=\`${REASON}\`."
+          if [[ -n "${SKIP_REASON}" ]]; then
+            msg="${msg} skip=\`${SKIP_REASON}\`."
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${msg}"
+
+      - name: Comment orchestration profile decision
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          PROFILE: ${{ steps.ctx.outputs.orchestration_profile }}
+          PREFLIGHT_CYCLES: ${{ steps.ctx.outputs.preflight_cycles }}
+          IMPLEMENT_ROUNDS: ${{ steps.ctx.outputs.implementation_dialogue_rounds }}
+          TASK_SIZE_TIER: ${{ steps.ctx.outputs.task_size_tier }}
+          CLAUDE_TEAMS_ALLOWED: ${{ steps.ctx.outputs.claude_teams_allowed }}
+          CLAUDE_TEAMS_REASON: ${{ steps.ctx.outputs.claude_teams_reason }}
+          MODE_OVERRIDE: ${{ steps.ctx.outputs.multi_agent_mode_override }}
+          MODE_LOCK: ${{ steps.ctx.outputs.multi_agent_mode_lock }}
+          RISK_TIER: ${{ steps.ctx.outputs.risk_tier }}
+          RISK_SCORE: ${{ steps.ctx.outputs.risk_score }}
+          RISK_REASONS: ${{ steps.ctx.outputs.risk_reasons }}
+          LESSONS_REQUIRED: ${{ steps.ctx.outputs.lessons_required }}
+          BUDGET_INITIAL: ${{ steps.ctx.outputs.context_budget_initial }}
+          BUDGET_MAX: ${{ steps.ctx.outputs.context_budget_max }}
+          BUDGET_FLOOR_INITIAL: ${{ steps.ctx.outputs.context_budget_floor_initial }}
+          BUDGET_FLOOR_MAX: ${{ steps.ctx.outputs.context_budget_floor_max }}
+          BUDGET_FLOOR_SPAN: ${{ steps.ctx.outputs.context_budget_floor_span }}
+          BUDGET_GUARD_APPLIED: ${{ steps.ctx.outputs.context_budget_guard_applied }}
+          BUDGET_GUARD_REASONS: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
+          ASSIST_AUTO: ${{ steps.ctx.outputs.assist_auto_selected }}
+          MAIN_SOURCE: ${{ steps.ctx.outputs.main_provider_source }}
+          ASSIST_SOURCE: ${{ steps.ctx.outputs.assist_provider_source }}
+          NL_HINT_APPLIED: ${{ steps.ctx.outputs.nl_hint_applied }}
+          NL_MAIN_HINT: ${{ steps.ctx.outputs.nl_main_hint }}
+          NL_ASSIST_HINT: ${{ steps.ctx.outputs.nl_assist_hint }}
+          NL_SKIP_REASON: ${{ steps.ctx.outputs.nl_inference_skipped_reason }}
+          HANDOFF_TARGET: ${{ steps.ctx.outputs.handoff_target }}
+        run: |
+          set -euo pipefail
+          override_display="${MODE_OVERRIDE:-none}"
+          nl_note=""
+          if [[ "${NL_HINT_APPLIED}" == "true" ]]; then
+            nl_note=" natural_language_hint(main=\`${NL_MAIN_HINT:-none}\`, assist=\`${NL_ASSIST_HINT:-none}\`)."
+          elif [[ -n "${NL_SKIP_REASON}" ]]; then
+            nl_note=" natural_language_hint(skipped=\`${NL_SKIP_REASON}\`)."
+          fi
+          budget_guard_note=""
+          if [[ "${BUDGET_GUARD_APPLIED}" == "true" ]]; then
+            budget_guard_note=" context_guard=applied(\`${BUDGET_GUARD_REASONS:-none}\`) floors=\`${BUDGET_FLOOR_INITIAL}/${BUDGET_FLOOR_MAX}/span${BUDGET_FLOOR_SPAN}\`."
+          fi
+          claude_teams_note=""
+          if [[ "${CLAUDE_TEAMS_ALLOWED}" == "true" ]]; then
+            claude_teams_note=" claude_teams=enabled(\`${CLAUDE_TEAMS_REASON}\`)."
+          fi
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Orchestration profile resolved: \`${PROFILE}\`. handoff_target=\`${HANDOFF_TARGET}\`. provider_source(main=\`${MAIN_SOURCE}\`, assist=\`${ASSIST_SOURCE}\`). task_size_tier=\`${TASK_SIZE_TIER}\`. risk_tier=\`${RISK_TIER}\` (score=\`${RISK_SCORE}\`, reasons=\`${RISK_REASONS}\`). preflight_cycles=\`${PREFLIGHT_CYCLES}\`, implementation_dialogue_rounds=\`${IMPLEMENT_ROUNDS}\`, multi_agent_mode_override=\`${override_display}\`, mode_lock=\`${MODE_LOCK}\`, lessons_required=\`${LESSONS_REQUIRED}\`, context_budget=\`${BUDGET_INITIAL}->${BUDGET_MAX}\`, assist_auto=\`${ASSIST_AUTO}\`.${claude_teams_note}${budget_guard_note}${nl_note}"
+
+      - name: Comment fallback decision
+        if: ${{ steps.ctx.outputs.should_run == 'true' && (steps.ctx.outputs.main_claude_fallback_applied == 'true' || steps.ctx.outputs.assist_claude_fallback_applied == 'true' || steps.ctx.outputs.claude_pressure_guard_applied == 'true') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ steps.ctx.outputs.main_claude_fallback_applied }}" == "true" ]]; then
+            gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "orchestrator:claude" \
+              --add-label "orchestrator:codex" >/dev/null 2>&1 || true
+          fi
+          if [[ "${{ steps.ctx.outputs.assist_claude_fallback_applied }}" == "true" ]]; then
+            gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "orchestrator-assist:claude" \
+              --add-label "orchestrator-assist:none" >/dev/null 2>&1 || true
+          fi
+          if [[ "${{ steps.ctx.outputs.claude_pressure_guard_applied }}" == "true" ]]; then
+            target_assist="$(echo "${{ steps.ctx.outputs.assist_orchestrator_provider }}" | tr '[:upper:]' '[:lower:]')"
+            gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "orchestrator-assist:claude" >/dev/null 2>&1 || true
+            if [[ "${target_assist}" == "codex" || "${target_assist}" == "none" ]]; then
+              gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --add-label "orchestrator-assist:${target_assist}" >/dev/null 2>&1 || true
+            fi
+          fi
+          gh issue comment "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "Orchestrator auto-adjust applied. Main fallback: \`${{ steps.ctx.outputs.main_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.main_claude_fallback_reason }}\`). Assist fallback: \`${{ steps.ctx.outputs.assist_claude_fallback_applied }}\` (\`${{ steps.ctx.outputs.assist_claude_fallback_reason }}\`). Claude pressure guard: \`${{ steps.ctx.outputs.claude_pressure_guard_applied }}\` (\`${{ steps.ctx.outputs.claude_pressure_guard_reason }}\`). To force Claude for this issue, add label \`orchestrator-force:claude\`."
+
+  execution-policy:
+    if: ${{ needs.ctx.outputs.should_run == 'true' }}
+    needs: [ctx]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      allow_tutti: ${{ steps.policy.outputs.allow_tutti }}
+      allow_heavy: ${{ steps.policy.outputs.allow_heavy }}
+      effective_mode: ${{ steps.policy.outputs.effective_mode }}
+      skip_reason: ${{ steps.policy.outputs.skip_reason }}
+      codex_execution_mode: ${{ steps.policy.outputs.codex_execution_mode }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Resolve live failover state
+        id: live_failover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_FAILOVER_STATE: ${{ vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+          PRIMARY_HEARTBEAT_AT: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_AT || '' }}
+          PRIMARY_HEARTBEAT_TTL_MINUTES: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_TTL_MINUTES || '8' }}
+          PRIMARY_HEARTBEAT_GRACE_MULTIPLIER: ${{ vars.FUGUE_PRIMARY_HEARTBEAT_GRACE_MULTIPLIER || '3' }}
+        run: |
+          set -euo pipefail
+
+          online_count=0
+          runners_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" 2>/dev/null || echo '{"runners":[]}')"
+          if echo "${runners_json}" | jq -e '.runners' >/dev/null 2>&1; then
+            online_count="$(echo "${runners_json}" | jq --arg label "${RUNNER_LABEL}" '[.runners[] | select(.status == "online") | select(any(.labels[]?; .name == $label))] | length')"
+          fi
+
+          eval "$(
+            scripts/lib/resolve-primary-heartbeat-state.sh \
+              --gha-execution-mode "${GHA_EXECUTION_MODE}" \
+              --current-state "${CURRENT_FAILOVER_STATE}" \
+              --runner-online-count "${online_count}" \
+              --pending-count 0 \
+              --mainframe-pending-count 1 \
+              --router-stale false \
+              --mainframe-stale false \
+              --heartbeat-at "${PRIMARY_HEARTBEAT_AT}" \
+              --heartbeat-ttl-minutes "${PRIMARY_HEARTBEAT_TTL_MINUTES}" \
+              --heartbeat-grace-multiplier "${PRIMARY_HEARTBEAT_GRACE_MULTIPLIER}" \
+              --format env
+          )"
+
+          {
+            echo "failover_state=${failover_state}"
+            echo "failover_reason=${failover_reason}"
+            echo "heartbeat_status=${heartbeat_status}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve GHA execution policy
+        id: policy
+        env:
+          GHA_EXECUTION_MODE: ${{ vars.FUGUE_GHA_EXECUTION_MODE || 'full' }}
+          FAILOVER_STATE: ${{ steps.live_failover.outputs.failover_state || vars.FUGUE_FAILOVER_STATE || 'healthy' }}
+          BACKUP_HEAVY_ENABLED: ${{ vars.FUGUE_GHA_BACKUP_HEAVY_ENABLED || 'false' }}
+          EXECUTION_MODE_OVERRIDE_INPUT: ${{ github.event.inputs.execution_mode_override || 'auto' }}
+        run: |
+          set -euo pipefail
+
+          gha_mode="$(echo "${GHA_EXECUTION_MODE:-full}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${gha_mode}" != "record-only" ]]; then
+            gha_mode="full"
+          fi
+
+          failover_state="$(echo "${FAILOVER_STATE:-healthy}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${failover_state}" in
+            healthy|degraded|offline|recovered) ;;
+            *) failover_state="healthy" ;;
+          esac
+
+          backup_heavy_enabled="$(echo "${BACKUP_HEAVY_ENABLED:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${backup_heavy_enabled}" != "true" ]]; then
+            backup_heavy_enabled="false"
+          fi
+
+          override="$(echo "${EXECUTION_MODE_OVERRIDE_INPUT:-auto}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          case "${override}" in
+            auto|primary|backup-safe|backup-heavy) ;;
+            *) override="auto" ;;
+          esac
+
+          allow_tutti="true"
+          allow_heavy="true"
+          effective_mode="primary"
+          codex_execution_mode="primary"
+          skip_reason="gha-full"
+
+          if [[ "${override}" == "primary" ]]; then
+            allow_tutti="true"
+            allow_heavy="true"
+            effective_mode="primary"
+            codex_execution_mode="primary"
+            skip_reason="manual-primary-override"
+          elif [[ "${override}" == "backup-safe" ]]; then
+            allow_tutti="false"
+            allow_heavy="false"
+            effective_mode="backup-safe"
+            codex_execution_mode="backup-safe"
+            skip_reason="manual-backup-safe-review-only"
+          elif [[ "${override}" == "backup-heavy" ]]; then
+            allow_tutti="true"
+            allow_heavy="true"
+            effective_mode="backup-heavy"
+            codex_execution_mode="backup-heavy"
+            skip_reason="manual-backup-heavy"
+          elif [[ "${gha_mode}" == "record-only" ]]; then
+            if [[ "${failover_state}" == "offline" ]]; then
+              allow_tutti="false"
+              allow_heavy="false"
+              effective_mode="backup-safe"
+              codex_execution_mode="backup-safe"
+              skip_reason="record-only-failover-${failover_state}-review-only"
+              if [[ "${failover_state}" == "offline" && "${backup_heavy_enabled}" == "true" ]]; then
+                allow_heavy="true"
+                effective_mode="backup-heavy"
+                codex_execution_mode="backup-heavy"
+                skip_reason="record-only-offline-backup-heavy"
+              fi
+            else
+              allow_tutti="false"
+              allow_heavy="false"
+              effective_mode="record-only"
+              codex_execution_mode="record-only"
+              if [[ "${failover_state}" == "degraded" ]]; then
+                skip_reason="record-only-primary-uncertain"
+              else
+                skip_reason="record-only-primary-active"
+              fi
+            fi
+          fi
+
+          {
+            echo "allow_tutti=${allow_tutti}"
+            echo "allow_heavy=${allow_heavy}"
+            echo "effective_mode=${effective_mode}"
+            echo "skip_reason=${skip_reason}"
+            echo "codex_execution_mode=${codex_execution_mode}"
+          } >> "${GITHUB_OUTPUT}"
+
+  backup-safe-hold:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.effective_mode == 'backup-safe'
+    needs: [ctx, execution-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hold issue in backup-safe mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --add-label "needs-human" \
+            --remove-label "processing" >/dev/null 2>&1 || true
+          gh issue comment "${ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "Primary executor is unavailable. Automatic GitHub backup-safe mode is observation-only and will not run Tutti or implementation lanes. Restore the primary executor or dispatch backup-heavy manually to continue on GitHub-hosted infrastructure."
+
+  # Review mode: Tutti consensus (6+ parallel lanes baseline)
+  tutti:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_tutti == 'true'
+    needs: [ctx, execution-policy]
+    permissions:
+      issues: write
+      contents: read
+      actions: write
+    uses: ./.github/workflows/fugue-tutti-router.yml
+    with:
+      issue_number: "${{ needs.ctx.outputs.issue_number }}"
+      orchestrator_provider: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER || 'claude') || needs.ctx.outputs.orchestrator_provider }}"
+      main_orchestrator_provider: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER || 'claude') || needs.ctx.outputs.main_orchestrator_provider }}"
+      assist_orchestrator_provider: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_ASSIST_ORCHESTRATOR_PROVIDER || 'claude') || needs.ctx.outputs.assist_orchestrator_provider }}"
+      force_claude: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && (vars.FUGUE_LEGACY_FORCE_CLAUDE || 'true') || needs.ctx.outputs.force_claude }}"
+      multi_agent_mode_override: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'legacy-bridge-default' || needs.ctx.outputs.multi_agent_mode_override }}"
+      multi_agent_mode_lock: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'legacy-bridge-default' || needs.ctx.outputs.multi_agent_mode_lock }}"
+      task_size_tier: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'small' || needs.ctx.outputs.task_size_tier }}"
+      claude_teams_allowed: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && 'false' || needs.ctx.outputs.claude_teams_allowed }}"
+      claude_teams_member_cap: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '3' || needs.ctx.outputs.claude_teams_member_cap }}"
+      claude_teams_max_invocations: "${{ needs.ctx.outputs.handoff_target == 'fugue-bridge' && '1' || needs.ctx.outputs.claude_teams_max_invocations }}"
+      handoff_target: "${{ needs.ctx.outputs.handoff_target }}"
+      intake_source: "${{ needs.ctx.outputs.intake_source }}"
+      canary_dispatch_owned: "${{ needs.ctx.outputs.canary_dispatch_owned }}"
+      canary_dispatch_run_id: "${{ needs.ctx.outputs.canary_dispatch_run_id }}"
+      risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
+      ambiguity_translation_gate: "${{ needs.ctx.outputs.translation_gate_decision }}"
+      ambiguity_translation_score: "${{ needs.ctx.outputs.translation_score }}"
+      claude_sub_trigger: "${{ needs.ctx.outputs.assist_auto_selected }}"
+      subscription_offline_policy_override: "${{ needs.ctx.outputs.subscription_offline_policy }}"
+      trust_subject: "${{ needs.ctx.outputs.trust_subject }}"
+      allow_processing_rerun: "${{ needs.ctx.outputs.allow_processing_rerun }}"
+      extra_issue_instruction: "${{ needs.ctx.outputs.vote_instruction }}"
+      vote_command: "${{ needs.ctx.outputs.vote_command }}"
+      dispatch_nonce: "${{ github.event.inputs.dispatch_nonce || github.run_id }}"
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  orchestration-scorecard:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_tutti == 'true'
+    needs: [ctx, execution-policy, tutti]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Post multi-agent / translator scorecard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          PROFILE: ${{ needs.ctx.outputs.orchestration_profile }}
+          RESOLVED_MULTI_AGENT_MODE: ${{ needs.tutti.outputs.resolved_multi_agent_mode }}
+          EXPECTED_LANES: ${{ needs.tutti.outputs.expected_lanes }}
+          HIGH_RISK: ${{ needs.tutti.outputs.high_risk }}
+          WEIGHTED_VOTE_PASSED: ${{ needs.tutti.outputs.weighted_vote_passed }}
+          WEIGHTED_APPROVE_SCORE: ${{ needs.tutti.outputs.weighted_approve_score }}
+          WEIGHTED_TOTAL_SCORE: ${{ needs.tutti.outputs.weighted_total_score }}
+          APPROVE_COUNT: ${{ needs.tutti.outputs.approve_count }}
+          TOTAL_COUNT: ${{ needs.tutti.outputs.total_count }}
+          TRANSLATION_DECISION: ${{ needs.ctx.outputs.translation_gate_decision }}
+          TRANSLATION_APPLIED: ${{ needs.ctx.outputs.translation_applied }}
+          TRANSLATION_PROVIDER: ${{ needs.ctx.outputs.translation_provider }}
+          TRANSLATION_SCORE: ${{ needs.ctx.outputs.translation_score }}
+          TRANSLATION_THRESHOLD: ${{ needs.ctx.outputs.translation_threshold }}
+          MAIN_PROVIDER: ${{ needs.ctx.outputs.main_orchestrator_provider }}
+          ASSIST_PROVIDER: ${{ needs.ctx.outputs.assist_orchestrator_provider }}
+          HYBRID_MODE: ${{ needs.ctx.outputs.hybrid_conductor_mode }}
+        run: |
+          set -euo pipefail
+
+          clamp_int() {
+            local v="$1"
+            local lo="$2"
+            local hi="$3"
+            if (( v < lo )); then
+              echo "${lo}"
+            elif (( v > hi )); then
+              echo "${hi}"
+            else
+              echo "${v}"
+            fi
+          }
+
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
+          created_epoch="$(printf '%s' "${run_json}" | jq -r '.created_at | fromdateiso8601')"
+          updated_epoch="$(printf '%s' "${run_json}" | jq -r '.updated_at | fromdateiso8601')"
+          duration_sec=$((updated_epoch - created_epoch))
+          if (( duration_sec < 1 )); then
+            duration_sec=1
+          fi
+
+          # v8.5 metrics: count Claude/translation/MCP calls for consumption tracking.
+          claude_calls=0
+          if [[ "${MAIN_PROVIDER}" == "claude" ]]; then
+            claude_calls=$((claude_calls + 1))
+          fi
+          if [[ "${ASSIST_PROVIDER}" == "claude" ]]; then
+            claude_calls=$((claude_calls + 1))
+          fi
+          translation_calls=0
+          if [[ "${TRANSLATION_APPLIED}" == "true" ]]; then
+            translation_calls=1
+            claude_calls=$((claude_calls + 1))
+          fi
+          # MCP REST bridge: count actual CI-accessible MCP service calls.
+          mcp_calls=0
+          if [[ -x "scripts/lib/mcp-rest-bridge.sh" ]]; then
+            bridge_result="$(STRIPE_API_KEY="${STRIPE_SECRET_KEY:-}" bash scripts/lib/mcp-rest-bridge.sh --smoke 2>/dev/null || echo '{}')"
+            bridge_count="$(printf '%s' "${bridge_result}" | jq -r '.mcp_calls // 0' 2>/dev/null || echo "0")"
+            if [[ "${bridge_count}" =~ ^[0-9]+$ ]]; then
+              mcp_calls="${bridge_count}"
+            fi
+          fi
+
+          lanes="$(echo "${EXPECTED_LANES:-0}" | tr -cd '0-9')"
+          if [[ -z "${lanes}" || "${lanes}" == "0" ]]; then
+            lanes=6
+          fi
+
+          weighted_total="${WEIGHTED_TOTAL_SCORE:-0}"
+          weighted_approve="${WEIGHTED_APPROVE_SCORE:-0}"
+          quality_current="$(awk -v a="${weighted_approve}" -v t="${weighted_total}" -v ac="${APPROVE_COUNT:-0}" -v tc="${TOTAL_COUNT:-0}" 'BEGIN {
+            q=0;
+            if (t+0 > 0) q=(a/t)*100;
+            else if (tc+0 > 0) q=(ac/tc)*100;
+            if (q < 0) q=0;
+            if (q > 100) q=100;
+            printf "%.0f", q;
+          }')"
+
+          fail_current=45
+          if [[ "${HIGH_RISK}" == "true" ]]; then
+            fail_current=85
+          elif [[ "${WEIGHTED_VOTE_PASSED}" == "true" ]]; then
+            fail_current=20
+          elif [[ "${WEIGHTED_VOTE_PASSED}" == "false" ]]; then
+            fail_current=60
+          fi
+
+          mode="$(echo "${RESOLVED_MULTI_AGENT_MODE:-standard}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${mode}" != "standard" && "${mode}" != "enhanced" && "${mode}" != "max" ]]; then
+            mode="standard"
+          fi
+          if [[ "${mode}" == "standard" ]]; then
+            ma_on_quality="$(clamp_int $((quality_current + 8)) 0 100)"
+            ma_off_quality="${quality_current}"
+            ma_on_fail="$(clamp_int $((fail_current - 8)) 0 100)"
+            ma_off_fail="${fail_current}"
+            ma_on_time=$((duration_sec * 125 / 100))
+            ma_off_time="${duration_sec}"
+          else
+            ma_on_quality="${quality_current}"
+            ma_off_quality="$(clamp_int $((quality_current - 8)) 0 100)"
+            ma_on_fail="${fail_current}"
+            ma_off_fail="$(clamp_int $((fail_current + 12)) 0 100)"
+            ma_on_time="${duration_sec}"
+            ma_off_time=$((duration_sec * 78 / 100))
+          fi
+
+          translation_current="off"
+          if [[ "${TRANSLATION_APPLIED}" == "true" || "${TRANSLATION_DECISION}" == "true" ]]; then
+            translation_current="on"
+          fi
+          if [[ "${translation_current}" == "on" ]]; then
+            tr_on_quality="${quality_current}"
+            tr_off_quality="$(clamp_int $((quality_current - 6)) 0 100)"
+            tr_on_fail="${fail_current}"
+            tr_off_fail="$(clamp_int $((fail_current + 9)) 0 100)"
+            tr_on_time="${duration_sec}"
+            tr_off_time=$((duration_sec * 94 / 100))
+          else
+            tr_on_quality="$(clamp_int $((quality_current + 2)) 0 100)"
+            tr_off_quality="${quality_current}"
+            tr_on_fail="$(clamp_int $((fail_current - 2)) 0 100)"
+            tr_off_fail="${fail_current}"
+            tr_on_time=$((duration_sec * 106 / 100))
+            tr_off_time="${duration_sec}"
+          fi
+
+          fmt_min() {
+            awk -v s="$1" 'BEGIN { printf "%.1f min", s/60 }'
+          }
+
+          cat > /tmp/fugue-scorecard.md <<EOF
+          ## Orchestration Scorecard (Heuristic)
+
+          - profile: \`${PROFILE}\`
+          - current multi-agent mode: \`${mode}\` (lanes=${lanes})
+          - current translator state: \`${translation_current}\` (decision=\`${TRANSLATION_DECISION}\`, applied=\`${TRANSLATION_APPLIED}\`, provider=\`${TRANSLATION_PROVIDER}\`, score=\`${TRANSLATION_SCORE}\`/threshold=\`${TRANSLATION_THRESHOLD}\`)
+          - run duration observed: $(fmt_min "${duration_sec}")
+
+          ### Multi-agent ON/OFF
+          | mode | quality (0-100) | time | failure risk (0-100) |
+          |---|---:|---:|---:|
+          | ON | ${ma_on_quality} | $(fmt_min "${ma_on_time}") | ${ma_on_fail} |
+          | OFF | ${ma_off_quality} | $(fmt_min "${ma_off_time}") | ${ma_off_fail} |
+
+          ### Translator ON/OFF
+          | mode | quality (0-100) | time | failure risk (0-100) |
+          |---|---:|---:|---:|
+          | ON | ${tr_on_quality} | $(fmt_min "${tr_on_time}") | ${tr_on_fail} |
+          | OFF | ${tr_off_quality} | $(fmt_min "${tr_off_time}") | ${tr_off_fail} |
+
+          Note: scorecard is an estimated counterfactual from this run (not separate A/B executions).
+
+          <!-- fugue-v8-metrics: claude_calls=${claude_calls}, translation_calls=${translation_calls}, mcp_calls=${mcp_calls}, total_duration=${duration_sec}s -->
+          EOF
+
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/fugue-scorecard.md
+
+  # Implement mode: if Tutti says it's safe AND issue requests implementation, run Codex implement immediately.
+  codex-implement:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_heavy == 'true' &&
+      needs.ctx.outputs.has_implement_request == 'true' &&
+      needs.ctx.outputs.has_implement_confirmed == 'true' &&
+      needs.tutti.outputs.ok_to_execute == 'true'
+    needs: [ctx, execution-policy, tutti]
+    uses: ./.github/workflows/fugue-codex-implement.yml
+    with:
+      issue_number: "${{ needs.ctx.outputs.issue_number }}"
+      kernel_run_id: "${{ github.event.inputs.kernel_run_id || '' }}"
+      target_repo: "${{ needs.ctx.outputs.target_repo }}"
+      refinement_cycles: "${{ needs.ctx.outputs.preflight_cycles }}"
+      implementation_dialogue_rounds: "${{ needs.ctx.outputs.implementation_dialogue_rounds }}"
+      orchestration_profile: "${{ needs.ctx.outputs.execution_profile }}"
+      risk_tier: "${{ needs.ctx.outputs.risk_tier }}"
+      lessons_required: "${{ needs.ctx.outputs.lessons_required }}"
+      correction_signal: "${{ needs.ctx.outputs.correction_signal }}"
+      workspace_hint_applied: "${{ needs.ctx.outputs.workspace_hint_applied }}"
+      workspace_action_hint: "${{ needs.ctx.outputs.workspace_action_hint }}"
+      workspace_domain_hint: "${{ needs.ctx.outputs.workspace_domain_hint }}"
+      workspace_reason: "${{ needs.ctx.outputs.workspace_reason }}"
+      workspace_suggested_phases: "${{ needs.ctx.outputs.workspace_suggested_phases }}"
+      workspace_readonly_actions: "${{ needs.ctx.outputs.workspace_readonly_actions }}"
+      workspace_approval_required_actions: "${{ needs.ctx.outputs.workspace_approval_required_actions }}"
+      workspace_readonly_environment: "${{ vars.FUGUE_WORKSPACE_READONLY_ENV || 'workspace-readonly' }}"
+      execution_mode: "${{ needs.execution-policy.outputs.codex_execution_mode }}"
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+
+  implement-awaiting-confirmation:
+    if: >-
+      needs.ctx.outputs.should_run == 'true' &&
+      needs.execution-policy.outputs.allow_heavy == 'true' &&
+      needs.ctx.outputs.has_implement_request == 'true' &&
+      needs.ctx.outputs.has_implement_confirmed != 'true' &&
+      needs.tutti.outputs.ok_to_execute == 'true'
+    needs: [ctx, execution-policy, tutti]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Post confirmation-required notice
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.ctx.outputs.issue_number }}
+        run: |
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Tutti approved execution, but implementation is blocked because \`implement-confirmed\` is missing. Add that label to proceed."

@@ -1,0 +1,12 @@
+{
+  "id": "tailscale-admin-ui",
+  "description": "Tailnet-only admin UI boundary for privileged Kernel operator surfaces.",
+  "network_plane": "tailscale-tailnet",
+  "bind_policy": "loopback-only-origin",
+  "ingress_surface": "private-admin-ui",
+  "ingress_auth": "tailscale-auth",
+  "routing_domain": "kernel-admin-private",
+  "accepts_signed_payload": false,
+  "operator_allowlist_required": true,
+  "audit_required": true
+}

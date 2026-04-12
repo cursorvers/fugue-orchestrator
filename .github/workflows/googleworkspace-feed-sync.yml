@@ -1,0 +1,89 @@
+name: Google Workspace Shared Feed Sync
+
+on:
+  schedule:
+    - cron: "0 21 * * 0-4"
+    - cron: "15 21 * * 0"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Shared feed profile to sync (`all-shared` or a shared profile id)"
+        required: false
+        type: string
+        default: "all-shared"
+      force_refresh:
+        description: "Bypass TTL cache and refresh the selected feeds"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      force_refresh: ${{ steps.matrix.outputs.force_refresh }}
+      profile_count: ${{ steps.matrix.outputs.profile_count }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve feed profile matrix
+        id: matrix
+        env:
+          GOOGLEWORKSPACE_FEED_POLICY_FILE: config/integrations/googleworkspace-feed-policy.json
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_EXPR: ${{ github.event.schedule }}
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_WORKFLOW_TARGET: shared
+          INPUT_FORCE_REFRESH: ${{ inputs.force_refresh }}
+        run: bash scripts/harness/resolve-googleworkspace-feed-matrix.sh
+
+  sync:
+    needs: [resolve-profiles]
+    if: ${{ needs.resolve-profiles.outputs.profile_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJson(needs.resolve-profiles.outputs.matrix) }}
+    environment:
+      name: ${{ matrix.profile.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install Google Workspace CLI
+        run: npm install -g @googleworkspace/cli
+
+      - name: Run feed sync
+        id: feed
+        env:
+          FEED_PROFILE: ${{ matrix.profile.profile }}
+          FORCE_REFRESH: ${{ needs.resolve-profiles.outputs.force_refresh }}
+          GOOGLEWORKSPACE_FEED_POLICY_FILE: config/integrations/googleworkspace-feed-policy.json
+          OUT_ROOT: .fugue/feeds/googleworkspace
+          PREFLIGHT_SCRIPT: scripts/harness/googleworkspace-preflight-enrich.sh
+          ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
+          GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
+        run: bash scripts/harness/googleworkspace-scheduled-extract.sh
+
+      - name: Upload feed artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: googleworkspace-feed-${{ matrix.profile.profile }}
+          path: |
+            .fugue/feeds/googleworkspace/${{ matrix.profile.profile }}/latest.json
+            .fugue/feeds/googleworkspace/${{ matrix.profile.profile }}
+          if-no-files-found: ignore

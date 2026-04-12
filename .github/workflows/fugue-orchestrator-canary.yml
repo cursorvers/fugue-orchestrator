@@ -1,0 +1,68 @@
+name: fugue-orchestrator-canary
+
+on:
+  schedule:
+    - cron: "43 2 * * *"
+  workflow_dispatch:
+    inputs:
+      canary_mode:
+        description: "Run mode: full (regular+force) or lite (regular only)"
+        required: false
+        type: choice
+        options:
+          - full
+          - lite
+        default: full
+
+permissions:
+  issues: write
+  contents: read
+  actions: write
+
+concurrency:
+  group: fugue-orchestrator-canary-${{ github.repository }}-${{ github.ref_name || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLAUDE_RATE_LIMIT_STATE: ${{ vars.FUGUE_CLAUDE_RATE_LIMIT_STATE || 'ok' }}
+      CLAUDE_ROLE_POLICY: ${{ vars.FUGUE_CLAUDE_ROLE_POLICY || 'flex' }}
+      CLAUDE_DEGRADED_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY || 'claude' }}
+      CLAUDE_MAIN_ASSIST_POLICY: ${{ vars.FUGUE_CLAUDE_MAIN_ASSIST_POLICY || 'codex' }}
+      CI_EXECUTION_ENGINE: ${{ vars.FUGUE_CI_EXECUTION_ENGINE || 'subscription' }}
+      SUBSCRIPTION_OFFLINE_POLICY: ${{ vars.FUGUE_SUBSCRIPTION_OFFLINE_POLICY || 'hold' }}
+      CANARY_OFFLINE_POLICY_OVERRIDE: ${{ vars.FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE || 'continuity' }}
+      CANARY_EXECUTION_MODE_OVERRIDE: ${{ vars.FUGUE_CANARY_EXECUTION_MODE_OVERRIDE || 'primary' }}
+      EMERGENCY_CONTINUITY_MODE: ${{ vars.FUGUE_EMERGENCY_CONTINUITY_MODE || 'false' }}
+      SUBSCRIPTION_RUNNER_LABEL: ${{ vars.FUGUE_SUBSCRIPTION_RUNNER_LABEL || 'fugue-subscription' }}
+      EMERGENCY_ASSIST_POLICY: ${{ vars.FUGUE_EMERGENCY_ASSIST_POLICY || 'none' }}
+      API_STRICT_MODE: ${{ vars.FUGUE_API_STRICT_MODE || 'false' }}
+      HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+      DEFAULT_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_MAIN_ORCHESTRATOR_PROVIDER || 'codex' }}
+      EXECUTION_PROVIDER_DEFAULT: ${{ vars.FUGUE_EXECUTION_PROVIDER || '' }}
+      CANARY_ALTERNATE_PROVIDER: ${{ vars.FUGUE_CANARY_ALTERNATE_PROVIDER || '' }}
+      CANARY_PRIMARY_HANDOFF_TARGET: ${{ vars.FUGUE_CANARY_PRIMARY_HANDOFF_TARGET || 'kernel' }}
+      CANARY_VERIFY_ROLLBACK: ${{ vars.FUGUE_CANARY_VERIFY_ROLLBACK || 'true' }}
+      LEGACY_MAIN_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_LEGACY_MAIN_ORCHESTRATOR_PROVIDER || 'claude' }}
+      LEGACY_ASSIST_ORCHESTRATOR_PROVIDER: ${{ vars.FUGUE_LEGACY_ASSIST_ORCHESTRATOR_PROVIDER || 'claude' }}
+      LEGACY_FORCE_CLAUDE: ${{ vars.FUGUE_LEGACY_FORCE_CLAUDE || 'true' }}
+      CANARY_LABEL_WAIT_ATTEMPTS: ${{ vars.FUGUE_CANARY_LABEL_WAIT_ATTEMPTS || '10' }}
+      CANARY_LABEL_WAIT_SLEEP_SEC: ${{ vars.FUGUE_CANARY_LABEL_WAIT_SLEEP_SEC || '2' }}
+      CANARY_WAIT_FAST_ATTEMPTS: ${{ vars.FUGUE_CANARY_WAIT_FAST_ATTEMPTS || '12' }}
+      CANARY_WAIT_FAST_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_FAST_SLEEP_SEC || '10' }}
+      CANARY_WAIT_SLOW_ATTEMPTS: ${{ vars.FUGUE_CANARY_WAIT_SLOW_ATTEMPTS || '9' }}
+      CANARY_WAIT_SLOW_SLEEP_SEC: ${{ vars.FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC || '20' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run canary (mode-aware)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          CANARY_MODE_INPUT: ${{ github.event.inputs.canary_mode || '' }}
+        run: bash scripts/harness/run-canary.sh

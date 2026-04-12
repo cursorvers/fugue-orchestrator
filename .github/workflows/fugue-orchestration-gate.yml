@@ -1,0 +1,298 @@
+name: fugue-orchestration-gate
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fugue-orchestration-gate.yml'
+      - '.github/workflows/fugue-orchestrator-canary.yml'
+      - '.github/workflows/fugue-watchdog.yml'
+      - '.github/workflows/fugue-tutti-caller.yml'
+      - '.github/workflows/fugue-tutti-router.yml'
+      - '.github/workflows/fugue-task-router.yml'
+      - '.github/workflows/kernel-decision-journal.yml'
+      - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/kernel-auth-evidence.sh'
+      - 'scripts/lib/canary-trust-policy.sh'
+      - 'scripts/lib/execution-profile-policy.sh'
+      - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/run-canary.sh'
+      - 'scripts/lib/resolve-primary-heartbeat-state.sh'
+      - 'scripts/lib/watchdog-alert-policy.sh'
+      - 'scripts/lib/watchdog-alert-delivery-policy.sh'
+      - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
+      - 'scripts/lib/workspace-root-policy.sh'
+      - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-codex-kernel-prompt.sh'
+      - 'scripts/check-codex-vote-prompt.sh'
+      - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/local/run-linked-systems.sh'
+      - 'scripts/harness/run-recovery-console.sh'
+      - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-auth-evidence.sh'
+      - 'tests/test-publish-decision-journal.sh'
+      - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
+      - 'tests/test-local-orchestration-consensus-bridge.sh'
+      - 'tests/test-task-router-start-signal.sh'
+      - 'tests/test-parallel-floor-policy.sh'
+      - 'tests/test-recovery-reroute-claim-gate.sh'
+      - 'tests/test-watchdog-reconcile-claim-policy.sh'
+      - 'tests/test-watchdog-reconcile-workflow.sh'
+      - 'tests/test-route-task-handoff.sh'
+      - 'tests/test-resolve-orchestration-context.sh'
+      - 'tests/test-canary-trust-policy.sh'
+      - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-primary-heartbeat-state.sh'
+      - 'tests/test-workspace-root-policy.sh'
+      - 'tests/test-workflow-checkout-order.sh'
+      - '.codex/prompts/kernel.md'
+      - '.codex/prompts/k.md'
+      - '.codex/prompts/vote.md'
+      - '.codex/prompts/v.md'
+      - 'AGENTS.md'
+      - 'CODEX.md'
+      - 'README.md'
+      - 'docs/requirements-gpt54-codex-kernel.md'
+      - 'docs/kernel-structure.md'
+      - 'docs/kernel-preimplementation-readiness.md'
+      - 'docs/ADR-002-kernel-unattended-runtime.md'
+      - 'docs/kernel-unattended-runtime-substrate.md'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fugue-orchestration-gate.yml'
+      - '.github/workflows/fugue-orchestrator-canary.yml'
+      - '.github/workflows/fugue-watchdog.yml'
+      - '.github/workflows/fugue-tutti-caller.yml'
+      - '.github/workflows/fugue-tutti-router.yml'
+      - '.github/workflows/fugue-task-router.yml'
+      - '.github/workflows/kernel-decision-journal.yml'
+      - 'scripts/lib/build-agent-matrix.sh'
+      - 'scripts/lib/kernel-auth-evidence.sh'
+      - 'scripts/lib/canary-trust-policy.sh'
+      - 'scripts/lib/execution-profile-policy.sh'
+      - 'scripts/lib/orchestrator-policy.sh'
+      - 'scripts/harness/run-canary.sh'
+      - 'scripts/lib/resolve-primary-heartbeat-state.sh'
+      - 'scripts/lib/watchdog-alert-policy.sh'
+      - 'scripts/lib/watchdog-alert-delivery-policy.sh'
+      - 'scripts/lib/watchdog-reconcile-claim-policy.sh'
+      - 'scripts/lib/workspace-root-policy.sh'
+      - 'scripts/check-agent-matrix-parity.sh'
+      - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-codex-kernel-prompt.sh'
+      - 'scripts/check-codex-vote-prompt.sh'
+      - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/local/run-local-orchestration.sh'
+      - 'scripts/local/run-linked-systems.sh'
+      - 'scripts/harness/run-recovery-console.sh'
+      - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-kernel-auth-evidence.sh'
+      - 'tests/test-publish-decision-journal.sh'
+      - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
+      - 'tests/test-local-orchestration-consensus-bridge.sh'
+      - 'tests/test-task-router-start-signal.sh'
+      - 'tests/test-parallel-floor-policy.sh'
+      - 'tests/test-recovery-reroute-claim-gate.sh'
+      - 'tests/test-watchdog-reconcile-claim-policy.sh'
+      - 'tests/test-watchdog-reconcile-workflow.sh'
+      - 'tests/test-route-task-handoff.sh'
+      - 'tests/test-resolve-orchestration-context.sh'
+      - 'tests/test-canary-trust-policy.sh'
+      - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-primary-heartbeat-state.sh'
+      - 'tests/test-workspace-root-policy.sh'
+      - 'tests/test-workflow-checkout-order.sh'
+      - '.codex/prompts/kernel.md'
+      - '.codex/prompts/k.md'
+      - '.codex/prompts/vote.md'
+      - '.codex/prompts/v.md'
+      - 'AGENTS.md'
+      - 'CODEX.md'
+      - 'README.md'
+      - 'docs/requirements-gpt54-codex-kernel.md'
+      - 'docs/kernel-structure.md'
+      - 'docs/kernel-preimplementation-readiness.md'
+      - 'docs/ADR-002-kernel-unattended-runtime.md'
+      - 'docs/kernel-unattended-runtime-substrate.md'
+  workflow_dispatch:
+    inputs:
+      run_canary_lite:
+        description: "Also run blocking canary-lite (dispatches canary workflow in lite mode)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  fast-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Shell syntax checks
+        run: |
+          set -euo pipefail
+          bash -n scripts/lib/build-agent-matrix.sh
+          bash -n scripts/lib/kernel-auth-evidence.sh
+          bash -n scripts/lib/execution-profile-policy.sh
+          bash -n scripts/lib/orchestrator-policy.sh
+          bash -n scripts/local/run-local-orchestration.sh
+          bash -n scripts/local/run-linked-systems.sh
+          bash -n scripts/sim-orchestrator-switch.sh
+          bash -n scripts/lib/watchdog-alert-policy.sh
+          bash -n scripts/lib/watchdog-alert-delivery-policy.sh
+          bash -n scripts/lib/watchdog-reconcile-claim-policy.sh
+          bash -n scripts/lib/workspace-root-policy.sh
+          bash -n scripts/harness/run-recovery-console.sh
+          bash -n scripts/check-agent-matrix-parity.sh
+          bash -n scripts/check-linked-systems-integrity.sh
+          bash -n scripts/check-codex-kernel-prompt.sh
+          bash -n scripts/check-codex-vote-prompt.sh
+          bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-kernel-auth-evidence.sh
+          bash -n tests/test-publish-decision-journal.sh
+          bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash -n tests/test-local-orchestration-consensus-bridge.sh
+          bash -n tests/test-task-router-start-signal.sh
+          bash -n tests/test-parallel-floor-policy.sh
+          bash -n tests/test-recovery-reroute-claim-gate.sh
+          bash -n tests/test-watchdog-reconcile-claim-policy.sh
+          bash -n tests/test-watchdog-reconcile-workflow.sh
+          bash -n tests/test-workspace-root-policy.sh
+          bash -n tests/test-canary-trust-policy.sh
+          bash -n tests/test-kernel-canary-plan.sh
+
+      - name: Kernel prompt static contract
+        run: |
+          set -euo pipefail
+          bash scripts/check-codex-kernel-prompt.sh
+
+      - name: Vote prompt static contract
+        run: |
+          set -euo pipefail
+          bash tests/test-codex-vote-prompt.sh
+          bash tests/test-kernel-auth-evidence.sh
+
+      - name: Local orchestration boundary tests
+        run: |
+          set -euo pipefail
+          bash tests/test-route-task-handoff.sh
+          bash tests/test-resolve-orchestration-context.sh
+          bash tests/test-watchdog-alert-policy.sh
+          bash tests/test-watchdog-alert-delivery-policy.sh
+          bash tests/test-primary-heartbeat-state.sh
+          bash tests/test-publish-decision-journal.sh
+          bash tests/test-local-orchestration-heartbeat-cleanup.sh
+          bash tests/test-local-orchestration-consensus-bridge.sh
+          bash tests/test-task-router-start-signal.sh
+          bash tests/test-parallel-floor-policy.sh
+          bash tests/test-recovery-reroute-claim-gate.sh
+          bash tests/test-watchdog-reconcile-claim-policy.sh
+          bash tests/test-watchdog-reconcile-workflow.sh
+          bash tests/test-workspace-root-policy.sh
+
+      - name: Canary trust tests
+        run: |
+          set -euo pipefail
+          bash tests/test-canary-trust-policy.sh
+          bash tests/test-kernel-canary-plan.sh
+
+      - name: Workflow YAML parse checks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import yaml
+          files = [
+              ".github/workflows/fugue-orchestrator-canary.yml",
+              ".github/workflows/fugue-orchestration-gate.yml",
+              ".github/workflows/fugue-watchdog.yml",
+              ".github/workflows/fugue-tutti-caller.yml",
+              ".github/workflows/fugue-tutti-router.yml",
+              ".github/workflows/fugue-task-router.yml",
+              ".github/workflows/kernel-decision-journal.yml",
+          ]
+          for p in files:
+              with open(p, "r", encoding="utf-8") as f:
+                  yaml.safe_load(f)
+          print("workflow-yaml-parse-ok")
+          PY
+
+      - name: Matrix parity checks
+        run: |
+          set -euo pipefail
+          chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh
+          ./scripts/check-agent-matrix-parity.sh
+          ./scripts/check-linked-systems-integrity.sh
+
+      - name: Deterministic switch simulation
+        run: |
+          set -euo pipefail
+          sim_out="$(mktemp)"
+          ./scripts/sim-orchestrator-switch.sh > "${sim_out}"
+          rows="$(( $(wc -l < "${sim_out}") - 1 ))"
+          if (( rows < 10 )); then
+            echo "Expected at least 10 scenario rows from sim-orchestrator-switch, got ${rows}" >&2
+            cat "${sim_out}" >&2
+            exit 1
+          fi
+          echo "sim-orchestrator-switch rows=${rows}"
+
+  canary-lite:
+    needs: [fast-gate]
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_canary_lite) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Trigger canary lite
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          start_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          gh workflow run fugue-orchestrator-canary.yml \
+            --repo "${repo}" \
+            --ref main \
+            -f canary_mode=lite
+
+          target_sha=""
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            target_sha="${GITHUB_SHA}"
+          fi
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            runs_json="$(gh run list --repo "${repo}" --workflow fugue-orchestrator-canary.yml --event workflow_dispatch --limit 20 --json databaseId,createdAt,headSha)"
+            if [[ -n "${target_sha}" ]]; then
+              run_id="$(echo "${runs_json}" | jq -r --arg start "${start_iso}" --arg sha "${target_sha}" '[.[] | select(.createdAt >= $start and .headSha == $sha)][0].databaseId // empty')"
+            fi
+            if [[ -z "${run_id}" ]]; then
+              run_id="$(echo "${runs_json}" | jq -r --arg start "${start_iso}" '[.[] | select(.createdAt >= $start)][0].databaseId // empty')"
+            fi
+            if [[ -n "${run_id}" ]]; then
+              break
+            fi
+            sleep 3
+          done
+
+          if [[ -z "${run_id}" ]]; then
+            echo "Failed to locate dispatched canary-lite run id." >&2
+            exit 1
+          fi
+
+          echo "Watching canary-lite run ${run_id}"
+          gh run watch "${run_id}" --repo "${repo}" --exit-status
+          gh run view "${run_id}" --repo "${repo}" --json status,conclusion,url,createdAt,updatedAt

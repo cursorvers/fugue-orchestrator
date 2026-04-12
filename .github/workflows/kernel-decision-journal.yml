@@ -1,0 +1,31 @@
+name: kernel-decision-journal
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "docs/**"
+      - "apps/happy-web/**"
+      - "prototypes/happy-mobile-web/**"
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  journal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Publish decision journal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: bash scripts/harness/publish-decision-journal.sh

@@ -1,0 +1,810 @@
+name: fugue-codex-implement
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: "Issue number containing implementation instructions"
+        required: true
+        type: string
+      target_repo:
+        description: "Target repository (owner/repo) for code generation. Defaults to caller repo."
+        required: false
+        type: string
+        default: ""
+      target_branch:
+        description: "Base branch to create PR against"
+        required: false
+        type: string
+        default: "main"
+      codex_model:
+        description: "Codex model to use"
+        required: false
+        type: string
+        default: "gpt-5-codex"
+      kernel_run_id:
+        description: "Optional Kernel run id for compact artifact propagation"
+        required: false
+        type: string
+        default: ""
+      refinement_cycles:
+        description: "Pre-implementation refinement cycles (Plan/Parallel Simulation/Critical Review/Fix/Replan)"
+        required: false
+        type: string
+        default: "3"
+      implementation_dialogue_rounds:
+        description: "Implementation-phase collaboration rounds (Implementer/Critic/Integrator)"
+        required: false
+        type: string
+        default: "2"
+      orchestration_profile:
+        description: "Resolved orchestration profile (codex-full|claude-light)"
+        required: false
+        type: string
+        default: "codex-full"
+      execution_mode:
+        description: "Execution policy mode (primary|backup-safe|backup-heavy|record-only)"
+        required: false
+        type: string
+        default: "primary"
+      risk_tier:
+        description: "Resolved risk tier (low|medium|high)"
+        required: false
+        type: string
+        default: ""
+      lessons_required:
+        description: "Whether lessons update is strictly required (true|false|auto)"
+        required: false
+        type: string
+        default: "auto"
+      correction_signal:
+        description: "Whether this issue includes explicit correction/postmortem signal (true|false|auto)"
+        required: false
+        type: string
+        default: "auto"
+      workspace_hint_applied:
+        description: "Whether Google Workspace readonly preflight is relevant"
+        required: false
+        type: string
+        default: "false"
+      workspace_action_hint:
+        description: "Comma-separated Google Workspace action hints"
+        required: false
+        type: string
+        default: ""
+      workspace_domain_hint:
+        description: "Comma-separated Google Workspace domain hints"
+        required: false
+        type: string
+        default: ""
+      workspace_reason:
+        description: "Short explanation for Google Workspace relevance"
+        required: false
+        type: string
+        default: ""
+      workspace_suggested_phases:
+        description: "Comma-separated Kernel phases suggested for Workspace use"
+        required: false
+        type: string
+        default: ""
+      workspace_readonly_actions:
+        description: "Comma-separated readonly Google Workspace actions allowed in CI preflight"
+        required: false
+        type: string
+        default: ""
+      workspace_approval_required_actions:
+        description: "Comma-separated write Google Workspace actions requiring approval"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_status:
+        description: "Latest scheduled Google Workspace feed ingest status"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_profiles:
+        description: "Comma-separated scheduled Google Workspace feed profiles used for context"
+        required: false
+        type: string
+        default: ""
+      workspace_feed_summary:
+        description: "Bounded summary derived from scheduled Google Workspace feeds"
+        required: false
+        type: string
+        default: ""
+      workspace_readonly_environment:
+        description: "Protected GitHub Environment used for readonly Google Workspace CI preflight"
+        required: false
+        type: string
+        default: "workspace-readonly"
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+      TARGET_REPO_PAT:
+        required: false
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON:
+        required: false
+      GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON:
+        required: false
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: fugue-codex-impl-${{ github.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.ctx.outputs.should_run }}
+      skip_reason: ${{ steps.ctx.outputs.skip_reason }}
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      issue_title: ${{ steps.ctx.outputs.issue_title }}
+      issue_body: ${{ steps.ctx.outputs.issue_body }}
+      is_large_refactor: ${{ steps.ctx.outputs.is_large_refactor }}
+      target_repo: ${{ steps.ctx.outputs.target_repo }}
+      branch_name: ${{ steps.ctx.outputs.branch_name }}
+      risk_tier: ${{ steps.ctx.outputs.risk_tier }}
+      risk_score: ${{ steps.ctx.outputs.risk_score }}
+      risk_reasons: ${{ steps.ctx.outputs.risk_reasons }}
+      lessons_required: ${{ steps.ctx.outputs.lessons_required }}
+      correction_signal: ${{ steps.ctx.outputs.correction_signal }}
+      preflight_cycles_floor: ${{ steps.ctx.outputs.preflight_cycles_floor }}
+      implementation_dialogue_rounds_floor: ${{ steps.ctx.outputs.implementation_dialogue_rounds_floor }}
+      context_budget_initial: ${{ steps.ctx.outputs.context_budget_initial }}
+      context_budget_max: ${{ steps.ctx.outputs.context_budget_max }}
+      context_budget_floor_initial: ${{ steps.ctx.outputs.context_budget_floor_initial }}
+      context_budget_floor_max: ${{ steps.ctx.outputs.context_budget_floor_max }}
+      context_budget_floor_span: ${{ steps.ctx.outputs.context_budget_floor_span }}
+      context_budget_guard_applied: ${{ steps.ctx.outputs.context_budget_guard_applied }}
+      context_budget_guard_reasons: ${{ steps.ctx.outputs.context_budget_guard_reasons }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve issue context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORCHESTRATION_PROFILE: ${{ inputs.orchestration_profile }}
+          INPUT_RISK_TIER: ${{ inputs.risk_tier }}
+          INPUT_LESSONS_REQUIRED: ${{ inputs.lessons_required }}
+          INPUT_CORRECTION_SIGNAL: ${{ inputs.correction_signal }}
+          FUGUE_CONTEXT_BUDGET_MIN_INITIAL: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_INITIAL || '6' }}
+          FUGUE_CONTEXT_BUDGET_MIN_MAX: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_MAX || '12' }}
+          FUGUE_CONTEXT_BUDGET_MIN_SPAN: ${{ vars.FUGUE_CONTEXT_BUDGET_MIN_SPAN || '6' }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ inputs.issue_number }}"
+          issue_json="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}")"
+
+          TITLE="$(echo "${issue_json}" | jq -r '.title // ""')"
+          BODY="$(echo "${issue_json}" | jq -r '.body // ""')"
+          HAS_IMPLEMENT="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement") != null) or (index("codex-implement") != null) or (index("claude-implement") != null)')"
+          HAS_IMPLEMENT_CONFIRMED="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("implement-confirmed") != null)')"
+          HAS_LARGE_REFACTOR="$(echo "${issue_json}" | jq -r '[.labels[].name] | (index("large-refactor") != null)')"
+          LABELS_CSV="$(echo "${issue_json}" | jq -r '[.labels[]?.name] | join(",")')"
+
+          SHOULD_RUN="true"
+          SKIP_REASON=""
+          if [[ "${HAS_IMPLEMENT}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-implement-intent"
+          elif [[ "${HAS_IMPLEMENT_CONFIRMED}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-implement-confirmed"
+          fi
+
+          # Determine target repo
+          TARGET_REPO="${{ inputs.target_repo }}"
+          if [[ -z "${TARGET_REPO}" ]]; then
+            TARGET_REPO="${GITHUB_REPOSITORY}"
+          fi
+
+          # Generate branch name from issue number
+          SAFE_TITLE="$(echo "${TITLE}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | head -c 40)"
+          BRANCH_NAME="codex/issue-${ISSUE_NUMBER}-${SAFE_TITLE}"
+
+          eval "$(
+            scripts/lib/workflow-risk-policy.sh \
+              --title "${TITLE}" \
+              --body "${BODY}" \
+              --labels "${LABELS_CSV}" \
+              --has-implement "${HAS_IMPLEMENT}" \
+              --orchestration-profile "${ORCHESTRATION_PROFILE}"
+          )"
+          if [[ "${INPUT_RISK_TIER}" == "low" || "${INPUT_RISK_TIER}" == "medium" || "${INPUT_RISK_TIER}" == "high" ]]; then
+            risk_tier="${INPUT_RISK_TIER}"
+          fi
+          input_correction_signal="$(echo "${INPUT_CORRECTION_SIGNAL:-auto}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${input_correction_signal}" == "true" || "${input_correction_signal}" == "false" ]]; then
+            correction_signal="${input_correction_signal}"
+          fi
+          input_lessons_required="$(echo "${INPUT_LESSONS_REQUIRED:-auto}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${input_lessons_required}" == "true" || "${input_lessons_required}" == "false" ]]; then
+            lessons_required="${input_lessons_required}"
+          fi
+          if [[ "${correction_signal}" == "true" ]]; then
+            lessons_required="true"
+          fi
+
+          {
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "issue_title<<EOF"
+            echo "${TITLE}"
+            echo "EOF"
+            echo "issue_body<<EOF"
+            echo "${BODY}"
+            echo "EOF"
+            echo "is_large_refactor=${HAS_LARGE_REFACTOR}"
+            echo "should_run=${SHOULD_RUN}"
+            echo "skip_reason=${SKIP_REASON}"
+            echo "target_repo=${TARGET_REPO}"
+            echo "branch_name=${BRANCH_NAME}"
+            echo "risk_tier=${risk_tier}"
+            echo "risk_score=${risk_score}"
+            echo "risk_reasons=${risk_reasons}"
+            echo "lessons_required=${lessons_required}"
+            echo "correction_signal=${correction_signal}"
+            echo "preflight_cycles_floor=${preflight_cycles_floor}"
+            echo "implementation_dialogue_rounds_floor=${implementation_dialogue_rounds_floor}"
+            echo "context_budget_initial=${context_budget_initial}"
+            echo "context_budget_max=${context_budget_max}"
+            echo "context_budget_floor_initial=${context_budget_floor_initial}"
+            echo "context_budget_floor_max=${context_budget_floor_max}"
+            echo "context_budget_floor_span=${context_budget_floor_span}"
+            echo "context_budget_guard_applied=${context_budget_guard_applied}"
+            echo "context_budget_guard_reasons=${context_budget_guard_reasons}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Notify pending implement confirmation
+        if: ${{ steps.ctx.outputs.should_run != 'true' && steps.ctx.outputs.skip_reason == 'missing-implement-confirmed' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --body "Implementation intent detected, but \`implement-confirmed\` is missing. Add that label to allow Codex execution."
+
+      - name: Add processing label
+        if: ${{ steps.ctx.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "completed" --remove-label "needs-review" || true
+          gh issue edit "${{ steps.ctx.outputs.issue_number }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --add-label "processing"
+
+  credential-guard:
+    if: ${{ needs.prepare.outputs.should_run == 'true' }}
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      can_run: ${{ steps.guard.outputs.can_run }}
+      skip_reason: ${{ steps.guard.outputs.skip_reason }}
+    steps:
+      - name: Guard implementation credentials
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          TARGET_REPO: ${{ needs.prepare.outputs.target_repo }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+        run: |
+          set -euo pipefail
+
+          can_run="true"
+          skip_reason=""
+
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            can_run="false"
+            skip_reason="missing-openai-api-key"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Escalating to humans."
+          elif [[ "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
+            can_run="false"
+            skip_reason="missing-target-repo-pat"
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot implement into ${TARGET_REPO}: missing secret \`TARGET_REPO_PAT\`. Escalating to humans."
+          fi
+
+          if [[ "${can_run}" != "true" ]]; then
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
+          fi
+
+          {
+            echo "can_run=${can_run}"
+            echo "skip_reason=${skip_reason}"
+          } >> "${GITHUB_OUTPUT}"
+
+  workspace-preflight:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && inputs.workspace_hint_applied == 'true' }}
+    needs: [prepare, credential-guard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.workspace_readonly_environment }}
+    outputs:
+      workspace_preflight_status: ${{ steps.workspace_preflight.outputs.workspace_preflight_status }}
+      workspace_report_path: ${{ steps.workspace_preflight.outputs.workspace_report_path }}
+      workspace_summary: ${{ steps.workspace_preflight.outputs.workspace_summary }}
+      workspace_artifact_name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.prepare.outputs.target_repo }}
+          token: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install Google Workspace CLI
+        run: npm install -g @googleworkspace/cli
+
+      - name: Set Workspace artifact metadata
+        id: workspace_meta
+        run: |
+          echo "workspace_artifact_name=googleworkspace-preflight-${{ needs.prepare.outputs.issue_number }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run Google Workspace readonly preflight
+        id: workspace_preflight
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          WORKSPACE_ACTIONS: ${{ inputs.workspace_readonly_actions || inputs.workspace_action_hint }}
+          WORKSPACE_DOMAINS: ${{ inputs.workspace_domain_hint }}
+          WORKSPACE_REASON: ${{ inputs.workspace_reason }}
+          WORKSPACE_SUGGESTED_PHASES: ${{ inputs.workspace_suggested_phases }}
+          OUT_DIR: .fugue/pre-implement
+          RUN_DIR: .fugue/pre-implement/googleworkspace-run
+          REPORT_PATH: .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-googleworkspace.md
+          ADAPTER: scripts/lib/googleworkspace-cli-adapter.sh
+          GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_CLI_CREDENTIALS_JSON }}
+          GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON: ${{ secrets.GOOGLE_WORKSPACE_USER_CREDENTIALS_JSON }}
+        run: bash scripts/harness/googleworkspace-preflight-enrich.sh
+
+      - name: Upload Google Workspace preflight artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.workspace_meta.outputs.workspace_artifact_name }}
+          path: |
+            .fugue/pre-implement/issue-${{ needs.prepare.outputs.issue_number }}-googleworkspace.md
+            .fugue/pre-implement/googleworkspace-run
+          if-no-files-found: ignore
+
+  implement:
+    if: ${{ needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true' && (needs.workspace-preflight.result == 'success' || needs.workspace-preflight.result == 'skipped') }}
+    needs: [prepare, credential-guard, workspace-preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    outputs:
+      pr_url: ${{ steps.create-pr.outputs.pr_url }}
+      codex_exit: ${{ steps.codex.outputs.exit_code }}
+      research_report_path: ${{ steps.codex.outputs.research_report_path }}
+      plan_report_path: ${{ steps.codex.outputs.plan_report_path }}
+      critic_report_path: ${{ steps.codex.outputs.critic_report_path }}
+      preflight_report_path: ${{ steps.codex.outputs.preflight_report_path }}
+      implementation_report_path: ${{ steps.codex.outputs.implementation_report_path }}
+      todo_report_path: ${{ steps.codex.outputs.todo_report_path }}
+      lessons_report_path: ${{ steps.codex.outputs.lessons_report_path }}
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.prepare.outputs.target_repo }}
+          token: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install Codex CLI
+        run: |
+          npm install -g @openai/codex
+          codex --version
+
+      - name: Authenticate Codex CLI with API key
+        run: |
+          printenv OPENAI_API_KEY | codex login --with-api-key
+
+      - name: Create working branch
+        run: |
+          git checkout -b "${{ needs.prepare.outputs.branch_name }}"
+
+      - name: Download Google Workspace preflight artifact
+        if: ${{ inputs.workspace_hint_applied == 'true' && needs.workspace-preflight.result == 'success' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.workspace-preflight.outputs.workspace_artifact_name }}
+          path: .
+
+      - name: Run parallel preflight nodes
+        id: preflight_parallel
+        env:
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          CODEX_MODEL: ${{ inputs.codex_model }}
+          PREFLIGHT_PARALLEL_ENABLED: ${{ vars.FUGUE_PREFLIGHT_PARALLEL_ENABLED || 'true' }}
+          PREFLIGHT_PARALLEL_TIMEOUT_SEC: ${{ vars.FUGUE_PREFLIGHT_PARALLEL_TIMEOUT_SEC || '240' }}
+        run: |
+          set -euo pipefail
+
+          issue_num="${ISSUE_NUMBER}"
+          artifact_dir=".fugue/pre-implement"
+          research_report="${artifact_dir}/issue-${issue_num}-research.md"
+          plan_report="${artifact_dir}/issue-${issue_num}-plan.md"
+          critic_report="${artifact_dir}/issue-${issue_num}-critic.md"
+          log_dir="/tmp/fugue-preflight-parallel-${issue_num}"
+          mkdir -p "${artifact_dir}" "${log_dir}"
+
+          {
+            echo "research_report_path=${research_report}"
+            echo "plan_report_path=${plan_report}"
+            echo "critic_report_path=${critic_report}"
+            echo "parallel_preflight_log_dir=${log_dir}"
+          } >> "${GITHUB_OUTPUT}"
+
+          enabled="$(echo "${PREFLIGHT_PARALLEL_ENABLED:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${enabled}" != "true" ]]; then
+            enabled="false"
+          fi
+          timeout_sec="$(echo "${PREFLIGHT_PARALLEL_TIMEOUT_SEC:-240}" | tr -cd '0-9')"
+          if [[ -z "${timeout_sec}" ]]; then
+            timeout_sec="240"
+          fi
+          if (( timeout_sec < 60 )); then
+            timeout_sec=60
+          elif (( timeout_sec > 900 )); then
+            timeout_sec=900
+          fi
+
+          if [[ "${enabled}" != "true" ]]; then
+            printf '%s\n' \
+              "# Issue #${issue_num} Research Artifact" \
+              "" \
+              "Parallel preflight is disabled. Generate deep research during the main Codex run." > "${research_report}"
+            printf '%s\n' \
+              "# Issue #${issue_num} Plan Artifact" \
+              "" \
+              "Parallel preflight is disabled. Generate and refine plan during the main Codex run." > "${plan_report}"
+            printf '%s\n' \
+              "# Issue #${issue_num} Critic Artifact" \
+              "" \
+              "Parallel preflight is disabled. Generate critical review during the main Codex run." > "${critic_report}"
+            echo "parallel_preflight_enabled=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "parallel_preflight_enabled=true" >> "${GITHUB_OUTPUT}"
+
+          nodes=(research plan critic)
+          work_root="$(mktemp -d "/tmp/fugue-preflight-worktrees-${issue_num}-XXXX")"
+          cleanup() {
+            for node in "${nodes[@]}"; do
+              workdir="${work_root}/${node}"
+              if [[ -d "${workdir}" ]]; then
+                git worktree remove --force "${workdir}" >/dev/null 2>&1 || true
+              fi
+            done
+            rm -rf "${work_root}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          make_fallback() {
+            local node="$1"
+            local outfile="$2"
+            printf '%s\n' \
+              "# Issue #${issue_num} ${node^} Artifact" \
+              "" \
+              "Codex parallel preflight node '${node}' did not produce the artifact file." \
+              "Use this as a fallback seed and replace with concrete findings in the main run." > "${outfile}"
+          }
+
+          pids=()
+          for node in "${nodes[@]}"; do
+            workdir="${work_root}/${node}"
+            prompt_file="${work_root}/${node}.prompt.md"
+            node_out_rel="${artifact_dir}/issue-${issue_num}-${node}.md"
+            git worktree add --detach "${workdir}" HEAD >/dev/null 2>&1
+
+            role_instruction=""
+            case "${node}" in
+              research)
+                role_instruction="Map current implementation touchpoints, hidden coupling, and likely impact files."
+                ;;
+              plan)
+                role_instruction="Propose concrete implementation plan with sequencing, rollback, and verification checkpoints."
+                ;;
+              critic)
+                role_instruction="Challenge weak assumptions, list failure scenarios, and define guardrails/regression tests."
+                ;;
+            esac
+
+            printf '%s\n' \
+              "## Task" \
+              "Issue #${issue_num}: ${ISSUE_TITLE}" \
+              "" \
+              "${ISSUE_BODY}" \
+              "" \
+              "## Role" \
+              "${role_instruction}" \
+              "" \
+              "## Output Contract" \
+              "- Create exactly one markdown file at \`${node_out_rel}\`." \
+              "- Do not modify any other file." \
+              "- Start with heading: \`# Issue #${issue_num} ${node^} Artifact\`." \
+              "- Keep output concise and actionable." > "${prompt_file}"
+
+            (
+              set +e
+              cd "${workdir}"
+              mkdir -p "${artifact_dir}"
+              if command -v timeout >/dev/null 2>&1; then
+                timeout "${timeout_sec}" codex exec \
+                  --model "${CODEX_MODEL}" \
+                  --full-auto --dangerously-bypass-approvals-and-sandbox \
+                  "$(cat "${prompt_file}")" > "${log_dir}/${node}.log" 2>&1
+              else
+                codex exec \
+                  --model "${CODEX_MODEL}" \
+                  --full-auto --dangerously-bypass-approvals-and-sandbox \
+                  "$(cat "${prompt_file}")" > "${log_dir}/${node}.log" 2>&1
+              fi
+              rc=$?
+              out_file="${workdir}/${node_out_rel}"
+              if [[ ! -f "${out_file}" ]]; then
+                make_fallback "${node}" "${out_file}"
+              fi
+              echo "${rc}" > "${log_dir}/${node}.rc"
+              exit 0
+            ) &
+            pids+=("$!")
+          done
+
+          for pid in "${pids[@]}"; do
+            wait "${pid}" || true
+          done
+
+          parallel_failures=0
+          for node in "${nodes[@]}"; do
+            src="${work_root}/${node}/${artifact_dir}/issue-${issue_num}-${node}.md"
+            dst="${artifact_dir}/issue-${issue_num}-${node}.md"
+            if [[ -f "${src}" ]]; then
+              cp "${src}" "${dst}"
+            else
+              make_fallback "${node}" "${dst}"
+              parallel_failures=$((parallel_failures + 1))
+            fi
+            if [[ -f "${log_dir}/${node}.rc" ]]; then
+              rc_val="$(cat "${log_dir}/${node}.rc")"
+              if [[ "${rc_val}" != "0" ]]; then
+                parallel_failures=$((parallel_failures + 1))
+              fi
+            fi
+          done
+
+          if (( parallel_failures > 0 )); then
+            echo "parallel preflight completed with ${parallel_failures} degraded node(s)" > "${log_dir}/summary.txt"
+          else
+            echo "parallel preflight completed successfully" > "${log_dir}/summary.txt"
+          fi
+
+      - name: Run Codex CLI
+        id: codex
+        env:
+          KERNEL_RUN_ID: ${{ inputs.kernel_run_id }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          ISSUE_BODY: ${{ needs.prepare.outputs.issue_body }}
+          CODEX_MODEL: ${{ inputs.codex_model }}
+          REFINEMENT_CYCLES: ${{ inputs.refinement_cycles }}
+          IMPLEMENTATION_DIALOGUE_ROUNDS: ${{ inputs.implementation_dialogue_rounds }}
+          ORCHESTRATION_PROFILE: ${{ inputs.orchestration_profile }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          LARGE_REFACTOR_LABEL: ${{ needs.prepare.outputs.is_large_refactor }}
+          RISK_TIER: ${{ needs.prepare.outputs.risk_tier }}
+          RISK_SCORE: ${{ needs.prepare.outputs.risk_score }}
+          RISK_REASONS: ${{ needs.prepare.outputs.risk_reasons }}
+          LESSONS_REQUIRED: ${{ needs.prepare.outputs.lessons_required }}
+          CORRECTION_SIGNAL: ${{ needs.prepare.outputs.correction_signal }}
+          PREFLIGHT_CYCLES_FLOOR: ${{ needs.prepare.outputs.preflight_cycles_floor }}
+          IMPLEMENTATION_DIALOGUE_ROUNDS_FLOOR: ${{ needs.prepare.outputs.implementation_dialogue_rounds_floor }}
+          CONTEXT_BUDGET_INITIAL: ${{ needs.prepare.outputs.context_budget_initial }}
+          CONTEXT_BUDGET_MAX: ${{ needs.prepare.outputs.context_budget_max }}
+          CONTEXT_BUDGET_FLOOR_INITIAL: ${{ needs.prepare.outputs.context_budget_floor_initial }}
+          CONTEXT_BUDGET_FLOOR_MAX: ${{ needs.prepare.outputs.context_budget_floor_max }}
+          CONTEXT_BUDGET_FLOOR_SPAN: ${{ needs.prepare.outputs.context_budget_floor_span }}
+          CONTEXT_BUDGET_GUARD_APPLIED: ${{ needs.prepare.outputs.context_budget_guard_applied }}
+          CONTEXT_BUDGET_GUARD_REASONS: ${{ needs.prepare.outputs.context_budget_guard_reasons }}
+          RESEARCH_REPORT_PATH: ${{ steps.preflight_parallel.outputs.research_report_path }}
+          PLAN_REPORT_PATH: ${{ steps.preflight_parallel.outputs.plan_report_path }}
+          CRITIC_REPORT_PATH: ${{ steps.preflight_parallel.outputs.critic_report_path }}
+          WORKSPACE_REPORT_PATH: ${{ needs.workspace-preflight.outputs.workspace_report_path }}
+          WORKSPACE_SUMMARY: ${{ needs.workspace-preflight.outputs.workspace_summary }}
+          WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
+          WORKSPACE_FEED_STATUS: ${{ inputs.workspace_feed_status }}
+          WORKSPACE_FEED_PROFILES: ${{ inputs.workspace_feed_profiles }}
+          WORKSPACE_FEED_SUMMARY: ${{ inputs.workspace_feed_summary }}
+        run: bash scripts/harness/codex-execute-validate.sh
+
+      - name: Update Kernel compact artifact
+        if: ${{ steps.codex.outputs.exit_code == '0' && inputs.kernel_run_id != '' }}
+        env:
+          KERNEL_RUN_ID: ${{ inputs.kernel_run_id }}
+          KERNEL_RUNTIME: fugue
+          KERNEL_PHASE: implement
+          KERNEL_RESEARCH_REPORT_PATH: ${{ steps.codex.outputs.research_report_path }}
+          KERNEL_PLAN_REPORT_PATH: ${{ steps.codex.outputs.plan_report_path }}
+          KERNEL_CRITIC_REPORT_PATH: ${{ steps.codex.outputs.critic_report_path }}
+          KERNEL_PREFLIGHT_REPORT_PATH: ${{ steps.codex.outputs.preflight_report_path }}
+          KERNEL_IMPLEMENTATION_REPORT_PATH: ${{ steps.codex.outputs.implementation_report_path }}
+          KERNEL_TODO_REPORT_PATH: ${{ steps.codex.outputs.todo_report_path }}
+          KERNEL_LESSONS_REPORT_PATH: ${{ steps.codex.outputs.lessons_report_path }}
+        run: |
+          set -euo pipefail
+
+          implementation_report_path="${KERNEL_IMPLEMENTATION_REPORT_PATH:-}"
+          if [[ -z "${implementation_report_path}" ]]; then
+            echo "Kernel implementation report path is empty; skipping workflow propagation."
+            exit 0
+          fi
+          if [[ ! -f "${implementation_report_path}" ]]; then
+            echo "Kernel implementation report path does not exist; skipping workflow propagation."
+            exit 0
+          fi
+
+          compact_path="$(bash scripts/lib/kernel-compact-artifact.sh path)"
+          if [[ ! -f "${compact_path}" ]]; then
+            echo "Kernel compact artifact not found for run ${KERNEL_RUN_ID}; skipping workflow propagation."
+            exit 0
+          fi
+
+          bash scripts/lib/kernel-compact-artifact.sh update manual_snapshot "implement artifact paths propagated" >/dev/null
+
+      - name: Commit changes
+        if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
+        run: |
+          git config user.name "fugue-codex[bot]"
+          git config user.email "fugue-codex[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement issue #${{ needs.prepare.outputs.issue_number }}
+
+          Generated by Codex CLI (${{ inputs.codex_model }}) via FUGUE GHA24.
+
+          Closes #${{ needs.prepare.outputs.issue_number }}"
+
+      - name: Push branch
+        if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
+        env:
+          GH_TOKEN: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          git push origin "${{ needs.prepare.outputs.branch_name }}"
+
+      - name: Create Pull Request
+        id: create-pr
+        if: ${{ steps.codex.outputs.no_changes != 'true' && steps.codex.outputs.exit_code == '0' }}
+        env:
+          GH_TOKEN: ${{ needs.prepare.outputs.target_repo != github.repository && secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          TARGET_REPO="${{ needs.prepare.outputs.target_repo }}"
+          ISSUE_NUM="${{ needs.prepare.outputs.issue_number }}"
+
+          PR_URL="$(gh pr create \
+            --repo "${TARGET_REPO}" \
+            --base "${{ inputs.target_branch }}" \
+            --head "${{ needs.prepare.outputs.branch_name }}" \
+            --title "feat: implement #${ISSUE_NUM} (Codex)" \
+            --body "## Auto-generated by FUGUE Codex Implement
+
+          **Source issue**: #${ISSUE_NUM}
+          **Model**: ${{ inputs.codex_model }}
+          **Mode**: full-auto
+
+          ### Changes
+          $(git log --oneline -1)
+
+          ### Review checklist
+          - [ ] Code compiles
+          - [ ] Tests pass
+          - [ ] No unintended file changes
+          - [ ] Security review (no secrets leaked)
+
+          ---
+          Generated by [FUGUE GHA24](https://github.com/${GITHUB_REPOSITORY})")"
+
+          echo "pr_url=${PR_URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload Codex log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-output-log
+          path: |
+            /tmp/codex-output.log
+            ${{ steps.preflight_parallel.outputs.parallel_preflight_log_dir }}
+            ${{ steps.codex.outputs.preflight_report_path }}
+            ${{ steps.codex.outputs.implementation_report_path }}
+            ${{ steps.codex.outputs.todo_report_path }}
+            ${{ steps.codex.outputs.lessons_report_path }}
+            ${{ steps.codex.outputs.research_report_path }}
+            ${{ steps.codex.outputs.plan_report_path }}
+            ${{ steps.codex.outputs.critic_report_path }}
+            ${{ needs.workspace-preflight.outputs.workspace_report_path }}
+            .fugue/pre-implement/googleworkspace-run
+          if-no-files-found: ignore
+
+  finalize:
+    if: always() && needs.prepare.outputs.should_run == 'true' && needs.credential-guard.outputs.can_run == 'true'
+    needs: [prepare, credential-guard, workspace-preflight, implement]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Update issue with results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          PR_URL: ${{ needs.implement.outputs.pr_url }}
+          CODEX_EXIT: ${{ needs.implement.outputs.codex_exit }}
+          WORKSPACE_PREFLIGHT_STATUS: ${{ needs.workspace-preflight.outputs.workspace_preflight_status }}
+        run: |
+          set -euo pipefail
+
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "processing" || true
+
+          workspace_note=""
+          if [[ -n "${WORKSPACE_PREFLIGHT_STATUS}" ]]; then
+            workspace_note="
+
+          Workspace preflight: ${WORKSPACE_PREFLIGHT_STATUS}"
+          fi
+
+          if [[ -n "${PR_URL}" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Codex implementation complete. PR created: ${PR_URL}
+
+          Exit code: ${CODEX_EXIT}${workspace_note}"
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --add-label "completed"
+          elif [[ "${CODEX_EXIT}" != "0" ]]; then
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Codex implementation stopped before PR creation because mandatory protocol checks failed.
+
+          Exit code: ${CODEX_EXIT}${workspace_note}
+          Check artifacts for protocol reports and codex output log."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --add-label "needs-review"
+          else
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Codex implementation did not produce changes.
+
+          Exit code: ${CODEX_EXIT}${workspace_note}
+          This may mean: no code changes were needed, the task was unclear, or Codex encountered an error.
+
+          Check the workflow run artifacts for the full Codex output log."
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" \
+              --add-label "needs-review"
+          fi

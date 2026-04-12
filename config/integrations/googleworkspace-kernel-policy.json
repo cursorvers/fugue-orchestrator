@@ -1,0 +1,365 @@
+{
+  "version": 1,
+  "name": "googleworkspace-kernel-policy",
+  "default_adapters": {
+    "readonly": "googleworkspace-cli-readonly",
+    "write": "googleworkspace-cli-write"
+  },
+  "auth_profiles": {
+    "service-account-readonly": {
+      "interactive": false,
+      "allows_side_effects": false,
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report"
+      ],
+      "notes": [
+        "Use for scheduled or unattended Kernel routines.",
+        "Do not assume Gmail mailbox access."
+      ]
+    },
+    "user-oauth-readonly": {
+      "interactive": true,
+      "allows_side_effects": false,
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report",
+        "weekly-digest",
+        "gmail-triage"
+      ],
+      "notes": [
+        "Preferred for operator-bound context gathering.",
+        "Use bounded output only."
+      ]
+    },
+    "user-oauth-write": {
+      "interactive": true,
+      "allows_side_effects": true,
+      "allowed_actions": [
+        "gmail-send",
+        "drive-upload",
+        "calendar-insert",
+        "docs-create",
+        "docs-insert-text",
+        "sheets-create",
+        "sheets-append"
+      ],
+      "notes": [
+        "Requires ok_to_execute and human approval.",
+        "Prefer dry-run before actual execution."
+      ]
+    },
+    "extension-only": {
+      "interactive": true,
+      "allows_side_effects": false,
+      "allowed_actions": [
+        "tasks",
+        "pubsub",
+        "presentations"
+      ],
+      "notes": [
+        "Not part of the mature core lane.",
+        "Enable only while the specific extension lane is under active validation."
+      ]
+    }
+  },
+  "phase_policy": [
+    {
+      "phase": "intake-classify",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [],
+      "auth_profiles": [],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "route-hint"
+    },
+    {
+      "phase": "preflight-enrich",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report",
+        "weekly-digest",
+        "gmail-triage"
+      ],
+      "auth_profiles": [
+        "service-account-readonly",
+        "user-oauth-readonly"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "evidence"
+    },
+    {
+      "phase": "scheduled-operator-loop",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [
+        "meeting-prep",
+        "standup-report",
+        "weekly-digest"
+      ],
+      "auth_profiles": [
+        "service-account-readonly",
+        "user-oauth-readonly"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "digest"
+    },
+    {
+      "phase": "execute-dry-run",
+      "adapter_id": "googleworkspace-cli-write",
+      "allowed_actions": [
+        "gmail-send",
+        "drive-upload",
+        "calendar-insert"
+      ],
+      "auth_profiles": [
+        "user-oauth-write"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "preview"
+    },
+    {
+      "phase": "approved-execute",
+      "adapter_id": "googleworkspace-cli-write",
+      "allowed_actions": [
+        "gmail-send",
+        "drive-upload",
+        "calendar-insert",
+        "docs-create",
+        "docs-insert-text",
+        "sheets-create",
+        "sheets-append"
+      ],
+      "auth_profiles": [
+        "user-oauth-write"
+      ],
+      "requires_ok_to_execute": true,
+      "requires_human_approval": true,
+      "result_class": "receipt"
+    },
+    {
+      "phase": "recovery-rehydrate",
+      "adapter_id": "googleworkspace-cli-readonly",
+      "allowed_actions": [
+        "meeting-prep",
+        "weekly-digest",
+        "gmail-triage"
+      ],
+      "auth_profiles": [
+        "user-oauth-readonly"
+      ],
+      "requires_ok_to_execute": false,
+      "requires_human_approval": false,
+      "result_class": "evidence"
+    }
+  ],
+  "action_policy": {
+    "meeting-prep": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "preflight-enrich",
+      "fallback": "skip-if-auth-unavailable"
+    },
+    "standup-report": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "scheduled-operator-loop",
+      "fallback": "service-account-preferred"
+    },
+    "weekly-digest": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "scheduled-operator-loop",
+      "fallback": "degrade-without-gmail"
+    },
+    "gmail-triage": {
+      "adapter_id": "googleworkspace-cli-readonly",
+      "side_effect": false,
+      "default_phase": "preflight-enrich",
+      "fallback": "skip-with-service-account"
+    },
+    "gmail-send": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": true
+    },
+    "drive-upload": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": true
+    },
+    "calendar-insert": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": true
+    },
+    "docs-create": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    },
+    "docs-insert-text": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    },
+    "sheets-create": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    },
+    "sheets-append": {
+      "adapter_id": "googleworkspace-cli-write",
+      "side_effect": true,
+      "default_phase": "approved-execute",
+      "requires_dry_run_preview": false
+    }
+  },
+  "receipt_contract": {
+    "required_common_fields": [
+      "action",
+      "artifact_type",
+      "primary_id"
+    ],
+    "per_action": {
+      "gmail-send": {
+        "artifact_type": "gmail-message",
+        "required_receipt_fields": [
+          "primary_id",
+          "message_id"
+        ]
+      },
+      "drive-upload": {
+        "artifact_type": "drive-file",
+        "required_receipt_fields": [
+          "primary_id",
+          "file_id"
+        ]
+      },
+      "calendar-insert": {
+        "artifact_type": "calendar-event",
+        "required_receipt_fields": [
+          "primary_id",
+          "event_id"
+        ]
+      },
+      "docs-create": {
+        "artifact_type": "google-doc",
+        "required_receipt_fields": [
+          "primary_id",
+          "document_id"
+        ]
+      },
+      "docs-insert-text": {
+        "artifact_type": "google-doc",
+        "required_receipt_fields": [
+          "primary_id",
+          "document_id"
+        ]
+      },
+      "sheets-create": {
+        "artifact_type": "google-sheet",
+        "required_receipt_fields": [
+          "primary_id",
+          "spreadsheet_id"
+        ]
+      },
+      "sheets-append": {
+        "artifact_type": "google-sheet-range",
+        "required_receipt_fields": [
+          "primary_id",
+          "spreadsheet_id",
+          "updated_range"
+        ]
+      }
+    }
+  },
+  "write_meta_contract": {
+    "required_common_meta_fields": [
+      "side_effect",
+      "write_disposition",
+      "ok_to_execute",
+      "human_approved",
+      "receipt"
+    ],
+    "allowed_write_dispositions": [
+      "preview",
+      "applied",
+      "blocked",
+      "readonly",
+      "resolved"
+    ],
+    "notes": [
+      "Preview, applied, blocked, readonly, and resolved states must be machine-readable in *-meta.json.",
+      "Kernel should rely on normalized receipt metadata rather than raw Workspace payloads when evaluating write evidence."
+    ]
+  },
+  "extension_lane_policy": {
+    "tasks": {
+      "decision": "defer",
+      "product_reason": "Potential future email-to-task or follow-up capture lane after the mature readonly and bounded-write paths are stable.",
+      "auth_profile": "extension-only",
+      "validation_path": "operator-invoked only; do not add to default loops",
+      "blocks_core_lane": false
+    },
+    "pubsub": {
+      "decision": "drop",
+      "product_reason": "No current Kernel or FUGUE production requirement justifies expanding into event-watch infrastructure.",
+      "auth_profile": "extension-only",
+      "validation_path": "none until a concrete product reason exists",
+      "blocks_core_lane": false
+    },
+    "presentations": {
+      "decision": "defer",
+      "product_reason": "Possible future digest publishing helper, but not part of the mature readonly or bounded-write lane.",
+      "auth_profile": "extension-only",
+      "validation_path": "operator-invoked only after a concrete publishing scenario is defined",
+      "blocks_core_lane": false
+    }
+  },
+  "runtime_enforcement": {
+    "extension_actions": [
+      "tasks",
+      "pubsub",
+      "presentations"
+    ],
+    "core_phases_excluding_extensions": [
+      "intake-classify",
+      "preflight-enrich",
+      "scheduled-operator-loop",
+      "execute-dry-run",
+      "approved-execute",
+      "recovery-rehydrate"
+    ],
+    "rules": [
+      "Default core phases must not include extension actions in allowed_actions.",
+      "Default core phases must not require the extension-only auth profile.",
+      "Deferred extension lanes stay operator-invoked until their own validation path is active."
+    ]
+  },
+  "compatibility": {
+    "fugue_access": {
+      "non_blocking": true,
+      "shared_feed_profiles": [
+        "morning-brief-shared"
+      ],
+      "personal_feed_profiles": [
+        "morning-brief-personal",
+        "weekly-digest-personal"
+      ],
+      "notes": [
+        "Kernel Google Workspace changes must not rename or remove the shared readonly feed path used by FUGUE.",
+        "Shared and personal feed environments remain separate so legacy FUGUE can continue consuming cached evidence safely."
+      ]
+    }
+  }
+}

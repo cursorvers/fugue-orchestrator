@@ -1,0 +1,78 @@
+name: fugue-caller
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to process"
+        required: true
+        type: string
+      kernel_run_id:
+        description: "Optional Kernel run id to forward into Tutti handoff"
+        required: false
+        type: string
+        default: ""
+      trigger_event_name:
+        description: "Optional upstream event name override (issues|issue_comment|workflow_dispatch)"
+        required: false
+        type: string
+        default: ""
+      trigger_label_name:
+        description: "Optional label name override for replaying explicit labeled triggers"
+        required: false
+        type: string
+        default: ""
+      trust_subject:
+        description: "Optional trusted actor login for permission checks"
+        required: false
+        type: string
+        default: ""
+      allow_processing_rerun:
+        description: "Allow rerun while processing label is present"
+        required: false
+        type: string
+        default: "false"
+      subscription_offline_policy_override:
+        description: "Optional offline policy override for downstream dispatches (hold|continuity)"
+        required: false
+        type: string
+        default: ""
+      handoff_target:
+        description: "Optional sovereign handoff target override (kernel|fugue-bridge)"
+        required: false
+        type: string
+        default: ""
+      execution_mode_override:
+        description: "Execution policy override (auto|primary|backup-safe|backup-heavy)"
+        required: false
+        type: string
+        default: "auto"
+
+permissions:
+  issues: write
+  contents: read
+  actions: write
+
+jobs:
+  route:
+    if: >-
+      (github.event_name != 'issue_comment' || github.actor != 'github-actions[bot]') &&
+      (github.event_name != 'issues' || github.event.label.name == 'tutti')
+    uses: ./.github/workflows/fugue-task-router.yml
+    with:
+      issue_number: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+      kernel_run_id: ${{ github.event.inputs.kernel_run_id || '' }}
+      trigger_event_name: ${{ github.event.inputs.trigger_event_name || github.event_name }}
+      trigger_label_name: ${{ github.event.inputs.trigger_label_name || github.event.label.name || '' }}
+      comment_body: ${{ github.event.comment.body || '' }}
+      comment_author: ${{ github.event.comment.user.login || '' }}
+      trust_subject: ${{ github.event.inputs.trust_subject || (github.event_name == 'issue_comment' && github.event.comment.user.login) || (github.event_name == 'issues' && github.actor) || '' }}
+      allow_processing_rerun: ${{ github.event.inputs.allow_processing_rerun || 'false' }}
+      subscription_offline_policy_override: ${{ github.event.inputs.subscription_offline_policy_override || '' }}
+      handoff_target: ${{ github.event.inputs.handoff_target || '' }}
+      execution_mode_override: ${{ github.event.inputs.execution_mode_override || 'auto' }}
+    secrets: inherit

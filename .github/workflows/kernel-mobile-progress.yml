@@ -1,0 +1,38 @@
+name: kernel-mobile-progress
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - kernel-recovery-console
+      - fugue-task-router
+      - fugue-tutti-caller
+      - fugue-orchestrator-canary
+      - fugue-watchdog
+    types:
+      - completed
+
+permissions:
+  issues: write
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Publish mobile progress snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+          RECOVERY_MODE: mobile-progress
+          RECOVERY_TRUST_SUBJECT: ${{ github.actor }}
+          RECOVERY_DISPATCH_NONCE: ${{ github.run_id }}
+        run: bash scripts/harness/run-recovery-console.sh

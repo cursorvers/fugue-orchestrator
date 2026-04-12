@@ -1,0 +1,205 @@
+# Requirements: Codex Main Orchestrator + Claude Opus Assist Orchestrator
+
+## 1. Goal
+
+Build an orchestration system where:
+- Codex is the main orchestrator (control-plane owner).
+- Claude Opus is an assist orchestrator (sidecar advisor).
+- Orchestrator selection remains variable and auditable without breaking FUGUE operations.
+
+## 2. Scope
+
+In scope:
+- Main/assist provider resolution in GitHub Actions.
+- Main-provider signal lane wiring in Tutti matrix (`codex-main-orchestrator` / `claude-main-orchestrator`).
+- Claude rate-limit aware fallback.
+- Assist lane integration as optional/non-blocking.
+- Workflow observability for requested vs resolved providers.
+- Documentation and CLI semantics updates.
+
+Out of scope:
+- Replacing Codex implementation engine.
+- Full removal of compatibility labels in one release.
+- Migrating every external/global policy file in this change.
+
+## 3. Functional Requirements
+
+FR-1 Main provider resolution:
+- Main provider resolution order:
+  1) issue label (`orchestrator:*`)
+  2) issue body hint
+  3) repo default (`FUGUE_MAIN_ORCHESTRATOR_PROVIDER` fallback to `FUGUE_ORCHESTRATOR_PROVIDER`)
+  4) hard fallback `codex`
+
+FR-2 Assist provider resolution:
+- Assist provider must resolve from:
+  1) issue label (`orchestrator-assist:*`) if present
+  2) issue body hint (`assist orchestrator provider:`) if present
+  3) repo default (`FUGUE_ASSIST_ORCHESTRATOR_PROVIDER`)
+  4) hard fallback `claude`
+
+FR-3 Claude throttle guard:
+- If Claude rate-limit state is `degraded` or `exhausted`, main provider must auto-fallback to `codex` unless forced.
+- If Claude rate-limit state is `exhausted`, assist provider `claude` must auto-fallback to `none` unless forced.
+- If main provider resolves to `claude` and assist provider also resolves to `claude`, apply pressure guard to reduce Claude lane pressure (`FUGUE_CLAUDE_MAIN_ASSIST_POLICY=codex|none`, default `codex`) unless forced.
+- Architectural invariant (modified FUGUE): if main resolves to `claude`, assist must resolve to `codex` in normal operation (unless explicit force override).
+- If Claude is not rate-limited (`claude_state=ok`) and assist resolves to `claude`, Claude assist lane is required (missing direct success must veto auto-execution).
+- If Claude rate-limit state is `ok` or `degraded`, Sonnet assist lanes should remain eligible.
+- Force override must be explicit (`orchestrator-force:claude` / CLI force option).
+- Fallback reason must be written to issue comments for auditability.
+
+FR-4 Main ownership:
+- Control-plane state transitions remain owned by main orchestrator workflows.
+- Assist output is advisory and must not own state transitions.
+
+FR-5 Assist lane behavior:
+- Assist lane must be optional and non-blocking.
+- Missing/failed assist provider credentials must not fail quorum.
+- Assist lane failure should be reported as skipped/error in integrated comment.
+- Assist role resolution (control-plane) and execution backend choice (data-plane) must be independently configurable and auditable.
+- In api/harness continuity profiles, if Claude direct execution is unavailable, assist must auto-adjust to an executable fallback (`codex` or `none`) unless explicitly forced.
+- Complexity gate: when `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX=true`, **assist provider is `claude`**, and task is complex (`risk_tier=high` or ambiguity translation-gate=true), `claude-opus-assist` successful participation is required; otherwise set `weighted_vote_passed=false` and `ok_to_execute=false`.
+
+FR-6 Weighted governance gate:
+- Execution approval uses role-weighted 2/3 consensus (not flat count only).
+- Any HIGH risk finding must veto auto-execution regardless of weighted score.
+
+FR-7 Implement preflight protocol:
+- Before implementation, run 5-step refinement loop:
+  1) Plan
+  2) Parallel Simulation
+  3) Critical Review
+  4) Problem fix
+  5) Replan
+- Default cycles must be 3 (`FUGUE_IMPLEMENT_REFINEMENT_CYCLES=3`) and auditable via artifact/report.
+- Large refactor/rewrite/migration strict sections are required when either:
+  - issue has `large-refactor` label, or
+  - issue text matches large-refactor keywords.
+
+FR-8 Implementation collaboration protocol:
+- After preflight passes, implementation phase must run role-based dialogue rounds:
+  - `Implementer Proposal`
+  - `Critic Challenge`
+  - `Integrator Decision`
+  - `Applied Change`
+  - `Verification`
+- Default rounds must be configurable:
+  - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS` (default baseline)
+  - `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE` (default when main provider is `claude`)
+- Missing/invalid implementation collaboration report must fail before PR creation.
+
+FR-9 Backward compatibility:
+- Existing `orchestrator_provider` workflow input remains supported.
+- Existing issue labeling patterns continue to work.
+
+## 4. Non-Functional Requirements
+
+NFR-1 Reliability:
+- No regression in review-only and implement modes.
+- Mainframe continues when assist lane is unavailable.
+
+NFR-2 Observability:
+- Integrated comment must include requested/resolved main + assist profiles.
+- Status/watchdog should expose assist/provider health signals where possible.
+- Agent artifacts should expose requested provider/model and effective execution route (direct vs proxy).
+
+NFR-3 Context efficiency:
+- Local policy entry files remain thin; avoid large duplicated policy blocks.
+- SSOT policy file is used as primary reference.
+
+## 5. Configuration Requirements
+
+Required/optional repo variables:
+- `FUGUE_MAIN_ORCHESTRATOR_PROVIDER` (optional, default resolved to codex)
+- `FUGUE_ASSIST_ORCHESTRATOR_PROVIDER` (optional, repository policy default; recommended `claude`)
+- `FUGUE_CI_EXECUTION_ENGINE` (`harness|api|subscription`, default `subscription`; controls run-agents engine)
+- `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION` (`true|false`, default `true`; allow GLM baseline voters and design-triggered Gemini specialist lane in `subscription` profile)
+- `FUGUE_SUBSCRIPTION_RUNNER_LABEL` (default `fugue-subscription`; required self-hosted label for `subscription-strict` lane execution)
+- `FUGUE_SUBSCRIPTION_CLI_TIMEOUT_SEC` (default `180`; timeout seconds for each `codex` / `claude` CLI lane in `subscription` mode)
+- `FUGUE_SUBSCRIPTION_OFFLINE_POLICY` (`hold|continuity`, default `continuity`; behavior when `subscription` is requested but no required-label self-hosted runner is online)
+- `FUGUE_CANARY_OFFLINE_POLICY_OVERRIDE` (`inherit|hold|continuity`, default `continuity`; canary-only override for runner-offline behavior under `subscription`)
+- `FUGUE_CANARY_LABEL_WAIT_ATTEMPTS` (default `10`; retry count while waiting for `tutti` label reflection before canary dispatch, clamped `1..60`)
+- `FUGUE_CANARY_LABEL_WAIT_SLEEP_SEC` (default `2`; sleep seconds between canary label reflection checks, clamped `1..30`)
+- `FUGUE_CANARY_WAIT_FAST_ATTEMPTS` (default `12`; fast-phase polling attempts for integrated review resolution in canary, clamped `1..60`)
+- `FUGUE_CANARY_WAIT_FAST_SLEEP_SEC` (default `10`; fast-phase polling interval seconds for canary, clamped `1..60`)
+- `FUGUE_CANARY_WAIT_SLOW_ATTEMPTS` (default `9`; slow-phase fallback polling attempts for canary, clamped `0..60`)
+- `FUGUE_CANARY_WAIT_SLOW_SLEEP_SEC` (default `20`; slow-phase fallback polling interval seconds for canary, clamped `1..120`)
+- `FUGUE_DUAL_MAIN_SIGNAL` (`true|false`, default `true`; include both `codex-main-orchestrator` and `claude-main-orchestrator` signal lanes)
+- `FUGUE_STRICT_MAIN_CODEX_MODEL` (`true|false`, default `false`; strict-validate `codex-main-orchestrator` model only when enabled)
+- `FUGUE_STRICT_OPUS_ASSIST_DIRECT` (`true|false`, default `false`; strict-validate `claude-opus-assist` direct model only when enabled)
+- `FUGUE_REQUIRE_DIRECT_CLAUDE_ASSIST` (`true|false`, default `false`; when true, `/vote` requires direct-success on `claude-opus-assist` under `assist=claude` + state=`ok`)
+- `FUGUE_REQUIRE_CLAUDE_SUB_ON_COMPLEX` (`true|false`, default `true`; require Claude sub gate on complex tasks only when assist=`claude`: `risk_tier=high` or ambiguity translation-gate=true)
+- `FUGUE_MIN_CONSENSUS_LANES` (integer >=6, default `6`; hard floor for resolved lane count in workflow/local orchestration)
+- `FUGUE_CODEX_MAIN_MODEL` (default `gpt-5.4`; model for `codex-main-orchestrator` lane)
+- `FUGUE_CODEX_MULTI_AGENT_MODEL` (default `gpt-5.3-codex-spark`; model for non-main codex multi-agent lanes)
+- `FUGUE_API_STRICT_MODE` (`true|false`, default `false`; when false, strict guards are disabled in `harness|api` profiles)
+- `FUGUE_EMERGENCY_CONTINUITY_MODE` (`true|false`, default `false`; when true, only in-flight `processing` issues continue)
+- `FUGUE_EMERGENCY_ASSIST_POLICY` (`none|codex|claude`, default `none`; assist demotion target in continuity profile)
+- `FUGUE_MULTI_AGENT_MODE` (`standard|enhanced|max`, default `enhanced`; controls lane depth)
+- `FUGUE_GLM_SUBAGENT_MODE` (`off|paired|symphony`, default `paired`; controls GLM subagent fan-out; forced `off` in subscription only when `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=false`)
+- `FUGUE_CODEX_RECURSIVE_DELEGATION` (`true|false`, default `false`; enables codex recursive delegation mode for targeted codex lanes)
+- `FUGUE_CODEX_RECURSIVE_MAX_DEPTH` (integer >=2, default `3`; recursive depth target, e.g. parent->child->grandchild)
+- `FUGUE_CODEX_RECURSIVE_TARGET_LANES` (CSV lane names or `all`, default `codex-main-orchestrator,codex-orchestration-assist`)
+- `FUGUE_CODEX_RECURSIVE_DRY_RUN` (`true|false`, default `false`; emits synthetic recursive verdicts for operational validation)
+- `FUGUE_CLAUDE_RATE_LIMIT_STATE` (`ok|degraded|exhausted`)
+- `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST` (`true|false`, default `false`; local direct orchestrationで assist=claude かつ state=ok の場合、`claude-opus-assist` direct success を必須化)
+- `FUGUE_LOCAL_REQUIRE_CLAUDE_ASSIST_ON_COMPLEX` (`true|false`, default `true`; local direct orchestrationで high-risk または ambiguity signal 時に `claude-opus-assist` success を必須化)
+- `FUGUE_LOCAL_AMBIGUITY_SIGNAL` (`true|false`, default `false`; local runで ambiguity を明示シグナル化する手動フラグ)
+- `FUGUE_CLAUDE_MAIN_ASSIST_POLICY` (`codex|none`, default `codex`; when main=claude and assist=claude, adjust assist to reduce Claude pressure unless forced)
+- `FUGUE_CLAUDE_DEGRADED_ASSIST_POLICY` (`none|codex|claude`, default `claude`; fallback target when assist=claude and state=degraded)
+- `FUGUE_CLAUDE_ASSIST_EXECUTION_POLICY` (`direct|hybrid|proxy`; controls Claude assist execution backend)
+- `FUGUE_CLAUDE_OPUS_MODEL` (optional, default `claude-sonnet-4-6`; compat variable name, default assist model for Claude main/assist lanes)
+- `FUGUE_CLAUDE_MAX_PLAN` (`true|false`, compatibility fallback; when execution policy is unset, true=>hybrid/false=>direct)
+- `FUGUE_CLAUDE_PLAN_TIER` (`max20` default assumption for operations messaging / status visibility)
+- `FUGUE_CLAUDE_SONNET4_MODEL` (optional, default `claude-sonnet-4-6`)
+- `FUGUE_CLAUDE_SONNET6_MODEL` (optional, default `claude-sonnet-4-6`)
+- `FUGUE_GEMINI_MODEL` (optional, default `gemini-3.1-pro`; Gemini specialist primary model)
+- `FUGUE_GEMINI_FALLBACK_MODEL` (optional, default `gemini-3-flash`; Gemini specialist fallback model)
+- `FUGUE_XAI_MODEL` (optional, default `grok-4`; xAI specialist primary model)
+- Runtime model normalization is enforced by `scripts/lib/model-policy.sh` (stale values are auto-corrected to supported latest-track families).
+- `FUGUE_SIM_CODEX_SPARK_ONLY` (`true|false`, default `true`; deterministic simulation common rule to pin both codex-main and codex multi-agent lanes to codex-spark for faster verification)
+- `FUGUE_SIM_CODEX_SPARK_MODEL` (optional, default `gpt-5.3-codex-spark`; spark-family model used when simulation spark-only rule is active)
+- `FUGUE_IMPLEMENT_REFINEMENT_CYCLES` (`1-5`, default `3`; enforce pre-implementation refinement loops)
+- `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS` (`1-5`, default `2`; implementation collaboration rounds)
+- `FUGUE_IMPLEMENT_DIALOGUE_ROUNDS_CLAUDE` (`1-5`, default `1`; implementation collaboration rounds when main=claude)
+
+Secrets:
+- API engines (`harness|api`): `OPENAI_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, optional `ANTHROPIC_API_KEY`
+- Subscription engine (`subscription`): codex/claude lanes require authenticated `codex` and `claude` CLIs.
+- Subscription hybrid (`subscription` + `FUGUE_ALLOW_GLM_IN_SUBSCRIPTION=true`): GLM lanes require `ZAI_API_KEY`; design-triggered Gemini lane requires `GEMINI_API_KEY`.
+
+## 6. Acceptance Criteria
+
+AC-1 Deterministic simulation:
+- A local simulation script must show:
+  - main fallback `claude -> codex` under throttled state
+  - assist behavior non-blocking
+  - execution profile behavior when self-hosted is unavailable:
+    - `subscription-strict -> subscription-paused` under `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=hold`
+    - `subscription-strict -> api-continuity` under `FUGUE_SUBSCRIPTION_OFFLINE_POLICY=continuity`
+  - emergency inflight-only guard (`FUGUE_EMERGENCY_CONTINUITY_MODE=true`)
+  - implementation gate unchanged (`vote + risk` guarded)
+  - weighted vote outcome and refinement-cycle gate visibility
+
+AC-2 Workflow syntax:
+- All changed shell scripts pass `bash -n`.
+- All changed workflow YAML files parse successfully.
+
+AC-3 Live smoke checks:
+- `ok` + requested `claude` keeps main as `claude` (unless policy sets codex).
+- `degraded/exhausted` + requested `claude` resolves main to `codex` (without force).
+- `exhausted` + force keeps `claude`.
+- Integrated comments show requested/resolved fields.
+
+AC-4 No system breakage:
+- Review-only flow still completes.
+- Implement flow gate remains `ok_to_execute == true` and implementation intent required.
+- Implement flow fails fast when refinement report is missing/incomplete.
+- Implement flow fails fast when implementation collaboration report is missing/incomplete.
+
+## 7. Rollout
+
+1. Ship with assist lane optional and non-blocking.
+2. Run smoke rehearsals for throttle states.
+3. Keep fallback to codex as safe default.
+4. Tighten/expand assist behavior after telemetry confirms stability.

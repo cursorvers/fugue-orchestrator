@@ -1,0 +1,21 @@
+.env
+.env.*
+*.local
+node_modules/
+.DS_Store
+.claude/.git/
+.claude/cache/
+.claude/projects/
+.claude/.credentials.json
+.fugue/local-run/
+.fugue/implement/
+.fugue/pre-implement/
+.fugue/test-workset-local/
+.fugue/kernel-googleworkspace-workset/
+.fugue/dev-tmp-root/
+.fugue/eval/
+.fugue/scratchpad/
+#...but encrypted secrets are safe to commit
+!.env.enc
+excalidraw.log
+tmp/

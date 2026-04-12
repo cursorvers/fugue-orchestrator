@@ -1,0 +1,75 @@
+name: kernel-recovery-console
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Recovery action"
+        required: true
+        type: choice
+        default: status
+        options:
+          - status
+          - mobile-progress
+          - continuity-canary
+          - rollback-canary
+          - reroute-issue
+      issue_number:
+        description: "Issue number for reroute-issue"
+        required: false
+        type: string
+        default: ""
+      handoff_target:
+        description: "Sovereign handoff target for reroute-issue"
+        required: false
+        type: choice
+        default: kernel
+        options:
+          - kernel
+          - fugue-bridge
+      canary_mode:
+        description: "Canary depth"
+        required: false
+        type: choice
+        default: lite
+        options:
+          - lite
+          - full
+      subscription_offline_policy_override:
+        description: "Offline policy override during recovery"
+        required: false
+        type: choice
+        default: continuity
+        options:
+          - continuity
+          - hold
+          - inherit
+
+permissions:
+  issues: write
+  contents: read
+  actions: write
+
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run recovery console
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+          RECOVERY_MODE: ${{ github.event.inputs.mode }}
+          RECOVERY_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          RECOVERY_HANDOFF_TARGET: ${{ github.event.inputs.handoff_target }}
+          RECOVERY_CANARY_MODE: ${{ github.event.inputs.canary_mode }}
+          RECOVERY_OFFLINE_POLICY: ${{ github.event.inputs.subscription_offline_policy_override }}
+          RECOVERY_TRUST_SUBJECT: ${{ github.actor }}
+          RECOVERY_DISPATCH_NONCE: ${{ github.run_id }}
+        run: bash scripts/harness/run-recovery-console.sh
