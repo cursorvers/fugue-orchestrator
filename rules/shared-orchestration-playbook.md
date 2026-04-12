@@ -118,6 +118,8 @@ Apply only integrator-approved changes.
 ## 8) Elegance Gate (Balanced)
 
 - For non-trivial changes, challenge hacky fixes and prefer cleaner alternatives.
+- State material assumptions before changing shared orchestration behavior.
+- Do not repair adjacent systems unless they block the active request or safety contract.
 - Skip over-engineering for simple, obvious fixes.
 - Keep change surface minimal.
 
