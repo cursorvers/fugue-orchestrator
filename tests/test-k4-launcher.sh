@@ -7,7 +7,16 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 export HOME="${TMP_DIR}/home"
-mkdir -p "${HOME}/bin" "${TMP_DIR}/root/scripts/local" "${TMP_DIR}/log"
+mkdir -p \
+  "${HOME}/bin" \
+  "${TMP_DIR}/root/.git" \
+  "${TMP_DIR}/root/.codex/prompts" \
+  "${TMP_DIR}/root/scripts/lib" \
+  "${TMP_DIR}/root/scripts/local" \
+  "${TMP_DIR}/log"
+touch \
+  "${TMP_DIR}/root/.codex/prompts/kernel.md" \
+  "${TMP_DIR}/root/scripts/lib/kernel-bootstrap-receipt.sh"
 
 cat > "${HOME}/bin/kernel-root" <<EOF
 #!/usr/bin/env bash

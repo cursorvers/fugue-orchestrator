@@ -32,14 +32,13 @@ resolve_kernel_root() {
       return 0
     fi
   fi
+  return 1
 }
 
-kernel_root="$(resolve_kernel_root)"
-
-if [[ -z "${kernel_root}" ]]; then
+kernel_root="$(resolve_kernel_root)" || {
   echo "kernel-root unavailable" >&2
   exit 1
-fi
+}
 
 entrypoint="${kernel_root}/scripts/local/kernel-entrypoint.sh"
 if [[ ! -x "${entrypoint}" ]]; then
