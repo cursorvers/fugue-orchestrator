@@ -17,5 +17,10 @@ if grep -Fq "2>/dev/null || printf '[]'" "${WORKFLOW}"; then
 fi
 
 grep -Fq 'workflow-waiting' "${ROOT_DIR}/scripts/lib/watchdog-alert-policy.sh"
+grep -Fq 'Persist watchdog alert recovery state' "${WORKFLOW}"
+grep -Fq "steps.decide.outputs.should_alert != 'true'" "${WORKFLOW}"
+grep -Fq "steps.decide.outputs.watchdog_alert_persist == 'true'" "${WORKFLOW}"
+grep -Fq "steps.decide.outputs.watchdog_alert_state_update_required == 'true'" "${WORKFLOW}"
+grep -Fq 'refusing to overwrite FUGUE_WATCHDOG_ALERT_STATE' "${WORKFLOW}"
 
 echo "watchdog waiting-run workflow check passed"
