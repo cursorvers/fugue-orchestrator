@@ -74,6 +74,7 @@ on:
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
       - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
@@ -180,6 +181,7 @@ on:
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
       - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
@@ -313,6 +315,7 @@ jobs:
           bash_n tests/test-workspace-root-policy.sh
           bash_n tests/test-canary-trust-policy.sh
           bash_n tests/test-kernel-canary-plan.sh
+          bash_n tests/test-watchdog-waiting-run-workflow.sh
           bash_n tests/test-kernel-entrypoint.sh
           bash_n tests/test-kernel-launcher.sh
           bash_n tests/test-kernel-launcher-template.sh
@@ -373,6 +376,7 @@ jobs:
           bash tests/test-route-task-handoff.sh
           bash tests/test-resolve-orchestration-context.sh
           bash tests/test-watchdog-alert-policy.sh
+          bash tests/test-watchdog-waiting-run-workflow.sh
           bash tests/test-watchdog-alert-delivery-policy.sh
           bash tests/test-primary-heartbeat-state.sh
           bash tests/test-publish-decision-journal.sh

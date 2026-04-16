@@ -14,7 +14,7 @@ Continue a frozen Kernel run when `Mac mini` is unavailable, without relying on 
 ## Required Surfaces
 
 - shared secret resolver:
-  - `process env -> Keychain -> explicit external env file`
+  - `process env -> Keychain -> shared SOPS bundle -> explicit external env file`
 - `doctor`
 - `compact artifact`
 - `recover-run`
@@ -23,6 +23,9 @@ Continue a frozen Kernel run when `Mac mini` is unavailable, without relying on 
 
 1. Connect by `Tailscale` and open the repository.
 2. Resolve shared secrets through the standard loader.
+   - Prefer Keychain for normal local continuation.
+   - If Keychain is absent or locked, use the shared SOPS bundle as a DR restore fallback.
+   - Treat GitHub org secrets as the CI plane, not as a local read backend.
 3. Run `codex-kernel-guard doctor --all-runs`.
 4. Identify the target by:
    - `project`
@@ -72,3 +75,5 @@ Continue a frozen Kernel run when `Mac mini` is unavailable, without relying on 
 - `recover-run` regenerates the heavy tmux profile from compact state.
 - `MBP` can continue a stale run from artifacts.
 - `cc pocket` can inspect and continue lightweight work from the same artifacts.
+- `MBP` and `Mac mini` resolve the same canonical shared-secret names without
+  printing values; `doctor` output is limited to present/missing, source, and length.

@@ -223,6 +223,39 @@ assert_field "workflow-dispatch-force-reason" "due_reasons_csv" "manual-force-li
   --now-epoch 11400 \
   --force-line-alert true
 
+assert_field "waiting-run-under-threshold-suppressed" "should_alert" "false" \
+  --event-name schedule \
+  --persist-state true \
+  --previous-state-json '{}' \
+  --now-epoch 11400 \
+  --openai-ok true \
+  --zai-ok true \
+  --waiting-run-count 1 \
+  --waiting-run-age-minutes 30 \
+  --waiting-run-oldest "Google Workspace Shared Feed Sync#24534657513"
+
+assert_field "waiting-run-over-threshold-alerts" "should_alert" "true" \
+  --event-name schedule \
+  --persist-state true \
+  --previous-state-json '{}' \
+  --now-epoch 11400 \
+  --openai-ok true \
+  --zai-ok true \
+  --waiting-run-count 1 \
+  --waiting-run-age-minutes 61 \
+  --waiting-run-oldest "Google Workspace Shared Feed Sync#24534657513"
+
+assert_field "waiting-run-over-threshold-reason" "due_reasons_csv" "workflow-waiting" \
+  --event-name schedule \
+  --persist-state true \
+  --previous-state-json '{}' \
+  --now-epoch 11400 \
+  --openai-ok true \
+  --zai-ok true \
+  --waiting-run-count 1 \
+  --waiting-run-age-minutes 61 \
+  --waiting-run-oldest "Google Workspace Shared Feed Sync#24534657513"
+
 total=$((total + 1))
 json_output="$(
   bash "${SCRIPT}" \
