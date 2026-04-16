@@ -10,18 +10,26 @@ usage() {
   cat <<'EOF'
 Usage:
   kernel-memory-query.sh search [--limit N] [--run <run_id>] [--format <text|json>] <query>
+  kernel-memory-query.sh packet [--run <run_id> | <query>] [--format <text|json>]
 EOF
 }
 
 compact_files() {
   [[ -d "${COMPACT_DIR}" ]] || return 0
-  find "${COMPACT_DIR}" -maxdepth 1 -type f -name '*.json' | sort
+  find "${COMPACT_DIR}" -maxdepth 1 -type f -name '*.json' ! -name '*.handoff.json' | sort
+}
+
+normalize_query() {
+  local value="${1:-}"
+  value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+  value="$(printf '%s' "${value}" | sed -E 's/[^a-z0-9]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]{2,}/ /g')"
+  printf '%s\n' "${value}"
 }
 
 valid_docs_json() {
   local run_filter="${1:-}"
-  local json path run_id
   local docs=""
+  local path json run_id
 
   while IFS= read -r path; do
     [[ -n "${path}" ]] || continue
@@ -29,7 +37,7 @@ valid_docs_json() {
     [[ -n "${json}" ]] || continue
     jq -e 'type == "object"' <<<"${json}" >/dev/null 2>&1 || continue
     if [[ -n "${run_filter}" ]]; then
-      run_id="$(jq -r '.run_id // ""' <<<"${json}" 2>/dev/null || true)"
+      run_id="$(jq -r '.run_id // ""' <<<"${json}")"
       [[ "${run_id}" == "${run_filter}" ]] || continue
     fi
     json="$(jq -cn --arg path "${path}" --argjson doc "${json}" '$doc + {compact_path: $path}')"
@@ -47,20 +55,11 @@ valid_docs_json() {
   printf '%s\n' "${docs}" | jq -cs '.'
 }
 
-normalize_query() {
-  local value="${1:-}"
-  value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
-  value="$(printf '%s' "${value}" | sed -E 's/[^a-z0-9]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]{2,}/ /g')"
-  printf '%s\n' "${value}"
-}
-
 cmd_search_json() {
   local query="${1:?query is required}"
   local limit="${2:-5}"
   local run_filter="${3:-}"
-  local normalized_query
-  local normalized_tokens
-  local docs_json
+  local normalized_query normalized_tokens docs_json
 
   normalized_query="$(normalize_query "${query}")"
   normalized_tokens="$(printf '%s\n' "${normalized_query}" | awk '{count=0; for (i=1; i<=NF; i++) if (length($i) > 1) count++; print count}')"
@@ -129,6 +128,7 @@ cmd_search_json() {
               $phase_artifact_keys,
               .workspace_receipt_path,
               .consensus_receipt_path,
+              .handoff_packet_path,
               $context_reference.path,
               $context_reference.label
             ] | map(norm) | join(" ")) as $haystack
@@ -146,7 +146,10 @@ cmd_search_json() {
               project: (.project // ""),
               purpose: (.purpose // ""),
               phase: phase_value,
+              current_phase: phase_value,
               mode: (.mode // ""),
+              runtime: (.runtime // ""),
+              lifecycle_state: (.lifecycle_state // ""),
               updated_at: (.updated_at // ""),
               score: $score,
               match_stage: (if $exact then "exact" elif $phrase then "phrase" else "token" end),
@@ -158,8 +161,9 @@ cmd_search_json() {
               compact_path: (.compact_path // ""),
               workspace_receipt_path: (.workspace_receipt_path // ""),
               consensus_receipt_path: (.consensus_receipt_path // ""),
-              context_reference_path: ($context_reference.path // ""),
-              context_reference_label: ($context_reference.label // "")
+              handoff_packet_path: (.handoff_packet_path // ""),
+              handoff_packet_sha256: (.handoff_packet_sha256 // ""),
+              context_reference: $context_reference
             }
         ] as $matches
       | {
@@ -201,8 +205,161 @@ cmd_search() {
   jq -r '
     .results
     | to_entries[]
-    | "  - result \(.key + 1): run=\(.value.run_id) | stage=\(.value.match_stage) | score=\(.value.score) | project=\(.value.project) | purpose=\(.value.purpose) | phase=\(.value.phase) | updated_at=\(.value.updated_at) | summary=\((.value.summary // []) | join(" || "))"
+    | "  - result \(.key + 1): run=\(.value.run_id) | stage=\(.value.match_stage) | score=\(.value.score) | project=\(.value.project) | purpose=\(.value.purpose) | phase=\(.value.current_phase) | updated_at=\(.value.updated_at) | summary=\((.value.summary // []) | join(" || "))"
   ' <<<"${json}"
+}
+
+compact_json_for_run() {
+  local run_id="${1:?run id is required}"
+  local docs_json
+  docs_json="$(valid_docs_json "${run_id}")"
+  jq -c '.[0] // {}' <<<"${docs_json}"
+}
+
+packet_json_from_doc() {
+  local doc_json="${1:?doc json is required}"
+  local packet_path packet_json
+  packet_path="$(jq -r '.handoff_packet_path // ""' <<<"${doc_json}")"
+  if [[ -n "${packet_path}" && -f "${packet_path}" ]]; then
+    packet_json="$(jq -c '.' "${packet_path}" 2>/dev/null || true)"
+    if [[ -n "${packet_json}" ]]; then
+      jq -cn \
+        --argjson packet "${packet_json}" \
+        --arg compact_path "$(jq -r '.compact_path // ""' <<<"${doc_json}")" \
+        --arg handoff_packet_path "${packet_path}" \
+        --arg handoff_packet_sha256 "$(jq -r '.handoff_packet_sha256 // ""' <<<"${doc_json}")" \
+        '$packet + {
+          source_compact_path: $compact_path,
+          handoff_packet_path: $handoff_packet_path,
+          handoff_packet_sha256: $handoff_packet_sha256
+        }'
+      return 0
+    fi
+  fi
+
+  jq -cn \
+    --arg kind "kernel-handoff-packet" \
+    --argjson version 1 \
+    --arg run_id "$(jq -r '.run_id // ""' <<<"${doc_json}")" \
+    --arg project "$(jq -r '.project // ""' <<<"${doc_json}")" \
+    --arg purpose "$(jq -r '.purpose // ""' <<<"${doc_json}")" \
+    --arg phase "$(jq -r '.current_phase // ""' <<<"${doc_json}")" \
+    --arg mode "$(jq -r '.mode // ""' <<<"${doc_json}")" \
+    --arg runtime "$(jq -r '.runtime // ""' <<<"${doc_json}")" \
+    --arg lifecycle_state "$(jq -r '.lifecycle_state // ""' <<<"${doc_json}")" \
+    --arg updated_at "$(jq -r '.updated_at // ""' <<<"${doc_json}")" \
+    --arg next_action "$(jq -r '(.next_action // [])[0] // ""' <<<"${doc_json}")" \
+    --arg compact_path "$(jq -r '.compact_path // ""' <<<"${doc_json}")" \
+    --arg handoff_packet_path "$(jq -r '.handoff_packet_path // ""' <<<"${doc_json}")" \
+    --arg handoff_packet_sha256 "$(jq -r '.handoff_packet_sha256 // ""' <<<"${doc_json}")" \
+    --argjson summary "$(jq -c '.summary // []' <<<"${doc_json}")" \
+    --argjson decisions "$(jq -c '.decisions // []' <<<"${doc_json}")" \
+    --argjson context_reference "$(jq -c '.context_reference // {}' <<<"${doc_json}")" \
+    '{
+      kind: $kind,
+      version: $version,
+      run_id: $run_id,
+      project: $project,
+      purpose: $purpose,
+      current_phase: $phase,
+      mode: $mode,
+      runtime: $runtime,
+      lifecycle_state: $lifecycle_state,
+      updated_at: $updated_at,
+      next_action: $next_action,
+      summary: $summary,
+      decisions: $decisions,
+      source_compact_path: $compact_path,
+      handoff_packet_path: $handoff_packet_path,
+      handoff_packet_sha256: $handoff_packet_sha256
+    }
+    + (if ($context_reference | length) == 0 then {} else {context_reference: $context_reference} end)'
+}
+
+render_packet_text() {
+  local packet_json="${1:?packet json is required}"
+  jq -r '
+    "Kernel handoff packet:",
+    "  - run id: \(.run_id)",
+    "  - project: \(.project)",
+    "  - purpose: \(.purpose)",
+    "  - phase: \(.current_phase)",
+    "  - mode: \(.mode)",
+    "  - runtime: \(.runtime)",
+    "  - lifecycle state: \(.lifecycle_state // "unknown")",
+    "  - next action: \(.next_action // "")",
+    "  - summary: \((.summary // []) | join(" || "))",
+    "  - decisions: \((.decisions // []) | join(" | "))",
+    "  - context reference: \(if ((.context_reference // {}) | length) == 0 then "none" else (((.context_reference.label // .context_reference.kind // "context") + " -> " + (.context_reference.path // ""))) end)",
+    "  - packet path: \(.handoff_packet_path // "")",
+    "  - compact path: \(.source_compact_path // "")"
+  ' <<<"${packet_json}"
+}
+
+cmd_packet() {
+  local format="text"
+  local run_filter=""
+  local query=""
+  local doc_json packet_json search_json
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --format)
+        format="${2:-}"
+        case "${format}" in
+          text|json) ;;
+          *)
+            echo "--format must be text or json" >&2
+            exit 2
+            ;;
+        esac
+        shift 2
+        ;;
+      --run)
+        run_filter="${2:-}"
+        [[ -n "${run_filter}" ]] || {
+          echo "--run requires a run id" >&2
+          exit 2
+        }
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        query="${1:-}"
+        shift
+        if [[ $# -gt 0 ]]; then
+          query="${query} $*"
+        fi
+        break
+        ;;
+    esac
+  done
+
+  if [[ -n "${run_filter}" ]]; then
+    doc_json="$(compact_json_for_run "${run_filter}")"
+  else
+    [[ -n "${query}" ]] || {
+      echo "packet requires --run <run_id> or a query" >&2
+      exit 2
+    }
+    search_json="$(cmd_search_json "${query}" 1 "")"
+    doc_json="$(jq -c '.results[0] // {}' <<<"${search_json}")"
+  fi
+
+  [[ "${doc_json}" != "{}" ]] || {
+    echo "no matching run found" >&2
+    exit 1
+  }
+
+  packet_json="$(packet_json_from_doc "${doc_json}")"
+  if [[ "${format}" == "json" ]]; then
+    printf '%s\n' "${packet_json}"
+    return 0
+  fi
+  render_packet_text "${packet_json}"
 }
 
 cmd="${1:-help}"
@@ -247,12 +404,12 @@ case "${cmd}" in
           exit 0
           ;;
         *)
-          if [[ -z "${query}" ]]; then
-            query="$1"
-          else
-            query="${query} $1"
-          fi
+          query="${1:-}"
           shift
+          if [[ $# -gt 0 ]]; then
+            query="${query} $*"
+          fi
+          break
           ;;
       esac
     done
@@ -261,6 +418,10 @@ case "${cmd}" in
       exit 2
     }
     cmd_search "${format}" "${query}" "${limit}" "${run_filter}"
+    ;;
+  packet)
+    shift || true
+    cmd_packet "$@"
     ;;
   help|-h|--help)
     usage

@@ -32,11 +32,26 @@ export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
 export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
 export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 
+context_reference_path="${TMP_DIR}/social-context.json"
+cat >"${context_reference_path}" <<'EOF'
+{
+  "kind": "social-post",
+  "post_id": "42",
+  "summary": ["Bounded external context"]
+}
+EOF
+
 KERNEL_TASK_SIZE_TIER="medium" bash "${CONSENSUS_SCRIPT}" record approved vote "compact receipt consensus" >/dev/null
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
 bash "${LEDGER_SCRIPT}" scheduler-state running "live-running" "/tmp/compact-test-workspace.json" >/dev/null
 bash "${COMPACT_SCRIPT}" update manual_snapshot "bootstrap-valid" >/dev/null
+KERNEL_COMPACT_PRESERVE_SUMMARY="true" \
+KERNEL_COMPACT_PRESERVE_LAST_EVENT="true" \
+KERNEL_CONTEXT_REFERENCE_PATH="${context_reference_path}" \
+KERNEL_CONTEXT_REFERENCE_KIND="social-post" \
+KERNEL_CONTEXT_REFERENCE_LABEL="social-post #42" \
+  bash "${COMPACT_SCRIPT}" update manual_snapshot "attach context" >/dev/null
 
 out="$(bash "${COMPACT_SCRIPT}" status)"
 grep -Fq 'present: true' <<<"${out}"
@@ -52,15 +67,24 @@ grep -Fq 'scheduler state: running' <<<"${out}"
 grep -Fq 'scheduler reason: live-running' <<<"${out}"
 grep -Fq 'workspace receipt path: /tmp/compact-test-workspace.json' <<<"${out}"
 grep -Fq "consensus receipt path: ${TMP_DIR}/state/consensus-receipts/compact-test.json" <<<"${out}"
+grep -Fq "handoff packet path: ${KERNEL_COMPACT_DIR}/compact-test.handoff.json" <<<"${out}"
+grep -Fq "context reference: social-post #42 -> ${context_reference_path}" <<<"${out}"
 grep -Fq 'phase artifacts: critic_report_path | plan_report_path' <<<"${out}"
 grep -Fq 'next action: implement-loader' <<<"${out}"
 grep -Fq 'decisions: use-keychain | mirror-github | keep-fugue-untouched' <<<"${out}"
 plan_report_path="$(jq -r '.phase_artifacts.plan_report_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
 critic_report_path="$(jq -r '.phase_artifacts.critic_report_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
 lifecycle_state="$(jq -r '.lifecycle_state' "${KERNEL_COMPACT_DIR}/compact-test.json")"
+handoff_packet_path="$(jq -r '.handoff_packet_path' "${KERNEL_COMPACT_DIR}/compact-test.json")"
+context_reference_json="$(jq -c '.context_reference // {}' "${KERNEL_COMPACT_DIR}/compact-test.json")"
 [[ "${plan_report_path}" == "/tmp/kernel-plan.md" ]]
 [[ "${critic_report_path}" == "/tmp/kernel-critic.md" ]]
 [[ "${lifecycle_state}" == "live-running" ]]
+[[ "${handoff_packet_path}" == "${KERNEL_COMPACT_DIR}/compact-test.handoff.json" ]]
+[[ -f "${handoff_packet_path}" ]]
+[[ "${context_reference_json}" == *"${context_reference_path}"* ]]
+grep -Fq '"run_id":"compact-test"' "${handoff_packet_path}"
+grep -Fq '"label":"social-post #42"' "${handoff_packet_path}"
 
 out="$(KERNEL_SUMMARY=$'line1\nline2\nline3\nline4' bash "${COMPACT_SCRIPT}" update manual_snapshot)"
 grep -Fq 'summary: line1 || line2 || line3' <<<"${out}"

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
+MEMORY_QUERY_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-memory-query.sh"
 CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
 
 usage() {
@@ -46,7 +47,7 @@ cmd_title() {
 
 cmd_prompt() {
   local run_id="${1:-${RUN_ID}}"
-  local json title summary next_action phase mode runtime
+  local json title summary next_action phase mode runtime handoff_packet
   json="$(compact_json "${run_id}")"
   title="$(jq -r '.codex_thread_title // (.project + ":" + .purpose)' <<<"${json}")"
   summary="$(jq -r '(.summary // []) | join(" || ")' <<<"${json}")"
@@ -54,6 +55,10 @@ cmd_prompt() {
   phase="$(jq -r '.current_phase // "unknown"' <<<"${json}")"
   mode="$(jq -r '.mode // "unknown"' <<<"${json}")"
   runtime="$(jq -r '.runtime // "kernel"' <<<"${json}")"
+  handoff_packet=""
+  if [[ -f "${MEMORY_QUERY_SCRIPT}" ]]; then
+    handoff_packet="$(bash "${MEMORY_QUERY_SCRIPT}" packet --run "${run_id}" --format text 2>/dev/null || true)"
+  fi
   cat <<EOF
 Kernel thread: ${title}
 Continue Kernel run ${run_id}.
@@ -62,6 +67,7 @@ Mode: ${mode}
 Runtime: ${runtime}
 Next action: ${next_action}
 Summary: ${summary}
+${handoff_packet}
 Resume this run as its dedicated Codex thread and continue under the repository Kernel contract.
 EOF
 }

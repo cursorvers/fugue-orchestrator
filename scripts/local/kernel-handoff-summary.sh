@@ -44,7 +44,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 latest_compact_path() {
-  ls -t "${COMPACT_DIR}"/*.json 2>/dev/null | head -n 1 || true
+  find "${COMPACT_DIR}" -maxdepth 1 -type f -name '*.json' ! -name '*.handoff.json' -print 2>/dev/null \
+    | while IFS= read -r path; do
+        printf '%s\t%s\n' "$(file_mtime_epoch "${path}")" "${path}"
+      done \
+    | sort -rn \
+    | head -n 1 \
+    | cut -f2-
+}
+
+file_mtime_epoch() {
+  local path="${1:?path is required}"
+  stat -f '%m' "${path}" 2>/dev/null \
+    || stat -c '%Y' "${path}" 2>/dev/null \
+    || printf '0\n'
 }
 
 compact_path_for_run() {
@@ -145,6 +158,8 @@ printf '  - active models: %s\n' "${active_models:-none}"
 printf '  - lifecycle state: %s\n' "$(jq -r '.lifecycle_state // "unknown"' <<<"${compact_json}")"
 printf '  - scheduler state: %s\n' "$(jq -r '.scheduler_state // "unknown"' <<<"${compact_json}")"
 printf '  - scheduler reason: %s\n' "$(jq -r '.scheduler_reason // ""' <<<"${compact_json}")"
+printf '  - handoff packet path: %s\n' "$(jq -r '.handoff_packet_path // ""' <<<"${compact_json}")"
+printf '  - context reference: %s\n' "$(jq -r 'if ((.context_reference // {}) | length) == 0 then "none" else ((.context_reference.label // .context_reference.kind // "context") + " -> " + (.context_reference.path // "")) end' <<<"${compact_json}")"
 printf '  - next action: %s\n' "${next_action}"
 printf '  - phase artifact focus: %s=%s\n' "${focus_key:-none}" "${phase_artifact_focus}"
 printf '  - decisions: %s\n' "${decisions:-none}"
