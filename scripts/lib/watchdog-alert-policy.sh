@@ -114,6 +114,27 @@ normalize_state() {
   esac
 }
 
+normalize_state_json() {
+  local raw="${1:-}"
+  local normalized
+  if [[ -z "${raw}" ]]; then
+    raw='{}'
+  fi
+  normalized="$(
+    printf '%s\n' "${raw}" | jq -cs '
+      (map(select(type == "object")) | first // {})
+      | .reason_buckets = (
+          (.reason_buckets // {})
+          | if type == "object" then . else {} end
+        )
+    ' 2>/dev/null
+  )" || normalized='{"reason_buckets":{}}'
+  if [[ -z "${normalized}" ]]; then
+    normalized='{"reason_buckets":{}}'
+  fi
+  printf '%s' "${normalized}"
+}
+
 reason_key() {
   local reason="$1"
   printf '%s' "${reason}" | sed 's/[^A-Za-z0-9._-]/_/g'
@@ -252,14 +273,8 @@ fi
 now_epoch="$(normalize_int "${now_epoch}" "$(date -u +%s)")"
 prev_epoch="$((now_epoch - tick_seconds))"
 
-if ! jq -e . >/dev/null 2>&1 <<<"${previous_state_json}"; then
-  previous_state_json='{}'
-fi
-if ! jq -e '.reason_buckets? // {} | type == "object"' >/dev/null 2>&1 <<<"${previous_state_json}"; then
-  previous_state_json='{}'
-fi
-
-state_json="$(jq -c '.reason_buckets = (.reason_buckets // {})' <<<"${previous_state_json}")"
+previous_state_json="$(normalize_state_json "${previous_state_json}")"
+state_json="${previous_state_json}"
 updated_state_json="${state_json}"
 state_update_required="false"
 
@@ -311,8 +326,8 @@ maybe_mark_stale_reason() {
     return
   fi
 
-  active_reasons+=("${reason}")
   if (( minutes < 180 )); then
+    active_reasons+=("${reason}")
     return
   fi
 
@@ -321,6 +336,7 @@ maybe_mark_stale_reason() {
     return
   fi
 
+  active_reasons+=("${reason}")
   if is_initial_or_repeat_window "${minutes}" 180 360; then
     due_reasons+=("${reason}")
   fi
@@ -439,6 +455,7 @@ bucket_180_now="$((now_epoch / 10800))"
 bucket_180_prev="$((prev_epoch / 10800))"
 bucket_360_now="$((now_epoch / 21600))"
 bucket_360_prev="$((prev_epoch / 21600))"
+updated_state_json="$(normalize_state_json "${updated_state_json}")"
 
 if [[ "${format}" == "env" ]]; then
   message_base64="$(printf '%s' "${message}" | base64 | tr -d '\n')"

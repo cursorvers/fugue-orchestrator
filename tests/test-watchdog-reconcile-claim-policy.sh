@@ -46,6 +46,8 @@ assert_case "suppresses-unexpired-claim" '[101,102]' '{"claims":{"101":{"issue_n
 assert_case "reclaims-stale-claim" '[101]' '{"claims":{"101":{"issue_number":101,"claimed_at":100,"expires_at":150,"source":"watchdog-reconcile","status":"claimed"}}}' '[101]' '1'
 assert_case "releases-non-pending-claims" '[102]' '{"claims":{"101":{"issue_number":101,"claimed_at":180,"expires_at":240,"source":"watchdog-reconcile","status":"claimed"}}}' '[102]' '1'
 assert_case "releases-all-claims-when-pending-empty" '[]' '{"claims":{"101":{"issue_number":101,"claimed_at":180,"expires_at":240,"source":"watchdog-reconcile","status":"claimed"}}}' '[]' '0'
+assert_case "normalizes-concatenated-missing-variable-state" '[]' '{"message":"Not Found","claims":{}}{}' '[]' '0'
+assert_case "normalizes-invalid-pending-json" '[not-json' '{"claims":{"101":{"issue_number":101,"claimed_at":180,"expires_at":240,"source":"watchdog-reconcile","status":"claimed"}}}' '[]' '0'
 
 echo ""
-echo "=== Results: 5/5 passed, 0 failed ==="
+echo "=== Results: 7/7 passed, 0 failed ==="

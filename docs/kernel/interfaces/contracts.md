@@ -59,8 +59,9 @@ If `GLM` fails:
 
 ### Simulation
 
-- `codex-spark only`
-- if unavailable, `codex-subagent` substitution requires explicit human approval
+- use one codex-spark lane when available
+- keep GLM / main Codex / role-specialist lanes available so codex-spark rate limits do not block simulation
+- require human approval only when the lane count drops below the critical minimum or a paid live provider must be started
 
 ### Implementation / Verification
 

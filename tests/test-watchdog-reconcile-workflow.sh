@@ -31,5 +31,13 @@ grep -Fq 'gh variable set FUGUE_RECONCILE_CLAIM_STATE' "${WORKFLOW}" || {
   echo "FAIL: watchdog workflow missing reconcile claim state persistence" >&2
   exit 1
 }
+grep -Fq 'gh variable get FUGUE_RECONCILE_CLAIM_STATE' "${WORKFLOW}" || {
+  echo "FAIL: watchdog workflow should read reconcile claim state without concatenating gh api 404 JSON" >&2
+  exit 1
+}
+grep -Fq 'next_state_b64=' "${WORKFLOW}" || {
+  echo "FAIL: watchdog workflow should pass reconcile claim state through base64 GITHUB_OUTPUT" >&2
+  exit 1
+}
 
 echo "PASS [watchdog-reconcile-workflow]"

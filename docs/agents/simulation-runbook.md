@@ -10,7 +10,7 @@ scripts/sim-orchestrator-switch.sh
 ```
 
 Simulation common rule:
-- `FUGUE_SIM_CODEX_SPARK_ONLY=true` (default) forces simulation to run `codex-main` and codex multi-agent lanes on `gpt-5.3-codex-spark` for faster turnaround.
-- Set `FUGUE_SIM_CODEX_SPARK_ONLY=false` only when main-model parity testing against `gpt-5.4` is explicitly required.
+- `FUGUE_SIM_CODEX_SPARK_ONLY=false` (default) keeps main-model and role-lane diversity so codex-spark rate limits do not stop simulation.
+- Set `FUGUE_SIM_CODEX_SPARK_ONLY=true` only for short, speed-first checks that can tolerate codex-spark quota exhaustion.
 
 Use live rehearsal only when needed and clean up synthetic issues after verification.

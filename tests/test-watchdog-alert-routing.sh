@@ -67,4 +67,19 @@ grep -Fq 'Discord system webhook did not confirm delivery' "${WORKFLOW}" || {
   exit 1
 }
 
+grep -Fq 'watchdog_alert_next_state_b64=' "${WORKFLOW}" || {
+  echo "FAIL: fugue-watchdog should pass persisted alert state through base64 GITHUB_OUTPUT" >&2
+  exit 1
+}
+
+grep -Fq 'base64 -d | jq -c' "${WORKFLOW}" || {
+  echo "FAIL: fugue-watchdog should decode and validate persisted alert state before gh variable set" >&2
+  exit 1
+}
+
+if grep -Fq 'watchdog_alert_next_state_json=' "${WORKFLOW}"; then
+  echo "FAIL: fugue-watchdog must not write raw JSON state directly to GITHUB_OUTPUT" >&2
+  exit 1
+fi
+
 echo "PASS [watchdog-alert-routing]"
