@@ -43,6 +43,20 @@
       "enabled": true
     },
     {
+      "id": "x-auto-draft-only",
+      "name": "x-auto Draft Only",
+      "description": "Generate dispatchable x-auto draft candidates and quoted-author recovery artifacts without posting.",
+      "adapter": "scripts/local/integrations/xauto-draft-only.sh",
+      "kind": "content",
+      "adapter_class": "shell",
+      "authority": "artifact-only",
+      "validation_mode": "budgeted",
+      "contract_owner": "kernel-local",
+      "preferred_lane": "codex",
+      "protected_interface": false,
+      "enabled": true
+    },
+    {
       "id": "discord-notify",
       "name": "Discord Notify",
       "description": "Send linked-run health notifications to Discord webhook.",
