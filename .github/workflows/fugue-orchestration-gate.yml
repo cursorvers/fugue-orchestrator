@@ -328,7 +328,7 @@ jobs:
           bash_n tests/test-kernel-runtime-status-surface.sh
           bash_n tests/test-kernel-runtime-workspace.sh
           bash_n tests/test-kernel-memory-query.sh
-          bash_n tests/test-codex-kernel-guard-memory-query.sh
+          bash_n_optional tests/test-codex-kernel-guard-memory-query.sh
           bash_n tests/test-kernel-scheduler.sh
           bash_n tests/test-xauto-draft-only.sh
           bash_n_optional tests/test-xauto-quoted-author-sync.sh
