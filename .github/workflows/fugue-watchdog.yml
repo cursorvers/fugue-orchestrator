@@ -701,13 +701,23 @@ jobs:
           fi
 
           decoded_next_state="$(printf '%s' "${NEXT_STATE_B64:-}" | base64 -d 2>/dev/null || printf '{}')"
-          NEXT_STATE_JSON="$(printf '%s' "${decoded_next_state:-{}}" | jq -c '
-            (if type == "object" then . else {} end)
-            | .claims = ((.claims // {}) | if type == "object" then . else {} end)
-          ')"
+          state_raw="${decoded_next_state:-}"
+          if [[ -z "${state_raw}" ]]; then
+            state_raw='{}'
+          fi
+          failed_raw="${FAILED_ISSUE_NUMBERS_JSON:-}"
+          if [[ -z "${failed_raw}" ]]; then
+            failed_raw='[]'
+          fi
           persist_json="$(jq -cn \
-            --argjson state "${NEXT_STATE_JSON}" \
-            --argjson failed "${FAILED_ISSUE_NUMBERS_JSON}" '
+            --arg state_raw "${state_raw}" \
+            --arg failed_raw "${failed_raw}" '
+              ($state_raw | fromjson? // {}) as $state_raw_json
+              | ($failed_raw | fromjson? // []) as $failed_raw_json
+              | ($state_raw_json | if type == "object" then . else {} end
+                  | .claims = ((.claims // {}) | if type == "object" then . else {} end)) as $state
+              | ($failed_raw_json | if type == "array" then . else [] end) as $failed
+              |
               reduce $failed[] as $issue ($state; .claims |= (del(.[($issue|tostring)])))
             ')"
 
