@@ -82,8 +82,8 @@ Required input:
 
 Behavior:
 
-- if the issue already has `tutti` or `processing`, dispatch `fugue-tutti-caller`
-- if the issue has `fugue-task` but not `tutti`, dispatch `fugue-task-router`
+- if the issue has `tutti`, `processing`, or `fugue-task`, dispatch `fugue-caller` with an explicit `issues`/`tutti` replay
+- if the issue lacks `fugue-task`, no recovery dispatch is performed
 
 Recommended inputs:
 
@@ -91,13 +91,28 @@ Recommended inputs:
 - `handoff_target=fugue-bridge` when forcing legacy rollback
 - `subscription_offline_policy_override=continuity`
 
+### `manus-diagnose`
+
+Use when Manus should be checked as a standby recovery lane without spending Manus quota.
+
+Behavior:
+
+- checks whether the Manus client and key resolution path are available
+- writes a diagnosis and recommendations to the workflow summary
+- does not start a live Manus task by default
+
+Recommended input:
+
+- `mode=manus-diagnose`
+
 ## Mobile Recovery Sequence
 
 1. Run `status`
 2. Run `mobile-progress` if you want a phone-friendly thread update
 3. If local runner is unhealthy, run `continuity-canary`
 4. If legacy rollback must remain available, run `rollback-canary`
-5. If a real issue is stuck, run `reroute-issue`
+5. If Manus may be needed as a standby repair lane, run `manus-diagnose`
+6. If a real issue is stuck, run `reroute-issue`
 
 ## Recovery Guarantees
 

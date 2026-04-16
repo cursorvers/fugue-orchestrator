@@ -370,6 +370,41 @@ reroute_issue() {
   append_summary "- no recovery dispatch performed: issue is not labeled \`fugue-task\`"
 }
 
+manus_diagnose() {
+  local receipt run_url api_key_available client_available access_reason next_action live_started
+  run_url="$(current_run_url)"
+
+  append_summary "## Manus Recovery Diagnosis"
+  append_summary ""
+  append_summary "- repository: \`${repo}\`"
+  append_summary "- issue: \`${issue_number:-none}\`"
+  append_summary "- live execution: \`disabled\`"
+  append_summary ""
+
+  receipt="$(
+    node "${SCRIPT_DIR}/manus-recovery-diagnose.js" \
+      --repo "${repo}" \
+      --issue-number "${issue_number}" \
+      --run-url "${run_url}"
+  )"
+  client_available="$(printf '%s' "${receipt}" | jq -r '.clientAvailable')"
+  api_key_available="$(printf '%s' "${receipt}" | jq -r '.apiKeyAvailable')"
+  access_reason="$(printf '%s' "${receipt}" | jq -r '.accessReason')"
+  live_started="$(printf '%s' "${receipt}" | jq -r '.liveExecutionStarted')"
+  next_action="$(printf '%s' "${receipt}" | jq -r '.nextAction')"
+
+  append_summary "- manus client available: \`${client_available}\`"
+  append_summary "- manus api key available: \`${api_key_available}\`"
+  append_summary "- access reason: \`${access_reason}\`"
+  append_summary "- live manus task started: \`${live_started}\`"
+  append_summary "- next action: \`${next_action}\`"
+  append_summary ""
+  append_summary "### Recommendations"
+  while IFS= read -r line; do
+    append_summary "- ${line}"
+  done < <(printf '%s' "${receipt}" | jq -r '.recommendations[]')
+}
+
 case "${mode}" in
   status)
     summarize_status
@@ -385,6 +420,9 @@ case "${mode}" in
     ;;
   reroute-issue)
     reroute_issue
+    ;;
+  manus-diagnose)
+    manus_diagnose
     ;;
   *)
     echo "Unknown RECOVERY_MODE: ${mode}" >&2
