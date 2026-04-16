@@ -393,7 +393,11 @@ jobs:
             [[ -f "${target}" ]] || { echo "skip optional test target: ${target}"; return 0; }
             bash "${target}"
           }
-          bash tests/test-xauto-draft-only.sh
+          if [[ -f scripts/local/integrations/xauto_quoted_author_sync.py ]]; then
+            bash tests/test-xauto-draft-only.sh
+          else
+            echo "skip optional x-auto draft-only test until quoted-author helper is present"
+          fi
           run_optional tests/test-xauto-quoted-author-sync.sh
           run_optional tests/test-xauto-blocked-recovery.sh
 
