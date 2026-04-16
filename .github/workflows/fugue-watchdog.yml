@@ -618,6 +618,35 @@ jobs:
             exit 0
           fi
 
+          if [[ -z "${NEXT_STATE_B64:-}" ]]; then
+            echo "::error::watchdog next alert state payload is empty; refusing to overwrite FUGUE_WATCHDOG_ALERT_STATE." >&2
+            exit 1
+          fi
+
+          NEXT_STATE_JSON="$(printf '%s' "${NEXT_STATE_B64:-}" | base64 -d | jq -c 'if type == "object" then . else {} end')"
+          gh variable set FUGUE_WATCHDOG_ALERT_STATE \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${NEXT_STATE_JSON}" >/dev/null
+
+      - name: Persist watchdog alert recovery state
+        if: ${{ steps.decide.outputs.should_alert != 'true' && steps.decide.outputs.watchdog_alert_persist == 'true' && steps.decide.outputs.watchdog_alert_state_update_required == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
+          NEXT_STATE_B64: ${{ steps.decide.outputs.watchdog_alert_next_state_b64 }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${OPS_TOKEN:-}" ]]; then
+            GH_TOKEN="${OPS_TOKEN}"
+            export GH_TOKEN
+          fi
+
+          if [[ -z "${NEXT_STATE_B64:-}" ]]; then
+            echo "::error::watchdog recovery alert state payload is empty; refusing to overwrite FUGUE_WATCHDOG_ALERT_STATE." >&2
+            exit 1
+          fi
+
           NEXT_STATE_JSON="$(printf '%s' "${NEXT_STATE_B64:-}" | base64 -d | jq -c 'if type == "object" then . else {} end')"
           gh variable set FUGUE_WATCHDOG_ALERT_STATE \
             --repo "${GITHUB_REPOSITORY}" \
