@@ -223,6 +223,76 @@ assert_field "workflow-dispatch-force-reason" "due_reasons_csv" "manual-force-li
   --now-epoch 11400 \
   --force-line-alert true
 
+total=$((total + 1))
+json_output="$(
+  bash "${SCRIPT}" \
+    --event-name schedule \
+    --persist-state true \
+    --previous-state-json '{not-json' \
+    --now-epoch 11400 \
+    --openai-ok false \
+    --pending-count 2 \
+    --format json
+)" || {
+  echo "FAIL [invalid-previous-state-json-is-normalized]: script exited with error"
+  failed=$((failed + 1))
+  json_output=""
+}
+if [[ -n "${json_output}" ]] && jq -e '.next_state.reason_buckets | type == "object"' >/dev/null <<<"${json_output}"; then
+  echo "PASS [invalid-previous-state-json-is-normalized]"
+  passed=$((passed + 1))
+elif [[ -n "${json_output}" ]]; then
+  echo "FAIL [invalid-previous-state-json-is-normalized]: next_state.reason_buckets is not an object"
+  failed=$((failed + 1))
+fi
+
+total=$((total + 1))
+json_output="$(
+  bash "${SCRIPT}" \
+    --event-name workflow_dispatch \
+    --persist-state true \
+    --previous-state-json '{"message":"Not Found","reason_buckets":{}}{}' \
+    --now-epoch 11400 \
+    --openai-ok true \
+    --zai-ok true \
+    --format json
+)" || {
+  echo "FAIL [concatenated-previous-state-json-is-normalized]: script exited with error"
+  failed=$((failed + 1))
+  json_output=""
+}
+if [[ -n "${json_output}" ]] && jq -e '.next_state.reason_buckets | type == "object"' >/dev/null <<<"${json_output}"; then
+  echo "PASS [concatenated-previous-state-json-is-normalized]"
+  passed=$((passed + 1))
+elif [[ -n "${json_output}" ]]; then
+  echo "FAIL [concatenated-previous-state-json-is-normalized]: next_state.reason_buckets is not an object"
+  failed=$((failed + 1))
+fi
+
+total=$((total + 1))
+json_output="$(
+  bash "${SCRIPT}" \
+    --event-name schedule \
+    --persist-state true \
+    --previous-state-json '{}' \
+    --now-epoch 20000 \
+    --openai-ok true \
+    --zai-ok true \
+    --mainframe-stale true \
+    --mainframe-hours 3 \
+    --mainframe-minutes 186 \
+    --mainframe-pending-count 3 \
+    --format json
+)"
+mainframe_active_count="$(jq -r '[.active_reasons[] | select(. == "mainframe-stale")] | length' <<<"${json_output}")"
+if [[ "${mainframe_active_count}" == "1" ]]; then
+  echo "PASS [persisted-stale-active-reason-is-not-duplicated]"
+  passed=$((passed + 1))
+else
+  echo "FAIL [persisted-stale-active-reason-is-not-duplicated]: count=${mainframe_active_count}"
+  failed=$((failed + 1))
+fi
+
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="
 

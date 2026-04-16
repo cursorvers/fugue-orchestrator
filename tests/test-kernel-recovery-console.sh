@@ -11,6 +11,10 @@ grep -q -- '- mobile-progress' "${WORKFLOW}" || {
   echo "FAIL: kernel-recovery-console workflow missing mobile-progress mode" >&2
   exit 1
 }
+grep -q -- '- manus-diagnose' "${WORKFLOW}" || {
+  echo "FAIL: kernel-recovery-console workflow missing manus-diagnose mode" >&2
+  exit 1
+}
 grep -q 'name: kernel-mobile-progress' "${MOBILE_WORKFLOW}" || {
   echo "FAIL: missing kernel-mobile-progress workflow" >&2
   exit 1
@@ -25,6 +29,14 @@ grep -q 'mobile_progress()' "${SCRIPT}" || {
 }
 grep -q 'ensure_status_issue()' "${SCRIPT}" || {
   echo "FAIL: recovery console script missing status-thread helper" >&2
+  exit 1
+}
+grep -q 'manus_diagnose()' "${SCRIPT}" || {
+  echo "FAIL: recovery console script missing manus_diagnose helper" >&2
+  exit 1
+}
+grep -q 'manus-recovery-diagnose.js' "${SCRIPT}" || {
+  echo "FAIL: manus-diagnose mode should call the Manus diagnosis helper" >&2
   exit 1
 }
 grep -q 'gh issue comment "${status_issue}"' "${SCRIPT}" || {
@@ -110,6 +122,23 @@ grep -q -- '-f trigger_event_name=issues' "${FAKE_GH_LOG}" || {
 }
 grep -q -- '-f trigger_label_name=tutti' "${FAKE_GH_LOG}" || {
   echo "FAIL: reroute-issue runtime should replay explicit tutti label trigger" >&2
+  exit 1
+}
+
+PATH="${FAKE_BIN}:${PATH}" \
+FAKE_GH_LOG="${FAKE_GH_LOG}" \
+GITHUB_REPOSITORY="cursorvers/fugue-orchestrator" \
+GITHUB_STEP_SUMMARY="${FAKE_SUMMARY}" \
+RECOVERY_MODE="manus-diagnose" \
+RECOVERY_ISSUE_NUMBER="123" \
+bash "${SCRIPT}" >/dev/null
+
+grep -q 'Manus Recovery Diagnosis' "${FAKE_SUMMARY}" || {
+  echo "FAIL: manus-diagnose should append a recovery diagnosis summary" >&2
+  exit 1
+}
+grep -q 'live manus task started: `false`' "${FAKE_SUMMARY}" || {
+  echo "FAIL: manus-diagnose must not start a live Manus task by default" >&2
   exit 1
 }
 

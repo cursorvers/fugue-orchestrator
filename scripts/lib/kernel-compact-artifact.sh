@@ -25,6 +25,16 @@ default_run_id() {
 
 RUN_ID="$(default_run_id)"
 
+project_from_run_id() {
+  local run_id="${1:-${RUN_ID}}"
+  awk -F: 'NF >= 6 && $1 == "adhoc" && $3 != "" {print $3}' <<<"${run_id}"
+}
+
+purpose_from_run_id() {
+  local run_id="${1:-${RUN_ID}}"
+  awk -F: 'NF >= 6 && $1 == "adhoc" && $4 != "" {print $4}' <<<"${run_id}"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -163,6 +173,8 @@ resolve_tmux_session() {
 resolve_codex_thread_title() {
   local existing_json="${1:-}"
   local existing_title=""
+  local existing_project=""
+  local existing_purpose=""
   local session_short_id
   if [[ -n "${existing_json}" ]]; then
     existing_title="$(jq -r '.codex_thread_title // ""' <<<"${existing_json}")"
@@ -170,7 +182,15 @@ resolve_codex_thread_title() {
       printf '%s\n' "${existing_title}"
       return 0
     fi
-    jq -r '(.project // "kernel-workspace") + ":" + (.purpose // "unspecified")' <<<"${existing_json}"
+    existing_project="$(jq -r '.project // ""' <<<"${existing_json}")"
+    existing_purpose="$(jq -r '.purpose // ""' <<<"${existing_json}")"
+    if [[ -z "${existing_project}" ]]; then
+      existing_project="$(project_from_run_id "${RUN_ID}")"
+    fi
+    if [[ -z "${existing_purpose}" ]]; then
+      existing_purpose="$(purpose_from_run_id "${RUN_ID}")"
+    fi
+    printf '%s:%s\n' "${existing_project:-${KERNEL_PROJECT:-kernel-workspace}}" "${existing_purpose:-${KERNEL_PURPOSE:-unspecified}}"
     return 0
   fi
   session_short_id="$(default_session_short_id)"
@@ -344,6 +364,10 @@ resolve_phase_artifacts_json() {
   if [[ -n "${existing_json}" ]]; then
     existing_phase_artifacts="$(jq -c '.phase_artifacts // {}' <<<"${existing_json}")"
   fi
+  if bool_env "${KERNEL_COMPACT_PRESERVE_PHASE_ARTIFACTS:-false}"; then
+    printf '%s\n' "${existing_phase_artifacts}"
+    return 0
+  fi
   jq -cn \
     --argjson existing_phase_artifacts "${existing_phase_artifacts}" \
     --arg research_report_path "${research_report_path}" \
@@ -441,10 +465,16 @@ cmd_update() {
     IFS=$'\t' read -r _ep _eu < <(jq -r '[(.project // ""), (.purpose // "")] | @tsv' <<<"${existing_json}")
     existing_project="${_ep}"
     existing_purpose="${_eu}"
+    if [[ -z "${existing_project}" ]]; then
+      existing_project="$(project_from_run_id "${RUN_ID}")"
+    fi
+    if [[ -z "${existing_purpose}" ]]; then
+      existing_purpose="$(purpose_from_run_id "${RUN_ID}")"
+    fi
   else
     existing_json=""
-    existing_project=""
-    existing_purpose=""
+    existing_project="$(project_from_run_id "${RUN_ID}")"
+    existing_purpose="$(purpose_from_run_id "${RUN_ID}")"
   fi
   existing_mode="${KERNEL_MODE:-}"
   existing_blocking_reason=""

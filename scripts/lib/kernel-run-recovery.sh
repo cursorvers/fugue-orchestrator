@@ -177,8 +177,8 @@ refresh_compact_artifact() {
       ((.next_action // []) | if type == "array" then join("|") elif type == "string" then . else "" end),
       ((.decisions // []) | join("|")),
       (.runtime // "kernel"),
-      (.project // "kernel-workspace"),
-      (.purpose // "unspecified"),
+      (.project // ""),
+      (.purpose // ""),
       (.current_phase // "unknown"),
       (.mode // "unknown"),
       (.tmux_session // ""),
@@ -200,6 +200,9 @@ refresh_compact_artifact() {
   KERNEL_NEXT_ACTIONS="${next_actions}" \
   KERNEL_DECISIONS="${decisions}" \
   KERNEL_SUMMARY="${summary}" \
+  KERNEL_COMPACT_PRESERVE_SUMMARY=true \
+  KERNEL_COMPACT_PRESERVE_LAST_EVENT=true \
+  KERNEL_COMPACT_PRESERVE_PHASE_ARTIFACTS=true \
     bash "${COMPACT_SCRIPT}" update recovered_session >/dev/null
 }
 
@@ -288,8 +291,8 @@ cmd_recover() {
       (.tmux_session // ""),
       (.session_fingerprint // ""),
       (.runtime // "kernel"),
-      (.project // "kernel-workspace"),
-      (.purpose // "unspecified")
+      (.project // ""),
+      (.purpose // "")
     ' <<<"${json}"
   )
   session_state="$(ensure_session "${run_id}" "${tmux_session}" "${session_fingerprint}")"

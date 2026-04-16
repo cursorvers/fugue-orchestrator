@@ -261,9 +261,11 @@ jobs:
           LAST_TIME="$(echo "${RUNS_JSON}" | jq -r '.workflow_runs[0].created_at // empty')"
 
           if [[ -z "${LAST_TIME}" ]]; then
-            echo "stale=true" >> "${GITHUB_OUTPUT}"
-            echo "hours_since=9999" >> "${GITHUB_OUTPUT}"
-            echo "minutes_since=999999" >> "${GITHUB_OUTPUT}"
+            {
+              echo "stale=true"
+              echo "hours_since=9999"
+              echo "minutes_since=999999"
+            } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -296,9 +298,11 @@ jobs:
           LAST_TIME="$(echo "${RUNS_JSON}" | jq -r '.workflow_runs[0].created_at // empty')"
 
           if [[ -z "${LAST_TIME}" ]]; then
-            echo "stale=true" >> "${GITHUB_OUTPUT}"
-            echo "hours_since=9999" >> "${GITHUB_OUTPUT}"
-            echo "minutes_since=999999" >> "${GITHUB_OUTPUT}"
+            {
+              echo "stale=true"
+              echo "hours_since=9999"
+              echo "minutes_since=999999"
+            } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -423,7 +427,7 @@ jobs:
           fi
           if gh variable list --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             watchdog_alert_persist="true"
-            watchdog_alert_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/FUGUE_WATCHDOG_ALERT_STATE" --jq '.value' 2>/dev/null || printf '{}')"
+            watchdog_alert_state="$(gh variable get FUGUE_WATCHDOG_ALERT_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || printf '{}')"
           fi
 
           policy_json="$(
@@ -464,12 +468,14 @@ jobs:
               --previous-state-json "${watchdog_alert_state}" \
               --format json
           )"
+          policy_json="$(printf '%s' "${policy_json}" | jq -c .)"
 
           should_alert="$(printf '%s' "${policy_json}" | jq -r '.should_alert')"
           force_line_alert="$(printf '%s' "${policy_json}" | jq -r '.force_line_alert')"
           msg="$(printf '%s' "${policy_json}" | jq -r '.message')"
           state_update_required="$(printf '%s' "${policy_json}" | jq -r '.state_update_required')"
-          next_state_json="$(printf '%s' "${policy_json}" | jq -c '.next_state')"
+          next_state_json="$(printf '%s' "${policy_json}" | jq -c '.next_state // {} | if type == "object" then . else {} end')"
+          next_state_b64="$(printf '%s' "${next_state_json}" | base64 | tr -d '\n')"
           due_reasons_csv="$(printf '%s' "${policy_json}" | jq -r 'if (.due_reasons | length) == 0 then "" else (.due_reasons | join(",")) end')"
           persist_state="$(printf '%s' "${policy_json}" | jq -r '.persist_state')"
 
@@ -479,7 +485,7 @@ jobs:
             echo "watchdog_alert_due_reasons=${due_reasons_csv}"
             echo "watchdog_alert_persist=${persist_state}"
             echo "watchdog_alert_state_update_required=${state_update_required}"
-            echo "watchdog_alert_next_state_json=${next_state_json}"
+            echo "watchdog_alert_next_state_b64=${next_state_b64}"
             echo "message<<EOF"
             echo "${msg}"
             echo "EOF"
@@ -547,7 +553,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
-          NEXT_STATE_JSON: ${{ steps.decide.outputs.watchdog_alert_next_state_json }}
+          NEXT_STATE_B64: ${{ steps.decide.outputs.watchdog_alert_next_state_b64 }}
           DISCORD_SENT: ${{ steps.discord_alert.outputs.sent }}
         run: |
           set -euo pipefail
@@ -563,6 +569,7 @@ jobs:
             exit 0
           fi
 
+          NEXT_STATE_JSON="$(printf '%s' "${NEXT_STATE_B64:-}" | base64 -d | jq -c 'if type == "object" then . else {} end')"
           gh variable set FUGUE_WATCHDOG_ALERT_STATE \
             --repo "${GITHUB_REPOSITORY}" \
             --body "${NEXT_STATE_JSON}" >/dev/null
@@ -624,7 +631,7 @@ jobs:
           fi
           if gh variable list --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             reconcile_claim_persist="true"
-            reconcile_claim_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/FUGUE_RECONCILE_CLAIM_STATE" --jq '.value' 2>/dev/null || printf '{}')"
+            reconcile_claim_state="$(gh variable get FUGUE_RECONCILE_CLAIM_STATE --repo "${GITHUB_REPOSITORY}" --json value -q '.value' 2>/dev/null || printf '{}')"
           fi
 
           eval "$(
@@ -636,13 +643,14 @@ jobs:
               --ttl-seconds 1800 \
               --format env
           )"
+          next_state_b64="$(printf '%s' "${next_state_json}" | base64 | tr -d '\n')"
 
           {
             echo "dispatch_issue_numbers_json=${dispatch_issue_numbers_json}"
             echo "dispatch_count=${dispatch_count}"
             echo "state_update_required=${state_update_required}"
             echo "persist_state=${persist_state}"
-            echo "next_state_json=${next_state_json}"
+            echo "next_state_b64=${next_state_b64}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Trigger caller for claimable issues
@@ -682,7 +690,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OPS_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || '' }}
-          NEXT_STATE_JSON: ${{ steps.claims.outputs.next_state_json || '{}' }}
+          NEXT_STATE_B64: ${{ steps.claims.outputs.next_state_b64 || '' }}
           FAILED_ISSUE_NUMBERS_JSON: ${{ steps.dispatch.outputs.failed_issue_numbers_json || '[]' }}
         run: |
           set -euo pipefail
@@ -692,6 +700,11 @@ jobs:
             export GH_TOKEN
           fi
 
+          decoded_next_state="$(printf '%s' "${NEXT_STATE_B64:-}" | base64 -d 2>/dev/null || printf '{}')"
+          NEXT_STATE_JSON="$(printf '%s' "${decoded_next_state:-{}}" | jq -c '
+            (if type == "object" then . else {} end)
+            | .claims = ((.claims // {}) | if type == "object" then . else {} end)
+          ')"
           persist_json="$(jq -cn \
             --argjson state "${NEXT_STATE_JSON}" \
             --argjson failed "${FAILED_ISSUE_NUMBERS_JSON}" '

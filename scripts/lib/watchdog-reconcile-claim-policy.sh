@@ -44,6 +44,42 @@ normalize_int() {
   fi
 }
 
+normalize_pending_json() {
+  local raw="${1:-[]}"
+  local normalized
+  normalized="$(
+    printf '%s\n' "${raw}" | jq -cs '
+      (map(select(type == "array")) | first // [])
+      | map(select(type == "number" or type == "string"))
+    ' 2>/dev/null
+  )" || normalized='[]'
+  if [[ -z "${normalized}" ]]; then
+    normalized='[]'
+  fi
+  printf '%s' "${normalized}"
+}
+
+normalize_claim_state_json() {
+  local raw="${1:-}"
+  local normalized
+  if [[ -z "${raw}" ]]; then
+    raw='{}'
+  fi
+  normalized="$(
+    printf '%s\n' "${raw}" | jq -cs '
+      (map(select(type == "object")) | first // {})
+      | .claims = (
+          (.claims // {})
+          | if type == "object" then . else {} end
+        )
+    ' 2>/dev/null
+  )" || normalized='{"claims":{}}'
+  if [[ -z "${normalized}" ]]; then
+    normalized='{"claims":{}}'
+  fi
+  printf '%s' "${normalized}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pending-json) pending_json="${2:-"[]"}"; shift 2 ;;
@@ -67,6 +103,8 @@ if [[ "${format}" != "json" && "${format}" != "env" ]]; then
   echo "Error: --format must be json|env" >&2
   exit 2
 fi
+pending_json="$(normalize_pending_json "${pending_json}")"
+previous_state_json="$(normalize_claim_state_json "${previous_state_json}")"
 
 policy_json="$(
   jq -cn \

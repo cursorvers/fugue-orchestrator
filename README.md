@@ -248,8 +248,8 @@ export ANTHROPIC_API_KEY="your-anthropic-key" # optional (Claude assist lane)
 
 # 3.7 Orchestrator切替シミュレーション（ローカル・非破壊）
 # ./scripts/sim-orchestrator-switch.sh | column -t -s $'\t'
-# NOTE: シミュレーションは `FUGUE_SIM_CODEX_SPARK_ONLY=true`（既定）で codex-main/codex multi-agent を `gpt-5.3-codex-spark` に統一し高速化します。
-# NOTE: `gpt-5-codex` との厳密差分検証が必要な場合のみ `FUGUE_SIM_CODEX_SPARK_ONLY=false` を指定してください。
+# NOTE: シミュレーションは `FUGUE_SIM_CODEX_SPARK_ONLY=false`（既定）で codex-main と GLM/role lanes の多様性を維持します。
+# NOTE: 短時間の高速検証を優先する場合のみ `FUGUE_SIM_CODEX_SPARK_ONLY=true` で `gpt-5.3-codex-spark` に統一します。
 # NOTE: lane構成のSSOTは `scripts/lib/build-agent-matrix.sh` です。
 # NOTE: ドリフト検知は `./scripts/check-agent-matrix-parity.sh` で実行できます。
 

@@ -49,7 +49,7 @@ fi
 codex_main_model_default="$(echo "${FUGUE_CODEX_MAIN_MODEL:-gpt-5.4}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 codex_multi_agent_model_default="$(echo "${FUGUE_CODEX_MULTI_AGENT_MODEL:-gpt-5.3-codex-spark}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 claude_opus_model_default="$(echo "${FUGUE_CLAUDE_OPUS_MODEL:-claude-sonnet-4-6}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-sim_codex_spark_only="$(echo "${FUGUE_SIM_CODEX_SPARK_ONLY:-true}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+sim_codex_spark_only="$(echo "${FUGUE_SIM_CODEX_SPARK_ONLY:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 if [[ "${sim_codex_spark_only}" != "false" ]]; then
   sim_codex_spark_only="true"
 fi
@@ -74,8 +74,8 @@ if [[ -x "${model_policy_script}" ]]; then
   codex_multi_agent_model_default="${codex_multi_agent_model}"
   claude_opus_model_default="${claude_model}"
 fi
-# Simulation common rule: keep simulation iterations fast by using codex-spark only
-# unless explicitly disabled.
+# Simulation override: pin both Codex simulation lanes to codex-spark only when
+# explicitly requested. The default keeps main-model and GLM fallback diversity.
 if [[ "${sim_codex_spark_only}" == "true" ]]; then
   codex_main_model_default="${sim_codex_spark_model}"
   codex_multi_agent_model_default="${sim_codex_spark_model}"
