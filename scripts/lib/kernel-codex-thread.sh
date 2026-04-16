@@ -51,7 +51,7 @@ cmd_prompt() {
   json="$(compact_json "${run_id}")"
   title="$(jq -r '.codex_thread_title // (.project + ":" + .purpose)' <<<"${json}")"
   summary="$(jq -r '(.summary // []) | join(" || ")' <<<"${json}")"
-  next_action="$(jq -r '(.next_action // [])[0] // ""' <<<"${json}")"
+  next_action="$(jq -r '(.next_action // "") | if type == "array" then (.[0] // "") elif type == "string" then . else "" end' <<<"${json}")"
   phase="$(jq -r '.current_phase // "unknown"' <<<"${json}")"
   mode="$(jq -r '.mode // "unknown"' <<<"${json}")"
   runtime="$(jq -r '.runtime // "kernel"' <<<"${json}")"

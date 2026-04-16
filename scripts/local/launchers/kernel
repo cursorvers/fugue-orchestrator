@@ -4,6 +4,12 @@ set -euo pipefail
 launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${launcher_dir}/orchestrator-entrypoint-hint" kernel || true
 
+k_launcher_path() {
+  local candidate="${launcher_dir}/k"
+  [[ -x "${candidate}" ]] || return 1
+  printf '%s\n' "${candidate}"
+}
+
 auto_open_latest_enabled() {
   local value="${KERNEL_AUTO_OPEN_LATEST:-true}"
   [[ "${value}" != "0" && "${value}" != "false" && "${value}" != "no" ]]
@@ -18,28 +24,33 @@ is_primary_node() {
 }
 
 resolve_latest_run_id() {
-  "${launcher_dir}/k" latest 2>/dev/null || true
+  local k_bin
+  k_bin="$(k_launcher_path)" || return 1
+  "${k_bin}" latest 2>/dev/null || true
 }
 
 maybe_open_latest_run() {
   auto_open_latest_enabled || return 1
   is_primary_node || return 1
-  local run_id
+  local run_id k_bin
+  k_bin="$(k_launcher_path)" || return 1
   run_id="$(resolve_latest_run_id)"
   [[ -n "${run_id}" ]] || return 1
   if interactive_tty_available; then
-    "${launcher_dir}/k" open "${run_id}" && exit 0
+    "${k_bin}" open "${run_id}" && exit 0
     return 1
   fi
-  env KERNEL_K_NO_ATTACH=true "${launcher_dir}/k" open "${run_id}" && exit 0
+  env KERNEL_K_NO_ATTACH=true "${k_bin}" open "${run_id}" && exit 0
   return 1
 }
 
 maybe_spawn_noninteractive_session() {
   interactive_tty_available && return 1
   bash "${launcher_dir}/kernel-root" >/dev/null 2>&1 || return 1
+  local k_bin
+  k_bin="$(k_launcher_path)" || return 1
   local purpose="${1:-${KERNEL_PURPOSE:-launch}}"
-  exec env KERNEL_K_NO_ATTACH=true "${launcher_dir}/k" new "${purpose}" "${@:2}"
+  exec env KERNEL_K_NO_ATTACH=true "${k_bin}" new "${purpose}" "${@:2}"
 }
 
 maybe_launch_with_guard() {

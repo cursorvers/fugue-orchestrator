@@ -140,7 +140,7 @@ if [[ -n "${focus_key}" ]]; then
 fi
 
 summary="$(jq -r '(.summary // []) | join(" || ")' <<<"${compact_json}")"
-next_action="$(jq -r '(.next_action // [])[0] // "none"' <<<"${compact_json}")"
+next_action="$(jq -r '(.next_action // "") | if type == "array" then (.[0] // "none") elif type == "string" and length > 0 then . else "none" end' <<<"${compact_json}")"
 active_models="$(jq -r '(.active_models // []) | join(",")' <<<"${compact_json}")"
 decisions="$(jq -r '(.decisions // []) | join(" | ")' <<<"${compact_json}")"
 

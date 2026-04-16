@@ -4,8 +4,10 @@ set -euo pipefail
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+USER_HOME="${USER_HOME:-${HOME}}"
 export HOME="${TMP_DIR}/home"
 mkdir -p "${HOME}/bin" "${TMP_DIR}/log"
+K_WRAPPER="${K_WRAPPER:-${USER_HOME}/bin/k}"
 
 cat > "${TMP_DIR}/ssh-stub" <<'EOF'
 #!/usr/bin/env bash
@@ -39,7 +41,7 @@ export KERNEL_REMOTE_USER="mini-user"
 export KERNEL_REMOTE_BIN_DIR="/remote/bin"
 export KERNEL_SSH_BIN="${TMP_DIR}/ssh-stub"
 
-out="$(/Users/masayuki_otawara/bin/k latest)"
+out="$("${K_WRAPPER}" latest)"
 grep -Fq 'remote-run' <<<"${out}"
 grep -Fq 'mini-user@mini-host' "${K_REMOTE_LOG}"
 grep -Fq '/remote/bin/k' "${K_REMOTE_LOG}"
@@ -48,7 +50,7 @@ grep -Fq 'actual_host=' "${K_REMOTE_LOG}"
 grep -Fq 'mini-host' "${K_REMOTE_LOG}"
 
 : > "${K_REMOTE_LOG}"
-out="$(/Users/masayuki_otawara/bin/k all)"
+out="$("${K_WRAPPER}" all)"
 grep -Fq 'run_id=remote-run' <<<"${out}"
 grep -Fq 'runtime=kernel' <<<"${out}"
 grep -Fq 'tmux_session=proj__secret-plane__abcd1234' <<<"${out}"
@@ -57,7 +59,7 @@ grep -Fq -- '--all-runs' "${K_REMOTE_LOG}"
 grep -Fq 'actual_host=' "${K_REMOTE_LOG}"
 
 : > "${K_REMOTE_LOG}"
-out="$(/Users/masayuki_otawara/bin/k open remote-run)"
+out="$("${K_WRAPPER}" open remote-run)"
 grep -Fq 'remote attach ok' <<<"${out}"
 grep -Fq -- '-tt mini-user@mini-host' "${K_REMOTE_LOG}"
 grep -Fq '/remote/bin/k' "${K_REMOTE_LOG}"
@@ -67,7 +69,7 @@ grep -Fq 'KERNEL_PRIMARY_HOST=true' "${K_REMOTE_LOG}"
 grep -Fq 'actual_host=' "${K_REMOTE_LOG}"
 
 : > "${K_REMOTE_LOG}"
-out="$(/Users/masayuki_otawara/bin/k new --runtime fugue remote-review)"
+out="$("${K_WRAPPER}" new --runtime fugue remote-review)"
 grep -Fq 'remote fugue new ok' <<<"${out}"
 grep -Fq '/remote/bin/k' "${K_REMOTE_LOG}"
 grep -Fq -- '--runtime' "${K_REMOTE_LOG}"
@@ -75,7 +77,7 @@ grep -Fq 'fugue' "${K_REMOTE_LOG}"
 grep -Fq 'remote-review' "${K_REMOTE_LOG}"
 
 export KERNEL_REMOTE_ALLOWED_HOSTS="other-host"
-if /Users/masayuki_otawara/bin/k latest >/dev/null 2>&1; then
+if "${K_WRAPPER}" latest >/dev/null 2>&1; then
   echo "k latest should fail closed when the remote host is outside the allowlist" >&2
   exit 1
 fi

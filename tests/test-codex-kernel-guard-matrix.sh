@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GUARD="/Users/masayuki_otawara/bin/codex-kernel-guard"
+GUARD="${KERNEL_GUARD_BIN:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
@@ -31,12 +31,18 @@ chmod +x "${TMP_DIR}/bin/codex" "${TMP_DIR}/bin/gemini" "${TMP_DIR}/bin/cursor"
 
 export PATH="${TMP_DIR}/bin:${PATH}"
 export KERNEL_ROOT="${ROOT_DIR}"
+export KERNEL_PROJECT="fugue-orchestrator-public"
+export KERNEL_PURPOSE="smoke"
+unset KERNEL_REPO_SLUG
 export CODEX_BIN="${TMP_DIR}/bin/codex"
 export GEMINI_BIN="${TMP_DIR}/bin/gemini"
 export CURSOR_BIN="${TMP_DIR}/bin/cursor"
 export COPILOT_BIN="${TMP_DIR}/bin/copilot-missing"
 export KERNEL_OPTIONAL_LANE_LEDGER_FILE="${TMP_DIR}/ledger.json"
 export KERNEL_GLM_RUN_STATE_FILE="${TMP_DIR}/glm.json"
+export KERNEL_STATE_ROOT="${TMP_DIR}/state"
+export KERNEL_COMPACT_DIR="${TMP_DIR}/state/compact"
+export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/state/runtime-ledger.json"
 export KERNEL_BOOTSTRAP_RECEIPT_DIR="${TMP_DIR}/receipts"
 export KERNEL_BOOTSTRAP_ACTIVE_MODELS_CSV="gpt-5.3-codex,glm,gemini-cli"
 export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
@@ -58,8 +64,8 @@ export KERNEL_COMPLETION_AGENT_MARKER="${TMP_DIR}/completion-bootstrap.log"
 
 export KERNEL_RUN_ID="matrix-normal"
 export ZAI_API_KEY="glm-present"
-out="$(ORCH_DRY_RUN=0 "${GUARD}" launch smoke 2>&1)"
-grep -Fq 'codex-stub -C ' <<<"${out}"
+out="$("${GUARD}" launch smoke 2>&1)"
+grep -Fq "${CODEX_BIN} -C " <<<"${out}"
 [[ ! -f "${KERNEL_COMPLETION_AGENT_MARKER}" ]]
 receipt_path="$(KERNEL_RUN_ID=matrix-normal bash "${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh" path)"
 test -f "${receipt_path}"

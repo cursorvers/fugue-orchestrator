@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+KGEMINI_WRAPPER="${KGEMINI_WRAPPER:-${HOME}/bin/kgemini}"
+KCURSOR_WRAPPER="${KCURSOR_WRAPPER:-${HOME}/bin/kcursor}"
+KCOPILOT_WRAPPER="${KCOPILOT_WRAPPER:-${HOME}/bin/kcopilot}"
+
 mkdir -p "${TMP_DIR}/bin"
 
 cat >"${TMP_DIR}/bin/gemini" <<'EOF'
@@ -60,16 +64,16 @@ export KERNEL_COPILOT_MONTHLY_SOFT_CAP=5
 export KERNEL_COPILOT_PER_RUN_SOFT_CAP=1
 export KERNEL_COPILOT_AUTOPILOT_ALLOWED=false
 
-out="$(bash /Users/masayuki_otawara/bin/kgemini test)"
+out="$(bash "${KGEMINI_WRAPPER}" test)"
 grep -Fq 'gemini-wrapper:test' <<<"${out}"
 
-out="$(bash /Users/masayuki_otawara/bin/kcursor --print test)"
+out="$(bash "${KCURSOR_WRAPPER}" --print test)"
 grep -Fq 'cursor-wrapper:--print test' <<<"${out}"
 
-out="$(bash /Users/masayuki_otawara/bin/kcopilot autopilot 2>&1 || true)"
+out="$(bash "${KCOPILOT_WRAPPER}" autopilot 2>&1 || true)"
 grep -Fq 'copilot-cli autopilot/agent mode is disabled' <<<"${out}"
 
-out="$(PATH="${TMP_DIR}/bin:/opt/homebrew/bin:/usr/bin:/bin" KERNEL_COPILOT_BIN=gh bash /Users/masayuki_otawara/bin/kcopilot -p test)"
+out="$(PATH="${TMP_DIR}/bin:/opt/homebrew/bin:/usr/bin:/bin" KERNEL_COPILOT_BIN=gh bash "${KCOPILOT_WRAPPER}" -p test)"
 grep -Fq 'gh-copilot-wrapper:-p test' <<<"${out}"
 
 status="$(bash "${ROOT_DIR}/scripts/lib/kernel-optional-lane-budget.sh" status)"

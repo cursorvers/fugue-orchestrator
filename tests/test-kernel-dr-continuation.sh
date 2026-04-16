@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
+GUARD_BIN="${KERNEL_GUARD_BIN:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 SESSION_NAME="fugue-orchestrator__tmux-handoff"
 trap 'tmux kill-session -t "${SESSION_NAME}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT
 
@@ -146,7 +147,7 @@ bash "${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh" update status_changed 
 
 tmux kill-session -t "${SESSION_NAME}" >/dev/null 2>&1 || true
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor --all-runs)"
+out="$("${GUARD_BIN}" doctor --all-runs)"
 grep -Fq 'shared secrets status:' <<<"${out}"
 grep -Fq 'OPENAI_API_KEY: present (' <<<"${out}"
 grep -Fq 'project=fugue-orchestrator | purpose=tmux-handoff' <<<"${out}"
@@ -155,14 +156,14 @@ grep -Fq "tmux_session=${SESSION_NAME}" <<<"${out}"
 grep -Fq 'next_action=resume-implementation' <<<"${out}"
 grep -Fq 'stale=true' <<<"${out}"
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor --run run-dr)"
+out="$("${GUARD_BIN}" doctor --run run-dr)"
 grep -Fq 'run detail:' <<<"${out}"
 grep -Fq 'run_id: run-dr' <<<"${out}"
 grep -Fq 'runtime: kernel' <<<"${out}"
 grep -Fq 'active_models: codex,glm,gemini-cli' <<<"${out}"
 grep -Fq 'summary: Ready for MBP degraded continuation' <<<"${out}"
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard recover-run run-dr)"
+out="$("${GUARD_BIN}" recover-run run-dr)"
 grep -Fq "tmux session: ${SESSION_NAME}" <<<"${out}"
 grep -Fq 'codex thread: fugue-orchestrator:tmux-handoff' <<<"${out}"
 grep -Fq 'strategy: continue-phase' <<<"${out}"
@@ -172,7 +173,7 @@ grep -Fq "${SESSION_NAME}:main | bash ${ROOT_DIR}/scripts/lib/kernel-codex-threa
 windows="$(tmux list-windows -t "=${SESSION_NAME}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 [[ "${windows}" == "main logs review ops" ]]
 
-out="$(/Users/masayuki_otawara/bin/codex-kernel-guard doctor)"
+out="$("${GUARD_BIN}" doctor)"
 grep -Fq 'active runs:' <<<"${out}"
 grep -Fq 'project=fugue-orchestrator | purpose=tmux-handoff' <<<"${out}"
 grep -Fq 'runtime=kernel' <<<"${out}"

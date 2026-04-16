@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GUARD="/Users/masayuki_otawara/bin/codex-kernel-guard"
+GUARD="${KERNEL_GUARD_BIN:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 TMP_DIR="$(mktemp -d)"
 trap 'chmod 0700 "${HOME}" 2>/dev/null || true; rm -rf "${TMP_DIR}"' EXIT
 
@@ -25,7 +25,7 @@ mkdir -p "${HOME}"
 chmod 0500 "${HOME}"
 
 export PATH="${TMP_DIR}/bin:${PATH}"
-export KERNEL_ROOT="${ROOT_DIR}"
+export KERNEL_ROOT="${TMP_DIR}/not-a-kernel-root"
 export CODEX_BIN="${TMP_DIR}/bin/codex"
 export GEMINI_BIN="${TMP_DIR}/bin/gemini"
 export CURSOR_BIN="${TMP_DIR}/bin/cursor-missing"

@@ -3,9 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
+GUARD_BIN="${KERNEL_GUARD_BIN_UNDER_TEST:-${KERNEL_GUARD_BIN:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}}"
 RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
-GUARD_BIN="${KERNEL_GUARD_BIN_UNDER_TEST:-${ROOT_DIR}/scripts/codex-kernel-guard.sh}"
 SESSION_A="fugue-orchestrator__alpha"
 SESSION_B="fugue-orchestrator__beta"
 trap 'tmux kill-session -t "${SESSION_A}" >/dev/null 2>&1 || true; tmux kill-session -t "${SESSION_B}" >/dev/null 2>&1 || true; rm -rf "${TMP_DIR}"' EXIT

@@ -4,8 +4,11 @@ set -euo pipefail
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+USER_HOME="${USER_HOME:-${HOME}}"
 export HOME="${TMP_DIR}/home"
 mkdir -p "${HOME}/bin" "${TMP_DIR}/compact" "${TMP_DIR}/log"
+K_WRAPPER="${K_WRAPPER:-${USER_HOME}/bin/k}"
+EXPECTED_KERNEL_PROJECT="${EXPECTED_KERNEL_PROJECT:-$(basename "$(pwd)")}"
 
 cat > "${HOME}/bin/codex-kernel-guard" <<'EOF'
 #!/usr/bin/env bash
@@ -136,68 +139,68 @@ for path in tmp_dir.joinpath("compact").glob("*.json"):
     path.write_text(text, encoding="utf-8")
 PY
 
-/Users/masayuki_otawara/bin/k >/dev/null
+"${K_WRAPPER}" >/dev/null
 grep -Fq 'doctor' "${K_TEST_LOG}"
 
-/Users/masayuki_otawara/bin/k all >/dev/null
+"${K_WRAPPER}" all >/dev/null
 grep -Fq 'doctor --all-runs' "${K_TEST_LOG}"
 
-/Users/masayuki_otawara/bin/k show run-1 >/dev/null
+"${K_WRAPPER}" show run-1 >/dev/null
 grep -Fq 'doctor --run run-1' "${K_TEST_LOG}"
 
 export TMUX_HAS_SESSION=true
 export TMUX_LIVE_SESSIONS='proj__latest,proj__purpose'
-out="$(/Users/masayuki_otawara/bin/k latest)"
+out="$("${K_WRAPPER}" latest)"
 grep -Fq 'run-3' <<<"${out}"
 
-out="$(/Users/masayuki_otawara/bin/k run-id)"
+out="$("${K_WRAPPER}" run-id)"
 grep -Fq 'run-3' <<<"${out}"
 
 export TMUX_LIVE_SESSIONS='proj__old'
 export TMUX_HAS_SESSION=false
-if /Users/masayuki_otawara/bin/k latest >/dev/null 2>&1; then
+if "${K_WRAPPER}" latest >/dev/null 2>&1; then
   echo "k latest should ignore stale runs even if the tmux session still exists" >&2
   exit 1
 fi
 
-/Users/masayuki_otawara/bin/k phase implement >/dev/null
+"${K_WRAPPER}" phase implement >/dev/null
 grep -Fq 'phase-complete implement' "${K_TEST_LOG}"
 
-/Users/masayuki_otawara/bin/k new secret-plane >/dev/null
-grep -Fq 'new-session -d -s fugue-orchestrator__secret-plane -n main' "${TMUX_ACTION_LOG}"
-grep -Fq 'new-window -t =fugue-orchestrator__secret-plane -n logs' "${TMUX_ACTION_LOG}"
-grep -Fq 'send-keys -t =fugue-orchestrator__secret-plane:main' "${TMUX_ACTION_LOG}"
-grep -Fq 'KERNEL_TMUX_SESSION=fugue-orchestrator__secret-plane' "${TMUX_ACTION_LOG}"
+"${K_WRAPPER}" new secret-plane >/dev/null
+grep -Fq "new-session -d -s ${EXPECTED_KERNEL_PROJECT}__secret-plane -n main" "${TMUX_ACTION_LOG}"
+grep -Fq "new-window -t =${EXPECTED_KERNEL_PROJECT}__secret-plane -n logs" "${TMUX_ACTION_LOG}"
+grep -Fq "send-keys -t =${EXPECTED_KERNEL_PROJECT}__secret-plane:main" "${TMUX_ACTION_LOG}"
+grep -Fq "KERNEL_TMUX_SESSION=${EXPECTED_KERNEL_PROJECT}__secret-plane" "${TMUX_ACTION_LOG}"
 grep -Fq 'KERNEL_PURPOSE=secret-plane' "${TMUX_ACTION_LOG}"
 grep -Fq 'kernel' "${TMUX_ACTION_LOG}"
 
-/Users/masayuki_otawara/bin/k new runtime-enforcement focus-text >/dev/null
-grep -Fq 'new-session -d -s fugue-orchestrator__runtime-enforcement -n main' "${TMUX_ACTION_LOG}"
+"${K_WRAPPER}" new runtime-enforcement focus-text >/dev/null
+grep -Fq "new-session -d -s ${EXPECTED_KERNEL_PROJECT}__runtime-enforcement -n main" "${TMUX_ACTION_LOG}"
 grep -Fq 'focus-text' "${TMUX_ACTION_LOG}"
 
-/Users/masayuki_otawara/bin/k new --runtime fugue fugue-handoff review-claude >/dev/null
-grep -Fq 'new-session -d -s fugue-orchestrator__fugue-handoff -n main' "${TMUX_ACTION_LOG}"
+"${K_WRAPPER}" new --runtime fugue fugue-handoff review-claude >/dev/null
+grep -Fq "new-session -d -s ${EXPECTED_KERNEL_PROJECT}__fugue-handoff -n main" "${TMUX_ACTION_LOG}"
 grep -Fq "${HOME}/bin/fugue" "${TMUX_ACTION_LOG}"
 grep -Fq 'KERNEL_RUNTIME=fugue' "${TMUX_ACTION_LOG}"
 grep -Fq 'review-claude' "${TMUX_ACTION_LOG}"
 
-/Users/masayuki_otawara/bin/k adopt cmux:proj-a gws >/dev/null
+"${K_WRAPPER}" adopt cmux:proj-a gws >/dev/null
 grep -Fq 'adopt-run cmux:proj-a gws' "${K_TEST_LOG}"
 
-/Users/masayuki_otawara/bin/k done ship it >/dev/null
+"${K_WRAPPER}" done ship it >/dev/null
 grep -Fq 'run-complete --summary ship it' "${K_TEST_LOG}"
 
 export TMUX_HAS_SESSION=true
 export TMUX_LIVE_SESSIONS='proj__purpose'
-out="$(/Users/masayuki_otawara/bin/k open run-1)"
+out="$("${K_WRAPPER}" open run-1)"
 grep -Fq 'attach proj__purpose' <<<"${out}"
 
-out="$(/Users/masayuki_otawara/bin/k run-1)"
+out="$("${K_WRAPPER}" run-1)"
 grep -Fq 'attach proj__purpose' <<<"${out}"
 
 export TMUX_LIVE_SESSIONS='proj__latest'
 export TMUX_HAS_SESSION=true
-out="$(/Users/masayuki_otawara/bin/k open)"
+out="$("${K_WRAPPER}" open)"
 grep -Fq 'attach proj__latest' <<<"${out}"
 
 export TMUX_LIVE_SESSIONS='proj__purpose'
@@ -205,7 +208,7 @@ export TMUX_HAS_SESSION=true
 export TMUX_SHOW_OPTION_SESSION='proj__purpose'
 export TMUX_SHOW_OPTION_NAME='@kernel_run_id'
 export TMUX_SHOW_OPTION_VALUE='run-other'
-if /Users/masayuki_otawara/bin/k open run-1 >/dev/null 2>&1; then
+if "${K_WRAPPER}" open run-1 >/dev/null 2>&1; then
   echo "k open should reject a tmux session owned by a different run" >&2
   exit 1
 fi
@@ -214,7 +217,7 @@ unset TMUX_SHOW_OPTION_SESSION TMUX_SHOW_OPTION_NAME TMUX_SHOW_OPTION_VALUE
 export TMUX_HAS_SESSION=false
 export TMUX_LIVE_SESSIONS=''
 : > "${K_TEST_LOG}"
-if out="$(/Users/masayuki_otawara/bin/k open run-1 2>&1)"; then
+if out="$("${K_WRAPPER}" open run-1 2>&1)"; then
   echo "operator host should not auto-recover a missing session" >&2
   exit 1
 fi
@@ -226,7 +229,7 @@ fi
 
 export KERNEL_NODE_ROLE=primary
 : > "${K_TEST_LOG}"
-out="$(/Users/masayuki_otawara/bin/k open run-1)"
+out="$("${K_WRAPPER}" open run-1)"
 grep -Fq 'attach proj__purpose' <<<"${out}"
 grep -Fq 'recover-run run-1' "${K_TEST_LOG}"
 
