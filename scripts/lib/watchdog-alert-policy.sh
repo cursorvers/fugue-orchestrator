@@ -33,6 +33,9 @@ mainframe_minutes="0"
 mainframe_last_success_at=""
 pending_count="0"
 mainframe_pending_count="0"
+waiting_run_count="0"
+waiting_run_age_minutes="0"
+waiting_run_oldest=""
 persist_state="false"
 previous_state_json='{}'
 now_epoch=""
@@ -77,6 +80,9 @@ Options:
   --mainframe-last-success-at <iso8601>
   --pending-count <n>
   --mainframe-pending-count <n>
+  --waiting-run-count <n>
+  --waiting-run-age-minutes <n>
+  --waiting-run-oldest <workflow/run label>
   --persist-state <true|false>
   --previous-state-json <json>
   --now-epoch <unix-seconds>
@@ -235,6 +241,9 @@ while [[ $# -gt 0 ]]; do
     --mainframe-last-success-at) mainframe_last_success_at="${2:-}"; shift 2 ;;
     --pending-count) pending_count="${2:-}"; shift 2 ;;
     --mainframe-pending-count) mainframe_pending_count="${2:-}"; shift 2 ;;
+    --waiting-run-count) waiting_run_count="${2:-}"; shift 2 ;;
+    --waiting-run-age-minutes) waiting_run_age_minutes="${2:-}"; shift 2 ;;
+    --waiting-run-oldest) waiting_run_oldest="${2:-}"; shift 2 ;;
     --persist-state) persist_state="${2:-}"; shift 2 ;;
     --previous-state-json) previous_state_json="${2:-}"; shift 2 ;;
     --now-epoch) now_epoch="${2:-}"; shift 2 ;;
@@ -264,6 +273,8 @@ mainframe_hours="$(normalize_int "${mainframe_hours}" "0")"
 mainframe_minutes="$(normalize_int "${mainframe_minutes}" "0")"
 pending_count="$(normalize_int "${pending_count}" "0")"
 mainframe_pending_count="$(normalize_int "${mainframe_pending_count}" "0")"
+waiting_run_count="$(normalize_int "${waiting_run_count}" "0")"
+waiting_run_age_minutes="$(normalize_int "${waiting_run_age_minutes}" "0")"
 claude_state_age_hours="$(normalize_int "${claude_state_age_hours}" "0")"
 claude_fallback_mentions_24h="$(normalize_int "${claude_fallback_mentions_24h}" "0")"
 
@@ -378,6 +389,10 @@ else
     if [[ "${mainframe_stale}" == "true" ]]; then
       maybe_mark_stale_reason "mainframe-stale" "${mainframe_hours}" "${mainframe_minutes}"
     fi
+
+    if (( waiting_run_count > 0 && waiting_run_age_minutes >= 60 )); then
+      maybe_mark_periodic_reason "workflow-waiting" 180
+    fi
   fi
 fi
 
@@ -438,6 +453,9 @@ xai_ok: ${xai_ok}
 anthropic_ok: ${anthropic_ok}
 pending_count: ${pending_count}
 mainframe_pending_count: ${mainframe_pending_count}
+waiting_run_count: ${waiting_run_count}
+waiting_run_age_minutes: ${waiting_run_age_minutes}
+waiting_run_oldest: ${waiting_run_oldest}
 watchdog_alert_state_persist: ${persist_state}
 watchdog_alert_due_reasons: ${due_reasons_text}
 router_hours_since_success: ${router_hours}

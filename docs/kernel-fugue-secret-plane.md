@@ -63,6 +63,7 @@ This is a hard rule, not a convenience preference:
 - `ZAI_API_KEY`
 - `GEMINI_API_KEY`
 - `XAI_API_KEY`
+- `ESTAT_API_ID`
 - `TARGET_REPO_PAT`
 - `FUGUE_OPS_PAT`
 - platform-specific runtime names such as `SUPABASE_SERVICE_ROLE_KEY`
@@ -122,6 +123,7 @@ Use this split:
 - `ANTHROPIC_API_KEY`
 - `GEMINI_API_KEY`
 - `XAI_API_KEY`
+- `ESTAT_API_ID`
 - `FUGUE_OPS_PAT`
 - shared webhook fallbacks such as `DISCORD_WEBHOOK_URL`
 
@@ -213,6 +215,13 @@ For this workspace, the best default is:
 
 1. process env
 2. Keychain
-3. explicit external env file
+3. shared SOPS bundle
+4. explicit external env file
 
-Routine runtime should not decrypt the shared bundle on every invocation. Decryption belongs to bootstrap / restore.
+The canonical bootstrap source is the encrypted SOPS bundle. Keychain,
+process env, and GitHub Actions secrets are derived execution planes, not
+independent sources of truth.
+
+Routine attended operation should be satisfied by Keychain. The SOPS fallback
+exists for host restore and DR continuity on MBP/Mac mini, and `doctor` output
+must report source and length only, never secret values.

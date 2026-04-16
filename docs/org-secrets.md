@@ -12,12 +12,16 @@ Important: GitHub secrets are the CI plane, not the full runtime plane. Runtime 
 ## Rules Of Thumb
 - Put shared provider keys in org secrets:
   - `OPENAI_API_KEY`, `ZAI_API_KEY`
+  - Shared automation/data API keys: `ESTAT_API_ID`
   - Optional specialists: `GEMINI_API_KEY`, `XAI_API_KEY`
   - Notification lifelines: `DISCORD_WEBHOOK_URL` (fallback: `DISCORD_SYSTEM_WEBHOOK`), `LINE_WEBHOOK_URL` (or `LINE_CHANNEL_ACCESS_TOKEN` + `LINE_TO`; legacy fallback: `LINE_NOTIFY_TOKEN`)
   - Ops token for variable/state auto-recovery: `FUGUE_OPS_PAT` (fallback: `TARGET_REPO_PAT`)
 - Keep repo secrets only for repo-specific credentials:
   - Example: `TARGET_REPO_PAT` (scope-limited PAT for PR creation)
 - Use `selected` visibility unless the secret is truly safe to expose to all repos.
+- `TARGET_REPO_PAT` is not a universal requirement. Prefer `FUGUE_OPS_PAT`
+  for FUGUE/Kernel state recovery where possible, and require `TARGET_REPO_PAT`
+  only for repositories that actually need repo-specific cross-repo write access.
 
 ## Audit
 Run:
@@ -49,3 +53,6 @@ Config:
 Policy:
 - Do not keep live secrets in repository `.env` files.
 - Keep canonical secret names stable so `Kernel` and `FUGUE` can swap without secret migration.
+- Prefer org secrets with `selected` repository visibility for shared keys.
+  Avoid keeping a same-name repo secret because GitHub resolves the lower-level
+  secret first and may hide a rotated org value.

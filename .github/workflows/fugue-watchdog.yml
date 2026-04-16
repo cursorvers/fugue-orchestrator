@@ -407,6 +407,52 @@ jobs:
             echo "failover_variable_sync_status=${failover_variable_sync_status}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Detect waiting workflow runs
+        id: waiting_runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh_err="$(mktemp)"
+          now_epoch="$(date -u +%s)"
+          query_failed="false"
+          oldest_label=""
+          max_age_minutes="0"
+          if ! runs_json="$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --status waiting \
+            --limit 200 \
+            --json databaseId,workflowName,createdAt,url 2>"${gh_err}")"; then
+            query_failed="true"
+            count="1"
+            max_age_minutes="60"
+            oldest_label="waiting-run-query-failed"
+            echo "::warning::failed to query waiting workflow runs: $(tr '\n' ' ' <"${gh_err}" | sed 's/[[:space:]]\+/ /g')"
+          else
+            count="$(printf '%s' "${runs_json}" | jq 'length')"
+          fi
+
+          if [[ "${query_failed}" != "true" && "${count}" != "0" ]]; then
+            oldest_json="$(printf '%s' "${runs_json}" | jq -c 'sort_by(.createdAt) | .[0]')"
+            oldest_created="$(printf '%s' "${oldest_json}" | jq -r '.createdAt // ""')"
+            oldest_name="$(printf '%s' "${oldest_json}" | jq -r '.workflowName // "unknown"')"
+            oldest_id="$(printf '%s' "${oldest_json}" | jq -r '.databaseId // "unknown"')"
+            if [[ -n "${oldest_created}" ]]; then
+              oldest_epoch="$(date -u -d "${oldest_created}" +%s)"
+              max_age_minutes="$(( (now_epoch - oldest_epoch) / 60 ))"
+            fi
+            oldest_label="${oldest_name}#${oldest_id}"
+            echo "::notice::waiting workflow runs detected: count=${count} oldest=${oldest_label} age_minutes=${max_age_minutes}"
+          fi
+
+          {
+            echo "count=${count}"
+            echo "max_age_minutes=${max_age_minutes}"
+            echo "oldest_label=${oldest_label}"
+            echo "query_failed=${query_failed}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Decide whether to alert (throttle + relevance)
         id: decide
         env:
@@ -464,6 +510,9 @@ jobs:
               --mainframe-last-success-at "${{ steps.mainframe_success.outputs.last_time }}" \
               --pending-count "${{ steps.pending.outputs.pending_count }}" \
               --mainframe-pending-count "${{ steps.pending.outputs.mainframe_pending_count }}" \
+              --waiting-run-count "${{ steps.waiting_runs.outputs.count }}" \
+              --waiting-run-age-minutes "${{ steps.waiting_runs.outputs.max_age_minutes }}" \
+              --waiting-run-oldest "${{ steps.waiting_runs.outputs.oldest_label }}" \
               --persist-state "${watchdog_alert_persist}" \
               --previous-state-json "${watchdog_alert_state}" \
               --format json
