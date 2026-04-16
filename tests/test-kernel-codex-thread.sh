@@ -25,9 +25,20 @@ export KERNEL_BOOTSTRAP_MANIFEST_LANE_COUNT="6"
 export KERNEL_BOOTSTRAP_AGENT_LABELS="true"
 export KERNEL_BOOTSTRAP_SUBAGENT_LABELS="true"
 
+context_reference_path="${TMP_DIR}/context.json"
+cat >"${context_reference_path}" <<'EOF'
+{
+  "kind": "social-post",
+  "post_id": "11"
+}
+EOF
+
 bash "${RECEIPT_SCRIPT}" write 6 codex,glm,gemini-cli normal >/dev/null
 bash "${LEDGER_SCRIPT}" transition healthy "bootstrap-valid" >/dev/null
-bash "${COMPACT_SCRIPT}" update manual_snapshot "Thread-aware recovery ready" >/dev/null
+KERNEL_CONTEXT_REFERENCE_PATH="${context_reference_path}" \
+KERNEL_CONTEXT_REFERENCE_KIND="social-post" \
+KERNEL_CONTEXT_REFERENCE_LABEL="social-post #11" \
+  bash "${COMPACT_SCRIPT}" update manual_snapshot "Thread-aware recovery ready" >/dev/null
 
 title="$(bash "${THREAD_SCRIPT}" title)"
 [[ "${title}" == "fugue-orchestrator:thread separation" ]]
@@ -37,5 +48,7 @@ grep -Fq 'Kernel thread: fugue-orchestrator:thread separation' <<<"${prompt}"
 grep -Fq 'Continue Kernel run thread-test.' <<<"${prompt}"
 grep -Fq 'Runtime: fugue' <<<"${prompt}"
 grep -Fq 'Next action: resume-threaded-implementation' <<<"${prompt}"
+grep -Fq 'Kernel handoff packet:' <<<"${prompt}"
+grep -Fq "context reference: social-post #11 -> ${context_reference_path}" <<<"${prompt}"
 
 echo "kernel codex thread check passed"

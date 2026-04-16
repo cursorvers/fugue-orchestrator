@@ -72,7 +72,8 @@ Usage:
   codex-kernel-guard.sh doctor --run <run_id>
   codex-kernel-guard.sh recover-run <run_id>
   codex-kernel-guard.sh attach-context <run_id> <reference_path> [label]
-  codex-kernel-guard.sh memory-query [--limit N] [--run <run_id>] [--format <text|json>] <query>
+  codex-kernel-guard.sh memory-query [search [--limit N] [--run <run_id>] [--format <text|json>] <query>]
+  codex-kernel-guard.sh memory-query packet [--run <run_id> | <query>] [--format <text|json>]
   codex-kernel-guard.sh phase-check <phase> [--uiux]
   codex-kernel-guard.sh phase-complete <phase> [--uiux]
   codex-kernel-guard.sh run-complete --summary <text> [--title <text>] [--uiux] [--no-gha] [--dry-run]
@@ -1118,6 +1119,9 @@ cmd_adopt_run() {
 
 cmd_memory_query() {
   ensure_default_env
+  if [[ $# -gt 0 && ( "$1" == "search" || "$1" == "packet" ) ]]; then
+    exec bash "${MEMORY_QUERY_SCRIPT}" "$@"
+  fi
   exec bash "${MEMORY_QUERY_SCRIPT}" search "$@"
 }
 

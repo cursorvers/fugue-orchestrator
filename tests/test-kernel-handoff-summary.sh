@@ -24,6 +24,12 @@ cat >"${KERNEL_COMPACT_DIR}/run-one.json" <<'EOF'
   "lifecycle_state": "live-running",
   "scheduler_state": "running",
   "scheduler_reason": "live-running",
+  "handoff_packet_path": "/tmp/run-one.handoff.json",
+  "context_reference": {
+    "kind": "social-post",
+    "label": "social-post #88",
+    "path": "/tmp/run-one-context.json"
+  },
   "next_action": ["verify-implementation"],
   "decisions": ["keep-kernel-sovereign", "bounded-handoff"],
   "phase_artifacts": {
@@ -76,10 +82,21 @@ cat >"${KERNEL_COMPACT_DIR}/run-two.json" <<'EOF'
 }
 EOF
 
+sleep 1
+cat >"${KERNEL_COMPACT_DIR}/run-two.handoff.json" <<'EOF'
+{
+  "kind": "kernel-handoff-packet",
+  "run_id": "run-two",
+  "summary": ["newer packet should not be selected as compact"]
+}
+EOF
+
 out="$(bash "${SCRIPT}" --run-id run-one)"
 grep -Fq 'run id: run-one' <<<"${out}"
 grep -Fq 'phase: implementation' <<<"${out}"
 grep -Fq 'lifecycle state: live-running' <<<"${out}"
+grep -Fq 'handoff packet path: /tmp/run-one.handoff.json' <<<"${out}"
+grep -Fq 'context reference: social-post #88 -> /tmp/run-one-context.json' <<<"${out}"
 grep -Fq 'phase artifact focus: implementation_report_path=/tmp/run-one-implementation.md' <<<"${out}"
 grep -Fq 'workspace receipt path: '"${workspace_receipt}" <<<"${out}"
 grep -Fq 'runtime ledger path: /tmp/kernel/runtime-ledger.json' <<<"${out}"
@@ -95,5 +112,6 @@ grep -Fq 'workspace receipt path: ' <<<"${out}"
 
 out="$(bash "${SCRIPT}")"
 grep -Fq 'run id: run-two' <<<"${out}"
+grep -Fq 'phase: plan' <<<"${out}"
 
 echo "kernel handoff summary check passed"
