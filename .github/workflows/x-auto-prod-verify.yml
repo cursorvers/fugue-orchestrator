@@ -1,0 +1,118 @@
+name: x-auto-prod-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number used for linked-system verification"
+        required: true
+        default: "565"
+      cursorvers_post_id:
+        description: "Deterministic probe post id"
+        required: true
+        default: "gha-e2e-quoted-author-verify"
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  verify-prod-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      RUN_ROOT: ${{ github.workspace }}/.fugue/gha-xauto-verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Prepare deterministic registry seed
+        id: prep
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUN_ROOT}"
+          seed_file="${RUNNER_TEMP}/xauto-linked-e2e-registry.json"
+          cat > "${seed_file}" <<JSON
+          [
+            {
+              "cursorvers_post_id": "${{ inputs.cursorvers_post_id }}",
+              "source_url": "https://x.com/carverfomo/status/2041157102723375342?s=20",
+              "author_handle": "carverfomo",
+              "display_name": "Carver",
+              "topic_tags": ["business", "strategy"],
+              "conclusion_tag": "broader_view",
+              "pattern_tag": "quoted",
+              "metadata": {
+                "confidence": 0.9,
+                "primary_source_url": "https://example.com/aviation-weather-market-observation",
+                "primary_source_strategy": "quoted-reference",
+                "primary_source_confidence": 0.92,
+                "event_kind": "discovered",
+                "probe_source": "github-actions"
+              }
+            }
+          ]
+          JSON
+          echo "seed_file=${seed_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify quoted-author schema
+        run: |
+          set -euo pipefail
+          scripts/local/integrations/xauto-quoted-author-ensure-schema.sh \
+            --mode smoke \
+            --run-dir "${RUN_ROOT}/schema"
+
+      - name: Run linked-system execute path
+        run: |
+          set -euo pipefail
+          POST_ISSUE_COMMENT=false \
+          X_AUTO_DRAFT_GENERATOR_MODE=registry-local \
+          X_AUTO_DRAFT_LOCAL_GENERATE_MODE=heuristic \
+          X_AUTO_WRITE_NOTION_ON_EXECUTE=false \
+          X_AUTO_DRAFT_REGISTRY_SEED_INPUT="${{ steps.prep.outputs.seed_file }}" \
+          X_AUTO_QUOTED_AUTHOR_SYNC_WRITE_MODE=required \
+          scripts/local/run-linked-systems.sh \
+            --issue "${{ inputs.issue_number }}" \
+            --repo "${{ github.repository }}" \
+            --mode execute \
+            --systems x-auto-draft-only \
+            --max-parallel 2 \
+            --out-dir "${RUN_ROOT}"
+
+      - name: Verify linked run artifacts
+        id: artifact_check
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          set -euo pipefail
+          run_dir="$(
+            find "${RUN_ROOT}" -maxdepth 1 -type d -name "linked-issue-${ISSUE_NUMBER}-*" -print \
+              | sort -r \
+              | head -n1
+          )"
+          test -n "${run_dir}"
+          grep -Fq 'quoted_author_sync_status=applied' "${run_dir}/systems/x-auto-draft-only/xauto-draft-only.meta"
+          grep -Fq 'bridge_status=applied' "${run_dir}/systems/x-auto-draft-only/quoted-author-sync/xauto-quoted-author-sync.meta"
+          echo "run_dir=${run_dir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify live quote event
+        run: |
+          set -euo pipefail
+          response="$(curl -sS "${SUPABASE_URL}/rest/v1/quote_events?select=event_hash,cursorvers_post_id,event_kind&cursorvers_post_id=eq.${{ inputs.cursorvers_post_id }}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}")"
+          echo "${response}" > "${RUN_ROOT}/live-quote-events.json"
+          count="$(jq 'length' <<< "${response}")"
+          test "${count}" -ge 1
+
+      - name: Upload verification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-auto-prod-verify-${{ github.run_id }}
+          path: |
+            ${{ steps.artifact_check.outputs.run_dir }}
+            ${{ env.RUN_ROOT }}/schema
+            ${{ env.RUN_ROOT }}/live-quote-events.json
