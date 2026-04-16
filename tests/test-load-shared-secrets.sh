@@ -25,12 +25,19 @@ case "${service}:${acct}" in
   fugue-secrets:openai-api-key) printf 'kc-openai' ;;
   fugue-secrets:anthropic-api-key) printf 'kc-anthropic' ;;
   fugue-secrets:xai-api-key) printf 'kc-xai' ;;
+  fugue-secrets:estat-app-id) printf 'kc-estat' ;;
   fugue-secrets:target-repo-pat) printf 'kc-target-repo-pat' ;;
   fugue-secrets:fugue-ops-pat) printf 'kc-fugue-ops-pat' ;;
   *) exit 44 ;;
 esac
 EOF
 chmod +x "${TMP_DIR}/bin/security"
+
+cat >"${TMP_DIR}/bin/sops" <<'EOF'
+#!/usr/bin/env bash
+printf 'ESTAT_APP_ID=sops-estat\n'
+EOF
+chmod +x "${TMP_DIR}/bin/sops"
 
 ENV_FILE="${TMP_DIR}/shared.env"
 cat >"${ENV_FILE}" <<'EOF'
@@ -40,6 +47,9 @@ EOF
 
 export PATH="${TMP_DIR}/bin:${PATH}"
 export SHARED_SECRETS_ENV_FILE="${ENV_FILE}"
+export SHARED_SECRETS_SOPS_FILE="${TMP_DIR}/fugue-secrets.enc"
+export SOPS_AGE_KEY_FILE="${TMP_DIR}/keys.txt"
+touch "${SHARED_SECRETS_SOPS_FILE}" "${SOPS_AGE_KEY_FILE}"
 
 export OPENAI_API_KEY="env-openai"
 out="$(bash "${SCRIPT}" get OPENAI_API_KEY)"
@@ -60,6 +70,16 @@ src="$(bash "${SCRIPT}" source-of ZAI_API_KEY)"
 
 out="$(bash "${SCRIPT}" get XAI_API_KEY)"
 [[ "${out}" == "kc-xai" || "${out}" == "legacy-xai" ]]
+
+out="$(bash "${SCRIPT}" get ESTAT_API_ID)"
+[[ "${out}" == "kc-estat" ]]
+src="$(bash "${SCRIPT}" source-of ESTAT_API_ID)"
+[[ "${src}" == "keychain" ]]
+
+out="$(SHARED_SECRETS_KEYCHAIN_SERVICE=missing-service bash "${SCRIPT}" get ESTAT_APP_ID)"
+[[ "${out}" == "sops-estat" ]]
+src="$(SHARED_SECRETS_KEYCHAIN_SERVICE=missing-service bash "${SCRIPT}" source-of ESTAT_API_ID)"
+[[ "${src}" == "sops-bundle" ]]
 
 out="$(bash "${SCRIPT}" get TARGET_REPO_PAT)"
 [[ "${out}" == "kc-target-repo-pat" ]]
