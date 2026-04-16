@@ -31,7 +31,11 @@ EOF
 
 chmod +x "${TMP_DIR}/home/bin/"*
 export KERNEL_TEST_LOG="${TMP_DIR}/log/orchestrator.log"
-TEST_SHELL="$(command -v zsh || command -v bash)"
+TEST_SHELL="${TEST_SHELL:-$(command -v zsh || command -v bash)}"
+[[ -n "${TEST_SHELL}" ]] || {
+  echo "missing zsh/bash for codex orchestrator snippet test" >&2
+  exit 1
+}
 
 "${TEST_SHELL}" -lc '
   export HOME="'"${TMP_DIR}/home"'"

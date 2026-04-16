@@ -248,7 +248,7 @@ packet_json_from_doc() {
     --arg runtime "$(jq -r '.runtime // ""' <<<"${doc_json}")" \
     --arg lifecycle_state "$(jq -r '.lifecycle_state // ""' <<<"${doc_json}")" \
     --arg updated_at "$(jq -r '.updated_at // ""' <<<"${doc_json}")" \
-    --arg next_action "$(jq -r '(.next_action // [])[0] // ""' <<<"${doc_json}")" \
+    --arg next_action "$(jq -r '(.next_action // "") | if type == "array" then (.[0] // "") elif type == "string" then . else "" end' <<<"${doc_json}")" \
     --arg compact_path "$(jq -r '.compact_path // ""' <<<"${doc_json}")" \
     --arg handoff_packet_path "$(jq -r '.handoff_packet_path // ""' <<<"${doc_json}")" \
     --arg handoff_packet_sha256 "$(jq -r '.handoff_packet_sha256 // ""' <<<"${doc_json}")" \

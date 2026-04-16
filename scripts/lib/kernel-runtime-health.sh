@@ -6,6 +6,7 @@ RECEIPT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-bootstrap-receipt.sh"
 GLM_STATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-glm-run-state.sh"
 LEDGER_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-ledger.sh"
 STATE_PATH_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-state-paths.sh"
+COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 MUTATE_LEDGER="${KERNEL_RUNTIME_HEALTH_MUTATE:-true}"
 
 default_run_id() {
@@ -18,6 +19,13 @@ default_run_id() {
 
 RUN_ID="$(default_run_id)"
 
+tmux_session_exists() {
+  local session_name="${1:-}"
+  local tmux_bin="${TMUX_BIN:-$(command -v tmux || true)}"
+  [[ -n "${session_name}" && -n "${tmux_bin}" ]] || return 1
+  "${tmux_bin}" has-session -t "=${session_name}" 2>/dev/null
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -28,6 +36,12 @@ EOF
 derive_lifecycle_state() {
   local state="${1:-unknown}"
   local scheduler_state="${2:-unknown}"
+  case "${state}" in
+    invalid|blocked|unknown)
+      printf 'blocked\n'
+      return 0
+      ;;
+  esac
   if [[ "${state}" == "degraded-allowed" ]]; then
     case "${scheduler_state}" in
       running|continuity_degraded)
@@ -80,6 +94,7 @@ cmd_status() {
   local receipt_path present glm_mode lane_count has_codex has_glm specialist_count receipt_mode state reason
   local active_model_count manifest_lane_count has_agent_labels has_subagent_labels
   local ledger_file codex_success glm_success specialist_success_count scheduler_state lifecycle_state
+  local compact_path compact_present compact_tmux_session
   local exit_code=0
   receipt_path="$(KERNEL_RUN_ID="${run_id}" bash "${RECEIPT_SCRIPT}" path)"
   present=false
@@ -122,6 +137,14 @@ cmd_status() {
     glm_success=0
     scheduler_state=unknown
     specialist_success_count=0
+  fi
+
+  compact_path="$(KERNEL_RUN_ID="${run_id}" bash "${COMPACT_SCRIPT}" path 2>/dev/null || true)"
+  compact_present=false
+  compact_tmux_session=""
+  if [[ -n "${compact_path}" && -f "${compact_path}" ]]; then
+    compact_present=true
+    compact_tmux_session="$(jq -r '.tmux_session // ""' "${compact_path}")"
   fi
 
   state="healthy"
@@ -174,6 +197,14 @@ cmd_status() {
   elif (( specialist_success_count < 1 )); then
     state="invalid"
     reason="specialist-provider-evidence-missing"
+  elif [[ "${scheduler_state}" == "running" || "${scheduler_state}" == "continuity_degraded" ]]; then
+    if [[ "${compact_present}" != "true" ]]; then
+      state="invalid"
+      reason="compact-artifact-missing"
+    elif [[ -n "${compact_tmux_session}" ]] && ! tmux_session_exists "${compact_tmux_session}"; then
+      state="invalid"
+      reason="tmux-session-missing-locally"
+    fi
   fi
 
   if [[ "${state}" == "invalid" ]]; then
@@ -195,6 +226,8 @@ cmd_status() {
   printf '  - codex provider success: %s\n' "${codex_success}"
   printf '  - glm provider success: %s\n' "${glm_success}"
   printf '  - specialist provider success count: %s\n' "${specialist_success_count}"
+  printf '  - compact present: %s\n' "${compact_present}"
+  printf '  - compact tmux session: %s\n' "${compact_tmux_session}"
   printf '  - receipt path: %s\n' "${receipt_path}"
   printf '  - mutating: %s\n' "${MUTATE_LEDGER}"
   return "${exit_code}"

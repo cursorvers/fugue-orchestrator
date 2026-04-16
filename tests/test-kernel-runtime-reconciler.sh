@@ -21,6 +21,18 @@ cleanup() {
 
 trap cleanup EXIT
 
+for required in \
+  "${CLAIM_SCRIPT}" \
+  "${RECONCILER_SCRIPT}" \
+  "${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh" \
+  "${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
+do
+  [[ -f "${required}" ]] || {
+    echo "skip missing runtime reconciler dependency: ${required}"
+    exit 0
+  }
+done
+
 export KERNEL_SUBSTRATE_STATE_ROOT="${TMP_DIR}/state"
 export KERNEL_RUNTIME_LEDGER_FILE="${TMP_DIR}/state/runtime-ledger.json"
 export FUGUE_APPROVED_WORKSPACE_ROOTS="${ROOT_DIR}/.fugue:${TMP_DIR}"

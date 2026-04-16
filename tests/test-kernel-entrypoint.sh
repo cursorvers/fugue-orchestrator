@@ -90,16 +90,22 @@ EOF
 cat > "${TMP_DIR}/workspace-receipt-active.json" <<'EOF'
 {"ok":true}
 EOF
+recent_active_ts="$(python3 - <<'PY'
+import datetime
+print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+)"
 cat > "${TMP_DIR}/compact/run-active.json" <<'EOF'
-{"run_id":"run-active","tmux_session":"kernel__active","updated_at":"2099-03-31T01:00:00Z","workspace_receipt_path":"WORKSPACE_ACTIVE_PLACEHOLDER"}
+{"run_id":"run-active","tmux_session":"kernel__active","updated_at":"ACTIVE_UPDATED_AT_PLACEHOLDER","workspace_receipt_path":"WORKSPACE_ACTIVE_PLACEHOLDER"}
 EOF
-python3 - "${TMP_DIR}/compact/run-active.json" "${TMP_DIR}/workspace-receipt-active.json" <<'PY'
+python3 - "${TMP_DIR}/compact/run-active.json" "${TMP_DIR}/workspace-receipt-active.json" "${recent_active_ts}" <<'PY'
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 text = text.replace("WORKSPACE_ACTIVE_PLACEHOLDER", sys.argv[2])
+text = text.replace("ACTIVE_UPDATED_AT_PLACEHOLDER", sys.argv[3])
 path.write_text(text, encoding="utf-8")
 PY
 printf '%s\n' 'kernel__active' >> "${TMUX_STATE_FILE}"
@@ -150,16 +156,22 @@ rm -f "${TMP_DIR}/state/4pane-active.json"
 cat > "${TMP_DIR}/workspace-receipt.json" <<'EOF'
 {"ok":true}
 EOF
+recent_latest_ts="$(python3 - <<'PY'
+import datetime
+print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+)"
 cat > "${TMP_DIR}/compact/run-latest.json" <<'EOF'
-{"run_id":"run-latest","tmux_session":"kernel__latest","updated_at":"2099-03-31T02:00:00Z","workspace_receipt_path":"WORKSPACE_RECEIPT_PLACEHOLDER"}
+{"run_id":"run-latest","tmux_session":"kernel__latest","updated_at":"LATEST_UPDATED_AT_PLACEHOLDER","workspace_receipt_path":"WORKSPACE_RECEIPT_PLACEHOLDER"}
 EOF
-python3 - "${TMP_DIR}/compact/run-latest.json" "${TMP_DIR}/workspace-receipt.json" <<'PY'
+python3 - "${TMP_DIR}/compact/run-latest.json" "${TMP_DIR}/workspace-receipt.json" "${recent_latest_ts}" <<'PY'
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 text = text.replace("WORKSPACE_RECEIPT_PLACEHOLDER", sys.argv[2])
+text = text.replace("LATEST_UPDATED_AT_PLACEHOLDER", sys.argv[3])
 path.write_text(text, encoding="utf-8")
 PY
 printf '%s\n' 'kernel__latest' >> "${TMUX_STATE_FILE}"

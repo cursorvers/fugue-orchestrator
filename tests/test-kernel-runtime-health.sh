@@ -76,11 +76,24 @@ export TMUX_LIVE_SESSIONS="health__session"
 out="$(KERNEL_RUNTIME_HEALTH_MUTATE=false bash "${HEALTH_SCRIPT}" status)"
 grep -Fq 'lifecycle state: live-running' <<<"${out}"
 grep -Fq 'scheduler state: running' <<<"${out}"
+grep -Fq 'compact present: true' <<<"${out}"
+grep -Fq 'compact tmux session: health__session' <<<"${out}"
 
 unset TMUX_LIVE_SESSIONS
-out="$(KERNEL_RUNTIME_HEALTH_MUTATE=false bash "${HEALTH_SCRIPT}" status)"
-grep -Fq 'lifecycle state: live-running' <<<"${out}"
-grep -Fq 'scheduler state: running' <<<"${out}"
+if KERNEL_RUNTIME_HEALTH_MUTATE=false bash "${HEALTH_SCRIPT}" status >/tmp/kernel-health-attach.$$ 2>&1; then
+  echo "expected missing tmux session to invalidate live-running health" >&2
+  cat /tmp/kernel-health-attach.$$ >&2
+  rm -f /tmp/kernel-health-attach.$$
+  exit 1
+fi
+grep -Fq 'reason: tmux-session-missing-locally' /tmp/kernel-health-attach.$$
+if grep -Fq 'lifecycle state: live-running' /tmp/kernel-health-attach.$$; then
+  echo "invalid live run must not report live-running lifecycle" >&2
+  cat /tmp/kernel-health-attach.$$ >&2
+  rm -f /tmp/kernel-health-attach.$$
+  exit 1
+fi
+rm -f /tmp/kernel-health-attach.$$
 export TMUX_LIVE_SESSIONS="health__session"
 
 bash "${GLM_SCRIPT}" fail one >/dev/null

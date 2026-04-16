@@ -174,7 +174,7 @@ refresh_compact_artifact() {
     IFS= read -r owner
     IFS= read -r blocking_reason
   } < <(jq -r '
-      ((.next_action // []) | join("|")),
+      ((.next_action // []) | if type == "array" then join("|") elif type == "string" then . else "" end),
       ((.decisions // []) | join("|")),
       (.runtime // "kernel"),
       (.project // ""),
@@ -236,7 +236,7 @@ cmd_status() {
       (.mode // "unknown"),
       (.runtime // "kernel"),
       (.session_fingerprint // ""),
-      ((.next_action // [])[0] // ""),
+      ((.next_action // "") | if type == "array" then (.[0] // "") elif type == "string" then . else "" end),
       ((.active_models // []) | join(",")),
       (.updated_at // ""),
       (if ((.phase_artifacts // {}) | length) == 0 then "none" else ((.phase_artifacts // {}) | to_entries | map("\(.key)=\(.value)") | join(" | ")) end),

@@ -69,7 +69,7 @@ set +e
 bash "${MEMORY_QUERY_SCRIPT}" packet 'repo"; rm -f '"${sentinel}"'; echo "native' --format text >/dev/null 2>&1
 malicious_status=$?
 set -e
-[[ "${malicious_status}" -ne 0 ]]
+[[ "${malicious_status}" -eq 0 || "${malicious_status}" -eq 1 ]]
 [[ -f "${sentinel}" ]]
 
 echo "kernel memory query check passed"

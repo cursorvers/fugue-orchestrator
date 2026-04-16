@@ -2,27 +2,43 @@
 set -euo pipefail
 
 launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+is_kernel_root() {
+  local candidate="${1:-}"
+  [[ -n "${candidate}" ]] || return 1
+  [[ -e "${candidate}/.git" ]] || return 1
+  [[ -f "${candidate}/.codex/prompts/kernel.md" ]] || return 1
+  [[ -f "${candidate}/scripts/lib/kernel-bootstrap-receipt.sh" ]] || return 1
+}
+
 resolve_kernel_root() {
-  if [[ -n "${KERNEL_ROOT:-}" ]]; then
+  if is_kernel_root "${KERNEL_ROOT:-}"; then
     printf '%s\n' "${KERNEL_ROOT}"
     return 0
   fi
   if [[ -x "${HOME}/bin/kernel-root" ]]; then
-    bash "${HOME}/bin/kernel-root" 2>/dev/null || true
-    return 0
+    local candidate
+    candidate="$(bash "${HOME}/bin/kernel-root" 2>/dev/null || true)"
+    if is_kernel_root "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
   fi
   if [[ -x "${launcher_dir}/kernel-root" ]]; then
-    bash "${launcher_dir}/kernel-root" 2>/dev/null || true
-    return 0
+    local candidate
+    candidate="$(bash "${launcher_dir}/kernel-root" 2>/dev/null || true)"
+    if is_kernel_root "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
   fi
+  return 1
 }
 
-kernel_root="$(resolve_kernel_root)"
-
-if [[ -z "${kernel_root}" ]]; then
+kernel_root="$(resolve_kernel_root)" || {
   echo "kernel-root unavailable" >&2
   exit 1
-fi
+}
 
 entrypoint="${kernel_root}/scripts/local/kernel-entrypoint.sh"
 if [[ ! -x "${entrypoint}" ]]; then

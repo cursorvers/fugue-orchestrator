@@ -27,13 +27,21 @@ export XAI_API_KEY=""
 export KERNEL_DOCTOR_SKIP_TMUX_CHECK=true
 export KERNEL_STALE_HOURS=24
 
-portable_utc_ts() {
-  local gnu_expr="$1"
-  local bsd_flag="$2"
-  if date -u -d "${gnu_expr}" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
-    date -u -d "${gnu_expr}" '+%Y-%m-%dT%H:%M:%SZ'
+utc_hours_ago() {
+  local hours="$1"
+  if date -u -d "${hours} hours ago" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+    date -u -d "${hours} hours ago" '+%Y-%m-%dT%H:%M:%SZ'
   else
-    date -u "${bsd_flag}" '+%Y-%m-%dT%H:%M:%SZ'
+    date -u -v-"${hours}"H '+%Y-%m-%dT%H:%M:%SZ'
+  fi
+}
+
+utc_days_ago() {
+  local days="$1"
+  if date -u -d "${days} days ago" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null 2>&1; then
+    date -u -d "${days} days ago" '+%Y-%m-%dT%H:%M:%SZ'
+  else
+    date -u -v-"${days}"d '+%Y-%m-%dT%H:%M:%SZ'
   fi
 }
 
@@ -56,8 +64,8 @@ if grep -Fq 'bootstrap receipt status:' <<<"${empty_out}"; then
 fi
 
 NOW_TS="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-MID_TS="$(portable_utc_ts '1 hour ago' '-v-1H')"
-OLD_TS="$(portable_utc_ts '2 days ago' '-v-2d')"
+MID_TS="$(utc_hours_ago 1)"
+OLD_TS="$(utc_days_ago 2)"
 cat >"${KERNEL_COMPACT_DIR}/run-live.json" <<EOF
 {"run_id":"run-live","project":"fugue-orchestrator","purpose":"runtime-enforcement","current_phase":"implement","mode":"healthy","runtime":"kernel","tmux_session":"fugue-orchestrator__runtime-enforcement","owner":"codex","active_models":["codex","glm","gemini-cli"],"blocking_reason":"","next_action":["wire-provider-evidence"],"decisions":["d1"],"summary":["live summary"],"last_event":"status_changed","updated_at":"${NOW_TS}"}
 EOF
