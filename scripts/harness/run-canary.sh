@@ -27,6 +27,7 @@ set -euo pipefail
 #   CANARY_MODE_INPUT    — full (default) or lite
 #   CANARY_EXECUTION_MODE_OVERRIDE — canary dispatch override (default: primary)
 #   CANARY_PLAN_ONLY     — true to print resolved cases without touching GitHub
+#   CANARY_SLO_TARGET_SECONDS — latency target for full canary completion (default: 900)
 #
 # Usage: bash scripts/harness/run-canary.sh
 
@@ -156,9 +157,11 @@ report_json="${report_dir}/canary-report.json"
 report_md="${report_dir}/canary-report.md"
 case_results_file="${report_dir}/case-results.jsonl"
 progress_file="${report_dir}/progress-events.jsonl"
+metrics_file="${report_dir}/canary-metrics.jsonl"
 mkdir -p "${report_dir}"
 : >"${case_results_file}"
 : >"${progress_file}"
+: >"${metrics_file}"
 
 record_case_result() {
   local case_name="$1"
@@ -253,6 +256,11 @@ write_canary_report() {
   local final_status="$1"
   local elapsed_seconds
   elapsed_seconds="$(( $(date -u '+%s') - canary_started_epoch ))"
+  local slo_target_seconds
+  slo_target_seconds="$(printf '%s' "${CANARY_SLO_TARGET_SECONDS:-900}" | tr -cd '0-9')"
+  if [[ -z "${slo_target_seconds}" || "${slo_target_seconds}" == "0" ]]; then
+    slo_target_seconds="900"
+  fi
 
   jq -n \
     --arg generated_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
@@ -271,9 +279,14 @@ write_canary_report() {
     --argjson verify_rollback_case "$( [[ "${verify_rollback_case}" == "true" ]] && printf 'true' || printf 'false' )" \
     --argjson failures "${failures}" \
     --argjson elapsed_seconds "${elapsed_seconds}" \
+    --argjson slo_target_seconds "${slo_target_seconds}" \
     --slurpfile cases "${case_results_file}" \
     --slurpfile progress "${progress_file}" \
-    '{
+    '($cases // []) as $case_rows
+    | ($case_rows | length) as $checks_total
+    | ($case_rows | map(select(.status == "passed")) | length) as $checks_passed
+    | ($case_rows | map(select(.status == "failed")) | length) as $checks_failed
+    | {
       version: 1,
       generated_at: $generated_at,
       repository: $repo,
@@ -292,8 +305,43 @@ write_canary_report() {
       github_ref_name: (if $github_ref_name == "" then null else $github_ref_name end),
       report_dir: $report_dir,
       progress: ($progress // []),
-      cases: ($cases // [])
+      cases: $case_rows,
+      slo: {
+        version: 1,
+        component: "fugue-orchestrator-canary",
+        target_seconds: $slo_target_seconds,
+        elapsed_seconds: $elapsed_seconds,
+        latency_status: (
+          if $plan_only then "not-applicable"
+          elif $elapsed_seconds <= $slo_target_seconds then "ok"
+          else "breach"
+          end
+        ),
+        checks_total: $checks_total,
+        checks_passed: $checks_passed,
+        checks_failed: $checks_failed,
+        pass_rate: (if $checks_total == 0 then 0 else (($checks_passed / $checks_total) * 100) end),
+        error_rate: (if $checks_total == 0 then 0 else (($checks_failed / $checks_total) * 100) end),
+        health_score: (
+          if $plan_only then 100
+          elif $checks_total == 0 then 0
+          else (100 - (($checks_failed / $checks_total) * 100))
+          end
+        )
+      }
     }' >"${report_json}"
+
+  jq -c '{
+    generated_at,
+    repository,
+    canary_mode,
+    final_status,
+    github_run_id,
+    github_ref_name,
+    plan_only,
+    verify_rollback_case,
+    slo
+  }' "${report_json}" >>"${metrics_file}"
 
   {
     echo "## Fugue Orchestrator Canary"
@@ -306,6 +354,9 @@ write_canary_report() {
     echo "- Elapsed seconds: ${elapsed_seconds}"
     echo "- Default main: ${default_main_provider}"
     echo "- Alternate main: ${canary_alternate_main}"
+    echo "- SLO target seconds: $(jq -r '.slo.target_seconds' "${report_json}")"
+    echo "- SLO latency status: $(jq -r '.slo.latency_status' "${report_json}")"
+    echo "- SLO health score: $(jq -r '.slo.health_score' "${report_json}")"
     echo ""
     echo "### Progress"
     jq -r '

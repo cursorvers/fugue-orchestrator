@@ -29,6 +29,22 @@ Run:
 scripts/audit-org-secrets.sh --org cursorvers
 ```
 
+Plan safe repo-shadow cleanup:
+
+```bash
+scripts/audit-org-secrets.sh --org cursorvers --cleanup-shadows
+```
+
+Apply cleanup only after reviewing the dry-run:
+
+```bash
+scripts/audit-org-secrets.sh --org cursorvers --apply-cleanup
+```
+
+Cleanup is intentionally conservative. It removes a repo-level secret only when
+the preferred org secret is confirmed to cover the repo and the name is not in
+`allow_repo_secrets`.
+
 Bootstrap/update secrets from local process env or an explicit external env file:
 ```bash
 bash scripts/local/sync-gh-secrets-from-env.sh --dry-run

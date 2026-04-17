@@ -80,6 +80,28 @@ Use:
 bash scripts/audit-org-secrets.sh --org cursorvers
 ```
 
+To plan repo-secret shadow cleanup after org coverage exists:
+
+```bash
+bash scripts/audit-org-secrets.sh --org cursorvers --cleanup-shadows
+```
+
+To actually delete safe repo shadows:
+
+```bash
+bash scripts/audit-org-secrets.sh --org cursorvers --apply-cleanup
+```
+
+`--apply-cleanup` deletes a repo-level secret only when all of the following are
+true:
+
+- the secret is listed as preferred org scope
+- the secret is not listed in `allow_repo_secrets`
+- org-level access is available
+- the org secret already covers that repo
+
+If any condition is not proven, the script keeps the repo secret and reports why.
+
 To sync available current-shell or external-file values across every configured repo:
 
 ```bash

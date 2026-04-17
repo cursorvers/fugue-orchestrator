@@ -286,7 +286,13 @@ dispatch_workflow() {
 
 load_reconcile_claim_state() {
   if gh variable list --repo "${repo}" >/dev/null 2>&1; then
-    gh api "repos/${repo}/actions/variables/FUGUE_RECONCILE_CLAIM_STATE" --jq '.value' 2>/dev/null || printf '{}'
+    local value
+    value="$(gh api "repos/${repo}/actions/variables/FUGUE_RECONCILE_CLAIM_STATE" --jq '.value' 2>/dev/null || true)"
+    if [[ -n "${value}" ]]; then
+      printf '%s\n' "${value}"
+    else
+      printf '{}'
+    fi
   else
     printf '{}'
   fi
@@ -372,6 +378,7 @@ reroute_issue() {
 
 manus_diagnose() {
   local receipt run_url api_key_available client_available access_reason next_action live_started
+  local health_score blocking_condition check_latency_ms
   run_url="$(current_run_url)"
 
   append_summary "## Manus Recovery Diagnosis"
@@ -392,10 +399,16 @@ manus_diagnose() {
   access_reason="$(printf '%s' "${receipt}" | jq -r '.accessReason')"
   live_started="$(printf '%s' "${receipt}" | jq -r '.liveExecutionStarted')"
   next_action="$(printf '%s' "${receipt}" | jq -r '.nextAction')"
+  health_score="$(printf '%s' "${receipt}" | jq -r '.overallHealthScore')"
+  blocking_condition="$(printf '%s' "${receipt}" | jq -r '.blockingCondition')"
+  check_latency_ms="$(printf '%s' "${receipt}" | jq -r '.checkLatencyMs')"
 
   append_summary "- manus client available: \`${client_available}\`"
   append_summary "- manus api key available: \`${api_key_available}\`"
   append_summary "- access reason: \`${access_reason}\`"
+  append_summary "- health score: \`${health_score}\`"
+  append_summary "- blocking condition: \`${blocking_condition}\`"
+  append_summary "- check latency ms: \`${check_latency_ms}\`"
   append_summary "- live manus task started: \`${live_started}\`"
   append_summary "- next action: \`${next_action}\`"
   append_summary ""

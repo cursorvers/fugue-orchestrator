@@ -2,8 +2,20 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANIFEST="${ROOT_DIR}/config/integrations/peripheral-adapters.json"
-LOCAL_SYSTEMS_MANIFEST="${ROOT_DIR}/config/integrations/local-systems.json"
+MANIFEST="${PERIPHERAL_ADAPTER_MANIFEST:-${ROOT_DIR}/config/integrations/peripheral-adapters.json}"
+LOCAL_SYSTEMS_MANIFEST="${PERIPHERAL_LOCAL_SYSTEMS_MANIFEST:-${ROOT_DIR}/config/integrations/local-systems.json}"
+CHECK_MODE="${PERIPHERAL_ADAPTER_CHECK_MODE:-contract}"
+
+usage() {
+  cat <<'EOF'
+Usage: check-peripheral-adapters.sh [--mode contract|strict]
+
+Modes:
+  contract  Validate manifest schema, local-linked paths, and in-repo contract files.
+            Cross-repo paths outside this repository may be absent and are reported as warnings.
+  strict    Validate every declared path exists on this machine.
+EOF
+}
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -17,6 +29,38 @@ pass() {
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"
 }
+
+while (($# > 0)); do
+  case "$1" in
+    --mode)
+      if [[ -z "${2:-}" ]]; then
+        fail "--mode requires one of: contract, strict"
+      fi
+      CHECK_MODE="${2:-}"
+      shift 2
+      ;;
+    --mode=*)
+      CHECK_MODE="${1#--mode=}"
+      shift
+      ;;
+    --strict)
+      CHECK_MODE="strict"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "unknown argument: $1"
+      ;;
+  esac
+done
+
+case "${CHECK_MODE}" in
+  contract|strict) ;;
+  *) fail "invalid check mode: ${CHECK_MODE}" ;;
+esac
 
 require_cmd jq
 [[ -f "${MANIFEST}" ]] || fail "manifest not found: ${MANIFEST}"
@@ -124,7 +168,18 @@ while IFS= read -r row; do
   else
     resolved_path="${ROOT_DIR}/${path_value}"
   fi
-  [[ -e "${resolved_path}" ]] || fail "adapter=${id} path missing: ${path_value}"
+
+  if [[ ! -e "${resolved_path}" ]]; then
+    if [[ "${CHECK_MODE}" == "contract" && "${scope}" == "cross-repo" && "${resolved_path}" == "${ROOT_DIR}/../"* ]]; then
+      echo "[WARN] adapter=${id} cross-repo path not checked in contract mode: ${path_value}" >&2
+      continue
+    fi
+    if [[ "${CHECK_MODE}" == "contract" && "${scope}" == "skill" && "${resolved_path}" != "${ROOT_DIR}/"* ]]; then
+      echo "[WARN] adapter=${id} external skill path not checked in contract mode: ${path_value}" >&2
+      continue
+    fi
+    fail "adapter=${id} path missing: ${path_value}"
+  fi
 
   if [[ "${adapter_class}" == "shell" ]]; then
     [[ -f "${resolved_path}" ]] || fail "adapter=${id} shell path is not a file: ${path_value}"
@@ -139,5 +194,5 @@ while IFS= read -r row; do
   fi
 done < <(jq -c '.adapters[]' "${MANIFEST}")
 
-pass "adapter paths and local-linked references valid"
+pass "adapter paths and local-linked references valid (mode=${CHECK_MODE})"
 echo "peripheral adapter contract check passed"

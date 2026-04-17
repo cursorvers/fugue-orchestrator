@@ -13,7 +13,7 @@ GitHub Organization Secrets (shared CI)    <- first choice for shared automation
 +-- OPENAI_API_KEY
 +-- ZAI_API_KEY
 +-- ANTHROPIC_API_KEY
-+-- GEMINI_API_KEY / XAI_API_KEY
++-- GEMINI_API_KEY / XAI_API_KEY / ESTAT_API_ID
 +-- shared webhook / ops credentials
 
 GitHub Repository / Environment Secrets    <- repo- or env-specific CI only
@@ -66,9 +66,10 @@ Preferred local resolution order for shared secrets:
 
 1. process env override
 2. local Keychain/shared secret cache
-3. explicit external env file
+3. shared encrypted SOPS bundle
+4. explicit external env file
 
-The encrypted shared bundle is for bootstrap / restore, not for routine runtime reads.
+The encrypted shared bundle is the canonical bootstrap / restore source and a disaster-recovery fallback. Routine attended operation should be satisfied by process env or Keychain; explicit external env files are last-resort imports and must live outside the repository.
 
 ## Workspace Rule
 
@@ -80,7 +81,7 @@ The encrypted shared bundle is for bootstrap / restore, not for routine runtime 
 ## Kernel / FUGUE Compatibility
 
 - Secret **names** are the contract. Orchestrator choice must not require renaming secrets.
-- `Kernel` and `FUGUE` should both resolve the same canonical names (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `TARGET_REPO_PAT`, `FUGUE_OPS_PAT`, etc.).
+- `Kernel` and `FUGUE` should both resolve the same canonical names (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `ESTAT_API_ID`, `TARGET_REPO_PAT`, `FUGUE_OPS_PAT`, etc.).
 - Provider-specific adapters may be optional, but secret naming stays stable so rollback from `Kernel` to `FUGUE` does not require secret migration.
 - Shared local resolution should happen through a common loader, not by each orchestrator inventing its own lookup order.
 

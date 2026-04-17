@@ -111,7 +111,8 @@ resolve_from_env_file() {
 
   local value
   value="$(
-    env -i bash -lc '
+    # Deliberately non-login and empty-env: external env imports must not depend on user shell profiles.
+    env -i bash -c '
       set -a
       source "$1"
       set +a
@@ -127,7 +128,8 @@ resolve_from_env_file() {
   while IFS= read -r alias_name; do
     [[ -n "${alias_name}" ]] || continue
     value="$(
-      env -i bash -lc '
+      # Deliberately non-login and empty-env: external env imports must not depend on user shell profiles.
+      env -i bash -c '
         set -a
         source "$1"
         set +a
