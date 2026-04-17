@@ -39,16 +39,24 @@ grep -q 'manus-recovery-diagnose.js' "${SCRIPT}" || {
   echo "FAIL: manus-diagnose mode should call the Manus diagnosis helper" >&2
   exit 1
 }
+grep -q 'overallHealthScore' "${ROOT_DIR}/scripts/harness/manus-recovery-diagnose.js" || {
+  echo "FAIL: manus diagnosis should emit an SLO-compatible health score" >&2
+  exit 1
+}
+grep -q 'blockingCondition' "${ROOT_DIR}/scripts/harness/manus-recovery-diagnose.js" || {
+  echo "FAIL: manus diagnosis should emit blocking condition telemetry" >&2
+  exit 1
+}
 grep -q 'gh issue comment "${status_issue}"' "${SCRIPT}" || {
   echo "FAIL: mobile-progress should post into the status issue" >&2
   exit 1
 }
 REROUTE_BLOCK="$(sed -n '/reroute_issue()/,/^}/p' "${SCRIPT}")"
-printf '%s' "${REROUTE_BLOCK}" | grep -q '"fugue-caller.yml"' || {
+grep -q '"fugue-caller.yml"' <<<"${REROUTE_BLOCK}" || {
   echo "FAIL: reroute-issue should dispatch fugue-caller.yml" >&2
   exit 1
 }
-if printf '%s' "${REROUTE_BLOCK}" | grep -q '"fugue-task-router.yml"'; then
+if grep -q '"fugue-task-router.yml"' <<<"${REROUTE_BLOCK}"; then
   echo "FAIL: reroute-issue should not dispatch fugue-task-router.yml directly" >&2
   exit 1
 fi
@@ -139,6 +147,14 @@ grep -q 'Manus Recovery Diagnosis' "${FAKE_SUMMARY}" || {
 }
 grep -q 'live manus task started: `false`' "${FAKE_SUMMARY}" || {
   echo "FAIL: manus-diagnose must not start a live Manus task by default" >&2
+  exit 1
+}
+grep -q 'health score:' "${FAKE_SUMMARY}" || {
+  echo "FAIL: manus-diagnose should include health score in summary" >&2
+  exit 1
+}
+grep -q 'blocking condition:' "${FAKE_SUMMARY}" || {
+  echo "FAIL: manus-diagnose should include blocking condition in summary" >&2
   exit 1
 }
 

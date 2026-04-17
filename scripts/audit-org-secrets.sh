@@ -11,6 +11,7 @@ set -euo pipefail
 # Usage:
 #   scripts/audit-org-secrets.sh --org cursorvers
 #   scripts/audit-org-secrets.sh --org cursorvers --config scripts/org-secrets-audit.json
+#   scripts/audit-org-secrets.sh --org cursorvers --cleanup-shadows
 #
 # Exit codes:
 # - 0: all good (or warnings only)
@@ -19,6 +20,8 @@ set -euo pipefail
 ORG=""
 CONFIG="scripts/org-secrets-audit.json"
 FALLBACK_REASON=""
+CLEANUP_SHADOWS="false"
+APPLY_CLEANUP="false"
 
 while [[ $# -gt 0 ]]; do
   case "${1}" in
@@ -26,13 +29,21 @@ while [[ $# -gt 0 ]]; do
       ORG="${2}"; shift 2;;
     --config)
       CONFIG="${2}"; shift 2;;
+    --cleanup-shadows)
+      CLEANUP_SHADOWS="true"; shift;;
+    --apply-cleanup)
+      CLEANUP_SHADOWS="true"; APPLY_CLEANUP="true"; shift;;
     -h|--help)
       cat <<'EOF'
-Usage: scripts/audit-org-secrets.sh --org <org> [--config <path>]
+Usage: scripts/audit-org-secrets.sh --org <org> [--config <path>] [--cleanup-shadows] [--apply-cleanup]
 
 Audits GitHub Actions secrets to help centralize them as organization secrets.
 If org-level secret access is unavailable, the script falls back to repo-only
 classification so migration planning can continue.
+
+Shadow cleanup is dry-run by default. --apply-cleanup deletes a repo-level
+secret only when a preferred org secret already covers the repo and the secret
+is not listed in allow_repo_secrets.
 EOF
       exit 0;;
     *)
@@ -195,6 +206,54 @@ secret_is_covered_for_repo() {
     return 0
   fi
   return 1
+}
+
+org_secret_covers_repo() {
+  local repo="$1"
+  local secret="$2"
+  [[ "${org_access}" == "true" ]] || return 1
+
+  local org_vis
+  org_vis="$(org_secret_visibility "${secret}")"
+  if [[ "${org_vis}" == "all" ]]; then
+    return 0
+  fi
+  if [[ "${org_vis}" == "selected" ]] && get_selected_repos_for_secret "${secret}" | has_line_exact "${repo}"; then
+    return 0
+  fi
+  return 1
+}
+
+cleanup_repo_shadow_secret() {
+  local repo="$1"
+  local secret="$2"
+
+  if [[ "${CLEANUP_SHADOWS}" != "true" ]]; then
+    return 0
+  fi
+
+  if [[ -n "${allow_repo_secrets}" ]] && printf '%s\n' "${allow_repo_secrets}" | has_line_exact "${secret}"; then
+    printf '  KEEP  %s (repo secret is allowed by allow_repo_secrets)\n' "${secret}"
+    return 0
+  fi
+
+  if ! org_secret_covers_repo "${repo}" "${secret}"; then
+    printf '  KEEP  %s (repo shadow not removed; org coverage is not confirmed)\n' "${secret}"
+    warnings=$((warnings+1))
+    return 0
+  fi
+
+  if [[ "${APPLY_CLEANUP}" != "true" ]]; then
+    printf '  CLEANUP-DRY-RUN %s (repo shadow can be deleted; org secret covers repo)\n' "${secret}"
+    return 0
+  fi
+
+  if GH_PROMPT_DISABLED=1 gh secret delete "${secret}" --repo "${repo}" >/dev/null; then
+    printf '  CLEANUP-OK %s (deleted repo shadow; org secret covers repo)\n' "${secret}"
+  else
+    printf '  CLEANUP-FAIL %s (repo shadow delete failed)\n' "${secret}" >&2
+    failures=$((failures+1))
+  fi
 }
 
 repo_count=0
@@ -420,6 +479,7 @@ while IFS= read -r repo; do
       while IFS= read -r candidate; do
         [[ -z "${candidate}" ]] && continue
         printf '    - %s\n' "${candidate}"
+        cleanup_repo_shadow_secret "${repo}" "${candidate}"
       done <<<"${migrate_candidates}"
     fi
   fi

@@ -18,11 +18,13 @@ function boolEnv(name, fallback = false) {
 }
 
 function resolveManusAccess() {
+  const started = Date.now();
   if (!fs.existsSync(MANUS_CLIENT_PATH)) {
     return {
       apiKeyAvailable: false,
       clientAvailable: false,
       reason: "manus-client-missing",
+      checkLatencyMs: Date.now() - started,
     };
   }
   try {
@@ -32,12 +34,14 @@ function resolveManusAccess() {
       apiKeyAvailable: Boolean(key),
       clientAvailable: true,
       reason: key ? "key-resolved" : "key-missing",
+      checkLatencyMs: Date.now() - started,
     };
   } catch (err) {
     return {
       apiKeyAvailable: false,
       clientAvailable: false,
       reason: `client-load-failed: ${String(err && err.message ? err.message : err).slice(0, 120)}`,
+      checkLatencyMs: Date.now() - started,
     };
   }
 }
@@ -61,15 +65,35 @@ function main() {
   recommendations.push("use-manus-only-for-novel-diagnosis-or-artifact-synthesis-after-local-tests-fail");
   recommendations.push("keep-manus-live-execution-manual-until-diagnosis-receipts-are-stable");
 
+  const blockingCondition = !access.clientAvailable
+    ? "api"
+    : !access.apiKeyAvailable
+      ? "auth"
+      : "none";
+  const overallHealthScore = access.clientAvailable && access.apiKeyAvailable
+    ? 100
+    : access.clientAvailable
+      ? 70
+      : 40;
+
   const receipt = {
     success: true,
     provider: "manus",
     mode: "diagnose",
+    sloVersion: 1,
     execute,
     liveExecutionStarted: false,
     clientAvailable: access.clientAvailable,
     apiKeyAvailable: access.apiKeyAvailable,
     accessReason: access.reason,
+    checkLatencyMs: access.checkLatencyMs,
+    overallHealthScore,
+    blockingCondition,
+    componentHealth: {
+      client: access.clientAvailable ? "ok" : "missing",
+      apiKey: access.apiKeyAvailable ? "ok" : "missing",
+      liveExecution: "disabled",
+    },
     input: {
       repo,
       issueNumber,
@@ -83,12 +107,15 @@ function main() {
 
   if (execute) {
     receipt.success = false;
+    receipt.overallHealthScore = Math.min(receipt.overallHealthScore, 30);
+    receipt.blockingCondition = "execute";
+    receipt.componentHealth.liveExecution = "blocked";
     receipt.nextAction = "manual-approval-required-for-live-manus-repair";
     receipt.recommendations.unshift("live-manus-repair-is-intentionally-disabled-in-diagnose-mode");
   }
 
-  process.stdout.write(`${JSON.stringify(receipt)}\n`);
-  process.exit(receipt.success ? 0 : 2);
+  console.log(JSON.stringify(receipt));
+  process.exitCode = receipt.success ? 0 : 2;
 }
 
 main();

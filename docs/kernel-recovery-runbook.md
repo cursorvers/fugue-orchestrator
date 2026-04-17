@@ -98,6 +98,7 @@ Use when Manus should be checked as a standby recovery lane without spending Man
 Behavior:
 
 - checks whether the Manus client and key resolution path are available
+- emits SLO-compatible fields: health score, blocking condition, and dependency check latency
 - writes a diagnosis and recommendations to the workflow summary
 - does not start a live Manus task by default
 
@@ -113,6 +114,25 @@ Recommended input:
 4. If legacy rollback must remain available, run `rollback-canary`
 5. If Manus may be needed as a standby repair lane, run `manus-diagnose`
 6. If a real issue is stuck, run `reroute-issue`
+
+## Waiting-Run Drill
+
+Use the deterministic local drill before live queue experiments:
+
+```bash
+bash scripts/harness/run-watchdog-waiting-run-drill.sh \
+  --waiting-run-count 1 \
+  --waiting-run-age-minutes 61
+```
+
+Expected result:
+
+- `should_alert=true`
+- `workflow-waiting` appears in the watchdog reasons
+
+Full procedure:
+
+- [fugue-watchdog-waiting-run-drill.md](/Users/masayuki/Dev/fugue-orchestrator-handoff-hardening/docs/runbook/fugue-watchdog-waiting-run-drill.md)
 
 ## Recovery Guarantees
 

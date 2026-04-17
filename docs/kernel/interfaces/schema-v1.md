@@ -17,6 +17,7 @@ The canonical shared secret names are:
 - `ZAI_API_KEY`
 - `GEMINI_API_KEY`
 - `XAI_API_KEY`
+- `ESTAT_API_ID`
 - `TARGET_REPO_PAT`
 - `FUGUE_OPS_PAT`
 
@@ -26,14 +27,17 @@ Runtime resolves shared secrets in this order:
 
 1. `process env`
 2. `Keychain`
-3. `explicit external env file`
+3. `shared SOPS bundle`
+4. `explicit external env file`
 
-The encrypted shared bundle is `bootstrap / restore` only. Routine runtime does not decrypt it.
+The encrypted shared bundle is the canonical bootstrap / restore source and a disaster-recovery fallback. Routine attended operation should be satisfied by process env or Keychain, but runtime loaders may use the bundle before falling back to an explicitly configured external env file.
 
 ### Compatibility
 
 - `XAI_API` is a legacy alias for `XAI_API_KEY`.
+- `ESTAT_APP_ID` is a legacy alias for `ESTAT_API_ID`.
 - New runtime code should emit and consume canonical names only.
+- Doctor views must print source and length only, never secret values.
 
 ## 2. Bootstrap Receipt Schema
 

@@ -151,13 +151,17 @@ Critical review lanes converged on the same result:
 
 ## Remaining Non-Blocking Hardening
 
-These items are outside the current completion gate:
+These items were outside the original completion gate. Follow-up hardening now has implementation support:
 
-- install `actionlint` on macmini for local parity with MBP and CI
-- clean up org-secret / repo-secret shadowing when org-level permission is available
-- add explicit failure-smoke drills for locked Keychain, missing SOPS, and missing `gh` auth
-- document a waiting-run end-to-end drill for operational runbooks
-- add SLO-style metrics for self-heal and canary latency
+- `scripts/local/install-github-actions-tools.sh` checks/installs local `actionlint`
+- `scripts/audit-org-secrets.sh --cleanup-shadows` plans safe repo-shadow cleanup
+- failure-smoke drills cover locked Keychain, missing SOPS, and missing `gh` auth
+- waiting-run drill is documented in `docs/runbook/fugue-watchdog-waiting-run-drill.md`
+- canary and Manus diagnosis emit SLO-compatible metrics
+
+The only remaining external gate is org-level permission for applying org-secret
+cleanup. Without that permission, repo-secret fallback remains the designed safe
+mode.
 
 ## Final Status
 

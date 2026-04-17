@@ -71,6 +71,14 @@ grep -q 'progress-events.jsonl' "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script missing durable progress event file" >&2
   exit 1
 }
+grep -q 'canary-metrics.jsonl' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing durable SLO metrics file" >&2
+  exit 1
+}
+grep -q 'CANARY_SLO_TARGET_SECONDS' "${CANARY_SCRIPT}" || {
+  echo "FAIL: canary script missing SLO target configuration" >&2
+  exit 1
+}
 grep -q 'GITHUB_STEP_SUMMARY' "${CANARY_SCRIPT}" || {
   echo "FAIL: canary script should append report to GITHUB_STEP_SUMMARY when available" >&2
   exit 1
@@ -263,6 +271,7 @@ plan_output="$(
   CANARY_WAIT_FAST_SLEEP_SEC="1" \
     CANARY_WAIT_SLOW_ATTEMPTS="0" \
     CANARY_WAIT_SLOW_SLEEP_SEC="1" \
+    CANARY_SLO_TARGET_SECONDS="900" \
     CANARY_REPORT_DIR="${TMP_DIR}/report" \
     GITHUB_STEP_SUMMARY="${TMP_DIR}/summary.md" \
     bash "${CANARY_SCRIPT}"
@@ -319,6 +328,10 @@ rollback_task_size="$(printf '%s\n' "${plan_output}" | jq -r 'select(.case == "r
   echo "FAIL: expected canary progress event output" >&2
   exit 1
 }
+[[ -f "${TMP_DIR}/report/canary-metrics.jsonl" ]] || {
+  echo "FAIL: expected canary SLO metrics output" >&2
+  exit 1
+}
 report_status="$(jq -r '.final_status' "${TMP_DIR}/report/canary-report.json")"
 [[ "${report_status}" == "planned" ]] || {
   echo "FAIL: expected planned final status in canary report, got ${report_status}" >&2
@@ -331,6 +344,16 @@ report_case_count="$(jq -r '.cases | length' "${TMP_DIR}/report/canary-report.js
 }
 jq -e '.progress | length >= 4' "${TMP_DIR}/report/canary-report.json" >/dev/null || {
   echo "FAIL: expected progress events in canary report json" >&2
+  exit 1
+}
+jq -e '.slo.version == 1 and .slo.component == "fugue-orchestrator-canary" and .slo.target_seconds == 900 and .slo.latency_status == "not-applicable" and .slo.health_score == 100' "${TMP_DIR}/report/canary-report.json" >/dev/null || {
+  echo "FAIL: expected canary report SLO payload" >&2
+  cat "${TMP_DIR}/report/canary-report.json" >&2
+  exit 1
+}
+jq -e '.slo.component == "fugue-orchestrator-canary" and .final_status == "planned"' "${TMP_DIR}/report/canary-metrics.jsonl" >/dev/null || {
+  echo "FAIL: expected canary metrics JSONL payload" >&2
+  cat "${TMP_DIR}/report/canary-metrics.jsonl" >&2
   exit 1
 }
 grep -Fq '"phase":"bootstrap"' "${TMP_DIR}/report/progress-events.jsonl" || {
@@ -347,6 +370,10 @@ grep -Fq '| regular | planned | plan-only | codex |  |' "${TMP_DIR}/report/canar
 }
 grep -Fq '### Progress' "${TMP_DIR}/report/canary-report.md" || {
   echo "FAIL: expected progress section in canary markdown report" >&2
+  exit 1
+}
+grep -Fq 'SLO latency status: not-applicable' "${TMP_DIR}/report/canary-report.md" || {
+  echo "FAIL: expected SLO status in canary markdown report" >&2
   exit 1
 }
 grep -Fq '### Progress' "${TMP_DIR}/summary.md" || {

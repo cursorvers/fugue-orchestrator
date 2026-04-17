@@ -35,19 +35,26 @@ on:
       - 'scripts/lib/kernel-memory-query.sh'
       - 'scripts/lib/kernel-run-recovery.sh'
       - 'scripts/codex-kernel-guard.sh'
+      - 'scripts/audit-org-secrets.sh'
+      - 'scripts/lib/load-shared-secrets.sh'
       - 'scripts/local/install-kernel-launchers.sh'
+      - 'scripts/local/install-github-actions-tools.sh'
+      - 'scripts/local/sync-gh-secrets-from-env.sh'
       - 'scripts/local/kernel-handoff-summary.sh'
       - 'scripts/local/launchers/**'
       - 'scripts/local/kernel-runtime-loop.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-peripheral-adapters.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/local/integrations/**'
+      - 'scripts/harness/manus-recovery-diagnose.js'
       - 'scripts/harness/run-recovery-console.sh'
+      - 'scripts/harness/run-watchdog-waiting-run-drill.sh'
       - 'tests/test-codex-skill-launch.sh'
       - 'tests/test-codex-vote-prompt.sh'
       - 'tests/test-codex-orchestrator-snippet.sh'
@@ -55,6 +62,10 @@ on:
       - 'tests/test-codex-kernel-guard-matrix.sh'
       - 'tests/test-codex-kernel-guard-state-fallback.sh'
       - 'tests/test-install-kernel-launchers.sh'
+      - 'tests/test-install-github-actions-tools.sh'
+      - 'tests/test-shared-secrets-failure-smoke.sh'
+      - 'tests/test-sync-gh-auth-drill.sh'
+      - 'tests/test-org-secrets-shadow-cleanup.sh'
       - 'tests/test-kernel-auth-evidence.sh'
       - 'tests/test-kernel-dr-continuation.sh'
       - 'tests/test-kernel-entrypoint.sh'
@@ -69,10 +80,12 @@ on:
       - 'tests/test-recovery-reroute-claim-gate.sh'
       - 'tests/test-watchdog-reconcile-claim-policy.sh'
       - 'tests/test-watchdog-reconcile-workflow.sh'
+      - 'tests/test-peripheral-adapter-contract.sh'
       - 'tests/test-route-task-handoff.sh'
       - 'tests/test-resolve-orchestration-context.sh'
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-kernel-recovery-console.sh'
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
@@ -142,19 +155,26 @@ on:
       - 'scripts/lib/kernel-memory-query.sh'
       - 'scripts/lib/kernel-run-recovery.sh'
       - 'scripts/codex-kernel-guard.sh'
+      - 'scripts/audit-org-secrets.sh'
+      - 'scripts/lib/load-shared-secrets.sh'
       - 'scripts/local/install-kernel-launchers.sh'
+      - 'scripts/local/install-github-actions-tools.sh'
+      - 'scripts/local/sync-gh-secrets-from-env.sh'
       - 'scripts/local/kernel-handoff-summary.sh'
       - 'scripts/local/launchers/**'
       - 'scripts/local/kernel-runtime-loop.sh'
       - 'scripts/check-agent-matrix-parity.sh'
       - 'scripts/check-linked-systems-integrity.sh'
+      - 'scripts/check-peripheral-adapters.sh'
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/local/integrations/**'
+      - 'scripts/harness/manus-recovery-diagnose.js'
       - 'scripts/harness/run-recovery-console.sh'
+      - 'scripts/harness/run-watchdog-waiting-run-drill.sh'
       - 'tests/test-codex-skill-launch.sh'
       - 'tests/test-codex-vote-prompt.sh'
       - 'tests/test-codex-orchestrator-snippet.sh'
@@ -162,6 +182,10 @@ on:
       - 'tests/test-codex-kernel-guard-matrix.sh'
       - 'tests/test-codex-kernel-guard-state-fallback.sh'
       - 'tests/test-install-kernel-launchers.sh'
+      - 'tests/test-install-github-actions-tools.sh'
+      - 'tests/test-shared-secrets-failure-smoke.sh'
+      - 'tests/test-sync-gh-auth-drill.sh'
+      - 'tests/test-org-secrets-shadow-cleanup.sh'
       - 'tests/test-kernel-auth-evidence.sh'
       - 'tests/test-kernel-dr-continuation.sh'
       - 'tests/test-kernel-entrypoint.sh'
@@ -176,10 +200,12 @@ on:
       - 'tests/test-recovery-reroute-claim-gate.sh'
       - 'tests/test-watchdog-reconcile-claim-policy.sh'
       - 'tests/test-watchdog-reconcile-workflow.sh'
+      - 'tests/test-peripheral-adapter-contract.sh'
       - 'tests/test-route-task-handoff.sh'
       - 'tests/test-resolve-orchestration-context.sh'
       - 'tests/test-canary-trust-policy.sh'
       - 'tests/test-kernel-canary-plan.sh'
+      - 'tests/test-kernel-recovery-console.sh'
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
@@ -289,11 +315,18 @@ jobs:
           bash_n scripts/lib/kernel-memory-query.sh
           bash_n scripts/lib/kernel-run-recovery.sh
           bash_n scripts/codex-kernel-guard.sh
+          bash_n scripts/audit-org-secrets.sh
+          bash_n scripts/lib/load-shared-secrets.sh
+          bash_n scripts/local/install-github-actions-tools.sh
+          bash_n scripts/local/sync-gh-secrets-from-env.sh
           bash_n scripts/local/kernel-handoff-summary.sh
           bash_n scripts/local/kernel-runtime-loop.sh
+          node --check scripts/harness/manus-recovery-diagnose.js
           bash_n scripts/harness/run-recovery-console.sh
+          bash_n scripts/harness/run-watchdog-waiting-run-drill.sh
           bash_n scripts/check-agent-matrix-parity.sh
           bash_n scripts/check-linked-systems-integrity.sh
+          bash_n scripts/check-peripheral-adapters.sh
           bash_n scripts/check-codex-kernel-prompt.sh
           bash_n scripts/check-codex-vote-prompt.sh
           bash_n tests/test-codex-kernel-prompt.sh
@@ -312,15 +345,21 @@ jobs:
           bash_n tests/test-recovery-reroute-claim-gate.sh
           bash_n tests/test-watchdog-reconcile-claim-policy.sh
           bash_n tests/test-watchdog-reconcile-workflow.sh
+          bash_n tests/test-peripheral-adapter-contract.sh
           bash_n tests/test-workspace-root-policy.sh
           bash_n tests/test-canary-trust-policy.sh
           bash_n tests/test-kernel-canary-plan.sh
+          bash_n tests/test-kernel-recovery-console.sh
           bash_n tests/test-watchdog-waiting-run-workflow.sh
           bash_n tests/test-kernel-entrypoint.sh
           bash_n tests/test-kernel-launcher.sh
           bash_n tests/test-kernel-launcher-template.sh
           bash_n tests/test-k4-launcher.sh
           bash_n tests/test-install-kernel-launchers.sh
+          bash_n tests/test-install-github-actions-tools.sh
+          bash_n tests/test-shared-secrets-failure-smoke.sh
+          bash_n tests/test-sync-gh-auth-drill.sh
+          bash_n tests/test-org-secrets-shadow-cleanup.sh
           bash_n tests/test-kernel-runtime-claim.sh
           bash_n tests/test-kernel-runtime-health.sh
           bash_n tests/test-kernel-runtime-launch.sh
@@ -363,6 +402,7 @@ jobs:
           run_required tests/test-codex-kernel-prompt.sh
           run_required tests/test-codex-orchestrator-snippet.sh
           run_required tests/test-install-kernel-launchers.sh
+          run_required tests/test-install-github-actions-tools.sh
           run_required tests/test-codex-kernel-guard-doctor.sh
           run_required tests/test-codex-kernel-guard-matrix.sh
           run_required tests/test-codex-kernel-guard-state-fallback.sh
@@ -377,6 +417,10 @@ jobs:
           bash tests/test-resolve-orchestration-context.sh
           bash tests/test-watchdog-alert-policy.sh
           bash tests/test-watchdog-waiting-run-workflow.sh
+          bash tests/test-kernel-recovery-console.sh
+          bash tests/test-shared-secrets-failure-smoke.sh
+          bash tests/test-sync-gh-auth-drill.sh
+          bash tests/test-org-secrets-shadow-cleanup.sh
           bash tests/test-watchdog-alert-delivery-policy.sh
           bash tests/test-primary-heartbeat-state.sh
           bash tests/test-publish-decision-journal.sh
@@ -387,6 +431,7 @@ jobs:
           bash tests/test-recovery-reroute-claim-gate.sh
           bash tests/test-watchdog-reconcile-claim-policy.sh
           bash tests/test-watchdog-reconcile-workflow.sh
+          bash tests/test-peripheral-adapter-contract.sh
           bash tests/test-workspace-root-policy.sh
 
       - name: x-auto linked system tests
@@ -483,6 +528,7 @@ jobs:
           chmod +x scripts/lib/build-agent-matrix.sh scripts/check-agent-matrix-parity.sh scripts/check-linked-systems-integrity.sh
           ./scripts/check-agent-matrix-parity.sh
           ./scripts/check-linked-systems-integrity.sh
+          ./scripts/check-peripheral-adapters.sh --mode contract
 
       - name: Deterministic switch simulation
         run: |
