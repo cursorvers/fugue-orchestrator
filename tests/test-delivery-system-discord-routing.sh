@@ -70,6 +70,9 @@ assert_contains "${DELIVERY_AUDIT}" "{id, path}" "delivery audit resolves canoni
 assert_contains "${DELIVERY_AUDIT}" "LINE_DELIVERY_PAUSED: \${{ vars.LINE_DELIVERY_PAUSED }}" "delivery audit reads LINE pause state"
 assert_contains "${DELIVERY_AUDIT}" "status=\"PAUSED\"" "delivery audit reports paused LINE state instead of unmitigated errors"
 assert_contains "${DELIVERY_AUDIT}" "LINE quota exhaustion predicted but delivery is already paused" "delivery audit treats paused quota exhaustion as mitigated"
+assert_contains "${DELIVERY_AUDIT}" "day_of_month_jst=\$(TZ=Asia/Tokyo date +%-d)" "delivery audit resumes LINE delivery on JST month boundary"
+assert_contains "${DELIVERY_AUDIT}" "JST month boundary" "delivery audit documents JST month reset resume"
+assert_contains "${DELIVERY_AUDIT}" "LINE_DELIVERY_PAUSED reset to false." "delivery audit can resume paused LINE delivery"
 assert_not_contains_block "${DELIVERY_AUDIT}" "Notify Discord on anomaly" "Remediate transient GHA failures" "DISCORD_WEBHOOK_URL" "delivery audit anomaly does not use client webhook"
 
 assert_contains "${ARTICLE_WORKFLOW}" 'DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}' "article failure notification wires system webhook"

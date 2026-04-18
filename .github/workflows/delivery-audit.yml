@@ -616,8 +616,9 @@ jobs:
             exit 0
           fi
 
-          day_of_month=$(date -u +%-d)
-          if [[ "${day_of_month}" -ne 1 ]]; then
+          day_of_month_jst=$(TZ=Asia/Tokyo date +%-d)
+          month_jst=$(TZ=Asia/Tokyo date +%-m)
+          if [[ "${day_of_month_jst}" -ne 1 ]]; then
             exit 0
           fi
 
@@ -625,7 +626,7 @@ jobs:
             --jq '.value' 2>/dev/null || echo "false")
 
           if [[ "${current_paused}" == "true" && "${LINE_STATUS}" != "ERROR" ]]; then
-            echo "::notice::Month boundary — resuming LINE delivery"
+            echo "::notice::JST month boundary (${month_jst}/1) — resuming LINE delivery"
             gh api -X PATCH "repos/${REPO}/actions/variables/LINE_DELIVERY_PAUSED" \
               -f name="LINE_DELIVERY_PAUSED" \
               -f value="false" >/dev/null
