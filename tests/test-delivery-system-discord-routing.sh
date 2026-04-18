@@ -43,6 +43,7 @@ assert_not_contains_block() {
 assert_contains "${DELIVERY_AUDIT}" "Discord System Webhook Health Check" "delivery audit checks system webhook"
 assert_contains "${DELIVERY_AUDIT}" 'DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}' "delivery audit wires system webhook"
 assert_contains "${DELIVERY_AUDIT}" "Discord system anomaly notification sent." "delivery audit reports system notification delivery"
+assert_contains "${DELIVERY_AUDIT}" "because it was created from \${failed_head_sha}, not current \${GITHUB_SHA}" "delivery audit does not rerun stale failed workflow attempts"
 assert_not_contains_block "${DELIVERY_AUDIT}" "Notify Discord on anomaly" "Remediate transient GHA failures" "DISCORD_WEBHOOK_URL" "delivery audit anomaly does not use client webhook"
 
 assert_contains "${ARTICLE_WORKFLOW}" 'DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}' "article failure notification wires system webhook"
