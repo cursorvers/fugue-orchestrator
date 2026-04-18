@@ -7,13 +7,15 @@ WORKFLOW="${ROOT_DIR}/.github/workflows/fugue-watchdog.yml"
 echo "=== watchdog alert routing policy test ==="
 echo ""
 
+BLOCKED_DISCORD_WEBHOOKS=(
+  "DISCORD_WEBHOOK_URL"
+  "DISCORD_ADMIN_WEBHOOK_URL"
+  "DISCORD_MANUS_WEBHOOK_URL"
+  "DISCORD_MAINT_WEBHOOK_URL"
+)
+
 if grep -Fq 'LINE_WEBHOOK_URL:' "${WORKFLOW}"; then
   echo "FAIL: fugue-watchdog must not wire LINE_WEBHOOK_URL for system alerts" >&2
-  exit 1
-fi
-
-if grep -Fq 'DISCORD_WEBHOOK_URL:' "${WORKFLOW}"; then
-  echo "FAIL: fugue-watchdog must not wire DISCORD_WEBHOOK_URL fallback for system alerts" >&2
   exit 1
 fi
 
@@ -21,6 +23,13 @@ if grep -Fq 'DISCORD_NOTIFY_WEBHOOK_URL:' "${WORKFLOW}"; then
   echo "FAIL: fugue-watchdog must not wire DISCORD_NOTIFY_WEBHOOK_URL for system alerts" >&2
   exit 1
 fi
+
+for blocked_webhook in "${BLOCKED_DISCORD_WEBHOOKS[@]}"; do
+  if grep -Fq "${blocked_webhook}" "${WORKFLOW}"; then
+    echo "FAIL: fugue-watchdog must not reference ${blocked_webhook} in system alert paths" >&2
+    exit 1
+  fi
+done
 
 if grep -Fq 'LINE_CHANNEL_ACCESS_TOKEN:' "${WORKFLOW}"; then
   echo "FAIL: fugue-watchdog must not wire LINE_CHANNEL_ACCESS_TOKEN for system alerts" >&2

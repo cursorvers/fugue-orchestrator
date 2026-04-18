@@ -91,6 +91,7 @@ on:
       - 'tests/test-kernel-canary-plan.sh'
       - 'tests/test-kernel-recovery-console.sh'
       - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-alert-routing.sh'
       - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
       - 'tests/test-delivery-system-discord-routing.sh'
@@ -217,6 +218,7 @@ on:
       - 'tests/test-kernel-canary-plan.sh'
       - 'tests/test-kernel-recovery-console.sh'
       - 'tests/test-watchdog-alert-policy.sh'
+      - 'tests/test-watchdog-alert-routing.sh'
       - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
       - 'tests/test-delivery-system-discord-routing.sh'
@@ -364,6 +366,7 @@ jobs:
           bash_n tests/test-canary-trust-policy.sh
           bash_n tests/test-kernel-canary-plan.sh
           bash_n tests/test-kernel-recovery-console.sh
+          bash_n tests/test-watchdog-alert-routing.sh
           bash_n tests/test-watchdog-waiting-run-workflow.sh
           bash_n tests/test-kernel-entrypoint.sh
           bash_n tests/test-kernel-launcher.sh
@@ -430,6 +433,7 @@ jobs:
           bash tests/test-route-task-handoff.sh
           bash tests/test-resolve-orchestration-context.sh
           bash tests/test-watchdog-alert-policy.sh
+          bash tests/test-watchdog-alert-routing.sh
           bash tests/test-watchdog-waiting-run-workflow.sh
           bash tests/test-kernel-recovery-console.sh
           bash tests/test-shared-secrets-failure-smoke.sh
