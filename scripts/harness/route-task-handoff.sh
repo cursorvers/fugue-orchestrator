@@ -301,14 +301,8 @@ fi
 if echo "${text}" | grep -Eqi '(#confirm-implement|#impl-confirm|implement confirmed|実装確定)'; then
   confirm_implement="true"
 fi
-auto_confirmed_by_vote="false"
-if [[ "${IS_VOTE_COMMAND}" == "true" && "${wants_implement}" == "true" && "${wants_review}" != "true" ]]; then
-  confirm_implement="true"
-  auto_confirmed_by_vote="true"
-fi
 if [[ "${wants_implement}" != "true" ]]; then
   confirm_implement="false"
-  auto_confirmed_by_vote="false"
 fi
 
 # Safety guard: when review-only is explicitly requested, clear any
@@ -339,7 +333,7 @@ if [[ "${wants_implement}" == "true" ]]; then
     --color "0052CC" >/dev/null 2>&1 || true
   fugue_gh_retry 4 gh label create "implement-confirmed" \
     --repo "${GITHUB_REPOSITORY}" \
-    --description "Human has explicitly confirmed implementation execution" \
+    --description "Human has explicitly confirmed critical/high-risk implementation execution" \
     --color "0E8A16" >/dev/null 2>&1 || true
   fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "implement" >/dev/null
   fugue_gh_retry 4 gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "${compat_label}" >/dev/null
@@ -428,14 +422,10 @@ if [[ "${wants_implement}" == "true" ]]; then
   extra=" + implement (+ ${compat_label} compatibility)"
   if [[ "${confirm_implement}" == "true" ]]; then
     extra="${extra} + implement-confirmed"
-    if [[ "${auto_confirmed_by_vote}" == "true" ]]; then
-      confirmation_line="- Implement confirmation: auto-confirmed by \`/vote\`"
-    else
-      confirmation_line="- Implement confirmation: confirmed"
-    fi
+    confirmation_line="- Implement confirmation: confirmed"
   else
-    confirmation_line="- Implement confirmation: pending (\`implement-confirmed\` label required before execution)"
-    confirm_note="Implementation intent is set, but execution is blocked until \`implement-confirmed\` is present."
+    confirmation_line="- Implement confirmation: pending only if the run is critical/high-risk; non-critical approved consensus may proceed"
+    confirm_note="Implementation intent is set. Non-critical work may proceed after Tutti approval; critical/high-risk work remains blocked until \`implement-confirmed\` is present."
   fi
 fi
 vote_instruction_line=""

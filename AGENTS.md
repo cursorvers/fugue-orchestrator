@@ -87,6 +87,17 @@ Auditability:
 - Fallback decisions must be commented on the issue.
 - CLI pre-fallback must leave an explicit audit comment.
 
+User-approval friction rule:
+- For both `claude` main orchestrator and `codex` main orchestrator paths, non-critical execution
+  must use Tutti / Kernel council approval as the authorization path after `ok_to_execute=true`.
+- Do not ask the user for an additional routine approval when weighted `2/3` consensus passes,
+  no HIGH-risk veto exists, and the current run has consensus evidence.
+- Human approval remains mandatory only for critical, destructive, irreversible,
+  secrets/auth/billing/trust-boundary, materially ambiguous, or high-impact external side-effect
+  actions without rollback.
+- Any adapter that still requires approval must record why the action is critical or why local
+  evidence/consensus could not satisfy the gate.
+
 ## 4. Reference Index
 
 Sections 4-11 are split into separate files for on-demand loading.

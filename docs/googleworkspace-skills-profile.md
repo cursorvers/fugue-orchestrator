@@ -291,7 +291,8 @@ Current CI path:
   operator assistance.
 - In service-account mode, treat Gmail helpers as opt-in only. The verified
   baseline for FUGUE/Kernel is Calendar + Drive + Tasks read-only.
-- Use the write adapter only with explicit human approval. The verified
+- Use the write adapter only after `ok_to_execute=true` and either approved
+  non-critical Kernel consensus or explicit human approval. The verified
   write-capable baseline is Gmail send, Drive upload, and Calendar insert.
 - Treat generated Docs, Sheets, or Drive writes as peripheral side effects, not
   control-plane truth.

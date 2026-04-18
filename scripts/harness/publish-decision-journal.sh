@@ -47,7 +47,7 @@ ensure_status_issue() {
 }
 
 list_changed_files() {
-  if [[ -n "${before_sha}" && ! "${before_sha}" =~ ^0+$ ]]; then
+  if [[ -n "${before_sha}" && ! "${before_sha}" =~ ^0+$ ]] && git cat-file -e "${before_sha}^{commit}" 2>/dev/null; then
     git diff --name-only "${before_sha}" "${sha}" -- \
       docs/ \
       apps/happy-web/ \

@@ -55,6 +55,12 @@ JSON
 JSON
       exit 0
       ;;
+    repos/cursorvers/fugue-orchestrator/issues/129)
+      cat <<'JSON'
+{"title":"production auth token rotation","body":"本番 auth token rotation を実装する","url":"https://github.com/cursorvers/fugue-orchestrator/issues/129","labels":[{"name":"fugue-task"},{"name":"tutti"},{"name":"implement"}]}
+JSON
+      exit 0
+      ;;
     *)
       echo "{}"
       exit 0
@@ -135,6 +141,10 @@ assert_output "handoff-confirm-override" "127" "has_implement_confirmed" "true" 
   "REQUESTED_EXECUTION_MODE_INPUT=implement" \
   "IMPLEMENT_REQUEST_INPUT=true" \
   "IMPLEMENT_CONFIRMED_INPUT=true"
+assert_output "noncritical-implement-no-human-confirm" "127" "implementation_human_confirmation_required" "false" \
+  "REQUESTED_EXECUTION_MODE_INPUT=implement" \
+  "IMPLEMENT_REQUEST_INPUT=true"
+assert_output "critical-implement-human-confirm" "129" "implementation_human_confirmation_required" "true"
 assert_output "vote-command-output" "127" "vote_command" "true" \
   "VOTE_COMMAND_INPUT=true"
 assert_output "vote-intake-source-derived" "127" "intake_source" "github-vote-comment" \

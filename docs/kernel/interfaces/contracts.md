@@ -60,7 +60,9 @@ If `GLM` fails:
 ### Simulation
 
 - `codex-spark only`
-- if unavailable, `codex-subagent` substitution requires explicit human approval
+- if unavailable, prefer the configured non-critical substitution path first;
+  explicit human approval is required only when substitution changes a
+  critical/high-risk execution boundary
 
 ### Implementation / Verification
 

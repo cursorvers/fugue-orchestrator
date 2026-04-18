@@ -99,10 +99,11 @@ Constraints:
 - Update that bootstrap receipt again when Kernel mode changes so unattended health checks do not drift from reality.
 - If `glm` recovery succeeds after the run has entered `degraded-allowed`, keep the run degraded and return to the normal shape only in the next run.
 - Treat "next run" as the next distinct `KERNEL_RUN_ID`; guarded launch will mint one automatically when it is absent.
-- Default to one-pass delivery: complete investigation, revised planning, implementation, and verification in one flow unless blocked by destructive risk, missing credentials, or external approval.
+- Default to one-pass delivery: complete investigation, revised planning, implementation, and verification in one flow unless blocked by critical/destructive risk, missing credentials that cannot be recovered from local evidence, or mandatory external approval.
 - Front-load user interaction into requirement definition: clarify the goal rigorously at the start, then avoid routine confirmation churn after the target is aligned.
 - Do not ask the user to confirm routine progress between planning and implementation.
 - Once a successful local auth, unlock, or trust proof exists in the run, reuse it across lanes and do not re-request equivalent user auth for non-critical work.
+- For non-critical work with `ok_to_execute=true`, approved local `/vote` or Tutti consensus satisfies routine user approval; ask again only for critical, destructive, irreversible, secrets/auth/billing/trust-boundary, or materially ambiguous actions.
 - Do not emit routine intermediate progress reports or midpoint summaries during execution.
 - After requirements are frozen, report only when blocked, when external approval is required, when the user explicitly asks, or when final completion is reached.
 - Do not pause execution to summarize a partial milestone, sub-slice, or intermediate checkpoint while the active request is still in progress.

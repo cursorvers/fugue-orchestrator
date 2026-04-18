@@ -74,11 +74,16 @@ Every sovereign adapter must preserve:
 1. weighted `2/3` council consensus
 2. HIGH-risk veto
 3. baseline council participation for non-trivial writes
-4. human approval gates for destructive or irreversible actions
+4. human approval gates for critical, destructive, irreversible, secrets/auth/billing/trust-boundary,
+   or materially ambiguous actions
 5. identical run trace and observability schema
 6. identical linked-system dispatch contract
 
 If an adapter cannot preserve these invariants, it is not a valid sovereign adapter.
+
+For non-critical work, council approval is the authorization path. Sovereign adapters for both
+`claude` and `codex` orchestration must preserve that rule and must not add a second routine user
+approval prompt after approved consensus evidence exists.
 
 ## Unattended Runtime Boundary
 

@@ -12,7 +12,7 @@ body:
         Mainframe behavior:
         - `Mainframe handoff = auto` sends this issue to Tutti (`tutti` label is applied by router).
         - Natural-language/default path is **review-first**.
-        - Implementation execution needs both `implement` and `implement-confirmed`.
+        - Implementation execution needs `implement`; `implement-confirmed` is required only for critical/high-risk execution.
         - `Orchestrator provider` selects routing profile only. The implementation engine is `fugue-codex-implement` (Codex CLI).
 
         Tip: if you include a target repo in backticks like `cursorvers/cloudflare-workers-hub`, FUGUE will label and prefix the issue title so you can quickly see which project it belongs to.
@@ -45,7 +45,7 @@ body:
     id: implementation_confirmation
     attributes:
       label: Implementation confirmation
-      description: Required to actually execute implementation.
+      description: Keep pending for non-critical work; use confirmed only for critical/high-risk execution with explicit human approval.
       options:
         - pending
         - confirmed

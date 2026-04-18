@@ -5,9 +5,16 @@
 
 - High-risk finding blocks auto-execution and escalates to human review.
 - Tutti execution decisions use weighted consensus (role-weighted 2/3 threshold) plus HIGH-risk veto.
+- For both `claude` and `codex` main orchestrators, non-critical work uses Tutti / Kernel council
+  approval as the authorization path after `ok_to_execute=true`; do not add another routine user
+  approval prompt when consensus evidence exists.
+- Human approval remains mandatory only for critical, destructive, irreversible,
+  secrets/auth/billing/trust-boundary, materially ambiguous, or high-impact external side-effect
+  actions without rollback.
 - Review-only intent must clear stale implementation labels.
 - Natural-language/mobile intake defaults to `review`; implement requires explicit signal.
-- Implementation execution requires both `implement` and `implement-confirmed`.
+- Implementation execution requires `implement`; `implement-confirmed` is required only for
+  critical/high-risk implementation after consensus approval.
 - Cross-repo implementation requires `TARGET_REPO_PAT`.
 - Dangerous operations require explicit human consent paths.
 - Implement mode must complete preflight refinement loops before code changes:

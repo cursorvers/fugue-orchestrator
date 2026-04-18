@@ -124,7 +124,7 @@ run_static_check "receipt-contract" "policy" \
 
 run_static_check "write-meta-contract" "policy" \
   "policy defines machine-readable write metadata fields and dispositions" \
-  run_policy_jq '.write_meta_contract.required_common_meta_fields == ["side_effect","write_disposition","ok_to_execute","human_approved","receipt"] and .write_meta_contract.allowed_write_dispositions == ["preview","applied","blocked","readonly","resolved"]'
+  run_policy_jq '.write_meta_contract.required_common_meta_fields == ["side_effect","write_disposition","ok_to_execute","human_approved","approval_source","receipt"] and .write_meta_contract.allowed_write_dispositions == ["preview","applied","blocked","readonly","resolved"]'
 
 run_static_check "extension-decisions" "policy" \
   "policy defines explicit keep/defer/drop decisions for extension lanes" \

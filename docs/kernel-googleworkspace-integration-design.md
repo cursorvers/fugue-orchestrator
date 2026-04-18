@@ -99,7 +99,8 @@ Allowed baseline:
 Use only after both of these are true:
 
 - `Kernel` has reached `ok_to_execute=true`
-- a human has explicitly approved the side effect
+- either the run is non-critical with approved Kernel council consensus, or a
+  human has explicitly approved the side effect
 
 Allowed baseline:
 
@@ -119,7 +120,7 @@ Allowed baseline:
 | Preflight enrich | plan needs human context | readonly | `meeting-prep`, `gmail-triage`, `weekly-digest`, `standup-report` | service account or user read-only | none | summarized evidence block |
 | Scheduled operator loop | morning, pre-meeting, weekly cron | readonly | `standup-report`, `meeting-prep`, `weekly-digest` | service account for narrow flows, user read-only for Gmail | scheduler policy | digest artifact |
 | Execute dry-run | side effect is proposed | write | `gmail-send`, `drive-upload`, `calendar-insert` with `--dry-run` where supported | user write | no execution yet | side-effect preview |
-| Approved execute | publish or notify | write | any validated write action | user write | `ok_to_execute=true` and human approval | side-effect receipt |
+| Approved execute | publish or notify | write | any validated write action | user write | `ok_to_execute=true` and non-critical Kernel consensus or explicit human approval | side-effect receipt |
 | Post-execute sync | task completed and deliverables exist | write | `docs-create`, `docs-insert-text`, `sheets-append`, `drive-upload`, `gmail-send` | user write | already approved | generated artifact ids |
 | Recovery rehydrate | stale issue or interrupted run | readonly | `meeting-prep`, `weekly-digest`, `gmail-triage` | user read-only | none | refreshed context summary |
 
@@ -187,6 +188,7 @@ Required common metadata fields in `*-meta.json`:
 - `write_disposition`
 - `ok_to_execute`
 - `human_approved`
+- `approval_source`
 - `receipt`
 
 Machine-readable contract source:
@@ -216,8 +218,11 @@ Rules:
 - previews and applied writes both use the same normalized receipt shape when
   the underlying helper returns stable ids
 - `write_disposition=preview` means a dry-run side-effect preview was recorded
-- `write_disposition=applied` means a write ran with both Kernel approval and
-  explicit human approval
+- `write_disposition=applied` means a write ran with Kernel approval and either
+  non-critical council consensus or explicit human approval
+- `approval_source=kernel-consensus` means non-critical consensus satisfied the
+  user approval gate; `approval_source=explicit-human` means the operator did
+  approve manually
 - `write_disposition=blocked` means a write action was requested without the
   required approval gate
 - receipt fields live in run evidence and `*-meta.json`, not in the main prompt
@@ -276,7 +281,8 @@ Compatibility rules:
 - must not run during intake
 - should be preceded by `--dry-run` when the underlying `gws` action supports it
 - must require `ok_to_execute=true`
-- must require explicit operator approval
+- must require explicit operator approval only for critical work; non-critical
+  work uses Kernel council consensus by default
 - must produce a receipt recorded by `Kernel`
 
 ## Context Budget Rules
@@ -306,7 +312,8 @@ Current implemented baseline:
   - stores `googleworkspace-context.json` in each local run directory
 - `scripts/lib/googleworkspace-cli-adapter.sh`
   - writes raw outputs and `*-meta.json` receipts under `<run-dir>/googleworkspace/`
-  - enforces `ok_to_execute` and explicit human approval on write actions
+  - enforces `ok_to_execute` plus explicit human approval or approved
+    non-critical Kernel consensus on write actions
 - `scripts/harness/googleworkspace-preflight-enrich.sh`
   - converts readonly Workspace hints into a bounded CI artifact
   - returns `ok`, `partial`, or `skipped`

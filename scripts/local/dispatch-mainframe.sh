@@ -10,7 +10,6 @@ REQUIRED_LABELS=(
   "fugue-task"
   "tutti"
   "implement"
-  "implement-confirmed"
   "orchestrator:codex"
   "orchestrator-assist:claude"
 )
@@ -18,10 +17,13 @@ REQUIRED_LABELS=(
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/local/dispatch-mainframe.sh <issue_number>
+  scripts/local/dispatch-mainframe.sh [--confirm-implement] <issue_number>
 
 Adds the required FUGUE labels to an issue, dispatches the Mainframe workflow,
 and prints the run URL.
+
+`--confirm-implement` adds implement-confirmed for explicitly confirmed
+critical/high-risk implementation execution.
 EOF
 }
 
@@ -59,7 +61,7 @@ label_description() {
     "fugue-task") echo "Task routed through Fugue orchestration" ;;
     "tutti") echo "Dispatch through the Tutti mainframe workflow" ;;
     "implement") echo "Implementation intent (provider-agnostic)" ;;
-    "implement-confirmed") echo "Human has explicitly confirmed implementation execution" ;;
+    "implement-confirmed") echo "Human has explicitly confirmed critical/high-risk implementation execution" ;;
     "orchestrator:codex") echo "Requested main orchestrator provider" ;;
     "orchestrator-assist:claude") echo "Requested assist orchestrator provider" ;;
     *) fail "unknown label description for: $1" ;;
@@ -132,17 +134,34 @@ wait_for_dispatched_run_url() {
   return 1
 }
 
-if [[ $# -ne 1 ]]; then
+CONFIRM_IMPLEMENT=false
+ISSUE_NUMBER=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --confirm-implement)
+      CONFIRM_IMPLEMENT=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ -n "${ISSUE_NUMBER}" ]]; then
+        usage >&2
+        exit 2
+      fi
+      ISSUE_NUMBER="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "${ISSUE_NUMBER}" ]]; then
   usage >&2
   exit 2
 fi
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
-
-ISSUE_NUMBER="$1"
 is_positive_integer "${ISSUE_NUMBER}" || fail "issue_number must be a positive integer"
 
 require_cmd gh
@@ -154,6 +173,13 @@ issue_url="$(gh issue view "${ISSUE_NUMBER}" --repo "${REPO}" --json url --templ
 ensure_required_labels_exist
 
 label_csv="$(join_by_comma "${REQUIRED_LABELS[@]}")"
+if [[ "${CONFIRM_IMPLEMENT}" == "true" ]]; then
+  gh label create "implement-confirmed" \
+    --repo "${REPO}" \
+    --color "$(label_color "implement-confirmed")" \
+    --description "$(label_description "implement-confirmed")" >/dev/null 2>&1 || true
+  label_csv="${label_csv},implement-confirmed"
+fi
 gh issue edit "${ISSUE_NUMBER}" --repo "${REPO}" --add-label "${label_csv}" >/dev/null
 
 baseline_run_id="$(latest_workflow_dispatch_run_id || true)"

@@ -7,6 +7,7 @@ apply="false"
 provider="codex"
 assist_provider="claude"
 add_tutti="true"
+confirm_implement="false"
 
 usage() {
   cat <<'EOF'
@@ -22,6 +23,7 @@ Options:
   --provider <codex|claude>  Main orchestrator provider body hint (default: codex)
   --assist <claude|codex|none>
                              Assist orchestrator provider body hint (default: claude)
+  --confirm-implement        Add implement-confirmed for explicitly confirmed critical/high-risk execution
   --no-tutti                 Do not add the `tutti` label after issue creation
   -h, --help                 Show help.
 EOF
@@ -71,6 +73,10 @@ while [[ $# -gt 0 ]]; do
     --assist)
       assist_provider="$(normalize_provider "${2:-}")"
       shift 2
+      ;;
+    --confirm-implement)
+      confirm_implement="true"
+      shift
       ;;
     --no-tutti)
       add_tutti="false"
@@ -128,7 +134,7 @@ ${assist_provider}
 implement
 
 ## Implement confirmation
-confirmed
+$( [[ "${confirm_implement}" == "true" ]] && echo "confirmed" || echo "pending" )
 EOF
 }
 
@@ -145,14 +151,20 @@ create_issue() {
   local url issue_num
 
   ensure_label "implement" "Implementation intent (provider-agnostic)" "1D76DB"
-  ensure_label "implement-confirmed" "Human has explicitly confirmed implementation execution" "0E8A16"
+  if [[ "${confirm_implement}" == "true" ]]; then
+    ensure_label "implement-confirmed" "Human has explicitly confirmed critical/high-risk implementation execution" "0E8A16"
+  fi
   ensure_label "orchestrator:${provider}" "Requested orchestrator profile for Tutti routing" "5319E7"
   ensure_label "orchestrator-assist:${assist_provider}" "Requested assist orchestrator profile for Tutti routing" "0052CC"
+  local label_csv="fugue-task,implement,orchestrator:${provider},orchestrator-assist:${assist_provider}"
+  if [[ "${confirm_implement}" == "true" ]]; then
+    label_csv="${label_csv},implement-confirmed"
+  fi
 
   url="$(gh issue create \
     --repo "${repo}" \
     --title "${title}" \
-    --label "fugue-task,implement,implement-confirmed,orchestrator:${provider},orchestrator-assist:${assist_provider}" \
+    --label "${label_csv}" \
     --body-file "${body_file}")"
 
   issue_num="${url##*/}"
@@ -196,7 +208,11 @@ for idx in "${!issue_files[@]}"; do
     printf 'ISSUE %s\n' "$((idx + 1))"
     printf 'repo: %s\n' "${repo}"
     printf 'title: %s\n' "${title}"
-    printf 'labels: %s\n' "fugue-task,implement,implement-confirmed,orchestrator:${provider},orchestrator-assist:${assist_provider}$( [[ "${add_tutti}" == "true" ]] && printf ',tutti' )"
+    label_csv="fugue-task,implement,orchestrator:${provider},orchestrator-assist:${assist_provider}"
+    if [[ "${confirm_implement}" == "true" ]]; then
+      label_csv="${label_csv},implement-confirmed"
+    fi
+    printf 'labels: %s\n' "${label_csv}$( [[ "${add_tutti}" == "true" ]] && printf ',tutti' )"
     printf 'body_file: %s\n' "${body_file}"
     echo '---'
   fi

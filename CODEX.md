@@ -52,7 +52,9 @@ Primary policy source:
 - Use that cycle to surface likely blockers early instead of discovering them one-by-one during implementation.
 - Do not stop at "one issue remains" if more likely failure modes can still be found cheaply.
 - Default to one-pass delivery: after the revised plan is coherent, continue through implementation and verification without asking the user for routine confirmation.
-- Only pause for the user when the next step is destructive, requires external credentials or approval, or is materially ambiguous.
+- Only pause for the user when the next step is critical, destructive, requires external credentials
+  that cannot be recovered from local evidence, requires mandatory human approval, or is materially
+  ambiguous.
 - Non-critical Kernel work should run under local `/vote` consensus by default; critical issues are the only exemption to that default.
 - Do not emit routine intermediate progress reports or midpoint summaries during execution.
 - After requirements are frozen, report only when blocked, when external approval is required, when the user explicitly asks, or when final completion is reached.
@@ -84,7 +86,10 @@ Primary policy source:
 - Keep the recovery split explicit: `launch` may fail closed on readiness, but `doctor`, `doctor --run`, and `recover-run` are the non-interactive-first surfaces for diagnosis and continuation.
 - When a specialist or adapter is blocked on auth, perform one bounded non-interactive recovery sweep per run (`--trust`, keychain status checks, bounded wrapper probes, `doctor`, `doctor --run`, `recover-run`) before escalating; if that sweep fails, ask the user once, not once per lane.
 - After one successful local auth, unlock, or trust proof in a run, continue all non-critical work without re-requesting equivalent user auth.
-- Reducing auth friction must not bypass `ok_to_execute`, human approval, billing, or trust-boundary controls; optimize retries and evidence reuse without weakening the safety contract.
+- Reducing auth friction must not bypass `ok_to_execute`, billing, or trust-boundary controls.
+  Non-critical work with approved consensus evidence must not be escalated into another routine
+  user approval prompt; mandatory human approval is reserved for critical/destructive/irreversible
+  or secrets/auth/billing/trust-boundary actions.
 - Treat operator time as a constrained resource: spend Codex effort on removing repetitive auth chores, caching successful local state, and documenting the recovery path when automation still cannot fully absorb the step.
 - If a flow still requires unavoidable human auth, update the repository contract so future runs can reach the minimum healthy shape with less manual intervention.
 

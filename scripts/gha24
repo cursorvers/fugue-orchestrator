@@ -3,11 +3,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # GHA24 - Submit task to FUGUE Tutti (agent consensus)
-# Usage: gha24 "task description" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude] [--local-run|--gha-only]
+# Usage: gha24 "task description" [--implement|--review] [--confirm-implement] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude] [--local-run|--gha-only]
 #
 # Options:
 #   --implement    Add implement intent labels to trigger post-vote implementation
 #   --review       Force review-only mode (ignore natural language hints)
+#   --confirm-implement
+#                  Explicitly confirm critical/high-risk implementation execution
 #   --repo REPO    Target repository to operate on (default: cursorvers/fugue-orchestrator)
 #   --orchestrator Per-request orchestrator override (codex|claude)
 #   --assist-orchestrator Per-request assist orchestrator override (claude|codex|none)
@@ -28,6 +30,7 @@ TASK=""
 ORCHESTRATOR_REPO="${GHA24_ORCHESTRATOR_REPO:-cursorvers/fugue-orchestrator}"
 TARGET_REPO="cursorvers/fugue-orchestrator"
 IMPLEMENT=true
+CONFIRM_IMPLEMENT=false
 MODE_EXPLICIT=false
 ORCHESTRATOR_PROVIDER="${GHA24_ORCHESTRATOR_PROVIDER:-}"
 ORCHESTRATOR_PROVIDER_EXPLICIT=false
@@ -53,6 +56,10 @@ while [[ $# -gt 0 ]]; do
     --implement)
       IMPLEMENT=true
       MODE_EXPLICIT=true
+      shift
+      ;;
+    --confirm-implement)
+      CONFIRM_IMPLEMENT=true
       shift
       ;;
     --review)
@@ -89,11 +96,13 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: gha24 \"task description\" [--implement|--review] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude] [--local-run|--gha-only]"
+      echo "Usage: gha24 \"task description\" [--implement|--review] [--confirm-implement] [--repo owner/repo] [--orchestrator codex|claude] [--assist-orchestrator claude|codex|none] [--force-claude] [--local-run|--gha-only]"
       echo ""
       echo "Options:"
       echo "  --implement    Trigger Codex CLI for autonomous code generation"
       echo "  --review       Review only (no code generation)"
+      echo "  --confirm-implement"
+      echo "                 Explicitly confirm critical/high-risk implementation execution"
       echo "  --repo REPO    Target repository (default: cursorvers/fugue-orchestrator)"
       echo "  --orchestrator Per-request orchestrator override (codex|claude)"
       echo "  --assist-orchestrator Per-request assist orchestrator override (claude|codex|none)"
@@ -317,11 +326,13 @@ if [[ "${IMPLEMENT}" == "true" ]]; then
   # `implement` is the provider-agnostic intent label.
   # Add provider-specific compatibility label only when provider is explicitly chosen.
   LABELS="${LABELS},implement"
-  gh label create "implement-confirmed" \
-    --repo "${ORCHESTRATOR_REPO}" \
-    --description "Human has explicitly confirmed implementation execution" \
-    --color "0E8A16" >/dev/null 2>&1 || true
-  LABELS="${LABELS},implement-confirmed"
+  if [[ "${CONFIRM_IMPLEMENT}" == "true" ]]; then
+    gh label create "implement-confirmed" \
+      --repo "${ORCHESTRATOR_REPO}" \
+      --description "Human has explicitly confirmed critical/high-risk implementation execution" \
+      --color "0E8A16" >/dev/null 2>&1 || true
+    LABELS="${LABELS},implement-confirmed"
+  fi
   if [[ "${ORCHESTRATOR_PROVIDER_EXPLICIT}" == "true" ]]; then
     compat_label="$( [[ "${provider}" == "claude" ]] && echo "claude-implement" || echo "codex-implement" )"
     gh label create "${compat_label}" \
@@ -383,7 +394,7 @@ $( [[ "${IMPLEMENT}" == "true" ]] && echo "implement" || echo "review" )
 
 $( if [[ "${IMPLEMENT}" == "true" ]]; then cat <<IMPL_CONFIRM
 ## Implement confirmation
-confirmed
+$( [[ "${CONFIRM_IMPLEMENT}" == "true" ]] && echo "confirmed" || echo "pending" )
 
 IMPL_CONFIRM
 fi )
@@ -590,7 +601,7 @@ fi
 
 if [[ "${IMPLEMENT}" == "true" ]]; then
   echo "Mode: Implementation intent (routing profile only; execution engine is Codex CLI after Tutti approval)"
-  echo "Tutti vote will run first. If approved with implement-confirmed present, Codex implement will run automatically."
+  echo "Tutti vote will run first. If approved, non-critical Codex implement runs automatically; critical/high-risk execution still requires implement-confirmed."
   if [[ "${LARGE_REFACTOR_HINT}" == "true" ]]; then
     echo "Large-refactor hint: enabled (label: large-refactor)"
   fi

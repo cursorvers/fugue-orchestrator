@@ -24,6 +24,10 @@ text=""
 run_dir=""
 ok_to_execute="false"
 human_approved="false"
+approval_source="none"
+explicit_human_approved="false"
+consensus_receipt_path=""
+CONSENSUS_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib/kernel-consensus-evidence.sh"
 
 usage() {
   cat <<'EOF'
@@ -63,6 +67,7 @@ Options:
   --run-dir <path>                 Write raw outputs and receipt metadata under <run-dir>/googleworkspace.
   --ok-to-execute <true|false>     Gate write actions on Kernel approval state.
   --human-approved <true|false>    Gate write actions on explicit human approval.
+                                   For non-critical runs, approved Kernel consensus can satisfy this gate.
   --credentials-file <path>        Use a specific service account or exported credential file.
                                    Fallback order when omitted:
                                    FUGUE_GWS_CREDENTIALS_FILE
@@ -287,6 +292,7 @@ esac
 validate_positive_int "${max_results}"
 ok_to_execute="$(normalize_bool "${ok_to_execute}")"
 human_approved="$(normalize_bool "${human_approved}")"
+explicit_human_approved="${human_approved}"
 
 if [[ -z "${credentials_file}" ]]; then
   credentials_file="${FUGUE_GWS_CREDENTIALS_FILE:-${KERNEL_GWS_CREDENTIALS_FILE:-${GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE:-}}}"
@@ -376,6 +382,60 @@ if is_write_action "${action}"; then
   write_action="true"
 fi
 
+consensus_path() {
+  local path
+  if [[ -n "${KERNEL_CONSENSUS_RECEIPT_PATH:-}" ]]; then
+    path="${KERNEL_CONSENSUS_RECEIPT_PATH}"
+  else
+    path="$(bash "${CONSENSUS_SCRIPT}" path 2>/dev/null || true)"
+  fi
+  [[ -n "${path}" && -f "${path}" ]] || return 1
+  printf '%s\n' "${path}"
+}
+
+consensus_json() {
+  local path
+  path="$(consensus_path)" || return 1
+  consensus_receipt_path="${path}"
+  jq -c '.' "${path}"
+}
+
+task_size_tier() {
+  local tier
+  tier="${KERNEL_TASK_SIZE_TIER:-}"
+  if [[ -z "${tier}" ]]; then
+    tier="$(consensus_json 2>/dev/null | jq -r '.task_size_tier // "medium"' 2>/dev/null || true)"
+  fi
+  tier="$(printf '%s' "${tier:-medium}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  case "${tier}" in
+    small|medium|large|critical) printf '%s\n' "${tier}" ;;
+    *) printf 'medium\n' ;;
+  esac
+}
+
+consensus_satisfies_approval_gate() {
+  local json path
+  [[ "${ok_to_execute}" == "true" ]] || return 1
+  [[ "$(task_size_tier)" != "critical" ]] || return 1
+  path="$(consensus_path)" || return 1
+  consensus_receipt_path="${path}"
+  json="$(jq -c '.' "${path}")" || return 1
+  [[ "$(jq -r '.decision // "unknown"' <<<"${json}")" == "approved" ]] || return 1
+  [[ "$(jq -r '.ok_to_execute // false' <<<"${json}")" == "true" ]] || return 1
+  [[ "$(jq -r '.weighted_vote_passed // false' <<<"${json}")" == "true" ]] || return 1
+}
+
+if [[ "${write_action}" == "true" ]]; then
+  if [[ "${human_approved}" == "true" ]]; then
+    approval_source="explicit-human"
+  elif consensus_satisfies_approval_gate; then
+    human_approved="true"
+    approval_source="kernel-consensus"
+  fi
+else
+  approval_source="readonly"
+fi
+
 resolved_command="$(print_command "${cmd[@]}")"
 gw_dir=""
 raw_output_path=""
@@ -413,6 +473,9 @@ write_meta() {
     --arg stderr_output_path "${stderr_output_path}" \
     --arg ok_to_execute "${ok_to_execute}" \
     --arg human_approved "${human_approved}" \
+    --arg explicit_human_approved "${explicit_human_approved}" \
+    --arg approval_source "${approval_source}" \
+    --arg consensus_receipt_path "${consensus_receipt_path}" \
     --arg write_action "${write_action}" \
     --arg write_disposition "${write_disposition}" \
     --argjson exit_code "${exit_code}" \
@@ -429,6 +492,9 @@ write_meta() {
       stderr_output_path:(if $stderr_output_path == "" then null else $stderr_output_path end),
       ok_to_execute:($ok_to_execute == "true"),
       human_approved:($human_approved == "true"),
+      explicit_human_approved:($explicit_human_approved == "true"),
+      approval_source:$approval_source,
+      consensus_receipt_path:(if $consensus_receipt_path == "" then null else $consensus_receipt_path end),
       side_effect:($write_action == "true"),
       write_disposition:$write_disposition,
       exit_code:$exit_code,
@@ -599,7 +665,7 @@ fi
 if [[ "${write_action}" == "true" && "${dry_run}" != "true" ]]; then
   if [[ "${ok_to_execute}" != "true" || "${human_approved}" != "true" ]]; then
     write_meta "skipped" 4 "write action blocked by approval gate" "{}"
-    echo "ERROR: write action requires --ok-to-execute true and --human-approved true" >&2
+    echo "ERROR: write action requires --ok-to-execute true plus explicit human approval or approved non-critical Kernel consensus" >&2
     exit 4
   fi
 fi

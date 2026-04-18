@@ -513,11 +513,11 @@ jobs:
           set -euo pipefail
           gh issue edit "${ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --add-label "needs-human" \
+            --add-label "needs-review" \
             --remove-label "processing" >/dev/null 2>&1 || true
           gh issue comment "${ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --body "Primary executor is unavailable (\`${FAILOVER_REASON}\`). Automatic GHA backup-safe mode is observation-only and will not call metered providers. Restore the primary executor or dispatch backup-heavy manually if you want GitHub-hosted execution."
+            --body "Primary executor is unavailable (\`${FAILOVER_REASON}\`). Automatic GHA backup-safe mode is observation-only and will not call metered providers. This is an operational review state, not a human approval gate; restore the primary executor or dispatch backup-heavy manually if you want GitHub-hosted execution."
 
       - name: Add processing label
         if: ${{ steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
@@ -735,10 +735,10 @@ jobs:
           fi
 
           if [[ -z "${RESP}" ]]; then
-            ANSWER="自動実行で外部LLM呼び出しに失敗しました。needs-human を付与したので、手動確認をお願いします。"
+            ANSWER="自動実行で外部LLM呼び出しに失敗しました。needs-review を付与しました。これは運用レビュー状態であり、非クリティカル作業の人間承認要求ではありません。"
             gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "${ANSWER}"
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-review" || true
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-human" || true
+            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review"
             exit 0
           elif [[ "${RESP_PROVIDER}" == "gemini" ]]; then
             ANSWER="$(echo "${RESP}" | jq -r '.candidates[0].content.parts[0].text // "No response body returned."' )"
@@ -764,8 +764,8 @@ jobs:
         run: |
           ISSUE_NUMBER="${{ steps.ctx.outputs.issue_number }}"
           gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --remove-label "completed" --remove-label "needs-review" || true
-          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "自動実行不可。人間の承認が必要です。"
-          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "自動実行不可。needs-review を付与しました。非クリティカル作業は人間承認ではなく、Tutti/Kernel の再評価または実行経路の見直しで継続してください。"
+          gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review" --remove-label "needs-human" || true
 
       - name: Remove processing label
         if: ${{ always() && steps.ctx.outputs.should_run == 'true' && steps.route_state.outputs.has_tutti != 'true' && steps.ctx.outputs.trusted == 'true' && steps.ctx.outputs.is_vote_command != 'true' && steps.exec_policy.outputs.allow_safe_execution == 'true' }}
