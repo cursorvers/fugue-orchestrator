@@ -67,6 +67,9 @@ assert_contains "${DELIVERY_AUDIT}" "because it was created from \${failed_head_
 assert_contains "${DELIVERY_AUDIT}" "because it was created from workflow path \${failed_workflow_path}, not current \${workflow_path}" "delivery audit does not rerun failed workflows from stale workflow paths"
 assert_contains "${DELIVERY_AUDIT}" "{id, run_number, created_at, head_sha, path}" "delivery audit captures failed run workflow path for rerun guard"
 assert_contains "${DELIVERY_AUDIT}" "{id, path}" "delivery audit resolves canonical workflow path metadata"
+assert_contains "${DELIVERY_AUDIT}" "LINE_DELIVERY_PAUSED: \${{ vars.LINE_DELIVERY_PAUSED }}" "delivery audit reads LINE pause state"
+assert_contains "${DELIVERY_AUDIT}" "status=\"PAUSED\"" "delivery audit reports paused LINE state instead of unmitigated errors"
+assert_contains "${DELIVERY_AUDIT}" "LINE quota exhaustion predicted but delivery is already paused" "delivery audit treats paused quota exhaustion as mitigated"
 assert_not_contains_block "${DELIVERY_AUDIT}" "Notify Discord on anomaly" "Remediate transient GHA failures" "DISCORD_WEBHOOK_URL" "delivery audit anomaly does not use client webhook"
 
 assert_contains "${ARTICLE_WORKFLOW}" 'DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}' "article failure notification wires system webhook"

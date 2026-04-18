@@ -42,6 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          LINE_DELIVERY_PAUSED: ${{ vars.LINE_DELIVERY_PAUSED }}
         shell: bash
         run: |
           set -euo pipefail
@@ -78,15 +79,25 @@ jobs:
             else
               rate=$(( (success * 100) / total ))
               if [[ "${rate}" -lt 50 ]]; then
-                status="ERROR"
-                overall_status="ERROR"
-                echo "::error::Workflow '${wf_name}' success rate ${rate}% (<50%)"
-              elif [[ "${rate}" -lt 70 ]]; then
-                status="WARNING"
-                if [[ "${overall_status}" != "ERROR" ]]; then
-                  overall_status="WARNING"
+                if [[ "${LINE_DELIVERY_PAUSED:-false}" == "true" && "${wf_name}" == LINE* ]]; then
+                  status="PAUSED"
+                  echo "::notice::Workflow '${wf_name}' success rate ${rate}% (<50%) while LINE delivery is paused"
+                else
+                  status="ERROR"
+                  overall_status="ERROR"
+                  echo "::error::Workflow '${wf_name}' success rate ${rate}% (<50%)"
                 fi
-                echo "::warning::Workflow '${wf_name}' success rate ${rate}% (<70%)"
+              elif [[ "${rate}" -lt 70 ]]; then
+                if [[ "${LINE_DELIVERY_PAUSED:-false}" == "true" && "${wf_name}" == LINE* ]]; then
+                  status="PAUSED"
+                  echo "::notice::Workflow '${wf_name}' success rate ${rate}% (<70%) while LINE delivery is paused"
+                else
+                  status="WARNING"
+                  if [[ "${overall_status}" != "ERROR" ]]; then
+                    overall_status="WARNING"
+                  fi
+                  echo "::warning::Workflow '${wf_name}' success rate ${rate}% (<70%)"
+                fi
               else
                 status="ok"
               fi
@@ -110,6 +121,7 @@ jobs:
         id: line_quota
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_DELIVERY_PAUSED: ${{ vars.LINE_DELIVERY_PAUSED }}
         shell: bash
         run: |
           set -euo pipefail
@@ -166,13 +178,25 @@ jobs:
             threshold_95=$(( quota_value * 95 / 100 ))
             threshold_80=$(( quota_value * 80 / 100 ))
             if [[ "${predicted_total}" -gt "${threshold_95}" ]]; then
-              status="ERROR"
-              overall="ERROR"
-              echo "::error::LINE quota exhaustion predicted: ${predicted_total}/${quota_value} (${predicted_pct}%)"
+              if [[ "${LINE_DELIVERY_PAUSED:-false}" == "true" ]]; then
+                status="PAUSED"
+                overall="HEALTHY"
+                echo "::notice::LINE quota exhaustion predicted but delivery is already paused: ${predicted_total}/${quota_value} (${predicted_pct}%)"
+              else
+                status="ERROR"
+                overall="ERROR"
+                echo "::error::LINE quota exhaustion predicted: ${predicted_total}/${quota_value} (${predicted_pct}%)"
+              fi
             elif [[ "${predicted_total}" -gt "${threshold_80}" ]]; then
-              status="WARNING"
-              overall="WARNING"
-              echo "::warning::LINE quota usage high: predicted ${predicted_total}/${quota_value} (${predicted_pct}%)"
+              if [[ "${LINE_DELIVERY_PAUSED:-false}" == "true" ]]; then
+                status="PAUSED"
+                overall="HEALTHY"
+                echo "::notice::LINE quota usage high but delivery is already paused: ${predicted_total}/${quota_value} (${predicted_pct}%)"
+              else
+                status="WARNING"
+                overall="WARNING"
+                echo "::warning::LINE quota usage high: predicted ${predicted_total}/${quota_value} (${predicted_pct}%)"
+              fi
             fi
           fi
 
