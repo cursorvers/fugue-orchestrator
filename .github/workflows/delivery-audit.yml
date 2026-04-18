@@ -471,10 +471,16 @@ jobs:
             # Get the most recent failed run
             last_failed=$(gh api \
               "repos/${REPO}/actions/workflows/${wf_id}/runs?per_page=1&status=completed&conclusion=failure" \
-              --jq '.workflow_runs[0] | {id, run_number, created_at}' 2>/dev/null || echo '{}')
+              --jq '.workflow_runs[0] | {id, run_number, created_at, head_sha}' 2>/dev/null || echo '{}')
 
             run_id=$(echo "${last_failed}" | jq -r '.id // empty')
             [[ -z "${run_id}" ]] && continue
+            failed_head_sha=$(echo "${last_failed}" | jq -r '.head_sha // empty')
+
+            if [[ -n "${failed_head_sha}" && "${failed_head_sha}" != "${GITHUB_SHA}" ]]; then
+              echo "::notice::Skipping rerun for '${wf_name}' (run ${run_id}) because it was created from ${failed_head_sha}, not current ${GITHUB_SHA}."
+              continue
+            fi
 
             # Fetch failed job logs (first 3000 chars to classify)
             job_log=$(gh run view "${run_id}" --log-failed 2>/dev/null | head -100 || echo "")
