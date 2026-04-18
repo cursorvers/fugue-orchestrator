@@ -69,6 +69,8 @@ done
 
 bash "${POLICY_SCRIPT}" \
   --event-name schedule \
+  --openai-ok true \
+  --zai-ok true \
   --failover-state healthy \
   --failover-reason primary-heartbeat-fresh \
   --gha-execution-mode full \
