@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   __setFieldyTelegramFsOpsForTest,
   acquireTelegramPollLock,
+  appendJsonl,
   formatReviewMessage,
   handleCallback,
   itemToReviewItem,
@@ -116,6 +117,21 @@ describe('fieldy telegram review helpers', () => {
       TELEGRAM_ALLOWED_USER_ID: '67890',
     }))).toEqual({
       TELEGRAM_BOT_TOKEN: 'token',
+      TELEGRAM_REVIEW_CHAT_ID: '12345',
+      TELEGRAM_ALLOWED_USER_ID: '67890',
+    });
+  });
+
+  it('prefers Fieldy-specific Telegram secrets over generic Telegram secrets', () => {
+    expect(preflightTelegramReviewEnv('poll', envResolver({
+      FIELDY_TELEGRAM_BOT_TOKEN: 'fieldy-token',
+      FIELDY_TELEGRAM_REVIEW_CHAT_ID: '12345',
+      FIELDY_TELEGRAM_ALLOWED_USER_ID: '67890',
+      TELEGRAM_BOT_TOKEN: 'fugue-token',
+      TELEGRAM_REVIEW_CHAT_ID: '99999',
+      TELEGRAM_ALLOWED_USER_ID: '11111',
+    }))).toEqual({
+      TELEGRAM_BOT_TOKEN: 'fieldy-token',
       TELEGRAM_REVIEW_CHAT_ID: '12345',
       TELEGRAM_ALLOWED_USER_ID: '67890',
     });
@@ -259,14 +275,41 @@ describe('fieldy telegram review helpers', () => {
     expect(body.text).not.toContain(sensitiveTitle);
   });
 
-  it('writes decisions through a tmp file in the same directory before rename', async () => {
+  it('offers approve, revise, reject, and detail actions without snooze', async () => {
+    const item = itemToReviewItem(baseItem);
+
+    await sendReviewItem('token', '12345', item);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    const labels = body.reply_markup.inline_keyboard[0].map((button: { text: string }) => button.text);
+    expect(labels).toEqual(['採用', '修正', '捨てる', '詳細']);
+  });
+
+  it('appends decisions with O_APPEND and fsyncs before closing', async () => {
     const { callback } = seedCallbackReview(tempDir);
-    const writeCalls: string[] = [];
+    const operations: string[] = [];
+    const fdPaths = new Map<number, string>();
+    const decisionFile = path.join(tempDir, 'decisions', '2026-04-18.jsonl');
     __setFieldyTelegramFsOpsForTest({
-      writeFileSync: ((filePath: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
-        writeCalls.push(String(filePath));
-        return fs.writeFileSync(filePath, data, options);
-      }) as typeof fs.writeFileSync,
+      openSync: ((filePath: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
+        const fd = fs.openSync(filePath, flags, mode);
+        fdPaths.set(fd, String(filePath));
+        if (String(filePath) === decisionFile) operations.push(`open:${String(flags)}`);
+        return fd;
+      }) as typeof fs.openSync,
+      writeSync: ((fd: number, buffer: string | NodeJS.ArrayBufferView) => {
+        if (fdPaths.get(fd) === decisionFile) operations.push('write');
+        return typeof buffer === 'string' ? fs.writeSync(fd, buffer) : fs.writeSync(fd, buffer);
+      }) as typeof fs.writeSync,
+      fsyncSync: ((fd: number) => {
+        if (fdPaths.get(fd) === decisionFile) operations.push('fsync');
+        return fs.fsyncSync(fd);
+      }) as typeof fs.fsyncSync,
+      closeSync: ((fd: number) => {
+        if (fdPaths.get(fd) === decisionFile) operations.push('close');
+        fdPaths.delete(fd);
+        return fs.closeSync(fd);
+      }) as typeof fs.closeSync,
     });
 
     await handleCallback('token', callback, {
@@ -275,21 +318,63 @@ describe('fieldy telegram review helpers', () => {
       TELEGRAM_ALLOWED_USER_ID: '67890',
     });
 
-    const decisionTmpCall = writeCalls.find((filePath) => filePath.includes(`${path.sep}decisions${path.sep}2026-04-18.jsonl.tmp-`));
-    expect(decisionTmpCall).toBeTruthy();
-    expect(path.dirname(String(decisionTmpCall))).toBe(path.join(tempDir, 'decisions'));
-    expect(fs.readFileSync(path.join(tempDir, 'decisions', '2026-04-18.jsonl'), 'utf-8')).toContain('"action":"approve"');
+    expect(operations).toEqual(['open:a', 'write', 'fsync', 'close']);
+    expect(fs.readFileSync(decisionFile, 'utf-8')).toContain('"action":"approve"');
   });
 
-  it('fsyncs the parent directory after renaming the decision file', async () => {
+  it('appends multiple JSONL rows in call order', () => {
+    const decisionFile = path.join(tempDir, 'decisions', '2026-04-18.jsonl');
+
+    appendJsonl(decisionFile, { index: 1 });
+    appendJsonl(decisionFile, { index: 2 });
+    appendJsonl(decisionFile, { index: 3 });
+
+    const rows = fs.readFileSync(decisionFile, 'utf-8').trimEnd().split('\n').map((line) => JSON.parse(line));
+    expect(rows).toEqual([{ index: 1 }, { index: 2 }, { index: 3 }]);
+  });
+
+  it('rejects JSONL rows larger than the 4KB O_APPEND guard', () => {
+    const decisionFile = path.join(tempDir, 'decisions', '2026-04-18.jsonl');
+
+    expect(() => appendJsonl(decisionFile, { payload: 'x'.repeat(4096) })).toThrow('appendJsonl: line too large for atomic O_APPEND');
+    expect(fs.existsSync(decisionFile)).toBe(false);
+  });
+
+  it('creates missing parent directories before appending JSONL', () => {
+    const decisionFile = path.join(tempDir, 'missing', 'nested', '2026-04-18.jsonl');
+
+    appendJsonl(decisionFile, { ok: true });
+
+    expect(fs.readFileSync(decisionFile, 'utf-8')).toBe('{"ok":true}\n');
+  });
+
+  it('records revise callbacks as needs_edit decisions', async () => {
+    const { callback } = seedCallbackReview(tempDir, 'revise');
+
+    await handleCallback('token', callback, {
+      TELEGRAM_BOT_TOKEN: 'token',
+      TELEGRAM_REVIEW_CHAT_ID: '12345',
+      TELEGRAM_ALLOWED_USER_ID: '67890',
+    });
+
+    const reviewItems = JSON.parse(fs.readFileSync(path.join(tempDir, 'review', 'review_items', '2026-04-18.json'), 'utf-8'));
+    expect(reviewItems[0].status).toBe('needs_edit');
+    const decision = fs.readFileSync(path.join(tempDir, 'decisions', '2026-04-18.jsonl'), 'utf-8');
+    expect(decision).toContain('"action":"revise"');
+    expect(decision).toContain('"next_state":"needs_edit"');
+    const answerBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1].body));
+    expect(answerBody.text).toBe('修正対象にしました');
+  });
+
+  it('keeps atomic rewrite fsync behavior for review item state files', async () => {
     const { callback } = seedCallbackReview(tempDir);
     const operations: string[] = [];
     const fdPaths = new Map<number, string>();
-    const decisionTmpMarker = `${path.sep}decisions${path.sep}2026-04-18.jsonl.tmp-`;
-    const decisionDir = path.join(tempDir, 'decisions');
+    const reviewItemsTmpMarker = `${path.sep}review_items${path.sep}2026-04-18.json.tmp-`;
+    const reviewItemsDir = path.join(tempDir, 'review', 'review_items');
     __setFieldyTelegramFsOpsForTest({
       writeFileSync: ((filePath: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
-        if (String(filePath).includes(decisionTmpMarker)) operations.push('writeTmp');
+        if (String(filePath).includes(reviewItemsTmpMarker)) operations.push('writeTmp');
         return fs.writeFileSync(filePath, data, options);
       }) as typeof fs.writeFileSync,
       openSync: ((filePath: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
@@ -299,8 +384,8 @@ describe('fieldy telegram review helpers', () => {
       }) as typeof fs.openSync,
       fsyncSync: ((fd: number) => {
         const filePath = fdPaths.get(fd);
-        if (filePath?.includes(decisionTmpMarker)) operations.push('fsyncTmp');
-        if (filePath === decisionDir) operations.push('fsyncParentDir');
+        if (filePath?.includes(reviewItemsTmpMarker)) operations.push('fsyncTmp');
+        if (filePath === reviewItemsDir) operations.push('fsyncParentDir');
         return fs.fsyncSync(fd);
       }) as typeof fs.fsyncSync,
       closeSync: ((fd: number) => {
@@ -308,7 +393,7 @@ describe('fieldy telegram review helpers', () => {
         return fs.closeSync(fd);
       }) as typeof fs.closeSync,
       renameSync: ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
-        if (String(oldPath).includes(decisionTmpMarker)) operations.push('rename');
+        if (String(oldPath).includes(reviewItemsTmpMarker)) operations.push('rename');
         return fs.renameSync(oldPath, newPath);
       }) as typeof fs.renameSync,
     });
@@ -332,13 +417,23 @@ describe('fieldy telegram review helpers', () => {
     const original = fs.readFileSync(decisionFile, 'utf-8');
     const originalReviewItems = fs.readFileSync(reviewItemsFile, 'utf-8');
     const originalActionTokens = fs.readFileSync(actionTokensFile, 'utf-8');
+    const fdPaths = new Map<number, string>();
     __setFieldyTelegramFsOpsForTest({
-      writeFileSync: ((filePath: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
-        if (String(filePath).includes('2026-04-18.jsonl.tmp-')) {
-          throw new Error('simulated kill before rename');
+      openSync: ((filePath: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
+        const fd = fs.openSync(filePath, flags, mode);
+        fdPaths.set(fd, String(filePath));
+        return fd;
+      }) as typeof fs.openSync,
+      writeSync: ((fd: number, buffer: string | NodeJS.ArrayBufferView) => {
+        if (fdPaths.get(fd) === decisionFile) {
+          throw new Error('simulated append failure');
         }
-        return fs.writeFileSync(filePath, data, options);
-      }) as typeof fs.writeFileSync,
+        return typeof buffer === 'string' ? fs.writeSync(fd, buffer) : fs.writeSync(fd, buffer);
+      }) as typeof fs.writeSync,
+      closeSync: ((fd: number) => {
+        fdPaths.delete(fd);
+        return fs.closeSync(fd);
+      }) as typeof fs.closeSync,
     });
 
     await handleCallback('token', callback, {
@@ -352,7 +447,6 @@ describe('fieldy telegram review helpers', () => {
     expect(JSON.parse(fs.readFileSync(reviewItemsFile, 'utf-8'))[0].status).toBe(item.status);
     expect(fs.readFileSync(actionTokensFile, 'utf-8')).toBe(originalActionTokens);
     expect(JSON.parse(fs.readFileSync(actionTokensFile, 'utf-8'))['approve-token'].usedAt).toBeUndefined();
-    expect(fs.readdirSync(path.dirname(decisionFile)).filter((name) => name.includes('.tmp-'))).toEqual([]);
     const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(body.text).toBe('処理に失敗しました。再試行してください');
   });
@@ -435,16 +529,17 @@ describe('fieldy telegram review helpers', () => {
   });
 });
 
-function seedCallbackReview(tempDir: string) {
+function seedCallbackReview(tempDir: string, action = 'approve') {
   const item = itemToReviewItem(baseItem);
+  const token = `${action}-token`;
   const reviewItemsDir = path.join(tempDir, 'review', 'review_items');
   fs.mkdirSync(reviewItemsDir, { recursive: true });
   fs.writeFileSync(path.join(reviewItemsDir, '2026-04-18.json'), `${JSON.stringify([item], null, 2)}\n`);
   fs.writeFileSync(path.join(tempDir, 'review', 'action-tokens.json'), `${JSON.stringify({
-    'approve-token': {
-      token: 'approve-token',
+    [token]: {
+      token,
       reviewItemId: item.id,
-      action: 'approve',
+      action,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     },
   }, null, 2)}\n`);
@@ -452,10 +547,10 @@ function seedCallbackReview(tempDir: string) {
   return {
     item,
     callback: {
-      id: 'callback-approve',
+      id: `callback-${action}`,
       from: { id: 67890 },
       message: { chat: { id: 12345 }, message_id: 10 },
-      data: 'fr:approve-token',
+      data: `fr:${token}`,
     },
   };
 }

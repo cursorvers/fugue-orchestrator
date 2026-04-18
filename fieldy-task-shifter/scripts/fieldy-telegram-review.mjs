@@ -21,6 +21,8 @@ const DEFAULT_STATE_PATH = path.join(os.homedir(), 'Fieldy', 'state', 'telegram-
 const POLL_LOCK_FILENAME = 'telegram-review-poll.pid';
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 const CALLBACK_PREFIX = 'fr:';
+const FIELDY_TELEGRAM_KEYCHAIN_SERVICE = 'fieldy-telegram-review';
+const DEFAULT_EXPECTED_BOT_USERNAME = 'masayuki_fieldy_review_bot';
 const BUCKET_LABELS = {
   task_candidates: 'Task',
   belief_candidates: 'Belief/Philosophy',
@@ -38,9 +40,15 @@ const REQUIRED_REVIEW_ENV = [
   'TELEGRAM_REVIEW_CHAT_ID',
   'TELEGRAM_ALLOWED_USER_ID',
 ];
+const SECRET_ALIASES = {
+  TELEGRAM_BOT_TOKEN: ['FIELDY_TELEGRAM_BOT_TOKEN', 'TELEGRAM_REVIEW_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN'],
+  TELEGRAM_REVIEW_CHAT_ID: ['FIELDY_TELEGRAM_REVIEW_CHAT_ID', 'TELEGRAM_REVIEW_CHAT_ID'],
+  TELEGRAM_ALLOWED_USER_ID: ['FIELDY_TELEGRAM_ALLOWED_USER_ID', 'TELEGRAM_ALLOWED_USER_ID'],
+};
 const defaultFsOps = {
   writeFileSync: fs.writeFileSync,
   openSync: fs.openSync,
+  writeSync: fs.writeSync,
   fsyncSync: fs.fsyncSync,
   closeSync: fs.closeSync,
   renameSync: fs.renameSync,
@@ -56,16 +64,45 @@ function getArg(name) {
   return index >= 0 ? args[index + 1] ?? null : null;
 }
 
-function resolveSecret(name) {
+function resolveSecretName(name) {
   if (process.env[name]) return process.env[name] || '';
   try {
-    return execFileSync('zsh', [
+    const fugueValue = execFileSync('zsh', [
       '-lc',
       `source "$HOME/.zshenv" >/dev/null 2>&1 || true; if typeset -f _fugue_secret >/dev/null 2>&1; then _fugue_secret ${name}; fi`,
+    ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (fugueValue) return fugueValue;
+  } catch {
+    // Fall through to the dedicated Fieldy keychain service.
+  }
+  try {
+    return execFileSync('/usr/bin/security', [
+      'find-generic-password',
+      '-s',
+      FIELDY_TELEGRAM_KEYCHAIN_SERVICE,
+      '-a',
+      name,
+      '-w',
     ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }
+}
+
+function resolveSecret(name) {
+  for (const candidate of SECRET_ALIASES[name] || [name]) {
+    const value = resolveSecretName(candidate);
+    if (value) return value;
+  }
+  return '';
+}
+
+function resolveConfiguredSecret(name, resolver) {
+  for (const candidate of SECRET_ALIASES[name] || [name]) {
+    const value = String(resolver(candidate) || '').trim();
+    if (value) return value;
+  }
+  return '';
 }
 
 function requireEnv(name) {
@@ -88,7 +125,7 @@ export function preflightTelegramReviewEnv(commandName, resolver = resolveSecret
   const values = {};
   const missing = [];
   for (const name of REQUIRED_REVIEW_ENV) {
-    const value = String(resolver(name) || '').trim();
+    const value = resolveConfiguredSecret(name, resolver);
     if (!value) {
       missing.push(name);
     } else {
@@ -167,9 +204,20 @@ function writeJson(filePath, value) {
   atomicWriteFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function appendJsonl(filePath, value) {
-  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
-  atomicWriteFileSync(filePath, `${existing}${JSON.stringify(value)}\n`);
+export function appendJsonl(filePath, value) {
+  const line = `${JSON.stringify(value)}\n`;
+  const byteLength = Buffer.byteLength(line);
+  if (byteLength > 4096) {
+    throw new Error(`appendJsonl: line too large for atomic O_APPEND (${byteLength} > 4096 bytes)`);
+  }
+  ensureDir(path.dirname(filePath));
+  const fd = fsOps.openSync(filePath, 'a');
+  try {
+    fsOps.writeSync(fd, line);
+    fsOps.fsyncSync(fd);
+  } finally {
+    fsOps.closeSync(fd);
+  }
 }
 
 function sleep(ms) {
@@ -328,6 +376,21 @@ async function telegramRequest(token, method, body, options) {
   return telegramFetch(token, method, body, options);
 }
 
+function expectedBotUsername() {
+  return (optionalEnv('FIELDY_TELEGRAM_EXPECTED_BOT_USERNAME') || DEFAULT_EXPECTED_BOT_USERNAME).replace(/^@/, '');
+}
+
+async function assertExpectedBot(token) {
+  const expected = expectedBotUsername();
+  if (!expected) return null;
+  const me = await telegramRequest(token, 'getMe', {});
+  const username = String(me?.username || '').replace(/^@/, '');
+  if (username !== expected) {
+    throw new Error(`Telegram bot mismatch: expected @${expected}, got @${username || 'unknown'}`);
+  }
+  return me;
+}
+
 async function getUpdates(token, offset) {
   return telegramRequest(token, 'getUpdates', {
     offset,
@@ -449,7 +512,7 @@ function createKeyboard(item) {
   const tokens = loadActionTokens();
   const actions = [
     { text: '採用', action: 'approve' },
-    { text: 'あとで', action: 'snooze' },
+    { text: '修正', action: 'revise' },
     { text: '捨てる', action: 'reject' },
     { text: '詳細', action: 'detail' },
   ];
@@ -586,6 +649,7 @@ async function cmdWhoami() {
 async function cmdSendTest() {
   const token = requireEnv('TELEGRAM_BOT_TOKEN');
   const chatId = requireEnv('TELEGRAM_REVIEW_CHAT_ID');
+  await assertExpectedBot(token);
   await telegramRequest(token, 'sendMessage', {
     chat_id: chatId,
     text: 'Fieldy Review Bot test',
@@ -598,6 +662,7 @@ async function cmdDaily() {
   const env = preflightTelegramReviewEnv('daily');
   const token = env.TELEGRAM_BOT_TOKEN;
   const chatId = env.TELEGRAM_REVIEW_CHAT_ID;
+  if (!dryRun) await assertExpectedBot(token);
   const date = todayJst();
   const existing = loadReviewItems(date);
   const existingIds = new Set(existing.map((item) => item.id));
@@ -663,9 +728,16 @@ async function removeButtons(token, callback) {
 
 function nextStatus(action) {
   if (action === 'approve') return 'approved';
-  if (action === 'snooze') return 'snoozed';
+  if (action === 'revise') return 'needs_edit';
   if (action === 'reject') return 'rejected';
   return null;
+}
+
+function actionResponseText(action) {
+  if (action === 'approve') return '採用しました';
+  if (action === 'revise') return '修正対象にしました';
+  if (action === 'reject') return '捨てました';
+  return '処理しました';
 }
 
 export async function handleCallback(token, callback, env = preflightTelegramReviewEnv('poll')) {
@@ -742,7 +814,7 @@ export async function handleCallback(token, callback, env = preflightTelegramRev
   saveActionTokens(tokens);
 
   await removeButtons(token, callback);
-  await answerCallback(token, callback.id, actionToken.action === 'approve' ? '採用しました' : actionToken.action === 'snooze' ? 'あとで見ます' : '捨てました');
+  await answerCallback(token, callback.id, actionResponseText(actionToken.action));
 }
 
 async function cmdPoll() {
@@ -750,6 +822,7 @@ async function cmdPoll() {
   registerTelegramPollLockCleanup(lock);
   const env = preflightTelegramReviewEnv('poll');
   const token = env.TELEGRAM_BOT_TOKEN;
+  await assertExpectedBot(token);
   const state = readJson(statePath(), {});
   const updates = await getUpdates(token, state.offset);
   let maxUpdateId = state.offset ? state.offset - 1 : -1;
@@ -767,6 +840,9 @@ function usage() {
   npm run fieldy:telegram:send-test
   npm run fieldy:telegram:daily -- [--dry-run] [--limit 5]
   npm run fieldy:telegram:poll
+
+Expected bot username:
+  FIELDY_TELEGRAM_EXPECTED_BOT_USERNAME defaults to ${DEFAULT_EXPECTED_BOT_USERNAME}
 
 Required secrets/env:
   TELEGRAM_BOT_TOKEN
