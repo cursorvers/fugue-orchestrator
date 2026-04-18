@@ -185,26 +185,26 @@ jobs:
           echo "report=| LINE Quota | ${total_usage}/${quota_value} (${usage_pct}%) predicted ${predicted_total} (${predicted_pct}%) | ${status} |" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------------
-      # 4. Discord Webhook Health Check
+      # 4. Discord System Webhook Health Check
       # ----------------------------------------------------------------
-      - name: Discord Webhook Health Check
+      - name: Discord System Webhook Health Check
         id: discord_health
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
-            echo "::notice::DISCORD_WEBHOOK_URL not set — skipping Discord webhook check"
-            echo "status=skipped" >> "$GITHUB_OUTPUT"
-            echo "report=| Discord Webhook | skipped | URL not configured |" >> "$GITHUB_OUTPUT"
+          if [[ -z "${DISCORD_SYSTEM_WEBHOOK:-}" ]]; then
+            echo "::error::DISCORD_SYSTEM_WEBHOOK not set — system notifications cannot be delivered"
+            echo "status=ERROR" >> "$GITHUB_OUTPUT"
+            echo "report=| Discord System Webhook | missing | ERROR — URL not configured |" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           http_code=$(curl -s -o /dev/null -w "%{http_code}" \
             --connect-timeout 5 --max-time 20 \
-            -X GET "${DISCORD_WEBHOOK_URL}" || echo "000")
+            -X GET "${DISCORD_SYSTEM_WEBHOOK}" || echo "000")
 
           if [[ "${http_code}" == "200" ]]; then
             status="ok"
@@ -212,15 +212,15 @@ jobs:
           elif [[ "${http_code}" == "404" ]]; then
             status="ERROR — webhook revoked"
             overall="ERROR"
-            echo "::error::Discord webhook returned 404 — webhook may be revoked"
+            echo "::error::Discord system webhook returned 404 — webhook may be revoked"
           else
             status="WARNING — HTTP ${http_code}"
             overall="WARNING"
-            echo "::warning::Discord webhook returned unexpected HTTP ${http_code}"
+            echo "::warning::Discord system webhook returned unexpected HTTP ${http_code}"
           fi
 
           echo "status=${overall}" >> "$GITHUB_OUTPUT"
-          echo "report=| Discord Webhook | HTTP ${http_code} | ${status} |" >> "$GITHUB_OUTPUT"
+          echo "report=| Discord System Webhook | HTTP ${http_code} | ${status} |" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------------
       # 5. Contract Drift Check
@@ -388,7 +388,6 @@ jobs:
         if: ${{ always() && steps.build_report.outputs.overall != 'HEALTHY' }}
         continue-on-error: true
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
           OVERALL: ${{ steps.build_report.outputs.overall }}
           TODAY: ${{ steps.build_report.outputs.today }}
@@ -406,9 +405,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
-            echo "::notice::DISCORD_WEBHOOK_URL not set — skipping Discord notification"
-            exit 0
+          if [[ -z "${DISCORD_SYSTEM_WEBHOOK:-}" ]]; then
+            echo "::error::DISCORD_SYSTEM_WEBHOOK not set — Discord system notification lost"
+            exit 1
           fi
 
           # Build LINE quota line
@@ -428,7 +427,7 @@ jobs:
             "**GHA Run Health:**" \
             "${gha_lines}" \
             "**${line_line}**" \
-            "**Discord Webhook: ${DISCORD_STATUS}**" \
+            "**Discord System Webhook: ${DISCORD_STATUS}**" \
             "**Contract Drift: ${DRIFT_STATUS}**" \
             "Run: ${RUN_URL}")
 
@@ -438,20 +437,13 @@ jobs:
             --connect-timeout 5 --max-time 20 \
             -H "Content-Type: application/json" \
             -d "${payload}" \
-            "${DISCORD_WEBHOOK_URL}" 2>/dev/null || echo "000")
+            "${DISCORD_SYSTEM_WEBHOOK}" 2>/dev/null || echo "000")
 
           if [[ "${http_status}" =~ ^2 ]]; then
-            echo "Discord anomaly notification sent."
+            echo "Discord system anomaly notification sent."
           else
-            echo "::warning::Primary webhook failed (HTTP ${http_status}); trying system webhook"
-            if [[ -n "${DISCORD_SYSTEM_WEBHOOK:-}" ]]; then
-              curl -s --connect-timeout 5 --max-time 20 \
-                -H "Content-Type: application/json" \
-                -d "${payload}" \
-                "${DISCORD_SYSTEM_WEBHOOK}" || echo "::warning::System webhook also failed"
-            else
-              echo "::warning::DISCORD_SYSTEM_WEBHOOK not set — Discord notification lost"
-            fi
+            echo "::error::Discord system webhook failed (HTTP ${http_status})"
+            exit 1
           fi
 
       # ----------------------------------------------------------------

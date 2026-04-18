@@ -318,16 +318,23 @@ jobs:
         if: ${{ failure() }}
         continue-on-error: true
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
         run: |
           set -euo pipefail
-          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
-            exit 0
+          if [ -z "${DISCORD_SYSTEM_WEBHOOK:-}" ]; then
+            echo "::error::DISCORD_SYSTEM_WEBHOOK not set. System failure notification cannot be delivered."
+            exit 1
           fi
           PAYLOAD=$(jq -n \
             --arg content "[LINE Rich Menu Deploy] Failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{content: $content}')
-          curl -s -X POST "${DISCORD_WEBHOOK_URL}" \
+          HTTP_STATUS="$(curl -sS -X POST "${DISCORD_SYSTEM_WEBHOOK}" \
             --connect-timeout 5 --max-time 20 \
+            -o /dev/null \
+            -w "%{http_code}" \
             -H "Content-Type: application/json" \
-            -d "${PAYLOAD}" || true
+            -d "${PAYLOAD}")" || true
+          case "${HTTP_STATUS}" in
+            2*) echo "Discord system failure notification sent." ;;
+            *)  echo "::error::Discord system failure notification failed (HTTP ${HTTP_STATUS:-N/A})."; exit 1 ;;
+          esac

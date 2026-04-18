@@ -34,6 +34,10 @@ jobs:
             if gh api "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" --jq '.name' >/dev/null 2>&1; then
               return 0
             fi
+            if [ -z "${value}" ]; then
+              echo "::notice::Skipping initialization for ${name} because GitHub Variables cannot store empty strings."
+              return 0
+            fi
             gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
               -f name="${name}" \
               -f value="${value}" >/dev/null
@@ -159,7 +163,23 @@ jobs:
 
           read_var() {
             local name="$1"
-            gh api "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" --jq '.value'
+            local out err
+            out="$(mktemp)"
+            err="$(mktemp)"
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" --jq '.value // empty' >"${out}" 2>"${err}"; then
+              cat "${out}"
+              rm -f "${out}" "${err}"
+              return 0
+            fi
+            if grep -Eq 'HTTP 404|Not Found|"message"[[:space:]]*:[[:space:]]*"Not Found"' "${out}" "${err}"; then
+              rm -f "${out}" "${err}"
+              return 0
+            fi
+            echo "::error::Failed to read GitHub variable ${name}" >&2
+            cat "${err}" >&2 || true
+            cat "${out}" >&2 || true
+            rm -f "${out}" "${err}"
+            return 1
           }
 
           RAW_INDEX="$(read_var "LINE_VALUE_SHARE_INDEX")"
@@ -235,17 +255,16 @@ jobs:
           upsert_var() {
             local name="$1"
             local value="$2"
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
-              -f name="${name}" -f value="${value}" >/dev/null
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
           }
 
           rollback_reservation() {
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_INDEX" \
-              -f name="LINE_VALUE_SHARE_PENDING_INDEX" -f value="" >/dev/null 2>&1 || true
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_AT" \
-              -f name="LINE_VALUE_SHARE_PENDING_AT" -f value="" >/dev/null 2>&1 || true
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_STATE" \
-              -f name="LINE_VALUE_SHARE_PENDING_STATE" -f value="" >/dev/null 2>&1 || true
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_INDEX" >/dev/null 2>&1 || true
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_AT" >/dev/null 2>&1 || true
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_PENDING_STATE" >/dev/null 2>&1 || true
             gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_VALUE_SHARE_INDEX" \
               -f name="LINE_VALUE_SHARE_INDEX" -f value="${CURRENT_INDEX}" >/dev/null 2>&1 || true
           }
@@ -384,6 +403,10 @@ jobs:
           upsert_var() {
             local name="$1"
             local value="$2"
+            if [ -z "${value}" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" >/dev/null 2>&1 || true
+              return 0
+            fi
             { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
                 -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
               || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
@@ -421,18 +444,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          upsert_var() {
+          clear_var() {
             local name="$1"
-            local value="$2"
-            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
-                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
-              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
-                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" >/dev/null 2>&1 || true
           }
 
-          upsert_var "LINE_VALUE_SHARE_PENDING_INDEX" ""
-          upsert_var "LINE_VALUE_SHARE_PENDING_AT" ""
-          upsert_var "LINE_VALUE_SHARE_PENDING_STATE" ""
+          clear_var "LINE_VALUE_SHARE_PENDING_INDEX"
+          clear_var "LINE_VALUE_SHARE_PENDING_AT"
+          clear_var "LINE_VALUE_SHARE_PENDING_STATE"
 
           echo "Cleared LINE value share rotation lock."
 
@@ -446,8 +465,7 @@ jobs:
 
           clear_var() {
             local name="$1"
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
-              -f name="${name}" -f value="" >/dev/null
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" >/dev/null 2>&1 || true
           }
 
           clear_var "LINE_VALUE_SHARE_PENDING_INDEX"
@@ -504,17 +522,17 @@ jobs:
         if: ${{ failure() }}
         continue-on-error: true
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_SYSTEM_WEBHOOK: ${{ secrets.DISCORD_SYSTEM_WEBHOOK }}
         run: |
           set -euo pipefail
-          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
-            echo "::notice::DISCORD_WEBHOOK_URL not set. Skipping failure notification."
-            exit 0
+          if [ -z "${DISCORD_SYSTEM_WEBHOOK:-}" ]; then
+            echo "::error::DISCORD_SYSTEM_WEBHOOK not set. System failure notification cannot be delivered."
+            exit 1
           fi
           PAYLOAD="$(jq -n \
             --arg content "[LINE Value Share] Workflow failed. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{content: $content}')"
-          HTTP_STATUS="$(curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+          HTTP_STATUS="$(curl -sS -X POST "${DISCORD_SYSTEM_WEBHOOK}" \
             --connect-timeout 5 \
             --max-time 20 \
             -o /dev/null \
@@ -522,6 +540,6 @@ jobs:
             -H "Content-Type: application/json" \
             -d "${PAYLOAD}")" || true
           case "${HTTP_STATUS}" in
-            2*) echo "Discord failure notification sent." ;;
-            *)  echo "::warning::Discord failure notification failed (HTTP ${HTTP_STATUS:-N/A})." ;;
+            2*) echo "Discord system failure notification sent." ;;
+            *)  echo "::error::Discord system failure notification failed (HTTP ${HTTP_STATUS:-N/A})."; exit 1 ;;
           esac
