@@ -81,6 +81,13 @@ assert_contains "${VALUE_WORKFLOW}" "Heal rotation index after duplicate guard" 
 assert_contains "${VALUE_WORKFLOW}" "build_retry_key" "value workflow builds deterministic LINE retry key"
 assert_contains "${VALUE_WORKFLOW}" "LINE broadcast request was already accepted for retry key" "value workflow handles duplicate retry-key acceptance"
 assert_contains "${VALUE_WORKFLOW}" "Pause delivery after ambiguous broadcast state" "value workflow pauses on ambiguous receipt persistence"
+assert_contains "${VALUE_WORKFLOW}" "Skipping initialization for \${name} because GitHub Variables cannot store empty strings." "value workflow skips empty variable initialization"
+assert_contains "${VALUE_WORKFLOW}" "gh api -X DELETE \"repos/\${GITHUB_REPOSITORY}/actions/variables/\${name}\" >/dev/null 2>&1 || true" "value workflow deletes variables when clearing empty state"
+assert_contains "${VALUE_WORKFLOW}" "Failed to read GitHub variable \${name}" "value workflow fails on unexpected variable read errors"
+assert_contains "${VALUE_WORKFLOW}" "HTTP 404|Not Found" "value workflow treats deleted optional variables as empty"
+assert_contains "${VALUE_WORKFLOW}" "upsert_var \"LINE_VALUE_SHARE_PENDING_INDEX\" \"\${CURRENT_INDEX}\"" "value workflow still creates prepared rotation lock"
+assert_contains "${VALUE_WORKFLOW}" "|| gh api -X POST \"repos/\${GITHUB_REPOSITORY}/actions/variables\"" "value workflow creates missing GitHub variables when reserving state"
+assert_contains "${VALUE_WORKFLOW}" "clear_var \"LINE_VALUE_SHARE_PENDING_INDEX\"" "value workflow clears success lock via delete semantics"
 
 if (( failures > 0 )); then
   exit 1

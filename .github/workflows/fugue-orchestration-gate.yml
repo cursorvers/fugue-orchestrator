@@ -10,6 +10,10 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
       - '.github/workflows/kernel-decision-journal.yml'
+      - '.github/workflows/delivery-audit.yml'
+      - '.github/workflows/line-richmenu-deploy.yml'
+      - '.github/workflows/line-send-note-article.yml'
+      - '.github/workflows/line-value-share.yml'
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/lib/kernel-auth-evidence.sh'
       - 'scripts/lib/canary-trust-policy.sh'
@@ -89,6 +93,8 @@ on:
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-delivery-system-discord-routing.sh'
+      - 'tests/test-line-delivery-dedup-guards.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
       - 'tests/test-workflow-checkout-order.sh'
@@ -130,6 +136,10 @@ on:
       - '.github/workflows/fugue-tutti-router.yml'
       - '.github/workflows/fugue-task-router.yml'
       - '.github/workflows/kernel-decision-journal.yml'
+      - '.github/workflows/delivery-audit.yml'
+      - '.github/workflows/line-richmenu-deploy.yml'
+      - '.github/workflows/line-send-note-article.yml'
+      - '.github/workflows/line-value-share.yml'
       - 'scripts/lib/build-agent-matrix.sh'
       - 'scripts/lib/kernel-auth-evidence.sh'
       - 'scripts/lib/canary-trust-policy.sh'
@@ -209,6 +219,8 @@ on:
       - 'tests/test-watchdog-alert-policy.sh'
       - 'tests/test-watchdog-waiting-run-workflow.sh'
       - 'tests/test-watchdog-alert-delivery-policy.sh'
+      - 'tests/test-delivery-system-discord-routing.sh'
+      - 'tests/test-line-delivery-dedup-guards.sh'
       - 'tests/test-primary-heartbeat-state.sh'
       - 'tests/test-workspace-root-policy.sh'
       - 'tests/test-workflow-checkout-order.sh'
@@ -347,6 +359,8 @@ jobs:
           bash_n tests/test-watchdog-reconcile-workflow.sh
           bash_n tests/test-peripheral-adapter-contract.sh
           bash_n tests/test-workspace-root-policy.sh
+          bash_n tests/test-delivery-system-discord-routing.sh
+          bash_n tests/test-line-delivery-dedup-guards.sh
           bash_n tests/test-canary-trust-policy.sh
           bash_n tests/test-kernel-canary-plan.sh
           bash_n tests/test-kernel-recovery-console.sh
@@ -422,6 +436,8 @@ jobs:
           bash tests/test-sync-gh-auth-drill.sh
           bash tests/test-org-secrets-shadow-cleanup.sh
           bash tests/test-watchdog-alert-delivery-policy.sh
+          bash tests/test-delivery-system-discord-routing.sh
+          bash tests/test-line-delivery-dedup-guards.sh
           bash tests/test-primary-heartbeat-state.sh
           bash tests/test-publish-decision-journal.sh
           bash tests/test-local-orchestration-heartbeat-cleanup.sh
