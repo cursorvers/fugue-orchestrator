@@ -463,19 +463,38 @@ jobs:
           rerun_count=0
 
           for wf_name in "${WORKFLOWS[@]}"; do
-            wf_id=$(gh api "repos/${REPO}/actions/workflows" \
-              --jq ".workflows[] | select(.name == \"${wf_name}\") | .id" \
-              2>/dev/null || echo "")
+            wf_meta=$(gh api "repos/${REPO}/actions/workflows" \
+              --jq ".workflows[] | select(.name == \"${wf_name}\") | {id, path}" \
+              2>/dev/null || echo '{}')
+            wf_id=$(echo "${wf_meta}" | jq -r '.id // empty')
+            workflow_path=$(echo "${wf_meta}" | jq -r '.path // empty')
             [[ -z "${wf_id}" ]] && continue
+            if [[ -z "${workflow_path}" ]]; then
+              echo "::notice::Skipping rerun for '${wf_name}' because workflow path metadata is unavailable."
+              continue
+            fi
 
             # Get the most recent failed run
             last_failed=$(gh api \
               "repos/${REPO}/actions/workflows/${wf_id}/runs?per_page=1&status=completed&conclusion=failure" \
-              --jq '.workflow_runs[0] | {id, run_number, created_at, head_sha}' 2>/dev/null || echo '{}')
+              --jq '.workflow_runs[0] | {id, run_number, created_at, head_sha, path}' 2>/dev/null || echo '{}')
 
             run_id=$(echo "${last_failed}" | jq -r '.id // empty')
             [[ -z "${run_id}" ]] && continue
             failed_head_sha=$(echo "${last_failed}" | jq -r '.head_sha // empty')
+            failed_workflow_path=$(echo "${last_failed}" | jq -r '.path // empty')
+
+            if [[ -z "${failed_workflow_path}" ]]; then
+              echo "::notice::Skipping rerun for '${wf_name}' (run ${run_id}) because workflow path for the failed run is unavailable."
+              continue
+            fi
+
+            workflow_path_normalized="${workflow_path%%@*}"
+            failed_workflow_path_normalized="${failed_workflow_path%%@*}"
+            if [[ "${failed_workflow_path_normalized}" != "${workflow_path_normalized}" ]]; then
+              echo "::notice::Skipping rerun for '${wf_name}' (run ${run_id}) because it was created from workflow path ${failed_workflow_path}, not current ${workflow_path}."
+              continue
+            fi
 
             if [[ -n "${failed_head_sha}" && "${failed_head_sha}" != "${GITHUB_SHA}" ]]; then
               echo "::notice::Skipping rerun for '${wf_name}' (run ${run_id}) because it was created from ${failed_head_sha}, not current ${GITHUB_SHA}."
