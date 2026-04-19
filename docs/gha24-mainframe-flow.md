@@ -67,3 +67,26 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
   - workflow evidence: `https://github.com/cursorvers/fugue-orchestrator/actions/runs/22278213098`
 - Current operational note:
   - `FUGUE_CLAUDE_RATE_LIMIT_STATE` remains `degraded`; claude should be treated as constrained capacity until it returns to `ok`.
+
+## Operations Record (2026-04-19)
+- Goal: prevent accidental Git operations from binding to parent state repositories at `/Users/masayuki_otawara` and `/Users/masayuki_otawara/Dev`.
+- Risk addressed:
+  - Running `git status`, `git add .`, or similar commands from non-repository work directories such as `~/.local/share/x-auto` or `~/Dev/tmp` could previously bind to the nearest parent repository and expose or stage unrelated home/workspace files.
+  - The home repository tracks only a small local-state set, while `~/Dev` is itself a parent orchestration repository with many nested standalone repositories. Both needed broad-add protection.
+- Implemented guards:
+  - `GIT_CEILING_DIRECTORIES=$HOME:$HOME/Dev` is initialized idempotently for zsh, bash, and POSIX login shells.
+  - The current user launchd environment was updated with the same ceiling for this login session.
+  - Home and Dev parent repositories now use local `status.showUntrackedFiles=no` for normal status output.
+  - Home and Dev parent repositories have local `.git/info/exclude` `/*` guards, so broad `git add .` does not stage untracked home files, generated workspaces, or nested project trees. New parent-repo files must be added deliberately with `git add -f <path>`.
+  - Explicit operations remain available through `git -C "$HOME" ...`, `git -C "$HOME/Dev" ...`, or the shell helpers `home-state-git` and `dev-root-git`.
+- Validation summary:
+  - `zsh -lc` from `~/.local/share/x-auto`, `~/.codex/skills/x-auto`, and `~/Dev/tmp` returns `fatal: not a git repository`, proving parent repo discovery is blocked for routine shell work.
+  - `zsh -lc` from `~/Dev/x-auto` and `~/fugue-orchestrator` resolves their real nested repositories normally.
+  - `env -u GIT_CEILING_DIRECTORIES bash -lc` still receives the guard via bash startup files.
+  - POSIX login `sh -l` receives the guard via `~/.profile`.
+  - Pure non-login `sh` does not read shell startup files, but home/Dev `/*` excludes still block broad-add accidents.
+  - `git -C "$HOME" add -n .` stages nothing.
+  - `git -C "$HOME/Dev" add -n .` stages only existing tracked modifications, not untracked project trees.
+- Current operational note:
+  - Objective completion is approximately 98%. Remaining 2% is a separate structural migration: moving the home/Dev parent state repositories into dedicated state directories. That is intentionally not done here because it changes repository identity and would require a separate rollback plan.
+  - `~/Dev` still has pre-existing tracked modifications unrelated to this guard. They are not untracked-noise risk, but they should be handled in a separate cleanup slice.
