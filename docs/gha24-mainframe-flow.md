@@ -69,7 +69,7 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
   - `FUGUE_CLAUDE_RATE_LIMIT_STATE` remains `degraded`; claude should be treated as constrained capacity until it returns to `ok`.
 
 ## Operations Record (2026-04-19)
-- Goal: prevent accidental Git operations from binding to parent state repositories at `/Users/masayuki_otawara` and `/Users/masayuki_otawara/Dev`.
+- Goal: prevent accidental Git operations from binding to parent state repositories at `$HOME` and `$HOME/Dev`.
 - Risk addressed:
   - Running `git status`, `git add .`, or similar commands from non-repository work directories such as `~/.local/share/x-auto` or `~/Dev/tmp` could previously bind to the nearest parent repository and expose or stage unrelated home/workspace files.
   - The home repository tracks only a small local-state set, while `~/Dev` is itself a parent orchestration repository with many nested standalone repositories. Both needed broad-add protection.
@@ -80,13 +80,25 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
   - Home and Dev parent repositories have local `.git/info/exclude` `/*` guards, so broad `git add .` does not stage untracked home files, generated workspaces, or nested project trees. New parent-repo files must be added deliberately with `git add -f <path>`.
   - Explicit operations remain available through `git -C "$HOME" ...`, `git -C "$HOME/Dev" ...`, or the shell helpers `home-state-git` and `dev-root-git`.
 - Validation summary:
-  - `zsh -lc` from `~/.local/share/x-auto`, `~/.codex/skills/x-auto`, and `~/Dev/tmp` returns `fatal: not a git repository`, proving parent repo discovery is blocked for routine shell work.
-  - `zsh -lc` from `~/Dev/x-auto` and `~/fugue-orchestrator` resolves their real nested repositories normally.
-  - `env -u GIT_CEILING_DIRECTORIES bash -lc` still receives the guard via bash startup files.
-  - POSIX login `sh -l` receives the guard via `~/.profile`.
-  - Pure non-login `sh` does not read shell startup files, but home/Dev `/*` excludes still block broad-add accidents.
-  - `git -C "$HOME" add -n .` stages nothing.
-  - `git -C "$HOME/Dev" add -n .` stages only existing tracked modifications, not untracked project trees.
+  - Non-repo discovery is blocked for routine shell work:
+    - `zsh -lc 'cd "$HOME/.local/share/x-auto" && git rev-parse --show-toplevel'` returns `fatal: not a git repository`.
+    - `zsh -lc 'cd "$HOME/.codex/skills/x-auto" && git rev-parse --show-toplevel'` returns `fatal: not a git repository`.
+    - `zsh -lc 'cd "$HOME/Dev/tmp" && git rev-parse --show-toplevel'` returns `fatal: not a git repository`.
+  - Nested repositories still resolve normally:
+    - `zsh -lc 'cd "$HOME/Dev/x-auto" && git rev-parse --show-toplevel'` resolves `$HOME/Dev/x-auto`.
+    - `zsh -lc 'cd "$HOME/fugue-orchestrator" && git rev-parse --show-toplevel'` resolves `$HOME/fugue-orchestrator`.
+  - Alternate startup paths still receive or retain protection:
+    - `env -u GIT_CEILING_DIRECTORIES bash -lc 'cd "$HOME/.local/share/x-auto" && git rev-parse --show-toplevel'` returns `fatal: not a git repository`.
+    - `sh -l -c 'cd "$HOME/.local/share/x-auto" && git rev-parse --show-toplevel'` returns `fatal: not a git repository`.
+    - Pure non-login `sh` does not read shell startup files; the home/Dev `/*` excludes are the fallback broad-add guard for that case.
+  - Broad-add dry-runs do not surface unrelated untracked noise:
+    - `git -C "$HOME" ls-files --others --exclude-standard` returns no paths.
+    - `git -C "$HOME/Dev" ls-files --others --exclude-standard` returns no paths.
+    - `git -C "$HOME" add -n .` stages no unrelated untracked paths.
+    - `git -C "$HOME/Dev" add -n .` stages only existing tracked modifications, not untracked project trees.
+- Completion definition:
+  - Phase 1 is complete when the validation commands above pass, PR checks are green, and the parent-repo guards remain local-only (`.git/info/exclude` and local git config) so project repositories are not modified.
+  - The current objective completion is approximately 98% for the narrow untracked-noise accident objective on this machine.
+  - The remaining 2% is Phase 2 hardening: create a machine-reproducible setup/verify script or migrate the home/Dev parent state repositories into dedicated state directories. That is intentionally separate because it changes repository identity or bootstrap behavior and needs its own rollback plan.
 - Current operational note:
-  - Objective completion is approximately 98%. Remaining 2% is a separate structural migration: moving the home/Dev parent state repositories into dedicated state directories. That is intentionally not done here because it changes repository identity and would require a separate rollback plan.
-  - `~/Dev` still has pre-existing tracked modifications unrelated to this guard. They are not untracked-noise risk, but they should be handled in a separate cleanup slice.
+  - `~/Dev` still has pre-existing tracked modifications unrelated to this guard. They are not untracked-noise risk, but they remain a separate accidental-commit risk when deliberately operating in the parent repository and should be handled in a separate cleanup slice.
