@@ -147,3 +147,28 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
   - JavaScript syntax checks for note/thumbnail/Manus scripts: pass.
 - Current operational note:
   - LINE workflow live `workflow_dispatch` smoke is intentionally not included in this record because it can send external LINE messages. Treat that as a separate, explicitly scheduled production-send smoke if needed.
+
+## Operations Record (2026-04-19 Phase 2)
+- Goal: make the parent-repo Git guard reproducible and auditable without moving repository identities.
+- Added artifact:
+  - `config/git/dev-root-info-exclude.block` is the tracked source of truth for the Dev parent repository's managed `.git/info/exclude` guard block.
+  - `scripts/local/dev-root-git-safety.sh install|verify|audit` installs, verifies, and receipts that managed block while preserving custom exclude lines outside the marked region.
+  - `tests/test-dev-root-git-safety.sh` simulates a fresh repository, verifies install idempotence, preserves custom excludes, and confirms drift detection.
+  - `scripts/local/git-parent-guard.sh verify` checks the active machine state:
+    - routine non-repo directories do not resolve to `$HOME` or `$HOME/Dev`
+    - nested repositories such as `$HOME/Dev/x-auto` still resolve normally
+    - parent repositories keep `status.showUntrackedFiles=no`
+    - parent repository `.git/info/exclude` files contain `/*`
+    - parent repositories expose no untracked paths through `git ls-files --others --exclude-standard`
+  - `scripts/local/git-parent-guard.sh apply` idempotently reapplies the shell startup guard, local parent-repo Git config, `.git/info/exclude` `/*` guard, and best-effort launchd session environment.
+- Validation summary:
+  - `bash -n scripts/local/git-parent-guard.sh`: pass
+  - `scripts/local/git-parent-guard.sh verify`: pass
+  - `bash -n scripts/local/dev-root-git-safety.sh`: pass
+  - `bash tests/test-dev-root-git-safety.sh`: pass
+  - `scripts/local/dev-root-git-safety.sh verify --repo "$HOME/Dev"`: pass
+- Completion definition:
+  - Phase 2 is complete when the script is merged and `verify` passes on the target machine after any shell/profile drift, machine migration, or parent-repo reset.
+  - The current objective completion is 100% for the requested untracked-noise accident prevention and auditability scope.
+- Remaining non-blocking cleanup:
+  - Stale worktree metadata and invalid temporary Git directories may still exist under local `/tmp` or `~/Dev/tmp`. These are cleanup tasks, not parent-repo discovery risks, and deleting their backing directories requires explicit destructive-action approval.

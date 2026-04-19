@@ -1,0 +1,7 @@
+# BEGIN FUGUE DEV ROOT GIT SAFETY
+# This parent repository contains many nested standalone repositories and
+# generated workspaces. Keep broad add/status operations from seeing unrelated
+# untracked trees. Existing tracked files remain tracked; add new parent-repo
+# files deliberately with `git add -f <path>`.
+/*
+# END FUGUE DEV ROOT GIT SAFETY
