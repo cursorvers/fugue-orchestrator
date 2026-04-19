@@ -51,6 +51,26 @@ bash "${CONSENSUS_SCRIPT}" record approved vote "run-complete regression test" >
 out="$(bash "${RUN_COMPLETE_SCRIPT}" --summary "Kernel run completed" --no-gha --dry-run)"
 grep -Fq 'run id: run-complete-test' <<<"${out}"
 grep -Fq 'title: fugue-orchestrator:doctor-handoff' <<<"${out}"
+grep -Fq 'completion report:' <<<"${out}"
+grep -Fq 'status: completed' <<<"${out}"
+grep -Fq 'changed: see summary' <<<"${out}"
+grep -Fq 'verification: phase gate, completion backup, compact artifact update' <<<"${out}"
+grep -Fq 'dirty worktree entries:' <<<"${out}"
+grep -Fq 'state:' <<<"${out}"
+
+out_custom="$(
+  KERNEL_COMPLETION_CHANGED="completion report contract" \
+  KERNEL_COMPLETION_LOCATIONS="AGENTS.md scripts/lib/kernel-run-complete.sh" \
+  KERNEL_COMPLETION_VERIFICATION="test-kernel-run-complete" \
+  KERNEL_COMPLETION_RESIDUAL_RISKS="dirty root remains classified" \
+  KERNEL_COMPLETION_SKIPPED_CHECKS="none" \
+  KERNEL_COMPLETION_FOLLOW_UPS="none" \
+  bash "${RUN_COMPLETE_SCRIPT}" --summary "Kernel run completed" --no-gha --dry-run
+)"
+grep -Fq 'changed: completion report contract' <<<"${out_custom}"
+grep -Fq 'locations: AGENTS.md scripts/lib/kernel-run-complete.sh' <<<"${out_custom}"
+grep -Fq 'verification: test-kernel-run-complete' <<<"${out_custom}"
+grep -Fq 'residual risks: dirty root remains classified' <<<"${out_custom}"
 
 compact_out="$(bash "${COMPACT_SCRIPT}" status)"
 grep -Fq 'last event: run_completed' <<<"${compact_out}"
