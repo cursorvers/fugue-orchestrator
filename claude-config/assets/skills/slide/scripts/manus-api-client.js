@@ -23,35 +23,6 @@ const API_CONFIG = Object.freeze({
   maxPollAttempts: 120,
 });
 
-function createAbortError(message = 'Polling aborted') {
-  const err = new Error(message);
-  err.name = 'AbortError';
-  return err;
-}
-
-function sleep(ms, signal) {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener?.('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener?.('abort', onAbort);
-      reject(createAbortError());
-    };
-    if (signal) {
-      if (signal.aborted) {
-        clearTimeout(timer);
-        reject(createAbortError());
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  });
-}
-
 // === Utility ===
 
 /** Mask API keys and tokens in log messages to prevent credential leakage. */
@@ -115,20 +86,10 @@ function makeRequest(method, apiPath, data) {
 // === Task Polling ===
 
 /** Poll a Manus task until completion or failure. Handles transient 404s. */
-async function pollTaskCompletion(taskId, options = {}) {
-  const {
-    deadlineAt = null,
-    signal = null,
-    pollIntervalMs = API_CONFIG.pollInterval,
-    maxPollAttempts = API_CONFIG.maxPollAttempts,
-  } = options;
+async function pollTaskCompletion(taskId) {
   const maxTransient404 = 3;
   let transient404Count = 0;
-  for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
-    if (signal?.aborted) throw createAbortError();
-    if (deadlineAt && Date.now() >= deadlineAt) {
-      throw new Error(`Polling deadline exceeded after ${Math.round((Date.now() - (deadlineAt - (attempt * pollIntervalMs))) / 1000)}s`);
-    }
+  for (let attempt = 0; attempt < API_CONFIG.maxPollAttempts; attempt++) {
     let status;
     try {
       status = await makeRequest('GET', `/tasks/${taskId}`);
@@ -137,8 +98,7 @@ async function pollTaskCompletion(taskId, options = {}) {
       if (err.message.includes('API 404') && transient404Count < maxTransient404) {
         transient404Count += 1;
         console.error(`[POLL] Task not found yet (${transient404Count}/${maxTransient404}), retrying...`);
-        const waitMs = deadlineAt ? Math.max(0, Math.min(pollIntervalMs, deadlineAt - Date.now())) : pollIntervalMs;
-        await sleep(waitMs, signal);
+        await new Promise(r => setTimeout(r, API_CONFIG.pollInterval));
         continue;
       }
       throw err;
@@ -147,12 +107,11 @@ async function pollTaskCompletion(taskId, options = {}) {
     if (status.status === 'completed') return status;
     if (status.status === 'failed')
       throw new Error(`Manus task failed: ${status.error || 'Unknown error'}`);
-    const elapsed = ((attempt + 1) * pollIntervalMs / 1000).toFixed(0);
+    const elapsed = ((attempt + 1) * API_CONFIG.pollInterval / 1000).toFixed(0);
     console.error(`[POLL] ${status.status || 'processing'}... (${elapsed}s elapsed)`);
-    const waitMs = deadlineAt ? Math.max(0, Math.min(pollIntervalMs, deadlineAt - Date.now())) : pollIntervalMs;
-    await sleep(waitMs, signal);
+    await new Promise(r => setTimeout(r, API_CONFIG.pollInterval));
   }
-  throw new Error(`Polling timeout after ${maxPollAttempts * pollIntervalMs / 1000}s`);
+  throw new Error(`Polling timeout after ${API_CONFIG.maxPollAttempts * API_CONFIG.pollInterval / 1000}s`);
 }
 
 // === File Download ===
@@ -188,14 +147,6 @@ function downloadFile(fileUrl, destPath) {
 
 /** Extract file entries from Manus API response (supports multiple structures). */
 function extractOutputFiles(taskResult) {
-  function safeBasenameFromUrl(rawUrl) {
-    try {
-      return path.basename(new URL(rawUrl).pathname) || 'output.html';
-    } catch {
-      return null;
-    }
-  }
-
   // Structure 1: Manus actual — output[].content[].type === "output_file"
   if (Array.isArray(taskResult.output)) {
     const outputFiles = taskResult.output
@@ -210,18 +161,13 @@ function extractOutputFiles(taskResult) {
   const legacyFiles = taskResult.output_files || taskResult.files || taskResult.artifacts || [];
   return legacyFiles.map(file => {
     if (typeof file === 'string') {
-      const safeName = safeBasenameFromUrl(file);
-      if (!safeName) return null;
-      return { url: file, name: safeName };
+      return { url: file, name: path.basename(new URL(file).pathname) };
     }
     const url = file.url || file.download_url || file.fileUrl || '';
-    const safeName = url ? safeBasenameFromUrl(url) : null;
-    if (url && !safeName) return null;
     const name = file.name || file.filename || file.fileName
-      || safeName
-      || 'output.html';
+      || (url ? path.basename(new URL(url).pathname) : 'output.html');
     return { url, name };
-  }).filter(f => f?.url);
+  }).filter(f => f.url);
 }
 
 /** Download all output files from completed Manus task. */
