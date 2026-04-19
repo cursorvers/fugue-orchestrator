@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/sops/import-to-keychain.sh"
 TMP_DIR="$(mktemp -d)"
+CURRENT_USER="$(whoami)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 mkdir -p "${TMP_DIR}/bin" "${TMP_DIR}/age"
@@ -45,7 +46,7 @@ FAIL_ERR="${TMP_DIR}/fail.err"
 
 out="$(bash "${SCRIPT}" "${ENV_FILE}")"
 grep -Fq 'imported: OPENAI_API_KEY -> openai-api-key' <<<"${out}"
-grep -Fq -- '-a openai-api-key -s fugue-secrets -w - -U' "${MOCK_SECURITY_LOG}"
+grep -Fq -- '-a openai-api-key -s fugue-secrets -w test-openai -U' "${MOCK_SECURITY_LOG}"
 
 printf 'FUGUE_QUEUE_API_KEY=queue\nSUPABASE_ACCESS_TOKEN=supabase\nX_API_KEY=xkey\n' > "${ENV_FILE}"
 >"${MOCK_SECURITY_LOG}"
@@ -53,9 +54,15 @@ out="$(bash "${SCRIPT}" "${ENV_FILE}")"
 grep -Fq 'imported: FUGUE_QUEUE_API_KEY (service: FUGUE_QUEUE_API_KEY)' <<<"${out}"
 grep -Fq 'imported: SUPABASE_ACCESS_TOKEN (service: Supabase CLI)' <<<"${out}"
 grep -Fq 'imported: X_API_KEY (service: x-auto)' <<<"${out}"
-grep -Fq -- '-a masayuki -s FUGUE_QUEUE_API_KEY -w - -U' "${MOCK_SECURITY_LOG}"
-grep -Fq -- '-a supabase -s Supabase CLI -w - -U' "${MOCK_SECURITY_LOG}"
-grep -Fq -- '-a X_API_KEY -s x-auto -w - -U' "${MOCK_SECURITY_LOG}"
+grep -Fq -- "-a ${CURRENT_USER} -s FUGUE_QUEUE_API_KEY -w queue -U" "${MOCK_SECURITY_LOG}"
+grep -Fq -- '-a supabase -s Supabase CLI -w go-keyring-base64:c3VwYWJhc2U= -U' "${MOCK_SECURITY_LOG}"
+grep -Fq -- '-a X_API_KEY -s x-auto -w xkey -U' "${MOCK_SECURITY_LOG}"
+
+printf 'ESTAT_APP_ID=1234567890123456789012345678901234567890\n' > "${ENV_FILE}"
+>"${MOCK_SECURITY_LOG}"
+out="$(bash "${SCRIPT}" "${ENV_FILE}")"
+grep -Fq 'imported: ESTAT_APP_ID -> estat-app-id (alias)' <<<"${out}"
+grep -Fq -- '-a estat-app-id -s fugue-secrets -w 1234567890123456789012345678901234567890 -U' "${MOCK_SECURITY_LOG}"
 
 printf 'OPENAI_API_KEY=test-openai\n' > "${ENV_FILE}"
 >"${MOCK_SECURITY_LOG}"
@@ -68,6 +75,6 @@ if grep -Fq 'imported:' "${FAIL_OUT}"; then
   echo "failure path reported imported output" >&2
   exit 1
 fi
-grep -Fq 'ERROR: failed to import OPENAI_API_KEY -> openai-api-key' "${FAIL_ERR}"
+grep -Fq 'ERROR: failed to import OPENAI_API_KEY (canonical)' "${FAIL_ERR}"
 
 echo "import to keychain check passed"

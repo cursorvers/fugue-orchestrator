@@ -27,6 +27,7 @@ case "${service}:${acct}" in
   fugue-secrets:xai-api-key) printf 'kc-xai' ;;
   fugue-secrets:target-repo-pat) printf 'kc-target-repo-pat' ;;
   fugue-secrets:fugue-ops-pat) printf 'kc-fugue-ops-pat' ;;
+  fugue-secrets:estat-app-id) printf '1234567890123456789012345678901234567890' ;;
   *) exit 44 ;;
 esac
 EOF
@@ -36,6 +37,7 @@ ENV_FILE="${TMP_DIR}/shared.env"
 cat >"${ENV_FILE}" <<'EOF'
 ZAI_API_KEY=file-zai
 XAI_API=legacy-xai
+ESTAT_APP_ID=file-estat-app-id
 EOF
 
 export PATH="${TMP_DIR}/bin:${PATH}"
@@ -70,5 +72,15 @@ out="$(bash "${SCRIPT}" get FUGUE_OPS_PAT)"
 [[ "${out}" == "kc-fugue-ops-pat" ]]
 src="$(bash "${SCRIPT}" source-of FUGUE_OPS_PAT)"
 [[ "${src}" == "keychain" ]]
+
+unset SHARED_SECRETS_ENV_FILE
+out="$(bash "${SCRIPT}" get ESTAT_API_ID)"
+[[ "${out}" == "1234567890123456789012345678901234567890" ]]
+src="$(bash "${SCRIPT}" source-of ESTAT_API_ID)"
+[[ "${src}" == "keychain" ]]
+
+export SHARED_SECRETS_ENV_FILE="${ENV_FILE}"
+out="$(bash "${SCRIPT}" get ESTAT_APP_ID)"
+[[ "${out}" == "1234567890123456789012345678901234567890" || "${out}" == "file-estat-app-id" ]]
 
 echo "shared secret loader check passed"
