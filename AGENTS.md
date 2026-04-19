@@ -20,6 +20,7 @@ Important scope boundary:
 - Load additional docs on demand only when blocked.
 - Avoid loading long historical rationale unless needed for a decision.
 - Keep adapter files short to reduce repeated context overhead.
+- Shared skill adapter files such as `CLAUDE.md` must use Japanese headings and Japanese operational wording by default. Keep product/tool names, file paths, commands, status values, and API field names as literals when needed.
 - Sections 4-11 details are split into `docs/agents/` for on-demand loading. See §4 Reference Index below.
 
 ## 2. Control Plane Contract
