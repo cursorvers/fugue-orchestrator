@@ -11,6 +11,8 @@ TARGET="both"            # codex | claude | both
 INCLUDE_OPTIONAL="false" # true | false
 FORCE="false"            # true | false
 DRY_RUN="false"          # true | false
+ADAPTER_ONLY="false"     # true | false
+PRUNE_STALE="false"      # true | false
 
 CODEX_SKILLS_DIR="${CODEX_SKILLS_DIR:-${HOME}/.codex/skills}"
 CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-${HOME}/.claude/skills}"
@@ -26,6 +28,8 @@ Options:
   --target <codex|claude|both>    Install destination. Default: both
   --with-optional                 Include optional skills from manifest.
   --manifest <path>               Manifest file path override.
+  --adapter-only                  Sync only CLAUDE.md into existing target skill dirs.
+  --prune-stale                   Remove managed target skill dirs no longer in manifest.
   --force                         Replace existing non-managed target directories.
   --dry-run                       Print actions without writing files.
   -h, --help                      Show this help.
@@ -61,6 +65,14 @@ parse_args() {
         [[ $# -ge 2 ]] || fail "--manifest requires a value"
         MANIFEST="$2"
         shift 2
+        ;;
+      --adapter-only)
+        ADAPTER_ONLY="true"
+        shift
+        ;;
+      --prune-stale)
+        PRUNE_STALE="true"
+        shift
         ;;
       --force)
         FORCE="true"
@@ -99,6 +111,41 @@ validate_skill_payload() {
   grep -q '^description:' "${skill_md}" || fail "skill ${skill_name} has no description in frontmatter"
 }
 
+is_selected_skill() {
+  local candidate="$1"
+  local skill_name profile
+  while IFS=$'\t' read -r skill_name profile; do
+    [[ -n "${skill_name}" ]] || continue
+    if [[ "${profile}" == "optional" && "${INCLUDE_OPTIONAL}" != "true" ]]; then
+      continue
+    fi
+    [[ "${skill_name}" == "${candidate}" ]] && return 0
+  done < <(read_manifest)
+  return 1
+}
+
+is_manifest_skill() {
+  local candidate="$1"
+  local skill_name _profile
+  while IFS=$'\t' read -r skill_name _profile; do
+    [[ -n "${skill_name}" ]] || continue
+    [[ "${skill_name}" == "${candidate}" ]] && return 0
+  done < <(read_manifest)
+  return 1
+}
+
+validate_source_tree() {
+  local skill_dir skill_name
+  for skill_dir in "${SOURCE_BASE}"/*; do
+    [[ -d "${skill_dir}" ]] || continue
+    skill_name="$(basename "${skill_dir}")"
+    [[ -f "${skill_dir}/SKILL.md" ]] || continue
+    if ! is_manifest_skill "${skill_name}"; then
+      fail "top-level local shared skill is not in manifest: ${skill_dir}"
+    fi
+  done
+}
+
 copy_skill() {
   local source_dir="$1"
   local target_base="$2"
@@ -113,11 +160,16 @@ copy_skill() {
 
   if [[ -d "${target_dir}" ]]; then
     target_real="$(cd "${target_dir}" && pwd -P)"
-    if [[ "${source_real}" == "${target_real}" ]]; then
+    if [[ -L "${target_dir}" ]]; then
+      if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "DRY-RUN replace symlinked skill ${target_dir}"
+      else
+        rm -rf "${target_dir}"
+      fi
+    elif [[ "${source_real}" == "${target_real}" ]]; then
       echo "SKIP ${target_dir} (already points at ${source_real})"
       return 0
-    fi
-    if [[ -f "${target_dir}/${MANAGED_MARKER}" || "${FORCE}" == "true" ]]; then
+    elif [[ -f "${target_dir}/${MANAGED_MARKER}" || "${FORCE}" == "true" ]]; then
       if [[ "${DRY_RUN}" == "true" ]]; then
         echo "DRY-RUN replace ${target_dir}"
       else
@@ -141,6 +193,46 @@ source_repo=${REPO_ROOT}
 source_base=${SOURCE_BASE}
 installed_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
+}
+
+copy_adapter_only() {
+  local source_dir="$1"
+  local target_base="$2"
+  local skill_name="$3"
+  local target_dir="${target_base}/${skill_name}"
+
+  [[ -f "${source_dir}/CLAUDE.md" ]] || fail "skill ${skill_name} has no CLAUDE.md"
+  [[ -d "${target_dir}" ]] || fail "target skill directory missing for adapter-only sync: ${target_dir}"
+  [[ -f "${target_dir}/SKILL.md" ]] || fail "target SKILL.md missing for adapter-only sync: ${target_dir}/SKILL.md"
+
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    echo "DRY-RUN adapter-only ${skill_name} -> ${target_dir}/CLAUDE.md"
+    return 0
+  fi
+
+  cp "${source_dir}/CLAUDE.md" "${target_dir}/CLAUDE.md"
+}
+
+prune_stale_managed() {
+  local target_base="$1"
+  local target_dir skill_name
+  [[ -d "${target_base}" ]] || return 0
+
+  for target_dir in "${target_base}"/*; do
+    [[ -d "${target_dir}" ]] || continue
+    [[ -f "${target_dir}/${MANAGED_MARKER}" ]] || continue
+    skill_name="$(basename "${target_dir}")"
+    if is_selected_skill "${skill_name}"; then
+      continue
+    fi
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+      echo "DRY-RUN prune stale managed skill ${target_dir}"
+    else
+      rm -rf "${target_dir}"
+      echo "PRUNE ${target_dir}"
+    fi
+  done
 }
 
 read_manifest() {
@@ -172,6 +264,8 @@ main() {
   require_cmd head
   require_cmd rm
 
+  validate_source_tree
+
   local sync_codex="false" sync_claude="false"
   if [[ "${TARGET}" == "codex" || "${TARGET}" == "both" ]]; then
     sync_codex="true"
@@ -199,13 +293,30 @@ main() {
     validate_skill_payload "${source_skill_dir}" "${skill_name}"
 
     if [[ "${sync_codex}" == "true" ]]; then
-      copy_skill "${source_skill_dir}" "${CODEX_SKILLS_DIR}" "${skill_name}"
+      if [[ "${ADAPTER_ONLY}" == "true" ]]; then
+        copy_adapter_only "${source_skill_dir}" "${CODEX_SKILLS_DIR}" "${skill_name}"
+      else
+        copy_skill "${source_skill_dir}" "${CODEX_SKILLS_DIR}" "${skill_name}"
+      fi
     fi
     if [[ "${sync_claude}" == "true" ]]; then
-      copy_skill "${source_skill_dir}" "${CLAUDE_SKILLS_DIR}" "${skill_name}"
+      if [[ "${ADAPTER_ONLY}" == "true" ]]; then
+        copy_adapter_only "${source_skill_dir}" "${CLAUDE_SKILLS_DIR}" "${skill_name}"
+      else
+        copy_skill "${source_skill_dir}" "${CLAUDE_SKILLS_DIR}" "${skill_name}"
+      fi
     fi
     installed=$((installed + 1))
   done < <(read_manifest)
+
+  if [[ "${PRUNE_STALE}" == "true" ]]; then
+    if [[ "${sync_codex}" == "true" ]]; then
+      prune_stale_managed "${CODEX_SKILLS_DIR}"
+    fi
+    if [[ "${sync_claude}" == "true" ]]; then
+      prune_stale_managed "${CLAUDE_SKILLS_DIR}"
+    fi
+  fi
 
   echo "local shared skills processed: ${installed} (selected=${selected}, target=${TARGET}, dry_run=${DRY_RUN})"
 }
