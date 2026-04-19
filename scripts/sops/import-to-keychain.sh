@@ -68,6 +68,7 @@ map_to_acct() {
     LINE_CHANNEL_SECRET) echo "line-channel-secret" ;;
     LINE_HARNESS_API_KEY) echo "line-harness-api-key" ;;
     ESTAT_APP_ID)       echo "estat-app-id" ;;
+    ESTAT_API_ID)       echo "estat-app-id" ;;
     *)                  echo "" ;;
   esac
 }

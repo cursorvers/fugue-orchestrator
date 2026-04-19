@@ -3,6 +3,10 @@ set -euo pipefail
 
 KEYCHAIN_SERVICE="${SHARED_SECRETS_KEYCHAIN_SERVICE:-fugue-secrets}"
 ENV_FILE="${SHARED_SECRETS_ENV_FILE:-}"
+SOPS_ENC_FILE_DEFAULT="${HOME}/fugue-orchestrator/secrets/fugue-secrets.enc"
+SOPS_ENC_FILE="${SHARED_SECRETS_SOPS_FILE:-${SOPS_ENC_FILE_DEFAULT}}"
+SOPS_AGE_KEY_DEFAULT="${HOME}/.config/sops/age/keys.txt"
+SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-${SOPS_AGE_KEY_DEFAULT}}"
 
 DEFAULT_VARS=(
   OPENAI_API_KEY
@@ -10,6 +14,7 @@ DEFAULT_VARS=(
   ZAI_API_KEY
   GEMINI_API_KEY
   XAI_API_KEY
+  ESTAT_API_ID
   TARGET_REPO_PAT
   FUGUE_OPS_PAT
 )
@@ -25,13 +30,15 @@ Usage:
 Resolution order:
   1) process env
   2) macOS Keychain
-  3) explicit external env file (SHARED_SECRETS_ENV_FILE)
+  3) shared sops bundle
+  4) explicit external env file (SHARED_SECRETS_ENV_FILE)
 EOF
 }
 
 canonical_name() {
   case "${1:-}" in
     XAI_API) printf 'XAI_API_KEY\n' ;;
+    ESTAT_APP_ID) printf 'ESTAT_API_ID\n' ;;
     *) printf '%s\n' "${1:-}" ;;
   esac
 }
@@ -39,6 +46,7 @@ canonical_name() {
 legacy_aliases() {
   case "${1:-}" in
     XAI_API_KEY) printf 'XAI_API\n' ;;
+    ESTAT_API_ID) printf 'ESTAT_APP_ID\n' ;;
     *) ;;
   esac
 }
@@ -50,6 +58,7 @@ keychain_account_for() {
     GEMINI_API_KEY) printf 'gemini-api-key\n' ;;
     ZAI_API_KEY) printf 'zai-api-key\n' ;;
     XAI_API_KEY) printf 'xai-api-key\n' ;;
+    ESTAT_API_ID|ESTAT_APP_ID) printf 'estat-app-id\n' ;;
     TARGET_REPO_PAT) printf 'target-repo-pat\n' ;;
     FUGUE_OPS_PAT) printf 'fugue-ops-pat\n' ;;
     *) return 1 ;;
@@ -132,12 +141,44 @@ resolve_from_env_file() {
   return 1
 }
 
+resolve_from_sops_bundle() {
+  local name="$1"
+  command -v sops >/dev/null 2>&1 || return 1
+  [[ -f "${SOPS_ENC_FILE}" ]] || return 1
+  [[ -f "${SOPS_AGE_KEY_FILE}" ]] || return 1
+
+  local decrypted value
+  decrypted="$(
+    env SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE}" \
+      sops decrypt --input-type dotenv --output-type dotenv "${SOPS_ENC_FILE}" 2>/dev/null
+  )" || return 1
+
+  value="$(printf '%s\n' "${decrypted}" | awk -F= -v key="${name}" '$1 == key { print substr($0, index($0, $2)); exit }')"
+  if [[ -n "${value}" ]]; then
+    printf 'sops-bundle\t%s\n' "${value}"
+    return 0
+  fi
+
+  local alias_name
+  while IFS= read -r alias_name; do
+    [[ -n "${alias_name}" ]] || continue
+    value="$(printf '%s\n' "${decrypted}" | awk -F= -v key="${alias_name}" '$1 == key { print substr($0, index($0, $2)); exit }')"
+    if [[ -n "${value}" ]]; then
+      printf 'sops-bundle\t%s\n' "${value}"
+      return 0
+    fi
+  done < <(legacy_aliases "${name}")
+
+  return 1
+}
+
 resolve_secret() {
   local canonical
   canonical="$(canonical_name "${1:-}")"
 
   resolve_from_env "${canonical}" && return 0
   resolve_from_keychain "${canonical}" && return 0
+  resolve_from_sops_bundle "${canonical}" && return 0
   resolve_from_env_file "${canonical}" && return 0
   return 1
 }
