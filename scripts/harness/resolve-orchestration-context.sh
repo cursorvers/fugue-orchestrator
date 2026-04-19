@@ -739,6 +739,10 @@ eval "$(
     --has-implement "${has_implement}" \
     --orchestration-profile "${orchestration_profile}"
 )"
+implementation_human_confirmation_required="false"
+if [[ "${task_size_tier}" == "critical" || "${risk_tier}" == "high" ]]; then
+  implementation_human_confirmation_required="true"
+fi
 claude_teams_allowed="false"
 claude_teams_reason="policy-script-missing"
 claude_teams_collaboration_signal="false"
@@ -976,6 +980,7 @@ fi
   echo "multi_agent_mode_hint=${multi_agent_mode_hint}"
   echo "implementation_dialogue_rounds=${implementation_dialogue_rounds}"
   echo "risk_tier=${risk_tier}"
+  echo "implementation_human_confirmation_required=${implementation_human_confirmation_required}"
   echo "risk_score=${risk_score}"
   echo "risk_reasons=${risk_reasons}"
   echo "lessons_required=${lessons_required}"

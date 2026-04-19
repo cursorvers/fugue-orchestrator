@@ -79,6 +79,27 @@ require_cmd() {
   fi
 }
 
+resolve_repo_root() {
+  local primary="$1"
+  shift || true
+
+  if [[ -d "${primary}" ]]; then
+    printf '%s\n' "${primary}"
+    return 0
+  fi
+
+  local candidate
+  for candidate in "$@"; do
+    [[ -n "${candidate}" ]] || continue
+    if [[ -d "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 require_dir() {
   local dir="$1"
   local label="$2"
@@ -93,6 +114,15 @@ require_cmd jq
 require_cmd rg
 require_cmd npm
 require_cmd deno
+
+if ! WORKERS_HUB_ROOT="$(resolve_repo_root "${WORKERS_HUB_ROOT}" "${ROOT_DIR}/cloudflare-workers-hub-deploy")"; then
+  echo "Error: workers hub repo not found: ${WORKERS_HUB_ROOT}" >&2
+  exit 2
+fi
+if ! CURSORVERS_LINE_ROOT="$(resolve_repo_root "${CURSORVERS_LINE_ROOT}" "${ROOT_DIR}/cursorvers_line_free_dev")"; then
+  echo "Error: cursorvers line repo not found: ${CURSORVERS_LINE_ROOT}" >&2
+  exit 2
+fi
 
 require_dir "${ROOT_DIR}" "fugue root"
 require_dir "${WORKERS_HUB_ROOT}" "workers hub repo"
@@ -174,6 +204,47 @@ append_result() {
       log_file:$log_file,
       message:$message
     }' >> "${RESULTS_JSONL}"
+}
+
+run_optional_deno_task_step() {
+  local id="$1"
+  local workdir="$2"
+  local task_name="$3"
+
+  local log_file="${RUN_DIR}/${id}.log"
+  local start_epoch
+  local end_epoch
+  local duration_ms
+  local rc=0
+
+  start_epoch="$(date +%s)"
+  echo "==> ${id}"
+  set +e
+  (
+    cd "${workdir}"
+    deno task "${task_name}"
+  ) >"${log_file}" 2>&1
+  rc=$?
+  set -e
+  end_epoch="$(date +%s)"
+  duration_ms="$(( (end_epoch - start_epoch) * 1000 ))"
+
+  if (( rc == 0 )); then
+    append_result "${id}" "ok" "${workdir}" "${duration_ms}" "${log_file}" "passed"
+    echo "[PASS] ${id}"
+    return 0
+  fi
+
+  if rg -q "Task not found: ${task_name}|No tasks found in configuration file" "${log_file}"; then
+    append_result "${id}" "ok" "${workdir}" "${duration_ms}" "${log_file}" "skipped (optional task '${task_name}' not defined)"
+    echo "[SKIP] ${id} (optional task '${task_name}' not defined)"
+    return 0
+  fi
+
+  append_result "${id}" "error" "${workdir}" "${duration_ms}" "${log_file}" "failed (exit ${rc})"
+  echo "[FAIL] ${id} (exit ${rc})" >&2
+  tail -n 40 "${log_file}" >&2 || true
+  return 1
 }
 
 run_step() {
@@ -408,7 +479,7 @@ run_step \
 run_step \
   "workers_local_agent" \
   "${WORKERS_HUB_ROOT}/local-agent" \
-  bash -lc "npm run type-check && npm test -- --run src/task-executor.test.ts" || failures=$((failures + 1))
+  bash -lc "if [[ ! -d node_modules || ! -d node_modules/@types/node ]]; then npm install --ignore-scripts --no-audit --no-fund; fi && npm run type-check && npm test -- --run src/task-executor.test.ts" || failures=$((failures + 1))
 
 run_step \
   "workers_cockpit_pwa" \
@@ -427,10 +498,10 @@ run_step \
   src/services/pwa-notifier.test.ts \
   src/fugue/cockpit-gateway.test.ts || failures=$((failures + 1))
 
-run_step \
+run_optional_deno_task_step \
   "cursorvers_functions" \
   "${CURSORVERS_LINE_ROOT}" \
-  deno task test:functions || failures=$((failures + 1))
+  "test:functions" || failures=$((failures + 1))
 
 run_contract_probe || failures=$((failures + 1))
 

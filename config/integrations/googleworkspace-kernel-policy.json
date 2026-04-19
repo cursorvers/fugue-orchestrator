@@ -45,7 +45,7 @@
         "sheets-append"
       ],
       "notes": [
-        "Requires ok_to_execute and human approval.",
+        "Requires ok_to_execute and either explicit human approval or approved non-critical Kernel consensus.",
         "Prefer dry-run before actual execution."
       ]
     },
@@ -137,7 +137,7 @@
         "user-oauth-write"
       ],
       "requires_ok_to_execute": true,
-      "requires_human_approval": true,
+      "requires_human_approval": "critical-only",
       "result_class": "receipt"
     },
     {
@@ -289,6 +289,7 @@
       "write_disposition",
       "ok_to_execute",
       "human_approved",
+      "approval_source",
       "receipt"
     ],
     "allowed_write_dispositions": [
@@ -300,6 +301,7 @@
     ],
     "notes": [
       "Preview, applied, blocked, readonly, and resolved states must be machine-readable in *-meta.json.",
+      "approval_source must distinguish explicit-human, kernel-consensus, readonly, and none.",
       "Kernel should rely on normalized receipt metadata rather than raw Workspace payloads when evaluating write evidence."
     ]
   },

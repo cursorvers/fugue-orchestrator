@@ -94,7 +94,7 @@ assert_case() {
   local expected_mode="$4"
   local expected_request="$5"
   local expected_confirm="$6"
-  local expect_implement_label="$7"
+  local expect_confirm_label="$7"
   local execution_mode_override="${8:-auto}"
   local expected_dispatch_override="${9:-${execution_mode_override}}"
   local kernel_run_id_input="${10:-}"
@@ -162,14 +162,9 @@ assert_case() {
     fi
   done
 
-  if [[ "${expect_implement_label}" == "true" ]]; then
+  if [[ "${expected_request}" == "true" ]]; then
     if ! grep -Eq -- '--add-label implement([[:space:]]|$)' "${FAKE_GH_LOG}"; then
       echo "FAIL [${name}]: implement label was not added"
-      failed=$((failed + 1))
-      return
-    fi
-    if ! grep -Eq -- '--add-label implement-confirmed([[:space:]]|$)' "${FAKE_GH_LOG}"; then
-      echo "FAIL [${name}]: implement-confirmed label was not added"
       failed=$((failed + 1))
       return
     fi
@@ -179,6 +174,15 @@ assert_case() {
       failed=$((failed + 1))
       return
     fi
+  fi
+
+  if [[ "${expect_confirm_label}" == "true" ]]; then
+    if ! grep -Eq -- '--add-label implement-confirmed([[:space:]]|$)' "${FAKE_GH_LOG}"; then
+      echo "FAIL [${name}]: implement-confirmed label was not added"
+      failed=$((failed + 1))
+      return
+    fi
+  else
     if grep -Eq -- '--add-label implement-confirmed([[:space:]]|$)' "${FAKE_GH_LOG}"; then
       echo "FAIL [${name}]: implement-confirmed label should not be added"
       failed=$((failed + 1))
@@ -223,11 +227,12 @@ assert_case() {
 echo "=== route-task-handoff.sh unit tests ==="
 echo ""
 
-assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "true" "true" "auto" "primary"
+assert_case "vote-default-implement" "通常タスク" "" "implement" "true" "false" "false" "auto" "primary"
 assert_case "review-heading-wins" $'レビューのみでよい\n\n## Execution Mode\nreview' "" "review" "false" "false" "false" "auto" "primary"
 assert_case "vote-instruction-review" "通常タスク" "review only" "review" "false" "false" "false" "auto" "primary"
-assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "true" "true" "backup-heavy" "backup-heavy"
-assert_case "kernel-run-id-passthrough" "通常タスク" "" "implement" "true" "true" "true" "auto" "primary" "run-kernel-123"
+assert_case "backup-heavy-override-passthrough" "通常タスク" "" "implement" "true" "false" "false" "backup-heavy" "backup-heavy"
+assert_case "kernel-run-id-passthrough" "通常タスク" "" "implement" "true" "false" "false" "auto" "primary" "run-kernel-123"
+assert_case "explicit-confirm-override" $'通常タスク\n\n## Implementation Confirmation\nconfirmed' "" "implement" "true" "true" "true" "auto" "primary"
 assert_content_label_case "company-deck-content-label" "外出先から会社紹介スライドを作って" "content-action:company-deck"
 
 echo ""

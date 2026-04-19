@@ -7,7 +7,6 @@ REQUIRED_LABELS=(
   "fugue-task"
   "tutti"
   "implement"
-  "implement-confirmed"
   "orchestrator:codex"
   "orchestrator-assist:claude"
 )
@@ -15,10 +14,13 @@ REQUIRED_LABELS=(
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/local/create-fugue-issue.sh --title <title> --body-file <path>
+  scripts/local/create-fugue-issue.sh --title <title> --body-file <path> [--confirm-implement]
 
 Creates a FUGUE issue with the required labels. If an exact-title duplicate
 already exists, prints the existing issue URL instead.
+
+`--confirm-implement` adds implement-confirmed for explicitly confirmed
+critical/high-risk implementation execution.
 EOF
 }
 
@@ -52,7 +54,7 @@ label_description() {
     "fugue-task") echo "Task routed through Fugue orchestration" ;;
     "tutti") echo "Dispatch through the Tutti mainframe workflow" ;;
     "implement") echo "Implementation intent (provider-agnostic)" ;;
-    "implement-confirmed") echo "Human has explicitly confirmed implementation execution" ;;
+    "implement-confirmed") echo "Human has explicitly confirmed critical/high-risk implementation execution" ;;
     "orchestrator:codex") echo "Requested main orchestrator provider" ;;
     "orchestrator-assist:claude") echo "Requested assist orchestrator provider" ;;
     *) fail "unknown label description for: $1" ;;
@@ -96,6 +98,7 @@ find_duplicate_issue_url() {
 
 TITLE=""
 BODY_FILE=""
+CONFIRM_IMPLEMENT=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -106,6 +109,10 @@ while [[ $# -gt 0 ]]; do
     --body-file)
       BODY_FILE="${2:-}"
       shift 2
+      ;;
+    --confirm-implement)
+      CONFIRM_IMPLEMENT=true
+      shift
       ;;
     -h|--help)
       usage
@@ -142,6 +149,13 @@ create_cmd=(
 for label in "${REQUIRED_LABELS[@]}"; do
   create_cmd+=(--label "${label}")
 done
+if [[ "${CONFIRM_IMPLEMENT}" == "true" ]]; then
+  gh label create "implement-confirmed" \
+    --repo "${REPO}" \
+    --color "$(label_color "implement-confirmed")" \
+    --description "$(label_description "implement-confirmed")" >/dev/null 2>&1 || true
+  create_cmd+=(--label "implement-confirmed")
+fi
 
 issue_url="$("${create_cmd[@]}")"
 printf '%s\n' "${issue_url}"

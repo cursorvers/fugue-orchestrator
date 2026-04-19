@@ -396,6 +396,12 @@ Auto-execute is allowed when:
 - rollback path is present
 - no human-consent gate is triggered
 
+For non-critical work, a passing council vote is the normal authorization path and must not be
+converted into a second routine user approval prompt by either a `claude` or `codex` orchestrator.
+Adapters may ask the user again only when the action is critical, destructive, irreversible,
+trust-boundary crossing, billing/secrets/auth-changing, materially ambiguous, or lacks the local
+credential/trust proof required to execute.
+
 ### 8.4 Human Approval Required
 
 Human approval remains mandatory for:
@@ -405,6 +411,10 @@ Human approval remains mandatory for:
 - secrets, auth, billing, or trust-boundary changes
 - irreversible migrations
 - high-impact external side effects without rollback
+
+Human approval is not mandatory for bounded non-critical side effects once `ok_to_execute=true`,
+weighted `2/3` consensus passes, no HIGH-risk finding exists, and the adapter records the consensus
+receipt as approval evidence.
 
 ## 8.5 Verification Fabric
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 ADAPTER="${SCRIPT_DIR}/scripts/lib/googleworkspace-cli-adapter.sh"
+CONSENSUS_SCRIPT="${SCRIPT_DIR}/scripts/lib/kernel-consensus-evidence.sh"
 
 passed=0
 failed=0
@@ -118,6 +119,54 @@ test_write_receipt_logged() {
     "${run_dir}/googleworkspace/gmail-send-meta.json" >/dev/null
 }
 
+test_noncritical_consensus_satisfies_write_gate() {
+  local run_dir="${tmp_dir}/write-consensus-ok"
+  local state_dir="${tmp_dir}/state-consensus-ok"
+  mkdir -p "${run_dir}"
+  KERNEL_STATE_ROOT="${state_dir}" KERNEL_RUN_ID="gw-consensus-ok" KERNEL_TASK_SIZE_TIER="medium" \
+    bash "${CONSENSUS_SCRIPT}" record approved local-vote "non-critical write consensus" >/dev/null
+  env PATH="${tmp_dir}:${PATH}" KERNEL_STATE_ROOT="${state_dir}" KERNEL_RUN_ID="gw-consensus-ok" "${ADAPTER}" \
+    --action gmail-send \
+    --to flux@example.com \
+    --subject "Test" \
+    --body "Hello" \
+    --format json \
+    --run-dir "${run_dir}" \
+    --ok-to-execute true >/dev/null
+  jq -e '
+    .status == "ok" and
+    .human_approved == true and
+    .explicit_human_approved == false and
+    .approval_source == "kernel-consensus" and
+    .consensus_receipt_path != null and
+    .write_disposition == "applied"
+  ' "${run_dir}/googleworkspace/gmail-send-meta.json" >/dev/null
+}
+
+test_critical_consensus_does_not_satisfy_write_gate() {
+  local run_dir="${tmp_dir}/write-consensus-critical"
+  local state_dir="${tmp_dir}/state-consensus-critical"
+  mkdir -p "${run_dir}"
+  KERNEL_STATE_ROOT="${state_dir}" KERNEL_RUN_ID="gw-consensus-critical" KERNEL_TASK_SIZE_TIER="critical" \
+    bash "${CONSENSUS_SCRIPT}" record approved local-vote "critical write consensus" >/dev/null
+  if env PATH="${tmp_dir}:${PATH}" KERNEL_STATE_ROOT="${state_dir}" KERNEL_RUN_ID="gw-consensus-critical" "${ADAPTER}" \
+    --action gmail-send \
+    --to flux@example.com \
+    --subject "Test" \
+    --body "Hello" \
+    --format json \
+    --run-dir "${run_dir}" \
+    --ok-to-execute true >/dev/null 2>"${run_dir}/stderr.log"; then
+    return 1
+  fi
+  jq -e '
+    .status == "skipped" and
+    .human_approved == false and
+    .approval_source == "none" and
+    .write_disposition == "blocked"
+  ' "${run_dir}/googleworkspace/gmail-send-meta.json" >/dev/null
+}
+
 test_write_preview_receipt_logged() {
   local run_dir="${tmp_dir}/write-preview"
   mkdir -p "${run_dir}"
@@ -224,6 +273,8 @@ echo ""
 
 assert_ok "write-gate-blocked" test_write_gate_blocked
 assert_ok "write-receipt-logged" test_write_receipt_logged
+assert_ok "noncritical-consensus-satisfies-write-gate" test_noncritical_consensus_satisfies_write_gate
+assert_ok "critical-consensus-does-not-satisfy-write-gate" test_critical_consensus_does_not_satisfy_write_gate
 assert_ok "write-preview-receipt-logged" test_write_preview_receipt_logged
 assert_ok "drive-upload-receipt-logged" test_drive_upload_receipt_logged
 assert_ok "docs-receipts-logged" test_docs_receipts_logged

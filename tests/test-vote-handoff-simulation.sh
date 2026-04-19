@@ -252,6 +252,16 @@ run_case \
   "" \
   "implement" \
   "true" \
+  "false" \
+  "false"
+
+run_case \
+  "explicit-confirm-override" \
+  $'通常タスク\n\n## Implementation Confirmation\nconfirmed' \
+  '[]' \
+  "" \
+  "implement" \
+  "true" \
   "true" \
   "false"
 

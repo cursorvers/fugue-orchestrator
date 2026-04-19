@@ -23,8 +23,15 @@ Kernel is complete for this refactor when it provides an artifact-first developm
 Execution may stop only for:
 
 - destructive actions
-- external authentication or approval
+- external authentication or approval that cannot be satisfied by existing local evidence or
+  non-critical council consensus
 - major new facts that contradict frozen requirements
+
+Non-critical work must proceed under Kernel council consensus by default. A `claude` orchestrator,
+`codex` orchestrator, or local adapter must not ask the user for a second routine approval after
+`ok_to_execute=true` and approved consensus evidence exist for the current run. Critical,
+destructive, irreversible, secrets/auth/billing/trust-boundary, or materially ambiguous actions
+remain human-gated.
 
 ## Execution Nodes
 

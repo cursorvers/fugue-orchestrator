@@ -16,8 +16,8 @@ Recommended common settings:
 - `Mainframe handoff`: `auto`
 - `Execution mode`: `implement` for code/docs changes, `review` if only
   confirming scope and behavior first
-- `Implementation confirmation`: `confirmed` only when autonomous execution is
-  desired
+- `Implementation confirmation`: `pending` by default; use `confirmed` only for
+  critical/high-risk implementation execution that has explicit human approval
 - `Main orchestrator provider`: `codex`
 - `Assist orchestrator provider`: `claude`
 - `Multi-agent mode`: `auto`

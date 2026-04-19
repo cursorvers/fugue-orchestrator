@@ -37,6 +37,7 @@ Constraints:
 - Keep output concise and operational.
 - Treat `/vote` as local continuation, not GitHub handoff.
 - Reuse successful local auth or trust evidence across the run; do not re-request equivalent user auth for non-critical work.
+- For non-critical work with `ok_to_execute=true`, this consensus evidence satisfies routine user approval; escalate only critical, destructive, irreversible, secrets/auth/billing/trust-boundary, or materially ambiguous actions.
 - Do not post to GitHub or any external service.
 - Do not summarize repository state, CI state, or production state unless asked.
 - Do not ask for confirmation just to start local consensus mode.

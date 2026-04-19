@@ -35,7 +35,8 @@ test_dry_run_lists_five_issues() {
     grep -q 'title: task: revalidate kernel google workspace readonly evidence lane' "${out_file}" &&
     grep -q 'title: task: triage kernel google workspace extension lanes tasks pubsub slides' "${out_file}" &&
     grep -q 'orchestrator:codex' "${out_file}" &&
-    grep -q 'orchestrator-assist:claude' "${out_file}"
+    grep -q 'orchestrator-assist:claude' "${out_file}" &&
+    ! grep -q 'implement-confirmed' "${out_file}"
 }
 
 test_dry_run_respects_assist_override() {
@@ -48,11 +49,29 @@ test_dry_run_respects_assist_override() {
   grep -q 'orchestrator-assist:none' "${out_file}"
 }
 
+test_dry_run_confirm_flag_adds_confirmation() {
+  local out_file="${tmp_dir}/confirm.txt"
+  (
+    cd "${SCRIPT_DIR}"
+    bash "${SCRIPT}" --dry-run --confirm-implement > "${out_file}"
+  )
+
+  grep -q 'implement-confirmed' "${out_file}"
+}
+
+test_ready_docs_default_to_pending() {
+  local missing
+  missing="$(grep -L 'Implementation confirmation`: `pending' "${SCRIPT_DIR}"/docs/kernel-googleworkspace-issue-*-ready.md || true)"
+  [[ -z "${missing}" ]]
+}
+
 echo "=== create-kernel-googleworkspace-issues.sh unit tests ==="
 echo ""
 
 assert_ok "dry-run-lists-five-issues" test_dry_run_lists_five_issues
 assert_ok "dry-run-respects-assist-override" test_dry_run_respects_assist_override
+assert_ok "dry-run-confirm-flag-adds-confirmation" test_dry_run_confirm_flag_adds_confirmation
+assert_ok "ready-docs-default-to-pending" test_ready_docs_default_to_pending
 
 echo ""
 echo "=== Results: ${passed}/${total} passed, ${failed} failed ==="

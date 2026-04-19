@@ -22,6 +22,49 @@ require_cmd jq
 [[ -f "${MANIFEST}" ]] || fail "manifest not found: ${MANIFEST}"
 [[ -f "${LOCAL_SYSTEMS_MANIFEST}" ]] || fail "local systems manifest not found: ${LOCAL_SYSTEMS_MANIFEST}"
 
+resolve_adapter_path() {
+  local path_value="$1"
+
+  if [[ "${path_value}" == /* ]]; then
+    [[ -e "${path_value}" ]] && printf '%s\n' "${path_value}" && return 0
+
+    # Allow user-home-portable absolute paths in manifests.
+    if [[ "${path_value}" == /Users/*/* ]]; then
+      local home_relative="${path_value#/Users/}"
+      home_relative="${home_relative#*/}"
+      local home_candidate="${HOME}/${home_relative}"
+      if [[ -e "${home_candidate}" ]]; then
+        printf '%s\n' "${home_candidate}"
+        return 0
+      fi
+    fi
+
+    printf '%s\n' "${path_value}"
+    return 1
+  fi
+
+  local resolved_path="${ROOT_DIR}/${path_value}"
+  if [[ -e "${resolved_path}" ]]; then
+    printf '%s\n' "${resolved_path}"
+    return 0
+  fi
+
+  local trimmed="${path_value}"
+  while [[ "${trimmed}" == ../* ]]; do
+    trimmed="${trimmed#../}"
+  done
+  if [[ "${trimmed}" != "${path_value}" ]]; then
+    resolved_path="${ROOT_DIR}/${trimmed}"
+    if [[ -e "${resolved_path}" ]]; then
+      printf '%s\n' "${resolved_path}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "${ROOT_DIR}/${path_value}"
+  return 1
+}
+
 if ! jq -e '.adapters | type == "array"' "${MANIFEST}" >/dev/null; then
   fail "manifest .adapters must be an array"
 fi
@@ -113,18 +156,20 @@ while IFS= read -r row; do
   adapter_class="$(echo "${row}" | jq -r '.adapter_class')"
   path_value="$(echo "${row}" | jq -r '.path // empty')"
   local_system_id="$(echo "${row}" | jq -r '.local_system_id // empty')"
+  status="$(echo "${row}" | jq -r '.status // empty')"
 
   [[ -n "${id}" ]] || fail "empty adapter id"
   [[ -n "${scope}" ]] || fail "adapter=${id} missing scope"
   [[ -n "${adapter_class}" ]] || fail "adapter=${id} missing adapter_class"
   [[ -n "${path_value}" ]] || fail "adapter=${id} missing path"
 
-  if [[ "${path_value}" == /* ]]; then
-    resolved_path="${path_value}"
-  else
-    resolved_path="${ROOT_DIR}/${path_value}"
+  if ! resolved_path="$(resolve_adapter_path "${path_value}")"; then
+    if [[ "${status}" == "stub-only" ]]; then
+      pass "adapter=${id} is stub-only; path check skipped (${path_value})"
+      continue
+    fi
+    fail "adapter=${id} path missing: ${path_value}"
   fi
-  [[ -e "${resolved_path}" ]] || fail "adapter=${id} path missing: ${path_value}"
 
   if [[ "${adapter_class}" == "shell" ]]; then
     [[ -f "${resolved_path}" ]] || fail "adapter=${id} shell path is not a file: ${path_value}"

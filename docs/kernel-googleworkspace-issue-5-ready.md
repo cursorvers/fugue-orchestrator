@@ -10,7 +10,7 @@ Use this with the `FUGUE Task (Mobile / Natural Language)` issue template.
 
 - `Mainframe handoff`: `auto`
 - `Execution mode`: `implement`
-- `Implementation confirmation`: `confirmed`
+- `Implementation confirmation`: `pending`
 - `Main orchestrator provider`: `codex`
 - `Assist orchestrator provider`: `claude`
 - `Multi-agent mode`: `auto`

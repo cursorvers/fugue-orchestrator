@@ -42,6 +42,11 @@ on:
         required: false
         type: string
         default: "codex-full"
+      task_size_tier:
+        description: "Resolved task size tier (small|medium|large|critical)"
+        required: false
+        type: string
+        default: ""
       execution_mode:
         description: "Execution policy mode (primary|backup-safe|backup-heavy|record-only)"
         required: false
@@ -173,6 +178,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ORCHESTRATION_PROFILE: ${{ inputs.orchestration_profile }}
+          INPUT_TASK_SIZE_TIER: ${{ inputs.task_size_tier }}
           INPUT_RISK_TIER: ${{ inputs.risk_tier }}
           INPUT_LESSONS_REQUIRED: ${{ inputs.lessons_required }}
           INPUT_CORRECTION_SIGNAL: ${{ inputs.correction_signal }}
@@ -197,9 +203,6 @@ jobs:
           if [[ "${HAS_IMPLEMENT}" != "true" ]]; then
             SHOULD_RUN="false"
             SKIP_REASON="missing-implement-intent"
-          elif [[ "${HAS_IMPLEMENT_CONFIRMED}" != "true" ]]; then
-            SHOULD_RUN="false"
-            SKIP_REASON="missing-implement-confirmed"
           fi
 
           # Determine target repo
@@ -222,6 +225,20 @@ jobs:
           )"
           if [[ "${INPUT_RISK_TIER}" == "low" || "${INPUT_RISK_TIER}" == "medium" || "${INPUT_RISK_TIER}" == "high" ]]; then
             risk_tier="${INPUT_RISK_TIER}"
+          fi
+          input_task_size_tier="$(printf '%s' "${INPUT_TASK_SIZE_TIER:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          if [[ "${input_task_size_tier}" == "small" || "${input_task_size_tier}" == "medium" || "${input_task_size_tier}" == "large" || "${input_task_size_tier}" == "critical" ]]; then
+            task_size_tier="${input_task_size_tier}"
+          elif [[ "${task_size_tier:-}" != "small" && "${task_size_tier:-}" != "medium" && "${task_size_tier:-}" != "large" && "${task_size_tier:-}" != "critical" ]]; then
+            task_size_tier="medium"
+          fi
+          human_confirmation_required="false"
+          if [[ "${task_size_tier}" == "critical" || "${risk_tier}" == "high" ]]; then
+            human_confirmation_required="true"
+          fi
+          if [[ "${SHOULD_RUN}" == "true" && "${human_confirmation_required}" == "true" && "${HAS_IMPLEMENT_CONFIRMED}" != "true" ]]; then
+            SHOULD_RUN="false"
+            SKIP_REASON="missing-implement-confirmed"
           fi
           input_correction_signal="$(echo "${INPUT_CORRECTION_SIGNAL:-auto}" | tr '[:upper:]' '[:lower:]')"
           if [[ "${input_correction_signal}" == "true" || "${input_correction_signal}" == "false" ]]; then
@@ -246,6 +263,8 @@ jobs:
             echo "is_large_refactor=${HAS_LARGE_REFACTOR}"
             echo "should_run=${SHOULD_RUN}"
             echo "skip_reason=${SKIP_REASON}"
+            echo "human_confirmation_required=${human_confirmation_required}"
+            echo "task_size_tier=${task_size_tier}"
             echo "target_repo=${TARGET_REPO}"
             echo "branch_name=${BRANCH_NAME}"
             echo "risk_tier=${risk_tier}"
@@ -269,7 +288,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --body "Implementation intent detected, but \`implement-confirmed\` is missing. Add that label to allow Codex execution."
+          gh issue comment "${{ steps.ctx.outputs.issue_number }}" --repo "${GITHUB_REPOSITORY}" --body "Implementation intent detected, but this is critical/high-risk and \`implement-confirmed\` is missing. Add that label to allow Codex execution."
 
       - name: Add processing label
         if: ${{ steps.ctx.outputs.should_run == 'true' }}
@@ -309,7 +328,7 @@ jobs:
           if [[ -z "${OPENAI_API_KEY:-}" ]]; then
             can_run="false"
             skip_reason="missing-openai-api-key"
-            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Escalating to humans."
+            gh issue comment "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body "Cannot run Codex implementation: missing secret \`OPENAI_API_KEY\`. Marking needs-review for operational configuration; this is not a human approval gate for non-critical work."
           elif [[ "${TARGET_REPO}" != "${GITHUB_REPOSITORY}" && -z "${TARGET_REPO_PAT:-}" ]]; then
             can_run="false"
             skip_reason="missing-target-repo-pat"
@@ -317,7 +336,11 @@ jobs:
           fi
 
           if [[ "${can_run}" != "true" ]]; then
-            gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
+            if [[ "${skip_reason}" == "missing-target-repo-pat" ]]; then
+              gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-human" --remove-label "processing" || true
+            else
+              gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --add-label "needs-review" --remove-label "needs-human" --remove-label "processing" || true
+            fi
           fi
 
           {
