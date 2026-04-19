@@ -3,7 +3,49 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
-CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
+CODEX_BIN="${CODEX_BIN:-}"
+
+resolve_codex_bin() {
+  local preferred="${CODEX_BIN:-}"
+  local candidate
+
+  if [[ -n "${preferred}" ]]; then
+    candidate="$(type -P "${preferred}" 2>/dev/null || true)"
+    if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    if [[ -x "${preferred}" ]]; then
+      printf '%s\n' "${preferred}"
+      return 0
+    fi
+  fi
+
+  candidate="$(type -P codex 2>/dev/null || true)"
+  if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  for candidate in \
+    "$HOME/bin/codex" \
+    "$HOME/.local/bin/codex" \
+    "/usr/local/bin/codex" \
+    "/opt/homebrew/bin/codex"
+  do
+    if [[ -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+CODEX_BIN="$(resolve_codex_bin)" || {
+  echo "codex executable not found. Set CODEX_BIN." >&2
+  exit 1
+}
 
 usage() {
   cat <<'EOF'
