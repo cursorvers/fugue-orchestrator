@@ -24,6 +24,43 @@ DEFAULT_STALE_HOURS="${KERNEL_STALE_HOURS:-24}"
 STATIC_CHECK_TIMEOUT_SEC="${DOCTOR_STATIC_CHECK_TIMEOUT_SEC:-15}"
 SUMMARY_TIMEOUT_SEC="${KERNEL_DOCTOR_SUMMARY_TIMEOUT_SEC:-15}"
 
+resolve_codex_bin() {
+  local preferred="${CODEX_BIN:-}"
+  local candidate
+
+  if [[ -n "${preferred}" ]]; then
+    candidate="$(type -P "${preferred}" 2>/dev/null || true)"
+    if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    if [[ -x "${preferred}" ]]; then
+      printf '%s\n' "${preferred}"
+      return 0
+    fi
+  fi
+
+  candidate="$(type -P codex 2>/dev/null || true)"
+  if [[ -n "${candidate}" && -x "${candidate}" ]]; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  for candidate in \
+    "$HOME/bin/codex" \
+    "$HOME/.local/bin/codex" \
+    "/usr/local/bin/codex" \
+    "/opt/homebrew/bin/codex"
+  do
+    if [[ -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -442,7 +479,7 @@ cmd_launch() {
 
   if [[ "${ORCH_DRY_RUN:-0}" == "1" ]]; then
     prompt="$(env KERNEL_RUN_ID="${run_id}" bash "${THREAD_SCRIPT}" prompt "${run_id}")"
-    printf '%s -C %q %q\n' "${CODEX_BIN:-/opt/homebrew/bin/codex}" "${ROOT_DIR}" "${prompt}"
+    printf '%s -C %q %q\n' "$(resolve_codex_bin)" "${ROOT_DIR}" "${prompt}"
     return 0
   fi
 
