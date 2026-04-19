@@ -6,6 +6,7 @@ PHASE_GATE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-phase-gate.sh"
 COMPACT_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-compact-artifact.sh"
 RUNNER_SCRIPT="${KERNEL_RUN_COMPLETE_RUNNER_SCRIPT:-${ROOT_DIR}/scripts/local/run-kernel-task-completion-backup.sh}"
 WORKSPACE_SCRIPT="${ROOT_DIR}/scripts/lib/kernel-runtime-workspace.sh"
+DIRTY_SUMMARY_SCRIPT="${ROOT_DIR}/scripts/local/dirty-worktree-summary.sh"
 ALLOW_GHA_NONCRITICAL="${KERNEL_ALLOW_GHA_NONCRITICAL:-false}"
 
 default_run_id() {
@@ -131,3 +132,17 @@ printf 'kernel run completion:\n'
 printf '  - run id: %s\n' "${RUN_ID}"
 printf '  - title: %s\n' "${title}"
 printf '  - summary: %s\n' "${summary}"
+printf 'completion report:\n'
+printf '  - status: completed\n'
+printf '  - changed: %s\n' "${KERNEL_COMPLETION_CHANGED:-see summary}"
+printf '  - locations: %s\n' "${KERNEL_COMPLETION_LOCATIONS:-${ROOT_DIR}}"
+printf '  - verification: %s\n' "${KERNEL_COMPLETION_VERIFICATION:-phase gate, completion backup, compact artifact update}"
+printf '  - residual risks: %s\n' "${KERNEL_COMPLETION_RESIDUAL_RISKS:-none reported}"
+printf '  - skipped checks: %s\n' "${KERNEL_COMPLETION_SKIPPED_CHECKS:-none reported}"
+printf '  - follow-up tasks: %s\n' "${KERNEL_COMPLETION_FOLLOW_UPS:-none reported}"
+printf 'dirty worktree entries:\n'
+if [[ -x "${DIRTY_SUMMARY_SCRIPT}" || -f "${DIRTY_SUMMARY_SCRIPT}" ]]; then
+  bash "${DIRTY_SUMMARY_SCRIPT}" --max-entries "${KERNEL_COMPLETION_DIRTY_MAX_ENTRIES:-20}" | sed 's/^/  /'
+else
+  printf '  dirty-summary=unavailable\n'
+fi

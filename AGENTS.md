@@ -98,6 +98,16 @@ User-approval friction rule:
 - Any adapter that still requires approval must record why the action is critical or why local
   evidence/consensus could not satisfy the gate.
 
+Completion reporting:
+- When development work is completed, the active agent must always display a completion report to
+  the user before ending the turn or workflow.
+- The completion report must state what changed, where it was changed, what verification was run,
+  and whether any residual risks, skipped checks, dirty worktree entries, or follow-up tasks remain.
+- Do not treat background automation, PR creation, merge completion, or issue label changes as a
+  substitute for this user-visible report.
+- If the work cannot be completed, report the blocker and the exact remaining task instead of
+  emitting a completion-style summary.
+
 ## 4. Reference Index
 
 Sections 4-11 are split into separate files for on-demand loading.

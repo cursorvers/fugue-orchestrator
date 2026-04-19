@@ -26,10 +26,12 @@ on:
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/local/dirty-worktree-summary.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-dirty-worktree-summary.sh'
       - 'tests/test-kernel-auth-evidence.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
@@ -87,10 +89,12 @@ on:
       - 'scripts/check-codex-kernel-prompt.sh'
       - 'scripts/check-codex-vote-prompt.sh'
       - 'scripts/sim-orchestrator-switch.sh'
+      - 'scripts/local/dirty-worktree-summary.sh'
       - 'scripts/local/run-local-orchestration.sh'
       - 'scripts/local/run-linked-systems.sh'
       - 'scripts/harness/run-recovery-console.sh'
       - 'tests/test-codex-vote-prompt.sh'
+      - 'tests/test-dirty-worktree-summary.sh'
       - 'tests/test-kernel-auth-evidence.sh'
       - 'tests/test-publish-decision-journal.sh'
       - 'tests/test-local-orchestration-heartbeat-cleanup.sh'
@@ -156,11 +160,13 @@ jobs:
           bash -n scripts/lib/watchdog-reconcile-claim-policy.sh
           bash -n scripts/lib/workspace-root-policy.sh
           bash -n scripts/harness/run-recovery-console.sh
+          bash -n scripts/local/dirty-worktree-summary.sh
           bash -n scripts/check-agent-matrix-parity.sh
           bash -n scripts/check-linked-systems-integrity.sh
           bash -n scripts/check-codex-kernel-prompt.sh
           bash -n scripts/check-codex-vote-prompt.sh
           bash -n tests/test-codex-vote-prompt.sh
+          bash -n tests/test-dirty-worktree-summary.sh
           bash -n tests/test-kernel-auth-evidence.sh
           bash -n tests/test-publish-decision-journal.sh
           bash -n tests/test-local-orchestration-heartbeat-cleanup.sh
@@ -202,6 +208,7 @@ jobs:
           bash tests/test-watchdog-reconcile-claim-policy.sh
           bash tests/test-watchdog-reconcile-workflow.sh
           bash tests/test-workspace-root-policy.sh
+          bash tests/test-dirty-worktree-summary.sh
 
       - name: Canary trust tests
         run: |
