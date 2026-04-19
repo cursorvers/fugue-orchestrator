@@ -1,3 +1,8 @@
+---
+name: cybersec-lookup
+description: Security scanning, vulnerability lookup, and DevSecOps knowledge lookup with safe read-only defaults.
+---
+
 # cybersec-lookup
 
 Use this skill when a task asks for security scanning, vulnerability lookup, DevSecOps guidance, or cyber-security knowledge lookup.

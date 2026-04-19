@@ -1,3 +1,8 @@
+---
+name: research-loop
+description: Iterative research, hypothesis testing, and optimization loop with bounded evidence gathering.
+---
+
 # research-loop
 
 Use this skill when a task asks for an iterative research, hypothesis testing, or optimization loop.

@@ -116,7 +116,7 @@
           "layout": "L1 or L7",
           "typography": {"mainFont": "極太明朝体 or Noto Sans JP Black", "jumpRatio": "3x+"},
           "colorStrategy": "ダークモード",
-          "prohibitions": ["ポップアート", "アニメ", "パステル"],
+          "prohibitions": ["ポップアート", "アニメ", "マンガ/コミック調の人物", "パステル"],
           "example": {"mainLine1": "X投稿術", "mainLine2": "2倍拡散", "bgColor": "#000000", "styleKeywords": "ドキュメンタリー, 硬派, Forbes/WIRED的"}
         },
         {
@@ -126,7 +126,7 @@
           "layout": "L1 or L8",
           "typography": {"mainFont": "Noto Sans JP Black", "jumpRatio": "3x+"},
           "colorStrategy": "ウォームペーパー or ブライトベース",
-          "prohibitions": ["グラデーション", "3D", "グロー", "ネオン"],
+          "prohibitions": ["グラデーション", "3D", "グロー", "ネオン", "アニメ/マンガ/コミック調の人物"],
           "example": {"mainLine1": "会社が変わる", "subCopy": "MicrosoftにClaudeが入る", "bgColor": "#F5F0E8"}
         }
       ]
@@ -194,7 +194,7 @@
           "layout": "L4 or L5",
           "typography": {"mainFont": "Noto Sans JP Black", "heroSize": "22-30% of image height"},
           "colorStrategy": "ダークベース+アクセント数字",
-          "prohibitions": ["小さく判読不能な数字", "数字への装飾フォント使用(Impact/Black weight必須)", "数字のコントラスト不足"],
+          "prohibitions": ["小さく判読不能な数字", "数字への装飾フォント使用(Impact/Black weight必須)", "数字のコントラスト不足", "アニメ/マンガ/コミック調の人物"],
           "example": {"setupText": "3月だけで", "heroNumber": "14件", "payoffText": "更新。", "bgColor": "#0E0E0E", "numberColor": "#D97706"}
         },
         {
@@ -204,7 +204,7 @@
           "layout": "L5",
           "typography": {"mainFont": "Noto Sans JP Black/Bold"},
           "colorStrategy": "ホワイト+レッド+ブラック 3色",
-          "prohibitions": ["グラデーション", "テクスチャ", "影", "グロー"],
+          "prohibitions": ["グラデーション", "テクスチャ", "影", "グロー", "アニメ/マンガ/コミック調の人物"],
           "example": {"line1": "AI施策の75%は", "line2": "失敗している。", "line3": "残り25%の共通点は", "line4": "経営者の直接関与。", "bgColor": "#FFFFFF", "accentColor": "#B91C1C"}
         }
       ]

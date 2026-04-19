@@ -11,6 +11,8 @@ TARGET="both"            # codex | claude | both
 INCLUDE_OPTIONAL="false" # true | false
 FORCE="false"            # true | false
 DRY_RUN="false"          # true | false
+PRUNE="false"            # true | false
+ADAPTER_ONLY="false"     # true | false
 
 CODEX_SKILLS_DIR="${CODEX_SKILLS_DIR:-${HOME}/.codex/skills}"
 CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-${HOME}/.claude/skills}"
@@ -27,6 +29,8 @@ Options:
   --with-optional                 Include optional skills from manifest.
   --manifest <path>               Manifest file path override.
   --force                         Replace existing non-managed target directories.
+  --prune, --prune-stale          Remove managed target directories not selected by the manifest.
+  --adapter-only                  Copy only CLAUDE.md into each target skill directory.
   --dry-run                       Print actions without writing files.
   -h, --help                      Show this help.
 
@@ -66,6 +70,14 @@ parse_args() {
         FORCE="true"
         shift
         ;;
+      --prune|--prune-stale)
+        PRUNE="true"
+        shift
+        ;;
+      --adapter-only)
+        ADAPTER_ONLY="true"
+        shift
+        ;;
       --dry-run)
         DRY_RUN="true"
         shift
@@ -92,8 +104,10 @@ validate_skill_payload() {
   local skill_dir="$1"
   local skill_name="$2"
   local skill_md="${skill_dir}/SKILL.md"
+  local claude_md="${skill_dir}/CLAUDE.md"
 
   [[ -f "${skill_md}" ]] || fail "skill ${skill_name} has no SKILL.md"
+  [[ -f "${claude_md}" ]] || fail "skill ${skill_name} has no CLAUDE.md"
   head -n1 "${skill_md}" | grep -q '^---$' || fail "skill ${skill_name} frontmatter is missing"
   grep -q '^name:' "${skill_md}" || fail "skill ${skill_name} has no name in frontmatter"
   grep -q '^description:' "${skill_md}" || fail "skill ${skill_name} has no description in frontmatter"
@@ -110,6 +124,17 @@ copy_skill() {
   source_real="$(cd "${source_dir}" && pwd -P)"
 
   mkdir -p "${target_base}"
+
+  if [[ "${ADAPTER_ONLY}" == "true" ]]; then
+    [[ -d "${target_dir}" ]] || fail "adapter-only requires existing target skill directory: ${target_dir}"
+    [[ -f "${target_dir}/SKILL.md" ]] || fail "adapter-only requires existing target SKILL.md: ${target_dir}/SKILL.md"
+    if [[ "${DRY_RUN}" == "true" ]]; then
+      echo "DRY-RUN adapter-only ${source_dir}/CLAUDE.md -> ${target_dir}/CLAUDE.md"
+      return 0
+    fi
+    cp "${source_dir}/CLAUDE.md" "${target_dir}/CLAUDE.md"
+    return 0
+  fi
 
   if [[ -d "${target_dir}" ]]; then
     target_real="$(cd "${target_dir}" && pwd -P)"
@@ -153,12 +178,84 @@ read_manifest() {
   ' "${MANIFEST}"
 }
 
+is_selected_manifest_skill() {
+  local candidate="$1"
+  local skill_name profile
+  while IFS=$'\t' read -r skill_name profile; do
+    [[ -n "${skill_name}" ]] || continue
+    if [[ "${profile}" == "optional" && "${INCLUDE_OPTIONAL}" != "true" ]]; then
+      continue
+    fi
+    [[ "${skill_name}" == "${candidate}" ]] && return 0
+  done < <(read_manifest)
+  return 1
+}
+
+is_manifest_skill() {
+  local candidate="$1"
+  local skill_name profile
+  while IFS=$'\t' read -r skill_name profile; do
+    [[ -n "${skill_name}" ]] || continue
+    [[ "${skill_name}" == "${candidate}" ]] && return 0
+  done < <(read_manifest)
+  return 1
+}
+
+validate_source_tree_scope() {
+  local errors=0
+  local source_skill_dir skill_name
+
+  [[ -d "${SOURCE_BASE}" ]] || fail "local shared skills directory not found: ${SOURCE_BASE}"
+
+  for source_skill_dir in "${SOURCE_BASE}"/*; do
+    [[ -d "${source_skill_dir}" ]] || continue
+    [[ -f "${source_skill_dir}/SKILL.md" ]] || continue
+    skill_name="$(basename "${source_skill_dir}")"
+
+    if [[ "${skill_name}" == *backup* || "${skill_name}" == *".bak"* || "${skill_name}" == *".old"* ]]; then
+      echo "ERROR: backup-like skill directory is active under local-shared-skills: ${source_skill_dir}" >&2
+      errors=$((errors + 1))
+      continue
+    fi
+
+    if ! is_manifest_skill "${skill_name}"; then
+      echo "ERROR: top-level local-shared skill is not listed in manifest: ${source_skill_dir}" >&2
+      errors=$((errors + 1))
+    fi
+  done
+
+  [[ "${errors}" -eq 0 ]] || fail "local shared skill source tree scope check failed (${errors} issue(s))"
+}
+
+prune_managed_target() {
+  local target_base="$1"
+  local target_dir skill_name
+
+  [[ -d "${target_base}" ]] || return 0
+
+  for target_dir in "${target_base}"/*; do
+    [[ -d "${target_dir}" ]] || continue
+    [[ -f "${target_dir}/${MANAGED_MARKER}" ]] || continue
+    skill_name="$(basename "${target_dir}")"
+    if is_selected_manifest_skill "${skill_name}"; then
+      continue
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+      echo "DRY-RUN prune ${target_dir}"
+    else
+      echo "PRUNE ${target_dir}"
+      rm -rf "${target_dir}"
+    fi
+  done
+}
+
 is_within_dir() {
   local maybe_path="$1"
   local expected_dir="$2"
   local actual_real expected_real
   [[ -e "${maybe_path}" ]] || return 1
   [[ -d "${maybe_path}" ]] || return 1
+  [[ -d "${expected_dir}" ]] || return 1
   actual_real="$(cd "${maybe_path}" && pwd -P)"
   expected_real="$(cd "${expected_dir}" && pwd -P)"
   [[ "${actual_real}" == "${expected_real}" || "${actual_real}" == "${expected_real}"/* ]]
@@ -185,6 +282,8 @@ main() {
     sync_claude="false"
   fi
 
+  validate_source_tree_scope
+
   local installed=0 selected=0
   while IFS=$'\t' read -r skill_name profile; do
     [[ -n "${skill_name}" ]] || continue
@@ -206,6 +305,15 @@ main() {
     fi
     installed=$((installed + 1))
   done < <(read_manifest)
+
+  if [[ "${PRUNE}" == "true" ]]; then
+    if [[ "${sync_codex}" == "true" ]]; then
+      prune_managed_target "${CODEX_SKILLS_DIR}"
+    fi
+    if [[ "${sync_claude}" == "true" ]]; then
+      prune_managed_target "${CLAUDE_SKILLS_DIR}"
+    fi
+  fi
 
   echo "local shared skills processed: ${installed} (selected=${selected}, target=${TARGET}, dry_run=${DRY_RUN})"
 }

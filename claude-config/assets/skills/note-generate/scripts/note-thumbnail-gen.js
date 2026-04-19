@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { MANUS_MIN_SIZE, loadManusClient, shouldUseManus, generateImageManus, enhancePromptForManus } from './note-thumbnail-manus.js';
+import { loadManusClient, shouldUseManus, generateImageManus, enhancePromptForManus } from './note-thumbnail-manus.js';
 import { passGate2 } from './thumbnail-gate2.js';
 
 // ── Constants ──────────────────────────────────────────────
@@ -74,42 +74,6 @@ function exitWithError(error, extra) {
   log('error', error, extra);
   output({ success: false, error, ...extra });
   process.exit(1);
-}
-
-let _sharpModule = undefined;
-
-async function loadSharp() {
-  if (_sharpModule !== undefined) return _sharpModule;
-  try {
-    const mod = await import('sharp');
-    _sharpModule = mod.default ?? mod;
-  } catch (err) {
-    log('warn', 'sharp unavailable; output size normalization disabled', { error: err.message });
-    _sharpModule = null;
-  }
-  return _sharpModule;
-}
-
-async function normalizeOutputBuffer(buffer) {
-  const sharp = await loadSharp();
-  if (!sharp) {
-    return { buffer, normalized: false, width: null, height: null };
-  }
-
-  const image = sharp(buffer, { failOn: 'none' });
-  const meta = await image.metadata();
-  const width = meta.width ?? null;
-  const height = meta.height ?? null;
-  if (width === OGP_WIDTH && height === OGP_HEIGHT) {
-    return { buffer, normalized: false, width, height };
-  }
-
-  const normalizedBuffer = await image
-    .resize(OGP_WIDTH, OGP_HEIGHT, { fit: 'cover', position: 'attention' })
-    .png()
-    .toBuffer();
-
-  return { buffer: normalizedBuffer, normalized: true, width, height };
 }
 
 // ── Pillar Detection ──────────────────────────────────────
@@ -462,7 +426,7 @@ async function resolveGeneration(input, styleId, pillar, library, GoogleGenerati
     const manusPrompt = enhancePromptForManus(input.prompt, styleId, library, pillar);
     log('info', 'Trying Manus engine first');
     const buffer = await generateImageManus(manusClient, manusPrompt);
-    if (buffer && buffer.length >= MANUS_MIN_SIZE) {
+    if (buffer && buffer.length >= MIN_FILE_SIZE) {
       return { buffer, modelName: 'manus-api', gate1Retries: 0, totalAttempts: 1 };
     }
     log('info', 'Manus failed or below threshold, falling back to Gemini');
@@ -519,25 +483,18 @@ async function main() {
 
   const { gen: finalGen, gate2 } = await runGate2WithRetry(gen, input, styleId, library, pillar, GoogleGenerativeAI);
 
-  const normalized = await normalizeOutputBuffer(finalGen.buffer);
-
   try {
-    writeFileSync(input.outPath, normalized.buffer);
+    writeFileSync(input.outPath, finalGen.buffer);
   } catch (err) {
-    exitWithError(`Failed to save: ${err.message}`, { path: input.outPath, bytes: normalized.buffer.length });
+    exitWithError(`Failed to save: ${err.message}`, { path: input.outPath, bytes: finalGen.buffer.length });
   }
 
   const result = {
     success: true, path: input.outPath, model: finalGen.modelName,
-    bytes: normalized.buffer.length, style: styleId, pillar,
+    bytes: finalGen.buffer.length, style: styleId, pillar,
     hasLibrary: !!library,
     gate1Retries: finalGen.gate1Retries, totalAttempts: finalGen.totalAttempts,
-    qualityNote: normalized.buffer.length >= TARGET_FILE_SIZE ? 'good' : 'acceptable',
-    outputWidth: OGP_WIDTH,
-    outputHeight: OGP_HEIGHT,
-    normalizedOutput: normalized.normalized,
-    sourceWidth: normalized.width,
-    sourceHeight: normalized.height,
+    qualityNote: finalGen.buffer.length >= TARGET_FILE_SIZE ? 'good' : 'acceptable',
     gate2: { pass: gate2.overallPass, skipped: gate2.gate2Skipped || false },
   };
   log('info', 'Thumbnail saved', result);
