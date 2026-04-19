@@ -172,3 +172,35 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
   - The current objective completion is 100% for the requested untracked-noise accident prevention and auditability scope.
 - Remaining non-blocking cleanup:
   - Stale worktree metadata and invalid temporary Git directories may still exist under local `/tmp` or `~/Dev/tmp`. These are cleanup tasks, not parent-repo discovery risks, and deleting their backing directories requires explicit destructive-action approval.
+
+## Operations Record (2026-04-19 Final Closure)
+- Goal: record that the parent Git-noise cleanup, x-auto image-post regression fix, Phase 2 guard reproducibility work, and local cleanup follow-through reached closure.
+- Closure evidence:
+  - PR `#738` `docs: record git safety guard in GHA flow`
+    - Merge commit: `8d100093df6b2f2d55496968fcbcd377546b7351`
+    - Merged at: `2026-04-19T01:07:27Z`
+    - Checks: `Codex Review (Codex)` success, `journal` success.
+  - PR `cursorvers/x-auto#16` `fix: avoid quote keyword for image posts`
+    - Merge commit: `a9e4acd42d47502de068d32a48dfe0cdceaef9b5`
+    - Merged at: `2026-04-19T01:16:08Z`
+    - Checks: `python-tests` success, `worker-typecheck` success.
+  - PR `cursorvers/x-auto#15` was closed without merge because it carried the same fix on a broad integration branch and was superseded by the smaller PR `#16`.
+  - PR `#746` `ops: add git parent guard verifier`
+    - Merge commit: `1abe68d28679f54cb1ac1a69462ef7c4589a66a0`
+    - Merged at: `2026-04-19T01:29:30Z`
+    - Checks: `Codex Review (Codex)` success, `journal` success.
+- Local cleanup evidence:
+  - `git worktree prune` removed stale parent worktree metadata; `git worktree prune -n` now returns no entries.
+  - Invalid `~/Dev/tmp` directories with `.git` but missing `HEAD` were removed after explicit destructive-action approval; the follow-up scan returns no paths.
+  - Merge-completed temporary worktrees for PR `#738`, PR `#746`, and `cursorvers/x-auto#16` were removed.
+  - Merge-completed local and remote branches for PR `#738`, PR `#746`, and `cursorvers/x-auto#16` were removed.
+  - The duplicate untracked home-side guard script created during implementation was removed after the canonical tracked scripts landed in PR `#746`.
+- Final verification evidence:
+  - `$HOME` state repository status: clean.
+  - `$HOME/Dev` parent repository status: clean working tree; remaining `ahead/behind` is branch history divergence, not working tree noise.
+  - `$HOME/Dev/x-auto` repository status: clean.
+  - `git -C "$HOME/Dev" worktree prune -n`: no output.
+  - Broken temp Git directory scan under `$HOME/Dev/tmp`: no output.
+- Completion definition:
+  - Objective completion is 100% for the requested scope. No further implementation slice is required.
+  - Any future deletion of unrelated long-lived worktrees or unrelated open PRs must be handled as a separate task because those entries were not caused by this cleanup.
