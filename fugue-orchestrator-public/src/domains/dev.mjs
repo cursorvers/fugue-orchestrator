@@ -6,6 +6,7 @@
  */
 
 import {
+  spawnSkill,
   checkPrerequisite,
   executeHostPrompt,
   executeHostedSkill,
@@ -14,6 +15,7 @@ import {
   resolveSkillExecutor,
   SKILL_TIMEOUT_MS,
 } from "./shared.mjs";
+import { fileURLToPath } from "node:url";
 
 /** Domain identifier */
 export const DOMAIN = "dev";
@@ -30,6 +32,10 @@ export const SKILL_IDS = [
   "discord-configure",
   "setup-happy-vm-git",
 ];
+
+const LOCAL_SEARCH_SCRIPT = fileURLToPath(
+  new URL("../../../scripts/search/search.js", import.meta.url),
+);
 
 /**
  * Resolve the effective execution host for a dev-domain entry.
@@ -66,6 +72,35 @@ export function buildMcpPrompt(entry, task) {
   ].join("\n");
 }
 
+async function executeLocalSearch(task) {
+  const result = await spawnSkill(
+    "node",
+    [LOCAL_SEARCH_SCRIPT, task, "--execute-local", "--format", "json"],
+    { timeoutMs: SKILL_TIMEOUT_MS },
+  );
+
+  if (!result.ok) {
+    return result;
+  }
+
+  const payload = JSON.parse(result.output);
+
+  return {
+    ok: true,
+    output: payload.output,
+    code: result.code,
+    metadata: {
+      mode: payload.mode,
+      plannedSourceIds: payload.plan.sources.map((source) => source.sourceId),
+      canonicalSourceIds: payload.plan.canonicalSourceIds,
+      referenceSourceIds: payload.plan.referenceSourceIds,
+      executedSources: payload.execution.executedSources,
+      failedSources: payload.execution.failedSources,
+      environmentGaps: payload.execution.environmentGaps,
+    },
+  };
+}
+
 /**
  * Execute a dev-domain skill through the shared adapter.
  *
@@ -93,6 +128,7 @@ export async function execute(params) {
 
   const hostedSkillRef = skillEntry ?? skillId;
   const resolvedExecutor = resolveDevExecutor(executionType, executor);
+
   if (executionType === "skill") {
     const result = await executeHostedSkill({
       task,
@@ -128,6 +164,23 @@ export async function execute(params) {
           executionType,
           executor: resolvedExecutor,
           scriptExecutionAllowed: false,
+        },
+      };
+    }
+
+    if (skillId === "search") {
+      const result = await executeLocalSearch(task);
+      return {
+        ok: result.ok,
+        output: result.output,
+        metadata: {
+          domain: DOMAIN,
+          skillId,
+          skillEntry: hostedSkillRef,
+          executionType,
+          executor: "local",
+          exitCode: result.code,
+          ...result.metadata,
         },
       };
     }

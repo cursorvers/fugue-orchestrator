@@ -370,10 +370,19 @@ export function buildSkillCommand({ task, skillId, skillEntry, executor }) {
     });
     return buildPromptCommand(prompt, resolvedExecutor);
   }
+  if (resolvedExecutor === "claude") {
+    const prompt = buildAuthorityPrompt({
+      contractType: "skill",
+      contractRef: hostedSkillRef,
+      authorityPath: authority.resolvedPath ?? authority.candidates[0],
+      task,
+    });
+    return buildPromptCommand(prompt, resolvedExecutor);
+  }
   if (resolvedExecutor === "codex") {
     return ["codex", ["exec", buildCodexPrompt(task, hostedSkillRef)]];
   }
-  return ["claude", ["-p", task, "--skill", hostedSkillRef]];
+  return ["claude", ["-p", task]];
 }
 
 /**

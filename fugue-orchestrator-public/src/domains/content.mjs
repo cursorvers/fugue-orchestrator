@@ -41,6 +41,69 @@ export const SKILL_IDS = [
 
 const E_STAT_BASE_URL = "https://api.e-stat.go.jp/rest/3.0/app";
 
+function stripHtml(input) {
+  return String(input || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function takeSnippet(input, maxLength = 220) {
+  const text = stripHtml(input);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trim()}…`;
+}
+
+async function executeEstatWebFallback(task) {
+  const url = `https://www.e-stat.go.jp/stat-search?query=${encodeURIComponent(task)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "user-agent": "fugue-e-stat-skill/1.0 (+web-fallback)",
+        accept: "text/html,*/*;q=0.8",
+      },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        output: `e-stat web fallback failed with HTTP ${response.status}.`,
+        code: null,
+      };
+    }
+    const html = await response.text();
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "e-Stat";
+    const description = html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i)?.[1]
+      || html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i)?.[1]
+      || "";
+    return {
+      ok: true,
+      output: [
+        "e-Stat website fallback",
+        `URL: ${url}`,
+        `Title: ${stripHtml(title)}`,
+        `Snippet: ${takeSnippet(description || html)}`,
+      ].join("\n"),
+      code: 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      output: `e-stat web fallback failed: ${error.message}`,
+      code: null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Internal: skill-specific executors
 // ---------------------------------------------------------------------------
@@ -52,10 +115,14 @@ const E_STAT_BASE_URL = "https://api.e-stat.go.jp/rest/3.0/app";
  * @returns {Promise<{ok: boolean, output: string, code: number | null}>}
  */
 async function executeEstat(task) {
+  const appId = process.env.ESTAT_API_ID || process.env.ESTAT_APP_ID;
+  if (!appId) {
+    return executeEstatWebFallback(task);
+  }
   // e-stat uses curl to query the government statistics API.
   // The task is passed as a search keyword parameter.
   const encodedTask = encodeURIComponent(task);
-  const url = `${E_STAT_BASE_URL}/getStatsList?searchWord=${encodedTask}&lang=J&limit=10`;
+  const url = `${E_STAT_BASE_URL}/json/getStatsList?appId=${encodeURIComponent(appId)}&searchWord=${encodedTask}&lang=J&limit=10`;
 
   return spawnSkill(
     "curl",
