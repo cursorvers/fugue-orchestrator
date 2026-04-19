@@ -102,3 +102,48 @@ Capture how a GHA24 request gets into the existing FUGUE mainframe path (tutti v
   - The remaining 2% is Phase 2 hardening: create a machine-reproducible setup/verify script or migrate the home/Dev parent state repositories into dedicated state directories. That is intentionally separate because it changes repository identity or bootstrap behavior and needs its own rollback plan.
 - Current operational note:
   - `~/Dev` still has pre-existing tracked modifications unrelated to this guard. They are not untracked-noise risk, but they remain a separate accidental-commit risk when deliberately operating in the parent repository and should be handled in a separate cleanup slice.
+
+## Operations Record (2026-04-19 GHA completion)
+- Goal: record the production GitHub Actions evidence for the multi-slice cleanup and orchestration-hardening work completed on 2026-04-19.
+- Completion status:
+  - Implementation slices completed through PR `#744`.
+  - All implementation PRs were merged into `canon-v4-e2e-test`.
+  - Local dirty worktree was reduced to zero after excluding generated runtime state from shipment.
+- GHA / PR evidence:
+  - PR `#737` `docs: record parent repo guard operations`
+    - Merge commit: `4c4296effb5056a55e9376dc2bfbb94879074740`
+    - Merged at: `2026-04-19T00:56:58Z`
+    - Checks: `Codex Review (Codex)` success, `fast-gate` success, `journal` success, `canary-lite` skipped.
+  - PR `#739` `secrets: add ESTAT and sops bundle resolution`
+    - Merge commit: `be3201bd0eaaa47c42c0a8b07098b343a6a39568`
+    - Merged at: `2026-04-19T00:59:28Z`
+    - Checks: `Codex Review (Codex)` success.
+  - PR `#740` `kernel: resolve codex executable dynamically`
+    - Merge commit: `94024f6e5a7ed34728de171fca16018f982f106a`
+    - Merged at: `2026-04-19T01:05:08Z`
+    - Checks: `Codex Review (Codex)` success.
+  - PR `#741` `line: harden delivery idempotency gates`
+    - Merge commit: `c6f32111e230425cb8448b693f8bfde612791b67`
+    - Merged at: `2026-04-19T01:08:15Z`
+    - Checks: `Codex Review (Codex)` success, `actionlint` success.
+  - PR `#742` `fieldy: add telegram review hardening`
+    - Merge commit: `977f7f30adb780d934e63f6b58a2b5e75f0f8be4`
+    - Merged at: `2026-04-19T01:11:30Z`
+    - Checks: `Codex Review (Codex)` success.
+  - PR `#743` `router: add search local execution contracts`
+    - Merge commit: `bc339905accdc78fba529c4cb7e402f57a862419`
+    - Merged at: `2026-04-19T01:15:35Z`
+    - Checks: `Codex Review (Codex)` success.
+  - PR `#744` `skills: harden thumbnail sync adapters`
+    - Merge commit: `b83fa16a4ca768db1867b1f2e33bd0d0be058774`
+    - Merged at: `2026-04-19T01:22:00Z`
+    - Checks: `Codex Review (Codex)` success.
+- Local verification evidence:
+  - `actionlint .github/workflows/line-send-note-article.yml .github/workflows/line-value-share.yml`: pass.
+  - `npm run test:fieldy-telegram`: 43 tests pass.
+  - `npm test` in `fugue-orchestrator-public`: 56 tests pass.
+  - `bash scripts/skills/sync-local-shared-skills.sh --dry-run`: pass.
+  - `bash scripts/skills/sync-local-shared-skills.sh --dry-run --with-optional`: pass.
+  - JavaScript syntax checks for note/thumbnail/Manus scripts: pass.
+- Current operational note:
+  - LINE workflow live `workflow_dispatch` smoke is intentionally not included in this record because it can send external LINE messages. Treat that as a separate, explicitly scheduled production-send smoke if needed.
