@@ -27,6 +27,7 @@ import { dirname, resolve } from 'node:path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const SEARCH_FIXTURE_FILE = resolve(__dirname, './fixtures/search-local-execution.json');
 
 // ---------------------------------------------------------------------------
 // Imports under test
@@ -179,6 +180,20 @@ describe('Intent Classifier - Keyword Match', () => {
     assert.ok(result);
     assert.ok(result.alternatives.length > 0, 'Should have alternatives');
   });
+
+  it('should match medical cross-source queries to search', () => {
+    const result = classifyIntent({ text: '病床機能報告と病院報告を横断検索して比較したい' });
+    assert.ok(result);
+    assert.equal(result.skillId, 'search');
+    assert.equal(result.strategy, 'keyword');
+    assert.ok(result.matchedKeywords.includes('病床機能報告'));
+  });
+
+  it('should keep direct government statistics queries on e-stat', () => {
+    const result = classifyIntent({ text: 'e-Statで国勢調査の人口統計を取得して' });
+    assert.ok(result);
+    assert.equal(result.skillId, 'e-stat');
+  });
 });
 
 describe('Intent Classifier - Domain Detection', () => {
@@ -267,6 +282,54 @@ describe('Skill Router - Dry Run', () => {
     });
     assert.ok(result.ok);
     assert.equal(result.skillId, 'bookkeeping');
+  });
+});
+
+describe('Skill Router - Search Local Execution', () => {
+  it('should block search execution without explicit script approval', async () => {
+    const result = await routeSkill({
+      task: '病床機能報告と病院報告を比較したい',
+      source: 'cli',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.skillId, 'search');
+    assert.match(result.execution.output, /blocked by default/);
+  });
+
+  it('should execute search locally with explicit script approval', async () => {
+    process.env.SEARCH_LOCAL_FIXTURE_FILE = SEARCH_FIXTURE_FILE;
+    const result = await routeSkill({
+      task: '病床機能報告と病院報告を比較したい',
+      source: 'cli',
+      context: { allowScriptExecution: true },
+    });
+    delete process.env.SEARCH_LOCAL_FIXTURE_FILE;
+    assert.equal(result.ok, true);
+    assert.equal(result.skillId, 'search');
+    assert.ok(result.execution.output.includes('Search Execution Report'));
+    assert.equal(result.execution.metadata.mode, 'execute-local');
+    assert.deepEqual(result.execution.metadata.executedSources, [
+      'mhlw-bed-function-report',
+      'mhlw-hospital-report',
+      'dashboard',
+      'web',
+    ]);
+    assert.deepEqual(result.execution.metadata.failedSources, ['medical-info-net']);
+  });
+
+  it('should execute search through dev domain adapter directly', async () => {
+    process.env.SEARCH_LOCAL_FIXTURE_FILE = SEARCH_FIXTURE_FILE;
+    const result = await executeDevDomainSkill({
+      skillId: 'search',
+      task: '病床機能報告と病院報告を比較したい',
+      source: 'cli',
+      executionType: 'script',
+      context: { allowScriptExecution: true },
+    });
+    delete process.env.SEARCH_LOCAL_FIXTURE_FILE;
+    assert.equal(result.ok, true);
+    assert.ok(result.output.includes('厚労省 病床機能報告'));
+    assert.equal(result.metadata.mode, 'execute-local');
   });
 });
 
@@ -398,7 +461,9 @@ describe('Shared Skill Executor Adapter', () => {
       executor: 'claude',
     });
     assert.equal(command, 'claude');
-    assert.deepEqual(args, ['-p', '請求書を発行して', '--skill', 'back-office']);
+    assert.equal(args[0], '-p');
+    assert.ok(args[1].includes('Authoritative SKILL.md contract'));
+    assert.ok(args[1].includes('back-office'));
   });
 
   it('should build codex-hosted skill commands', () => {
@@ -422,7 +487,8 @@ describe('Shared Skill Executor Adapter', () => {
       executor: 'claude',
     });
     assert.equal(command, 'claude');
-    assert.deepEqual(args, ['-p', 'Discord権限を確認して', '--skill', 'discord:access']);
+    assert.equal(args[0], '-p');
+    assert.ok(args[1].includes('discord:access'));
   });
 
   it('should fall back to command contracts when no skill spec exists', () => {
