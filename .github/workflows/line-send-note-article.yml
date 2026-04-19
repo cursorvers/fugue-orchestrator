@@ -19,24 +19,66 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure LINE article state variables
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          ensure_var() {
+            local name="$1"
+            local value="$2"
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" --jq '.name' >/dev/null 2>&1; then
+              return 0
+            fi
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+              -f name="${name}" \
+              -f value="${value}" >/dev/null
+          }
+
+          ensure_var "LINE_DELIVERY_PAUSED" "false"
+          ensure_var "LINE_NOTE_ARTICLE_PENDING_ID" ""
+          ensure_var "LINE_NOTE_ARTICLE_PENDING_AT" ""
+          ensure_var "LINE_NOTE_ARTICLE_PENDING_STATE" ""
+          ensure_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" ""
+          ensure_var "LINE_LAST_SENT_NOTE_ARTICLE_ID" ""
+          ensure_var "LINE_LAST_SENT_NOTE_ARTICLE_URL" ""
+          ensure_var "LINE_LAST_SENT_NOTE_ARTICLE_PUBLISHED_AT" ""
+          ensure_var "LINE_LAST_SENT_NOTE_ARTICLE_AT" ""
+
       - name: Quota gate
         id: quota_gate
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || github.token }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           gate_pass="true"
+          skip_reason=""
 
-          # 1. Check delivery pause flag
-          paused=$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
-            --jq '.value' 2>/dev/null || echo "false")
-          if [ "${paused}" = "true" ]; then
-            echo "::notice::LINE delivery paused by delivery-audit"
+          if [ "${RUN_ATTEMPT:-1}" -gt 1 ] 2>/dev/null; then
+            echo "::notice::Blocking rerun attempt ${RUN_ATTEMPT} for LINE Send Note Article."
             gate_pass="false"
+            skip_reason="rerun_blocked"
           fi
 
-          # 2. Quota check (push costs 1 message)
+          paused="__missing__"
+          if paused_value="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" --jq '.value' 2>/dev/null)"; then
+            paused="${paused_value}"
+          fi
+          if [ "${gate_pass}" = "true" ] && [ "${paused}" = "__missing__" ]; then
+            echo "::error::LINE_DELIVERY_PAUSED is unavailable. Refusing to continue."
+            exit 1
+          elif [ "${paused}" = "true" ]; then
+            echo "::notice::LINE delivery paused by delivery-audit"
+            gate_pass="false"
+            skip_reason="delivery_paused"
+          fi
+
           if [ "${gate_pass}" = "true" ] && [ -n "${LINE_CHANNEL_ACCESS_TOKEN:-}" ]; then
             AUTH="Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}"
 
@@ -57,7 +99,10 @@ jobs:
             fi
           fi
 
-          echo "gate_pass=${gate_pass}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "gate_pass=${gate_pass}"
+            echo "skip_reason=${skip_reason}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Resolve latest unpublished article
         if: ${{ steps.quota_gate.outputs.gate_pass == 'true' }}
@@ -65,6 +110,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LINE_NOTE_ARTICLE_PENDING_TTL_SECONDS: ${{ vars.LINE_NOTE_ARTICLE_PENDING_TTL_SECONDS || '21600' }}
+          LINE_NOTE_ARTICLE_MAX_ATTEMPTS: ${{ vars.LINE_NOTE_ARTICLE_MAX_ATTEMPTS || '10' }}
         run: |
           set -euo pipefail
 
@@ -77,34 +124,46 @@ jobs:
             exit 0
           fi
 
+          normalize_int() {
+            local value="$1"
+            local fallback="$2"
+            if [[ "${value}" =~ ^[0-9]+$ ]]; then
+              printf '%s' "${value}"
+            else
+              printf '%s' "${fallback}"
+            fi
+          }
+
+          TTL_SECONDS="$(normalize_int "${LINE_NOTE_ARTICLE_PENDING_TTL_SECONDS:-21600}" "21600")"
+          MAX_ATTEMPTS="$(normalize_int "${LINE_NOTE_ARTICLE_MAX_ATTEMPTS:-10}" "10")"
           RESPONSE_BODY="${RUNNER_TEMP}/articles-response.json"
           RESPONSE_HEADERS="${RUNNER_TEMP}/articles-response.headers"
-
-          REQUEST_URL="${SUPABASE_URL}/rest/v1/articles?select=id,title,url,published_at&published_at=not.is.null&is_notified=eq.false&order=published_at.desc.nullslast&limit=1"
-
           HTTP_STATUS="$(curl -sS \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/claim_article_for_line_delivery" \
             -D "${RESPONSE_HEADERS}" \
             -o "${RESPONSE_BODY}" \
             -w "%{http_code}" \
             -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Accept: application/json" \
-            "${REQUEST_URL}")"
+            -H "Content-Type: application/json" \
+            --data "{\"p_lease_seconds\": ${TTL_SECONDS}, \"p_max_attempts\": ${MAX_ATTEMPTS}}")"
 
-          echo "Supabase select HTTP status: ${HTTP_STATUS}"
+          echo "Supabase claim RPC HTTP status: ${HTTP_STATUS}"
           cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}"
 
           if [ "${HTTP_STATUS}" != "200" ]; then
-            echo "::error::Failed to query Supabase articles table."
+            echo "::error::Failed to claim an article for LINE delivery."
             exit 1
           fi
 
           ARTICLE_COUNT="$(jq 'length' "${RESPONSE_BODY}")"
           if [ "${ARTICLE_COUNT}" = "0" ]; then
-            echo "No unnotified published article found. Exiting successfully."
+            echo "No claimable article found. Exiting successfully."
             {
               echo "skip=true"
-              echo "skip_reason=no_unnotified_article"
+              echo "skip_reason=no_claimable_article"
+              echo "reconcile_only=false"
             } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -113,6 +172,8 @@ jobs:
           ARTICLE_TITLE="$(jq -r '.[0].title // "note記事"' "${RESPONSE_BODY}")"
           ARTICLE_URL="$(jq -r '.[0].url // empty' "${RESPONSE_BODY}")"
           ARTICLE_PUBLISHED_AT="$(jq -r '.[0].published_at // empty' "${RESPONSE_BODY}")"
+          ARTICLE_ACTION="$(jq -r '.[0].delivery_action // "send"' "${RESPONSE_BODY}")"
+          CLAIM_TOKEN="$(jq -r '.[0].claim_token // empty' "${RESPONSE_BODY}")"
 
           if [ -z "${ARTICLE_ID}" ] || [ "${ARTICLE_ID}" = "null" ]; then
             echo "::error::Article id is missing."
@@ -124,49 +185,36 @@ jobs:
             exit 1
           fi
 
-          MESSAGE_TEXT="$(
-            ARTICLE_TITLE="${ARTICLE_TITLE}" \
-            ARTICLE_URL="${ARTICLE_URL}" \
-            ARTICLE_PUBLISHED_AT="${ARTICLE_PUBLISHED_AT}" \
-            python3 - <<'PY'
-          import os
+          if [ -z "${CLAIM_TOKEN}" ] || [ "${CLAIM_TOKEN}" = "null" ]; then
+            echo "::error::Claim token is missing."
+            exit 1
+          fi
 
-          title = os.environ["ARTICLE_TITLE"].strip()
-          url = os.environ["ARTICLE_URL"].strip()
-          published_at = os.environ.get("ARTICLE_PUBLISHED_AT", "").strip()
-
-          lines = [
-              "note新着記事のお知らせ",
-              "",
-              title,
-          ]
-
-          if published_at:
-              lines.append(f"公開日時: {published_at}")
-
-          lines.extend([
-              "",
-              url,
-          ])
-
-          print("\n".join(lines))
-          PY
-          )"
+          MESSAGE_TEXT="$(printf '%s\n\n%s' 'note新着記事のお知らせ' "${ARTICLE_TITLE}")"
+          if [ -n "${ARTICLE_PUBLISHED_AT}" ]; then
+            MESSAGE_TEXT="$(printf '%s\n%s' "${MESSAGE_TEXT}" "公開日時: ${ARTICLE_PUBLISHED_AT}")"
+          fi
+          MESSAGE_TEXT="$(printf '%s\n\n%s' "${MESSAGE_TEXT}" "${ARTICLE_URL}")"
 
           {
             echo "skip=false"
+            echo "reconcile_only=$([ "${ARTICLE_ACTION}" = "reconcile" ] && echo true || echo false)"
+            echo "skip_reason="
             echo "article_id=${ARTICLE_ID}"
+            echo "article_url=${ARTICLE_URL}"
+            echo "article_published_at=${ARTICLE_PUBLISHED_AT}"
+            echo "claim_token=${CLAIM_TOKEN}"
             echo "article_title<<EOF"
             printf '%s\n' "${ARTICLE_TITLE}"
             echo "EOF"
-            echo "article_url=${ARTICLE_URL}"
             echo "message_text<<EOF"
             printf '%s\n' "${MESSAGE_TEXT}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Send LINE push message
-        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
+        id: send_line
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' && steps.article.outputs.reconcile_only != 'true' }}
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TO: ${{ secrets.LINE_TO }}
@@ -188,12 +236,29 @@ jobs:
           RESPONSE_BODY="${RUNNER_TEMP}/line-push-response.json"
           RESPONSE_HEADERS="${RUNNER_TEMP}/line-push-response.headers"
 
+          build_retry_key() {
+            local seed="$1"
+            local digest
+            if command -v sha256sum >/dev/null 2>&1; then
+              digest="$(printf '%s' "${seed}" | sha256sum | awk '{print $1}')"
+            else
+              digest="$(printf '%s' "${seed}" | shasum -a 256 | awk '{print $1}')"
+            fi
+            printf '%s-%s-%s-%s-%s' \
+              "${digest:0:8}" \
+              "${digest:8:4}" \
+              "${digest:12:4}" \
+              "${digest:16:4}" \
+              "${digest:20:12}"
+          }
+
           jq -n \
             --arg to "${LINE_TO}" \
             --arg text "${MESSAGE_TEXT}" \
             '{to: $to, messages: [{type: "text", text: $text}]}' > "${REQUEST_BODY}"
 
-          RETRY_KEY="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "no-retry-key")"
+          RETRY_KEY="$(build_retry_key "line-note-article:${{ steps.article.outputs.article_id }}")"
+          ACCEPTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           MAX_ATTEMPTS=3
           ATTEMPT=1
 
@@ -212,17 +277,32 @@ jobs:
             cat "${RESPONSE_BODY}" | jq . 2>/dev/null || cat "${RESPONSE_BODY}" || true
 
             LINE_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
+            LINE_ACCEPTED_REQUEST_ID="$(awk 'BEGIN{IGNORECASE=1} /^x-line-accepted-request-id:/{gsub("\r","",$2); print $2; exit}' "${RESPONSE_HEADERS}")"
             if [ -n "${LINE_REQUEST_ID:-}" ]; then
               echo "LINE request id: ${LINE_REQUEST_ID}"
             fi
 
             case "${HTTP_STATUS}" in
               2*)
+                {
+                  echo "line_request_id=${LINE_REQUEST_ID}"
+                  echo "accepted_at=${ACCEPTED_AT}"
+                } >> "${GITHUB_OUTPUT}"
                 echo "LINE push sent successfully."
                 exit 0
                 ;;
+              409)
+                {
+                  echo "line_request_id=${LINE_ACCEPTED_REQUEST_ID:-${LINE_REQUEST_ID}}"
+                  echo "accepted_at=${ACCEPTED_AT}"
+                } >> "${GITHUB_OUTPUT}"
+                echo "::notice::LINE push request was already accepted for retry key ${RETRY_KEY}."
+                if [ -n "${LINE_ACCEPTED_REQUEST_ID:-}" ]; then
+                  echo "Accepted LINE request id: ${LINE_ACCEPTED_REQUEST_ID}"
+                fi
+                exit 0
+                ;;
               408|429|500|502|503|504)
-                # Distinguish monthly quota exhaustion from transient 429
                 if [ "${HTTP_STATUS}" = "429" ]; then
                   BODY_MSG="$(jq -r '.message // ""' "${RESPONSE_BODY}" 2>/dev/null || true)"
                   if printf '%s' "${BODY_MSG}" | grep -qiE 'monthly|limit|quota'; then
@@ -244,41 +324,230 @@ jobs:
             exit 1
           done
 
-      - name: Mark article as notified in Supabase
-        if: ${{ success() && steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.skip != 'true' }}
+      - name: Reconcile accepted article in Supabase
+        id: reconcile_article
+        if: ${{ steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outputs.reconcile_only == 'true' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          CLAIM_TOKEN: ${{ steps.article.outputs.claim_token }}
         run: |
           set -euo pipefail
 
-          RESPONSE_BODY="${RUNNER_TEMP}/articles-update-response.json"
-          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-update-response.headers"
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-reconcile-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-reconcile-response.headers"
 
           HTTP_STATUS="$(curl -sS \
-            -X PATCH "${SUPABASE_URL}/rest/v1/articles?id=eq.${ARTICLE_ID}" \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/reconcile_article_line_delivery" \
             -D "${RESPONSE_HEADERS}" \
             -o "${RESPONSE_BODY}" \
             -w "%{http_code}" \
             -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
-            -H "Prefer: return=minimal" \
-            --data '{"is_notified":true}')"
+            --data "{\"p_article_id\": \"${ARTICLE_ID}\", \"p_claim_token\": \"${CLAIM_TOKEN}\"}")"
 
-          echo "Supabase update HTTP status: ${HTTP_STATUS}"
+          echo "Supabase reconcile HTTP status: ${HTTP_STATUS}"
           cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
 
-          case "${HTTP_STATUS}" in
-            2*)
-              echo "Article marked as notified."
-              ;;
-            *)
-              echo "::error::Failed to mark article as notified."
-              exit 1
-              ;;
-          esac
+          if [ "${HTTP_STATUS}" != "200" ] || [ "$(jq -r '.' "${RESPONSE_BODY}")" != "true" ]; then
+            echo "::error::Failed to reconcile accepted article."
+            exit 1
+          fi
+
+          echo "Accepted article reconciled without resend."
+
+      - name: Mark article delivery accepted in Supabase
+        id: mark_accepted
+        if: ${{ always() && steps.send_line.outcome == 'success' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          CLAIM_TOKEN: ${{ steps.article.outputs.claim_token }}
+          LINE_REQUEST_ID: ${{ steps.send_line.outputs.line_request_id }}
+        run: |
+          set -euo pipefail
+
+          REQUEST_ID_JSON="null"
+          if [ -n "${LINE_REQUEST_ID:-}" ]; then
+            REQUEST_ID_JSON="$(jq -Rn --arg value "${LINE_REQUEST_ID}" '$value')"
+          fi
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-accepted-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-accepted-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/mark_article_line_delivery_accepted" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            --data "{\"p_article_id\": \"${ARTICLE_ID}\", \"p_claim_token\": \"${CLAIM_TOKEN}\", \"p_line_request_id\": ${REQUEST_ID_JSON}}")"
+
+          echo "Supabase accepted HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+          if [ "${HTTP_STATUS}" != "200" ] || [ "$(jq -r '.' "${RESPONSE_BODY}")" != "true" ]; then
+            echo "::error::Failed to mark article delivery as accepted."
+            exit 1
+          fi
+
+          echo "Article delivery marked accepted."
+
+      - name: Finalize article delivery in Supabase
+        id: finalize_delivery
+        if: ${{ always() && steps.send_line.outcome == 'success' && steps.mark_accepted.outcome == 'success' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          CLAIM_TOKEN: ${{ steps.article.outputs.claim_token }}
+          LINE_REQUEST_ID: ${{ steps.send_line.outputs.line_request_id }}
+        run: |
+          set -euo pipefail
+
+          REQUEST_ID_JSON="null"
+          if [ -n "${LINE_REQUEST_ID:-}" ]; then
+            REQUEST_ID_JSON="$(jq -Rn --arg value "${LINE_REQUEST_ID}" '$value')"
+          fi
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-succeeded-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-succeeded-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/mark_article_line_delivery_succeeded" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            --data "{\"p_article_id\": \"${ARTICLE_ID}\", \"p_claim_token\": \"${CLAIM_TOKEN}\", \"p_line_request_id\": ${REQUEST_ID_JSON}}")"
+
+          echo "Supabase finalize HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+          if [ "${HTTP_STATUS}" != "200" ] || [ "$(jq -r '.' "${RESPONSE_BODY}")" != "true" ]; then
+            echo "::error::Failed to finalize article delivery."
+            exit 1
+          fi
+
+          echo "Article delivery finalized."
+
+      - name: Quarantine ambiguous send state in Supabase
+        if: ${{ always() && steps.send_line.outcome == 'success' && (steps.mark_accepted.outcome != 'success' || steps.finalize_delivery.outcome != 'success') }}
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          CLAIM_TOKEN: ${{ steps.article.outputs.claim_token }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-quarantine-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-quarantine-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/mark_article_line_delivery_quarantined" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            --data "{\"p_article_id\": \"${ARTICLE_ID}\", \"p_claim_token\": \"${CLAIM_TOKEN}\", \"p_error\": \"line_send_succeeded_but_finalize_failed\"}")"
+
+          echo "Supabase quarantine HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+      - name: Pause delivery after ambiguous send state
+        if: ${{ always() && steps.send_line.outcome == 'success' && (steps.mark_accepted.outcome != 'success' || steps.finalize_delivery.outcome != 'success') }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" --jq '.name' >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LINE_DELIVERY_PAUSED" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="true" >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+              -f name="LINE_DELIVERY_PAUSED" \
+              -f value="true" >/dev/null
+          fi
+
+          echo "::error::Paused LINE delivery because LINE send succeeded but article finalization failed."
+          exit 1
+
+      - name: Mark article delivery failed in Supabase
+        if: ${{ always() && steps.quota_gate.outputs.gate_pass == 'true' && steps.article.outcome == 'success' && steps.article.outputs.skip != 'true' && steps.article.outputs.reconcile_only != 'true' && steps.send_line.outcome != 'success' }}
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          CLAIM_TOKEN: ${{ steps.article.outputs.claim_token }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE_BODY="${RUNNER_TEMP}/articles-failed-response.json"
+          RESPONSE_HEADERS="${RUNNER_TEMP}/articles-failed-response.headers"
+
+          HTTP_STATUS="$(curl -sS \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/mark_article_line_delivery_failed" \
+            -D "${RESPONSE_HEADERS}" \
+            -o "${RESPONSE_BODY}" \
+            -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            --data "{\"p_article_id\": \"${ARTICLE_ID}\", \"p_claim_token\": \"${CLAIM_TOKEN}\", \"p_error\": \"line_push_failed_or_not_accepted\", \"p_retry_seconds\": 300}")"
+
+          echo "Supabase failure-mark HTTP status: ${HTTP_STATUS}"
+          cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
+
+      - name: Persist accepted delivery receipt
+        if: ${{ always() && ((steps.send_line.outcome == 'success' && steps.finalize_delivery.outcome == 'success') || steps.reconcile_article.outcome == 'success') }}
+        env:
+          GH_TOKEN: ${{ secrets.FUGUE_OPS_PAT || secrets.TARGET_REPO_PAT || github.token }}
+          ARTICLE_ID: ${{ steps.article.outputs.article_id }}
+          ARTICLE_URL: ${{ steps.article.outputs.article_url }}
+          ARTICLE_PUBLISHED_AT: ${{ steps.article.outputs.article_published_at }}
+          ACCEPTED_AT: ${{ steps.send_line.outputs.accepted_at }}
+          LINE_REQUEST_ID: ${{ steps.send_line.outputs.line_request_id }}
+        run: |
+          set -euo pipefail
+
+          RECEIPT_AT="${ACCEPTED_AT:-}"
+          if [ -z "${RECEIPT_AT}" ]; then
+            RECEIPT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          fi
+
+          upsert_var() {
+            local name="$1"
+            local value="$2"
+            { gh api -X PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/${name}" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1 \
+              || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -f name="${name}" -f value="${value}" >/dev/null 2>&1; }
+          }
+
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_ID" "${ARTICLE_ID}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_URL" "${ARTICLE_URL}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_PUBLISHED_AT" "${ARTICLE_PUBLISHED_AT}"
+          upsert_var "LINE_LAST_SENT_NOTE_ARTICLE_AT" "${RECEIPT_AT}"
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_ID" ""
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_AT" ""
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_STATE" ""
+          upsert_var "LINE_NOTE_ARTICLE_PENDING_REQUEST_ID" "${LINE_REQUEST_ID}"
+
+          echo "Accepted delivery receipt finalized."
 
       - name: Observe LINE quota and consumption
         if: ${{ always() }}
@@ -308,7 +577,6 @@ jobs:
             cat "${RESPONSE_BODY}" | jq . || cat "${RESPONSE_BODY}" || true
           done
 
-          # Quota threshold check
           QUOTA_FILE="${RUNNER_TEMP}/line-quota.json"
           CONSUMPTION_FILE="${RUNNER_TEMP}/line-quota-consumption.json"
           if [ -f "${QUOTA_FILE}" ] && [ -f "${CONSUMPTION_FILE}" ]; then
