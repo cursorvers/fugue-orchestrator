@@ -108,11 +108,11 @@ echo "$DECRYPTED" | while IFS= read -r line; do
 
   # Standard fugue-secrets entries: import with BOTH original key name AND kebab alias
   # This prevents "key not found" when code searches by either naming convention
-  import_secret "$KEY" "fugue-secrets" "$VALUE" "$KEY (canonical)"
+  import_secret "$KEY" "fugue" "$VALUE" "$KEY (canonical)"
 
   ACCT=$(map_to_acct "$KEY")
   if [ -n "$ACCT" ] && [ "$ACCT" != "$KEY" ]; then
-    import_secret "$ACCT" "fugue-secrets" "$VALUE" "$KEY -> $ACCT (alias)"
+    import_secret "$ACCT" "fugue" "$VALUE" "$KEY -> $ACCT (alias)"
   fi
 done
 
