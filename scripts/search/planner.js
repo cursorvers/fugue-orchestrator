@@ -18,6 +18,20 @@ function promoteConfidence(entries) {
   });
 }
 
+function ensureXSearchInEntries(entries) {
+  if (!isXSearchDirectMode() || entries.some((entry) => entry.sourceId === 'x-search')) {
+    return entries;
+  }
+  return [
+    ...entries,
+    {
+      sourceId: 'x-search',
+      confidence: 'secondary-mid',
+      via: 'auto-xai-key-set',
+    },
+  ];
+}
+
 function dedupeSources(sourceEntries) {
   return Array.from(new Map(sourceEntries.map((entry) => [entry.sourceId, entry])).values());
 }
@@ -94,7 +108,7 @@ export function buildExecutionPlan(request, routeDecision) {
           });
         }
       }
-      return toPlan(request, entries, 'parallel-pattern');
+      return toPlan(request, ensureXSearchInEntries(entries), 'parallel-pattern');
     }
   }
 
@@ -114,5 +128,5 @@ export function buildExecutionPlan(request, routeDecision) {
     });
   }
 
-  return toPlan(request, routedEntries, 'router');
+  return toPlan(request, ensureXSearchInEntries(routedEntries), 'router');
 }
