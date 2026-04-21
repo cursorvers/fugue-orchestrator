@@ -1,0 +1,31 @@
+# x-auto スキルアダプター（薄型）
+
+この adapter は routing と safety gate だけを定義します。実行手順は `SKILL.md` と x-auto runtime authority に従い、このファイルに増やしません。
+
+## 読み順
+
+1. この skill の `SKILL.md`
+2. current workspace が x-auto runtime root の場合は `./CLAUDE.md`。ただし `$HOME/.local/share/x-auto` は draft/log の data/cache root であり runtime root ではない。そこから起動した場合は、存在すれば `$HOME/Dev/x-auto/CLAUDE.md` を読む。
+3. それ以外は current workspace の `x-auto/CLAUDE.md`。無い場合のみ `$FUGUE_DEV_ROOT/x-auto/CLAUDE.md`（`FUGUE_DEV_ROOT` 未設定なら fallback せず停止）
+4. Codex 固有規則が必要な場合のみ、x-auto runtime root では `./AGENTS.md`。`$HOME/.local/share/x-auto` から起動した場合は、存在すれば `$HOME/Dev/x-auto/AGENTS.md` を読む。それ以外は current workspace の `x-auto/AGENTS.md`。無い場合のみ `$FUGUE_DEV_ROOT/x-auto/AGENTS.md`（`FUGUE_DEV_ROOT` 未設定なら fallback せず停止）
+5. 最寄り repository の `AGENTS.md`
+6. runtime code/tests/logs は必要時のみ読む
+
+authority file が見つからない、または読めない場合は、記憶で補完せず missing path を報告して停止します。
+投稿安全、publish 判定、Single Writer は x-auto runtime authority を最優先し、一般規約で緩和しないでください。
+live runtime behavior は状態診断にだけ使い、安全・承認ゲートの緩和根拠にしないでください。
+
+## 安全ゲート
+
+- Single Writer は Mac mini `com.cursorvers.x-auto` scheduler のみ。代替投稿経路を追加・再有効化しない。
+- `delete/trash/move/overwrite-risk`、database/data source の schema・構造変更、代替投稿経路の追加・再有効化は毎回ユーザー明示確認が必要。
+- `Status=approved` を含む publish 相当は、ユーザーの明示投稿指示があり、有効な `x-auto.consensus.receipt/v1` を検証し、runtime publish gate を通過した場合、追加のユーザー承認・認証を求めない。
+- ユーザーが `approve` / `publish` / `schedule` / `schedule-as-approved` を明示せず、有効な consensus approval receipt も無い場合、既定は `Status=draft`。
+- 明示投稿指示がある場合、現行完成までマルチエージェント合議で判定し、合議が成立しない場合は `Status=draft` を維持し、blocking reason を記録して報告する。単一 agent 判断へのフォールバックや、同じ投稿判断に対する追加ユーザー認証要求は禁止。
+- 合議フローが single-lane fallback になった場合、`draft -> approved` は実行せず、違反理由を記録して報告する。
+- Notion と local queue のどちらかを変更した場合、同一作業内で同期状態を回復する。
+- thumbnail policy は `thumbnail-gen` authority を使用し、ここで再定義しない。
+
+## 完了報告
+
+変更後は `status`、queue row / Notion URL、schedule、source/reply URL、image state、実行した health/audit check、未実行理由と blocker を報告する。publish 相当の gate が未実行または失敗なら `Status=draft` を維持する。
