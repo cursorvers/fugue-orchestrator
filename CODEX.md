@@ -210,3 +210,4 @@ Until Kernel runtime implementation is complete:
 
 - preserve existing non-Kernel paths unless explicitly migrating them
 - treat Kernel docs and validation harnesses as the source of truth for new Kernel control-plane work
+- for current unified search paths, assume the default reference stack is `WebSearch + xAI API search + Manus wide research` unless the user narrows sources
