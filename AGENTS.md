@@ -87,7 +87,13 @@ Auditability:
 - Fallback decisions must be commented on the issue.
 - CLI pre-fallback must leave an explicit audit comment.
 
-## 4. Reference Index
+## 4. Search Default
+
+- Unified search in this repository defaults to `WebSearch + xAI API search + Manus wide research`.
+- `xAI` and `Manus` are reference sources by default; canonical sources still decide factual grounding.
+- Command/docs surfaces must keep this default aligned across `AGENTS.md`, adapters, and search command docs.
+
+## 5. Reference Index
 
 Sections 4-11 are split into separate files for on-demand loading.
 Load only the section relevant to your current task.

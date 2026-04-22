@@ -125,3 +125,5 @@ See `~/.claude/rules/dangerous-permission-consensus.md` (3-party consensus requi
 ## 8. Rule Navigation
 
 Entry: this file. SSOT: `~/.claude/docs/delegation-matrix.md`. Core/Quality rules: `~/.claude/docs/` and `~/.claude/rules/` (lazy-loaded on demand).
+
+Search default in this repository: `WebSearch + xAI API search + Manus wide research` runs as the standard reference stack unless the user narrows sources.
