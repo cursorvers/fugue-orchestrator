@@ -1,0 +1,88 @@
+# Monthly GitHub Actions cost report for the cursorvers organization.
+#
+# Required secrets:
+# - DISCORD_WEBHOOK_URL: Discord webhook URL that receives the report.
+# - GH_ADMIN_PAT_BILLING: GitHub PAT with read-only billing access and admin:org scope.
+#   The default github.token cannot read the organization billing usage API.
+#
+# Discord webhook payload format:
+# {"content":"📊 GHA cost report YYYY-MM (cursorvers org)\n- SKU: $X.XX (Yqty)"}
+
+name: GHA Cost Notify Discord
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check secret
+        id: check
+        if: ${{ vars.SKIP_NOTIFY != 'true' }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo 'DISCORD_WEBHOOK_URL secret is not set; skipping notification.'
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          elif [ -z "$GH_ADMIN_PAT_BILLING" ]; then
+            echo 'GH_ADMIN_PAT_BILLING secret is not set; skipping notification.'
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GH_ADMIN_PAT_BILLING: ${{ secrets.GH_ADMIN_PAT_BILLING }}
+
+      - name: Post previous month GHA cost report
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+
+          previous_month="$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m)"
+          year="${previous_month%-*}"
+          month="${previous_month#*-}"
+
+          usage_json="$(gh api \
+            "/organizations/cursorvers/settings/billing/usage?year=${year}&month=${month}")"
+
+          top_items="$(jq -r '
+            def amount: ((.grossAmount // .gross_amount // .gross_amount_usd // 0) | tonumber? // 0);
+            def qty: (.quantity // .usageQuantity // .usage_quantity // 0);
+            def sku: (.sku // .product // .name // "unknown");
+            (.usageItems // .usage_items // .items // [])
+            | sort_by(amount)
+            | reverse
+            | .[:5][]
+            | [sku, amount, qty]
+            | @tsv
+          ' <<< "$usage_json")"
+
+          lines=""
+          while IFS=$'\t' read -r sku amount quantity; do
+            [ -n "$sku" ] || continue
+            line="$(printf -- '- %s: $%.2f (%sqty)' "$sku" "$amount" "$quantity")"
+            lines="${lines}${lines:+$'\n'}${line}"
+          done <<< "$top_items"
+
+          if [ -z "$lines" ]; then
+            lines="- No SKU usage returned for ${previous_month}."
+          fi
+
+          content="$(printf '📊 GHA cost report %s (cursorvers org)\n%s' "$previous_month" "$lines")"
+          payload="$(jq -n --arg content "$content" '{content: $content}')"
+
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "$DISCORD_WEBHOOK_URL"
+        env:
+          GH_TOKEN: ${{ secrets.GH_ADMIN_PAT_BILLING }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
