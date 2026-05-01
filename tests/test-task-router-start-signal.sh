@@ -24,5 +24,17 @@ grep -Fq "&& steps.ctx.outputs.trusted == 'true' }}" "${WORKFLOW}" || {
   echo "FAIL: task router handoff must require trust after /vote parsing" >&2
   exit 1
 }
+grep -Fq 'ROUTER_COMMENT_BODY: ${{ inputs.comment_body' "${WORKFLOW}" || {
+  echo "FAIL: task router must pass comment body through step env" >&2
+  exit 1
+}
+grep -Fq 'COMMENT_BODY="${ROUTER_COMMENT_BODY:-}"' "${WORKFLOW}" || {
+  echo "FAIL: task router must read comment body from env to avoid shell interpolation" >&2
+  exit 1
+}
+if grep -Fq 'COMMENT_BODY="${{ inputs.comment_body' "${WORKFLOW}"; then
+  echo "FAIL: task router must not interpolate comment body directly into run script" >&2
+  exit 1
+fi
 
 echo "PASS [task-router-start-signal]"

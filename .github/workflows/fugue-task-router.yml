@@ -85,6 +85,12 @@ jobs:
         id: ctx
         env:
           GH_TOKEN: ${{ github.token }}
+          ROUTER_TRIGGER_EVENT_NAME: ${{ inputs.trigger_event_name || '' }}
+          ROUTER_TRIGGER_LABEL_NAME: ${{ inputs.trigger_label_name || '' }}
+          ROUTER_COMMENT_BODY: ${{ inputs.comment_body || '' }}
+          ROUTER_COMMENT_AUTHOR: ${{ inputs.comment_author || '' }}
+          ROUTER_TRUST_SUBJECT: ${{ inputs.trust_subject || '' }}
+          ROUTER_ALLOW_PROCESSING_RERUN: ${{ inputs.allow_processing_rerun || 'false' }}
         run: |
           set -euo pipefail
 
@@ -115,15 +121,15 @@ jobs:
             gh_retry "${attempts}" gh api "${endpoint}"
           }
 
-          TRIGGER_EVENT_NAME="${{ inputs.trigger_event_name || '' }}"
+          TRIGGER_EVENT_NAME="${ROUTER_TRIGGER_EVENT_NAME:-}"
           if [[ -z "${TRIGGER_EVENT_NAME}" ]]; then
             TRIGGER_EVENT_NAME="${GITHUB_EVENT_NAME}"
           fi
-          TRIGGER_LABEL_NAME="$(printf '%s' "${{ inputs.trigger_label_name || '' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          COMMENT_BODY="${{ inputs.comment_body || '' }}"
-          COMMENT_AUTHOR="${{ inputs.comment_author || '' }}"
-          TRUST_SUBJECT_INPUT="$(printf '%s' "${{ inputs.trust_subject || '' }}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-          ALLOW_PROCESSING_RERUN_INPUT="$(printf '%s' "${{ inputs.allow_processing_rerun || 'false' }}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          TRIGGER_LABEL_NAME="$(printf '%s' "${ROUTER_TRIGGER_LABEL_NAME:-}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          COMMENT_BODY="${ROUTER_COMMENT_BODY:-}"
+          COMMENT_AUTHOR="${ROUTER_COMMENT_AUTHOR:-}"
+          TRUST_SUBJECT_INPUT="$(printf '%s' "${ROUTER_TRUST_SUBJECT:-}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+          ALLOW_PROCESSING_RERUN_INPUT="$(printf '%s' "${ROUTER_ALLOW_PROCESSING_RERUN:-false}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 
           IS_VOTE_COMMAND="false"
           VOTE_INSTRUCTION=""
