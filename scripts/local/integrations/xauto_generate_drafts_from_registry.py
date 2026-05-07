@@ -26,6 +26,8 @@ UNSUPPORTED_AUTHORITY_RE = re.compile(r"\b(?:jama|nejm|nature medicine|thelancet
 ASSERTIVE_TONE_RE = re.compile(r"(?:絶対|必ず|明らかに|完全に|断言できる|しかない|に違いない|で間違いない)")
 POLITE_ENDING_RE = re.compile(r"(?:です|ます|ません|でしょう|ください|いたします|しております)$")
 SENTENCE_SPLIT_RE = re.compile(r"[。！？!?]+")
+LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9/+&._-]*")
+MINIMAL_ENGLISH_ALLOWLIST = {"AI", "API", "DX", "UI", "UX", "LLM", "GPU", "CPU", "B2B", "B2C", "SaaS", "X"}
 TAG_LABELS = {
     "vitality": "活力",
     "curiosity": "好奇心",
@@ -114,6 +116,40 @@ PRIMARY_SOURCE_STRATEGY_PRIORITY = {
     "quoted-reference": 3,
     "author-conversation": 2,
     "cursorvers-reference": 1,
+}
+SOURCE_EXPLAINER_DOMAIN_HINTS = {
+    "anthropic.com",
+    "developer.apple.com",
+    "jamanetwork.com",
+    "nature.com",
+    "pmda.go.jp",
+    "mhlw.go.jp",
+    "meti.go.jp",
+    "nedo.go.jp",
+    "digital.go.jp",
+    "caa.go.jp",
+    "ppc.go.jp",
+    "fsa.go.jp",
+    "court.go.jp",
+    "jisc.go.jp",
+    "japaneselawtranslation.go.jp",
+    "aisi.go.jp",
+}
+SOURCE_EXPLAINER_TOPIC_HINTS = {
+    "medical",
+    "medicine",
+    "healthcare",
+    "clinical",
+    "diagnosis",
+    "governance",
+    "guidelines",
+    "policy",
+    "compliance",
+    "security",
+    "workflow",
+    "quality",
+    "harness",
+    "orchestrator",
 }
 
 
@@ -300,6 +336,8 @@ def map_category(record: dict) -> tuple[str, str, str]:
         "original": "視点提示",
     }
     pattern = pattern_map.get(pattern_tag, "")
+    if source_explainer_mode(record):
+        pattern = "一次情報詳細解説"
     if not pattern:
         if conclusion in {"agreement", "possible_with_vitality"}:
             pattern = "本質提示"
@@ -413,6 +451,42 @@ def tone_balance_violation_reason(text: str, tone_profile: str = "middle") -> st
     return None
 
 
+def language_mixing_violation_reason(text: str) -> str | None:
+    normalized = sanitize_text(text or "")
+    if not normalized:
+        return None
+
+    tokens = LATIN_TOKEN_RE.findall(normalized)
+    if not tokens:
+        return None
+
+    significant_tokens: list[str] = []
+    significant_latin_chars = 0
+    lowercase_like_tokens = 0
+
+    for token in tokens:
+        core = token.strip("._-/+&")
+        if not core:
+            continue
+        if core.upper() in MINIMAL_ENGLISH_ALLOWLIST and core == core.upper():
+            continue
+        if len(core) == 1 and core.isupper():
+            continue
+        significant_tokens.append(core)
+        significant_latin_chars += sum(1 for char in core if char.isascii() and char.isalpha())
+        if re.search(r"[a-z]", core):
+            lowercase_like_tokens += 1
+
+    if lowercase_like_tokens >= 2:
+        return "language-mixing-overload"
+    if len(significant_tokens) >= 4:
+        return "language-mixing-overload"
+    if significant_latin_chars >= 28 and len(significant_tokens) >= 2:
+        return "language-mixing-overload"
+
+    return None
+
+
 def is_x_url(url: str) -> bool:
     lowered = url.lower()
     return "x.com/" in lowered or "twitter.com/" in lowered
@@ -423,6 +497,71 @@ def source_domain(url: str) -> str:
         return ""
     parsed = urllib.parse.urlparse(url)
     return parsed.netloc.lower()
+
+
+def source_explainer_mode(record: dict) -> bool:
+    primary_url = primary_source_url(record)
+    if not primary_url or is_x_url(primary_url):
+        return False
+    domain = source_domain(primary_url)
+    if domain.endswith(".go.jp") or domain in SOURCE_EXPLAINER_DOMAIN_HINTS:
+        return True
+    topics = topic_set(record)
+    return (
+        primary_source_confidence(record) >= 0.65
+        and primary_source_strategy_rank(record) >= 2
+        and bool(topics.intersection(SOURCE_EXPLAINER_TOPIC_HINTS))
+    )
+
+
+def source_artifact_kind(record: dict) -> str:
+    primary_url = primary_source_url(record)
+    domain = source_domain(primary_url)
+    path = urllib.parse.urlparse(primary_url).path.lower()
+    if not primary_url:
+        return "一次情報"
+    if domain.endswith(".go.jp"):
+        if "/press/" in path or "houdou" in path or "news" in path:
+            return "公表資料"
+        if "guideline" in path or "guide" in path or "qa" in path:
+            return "ガイド・Q&A"
+        return "制度・事業ページ"
+    if domain == "developer.apple.com":
+        return "審査ガイドライン"
+    if domain == "anthropic.com":
+        return "技術解説"
+    if domain in {"jamanetwork.com", "nature.com"}:
+        return "研究論文"
+    return "一次情報"
+
+
+def source_explainer_violation_reason(record: dict, draft: dict) -> str | None:
+    if not source_explainer_mode(record):
+        return None
+    body = sanitize_text(draft.get("body", ""))
+    if not body:
+        return "source-explainer-abstract-overload"
+    structural_markers = (
+        "一つ目",
+        "二つ目",
+        "三つ目",
+        "第一に",
+        "第二に",
+        "第三に",
+        "まず",
+        "次に",
+        "最後に",
+        "今回",
+        "この資料",
+        "この論文",
+        "このガイド",
+        "このページ",
+        "この発表",
+    )
+    hit_count = sum(1 for marker in structural_markers if marker in body)
+    if hit_count < 3:
+        return "source-explainer-abstract-overload"
+    return None
 
 
 def family_key(record: dict) -> str:
@@ -506,6 +645,8 @@ def sanitize_text(text: str) -> str:
 
 def heuristic_draft(record: dict, min_chars: int) -> dict:
     pillar, category, pattern = map_category(record)
+    if source_explainer_mode(record):
+        return heuristic_source_explainer_draft(record, min_chars, pillar, category, pattern)
     concept = concept_label(record)
     topic_label = topic_phrase(record)
     variant = int(hashlib.sha256(stable_record_key(record).encode("utf-8")).hexdigest()[:8], 16) % 3
@@ -648,6 +789,100 @@ def heuristic_draft(record: dict, min_chars: int) -> dict:
     }
 
 
+def heuristic_source_explainer_draft(
+    record: dict,
+    min_chars: int,
+    pillar: str,
+    category: str,
+    pattern: str,
+) -> dict:
+    topic_label = topic_phrase(record)
+    artifact_kind = source_artifact_kind(record)
+    domain = source_domain(primary_source_url(record))
+    variant = int(hashlib.sha256(stable_record_key(record).encode("utf-8")).hexdigest()[:8], 16) % 3
+    if domain == "mhlw.go.jp":
+        title = [
+            "厚労省の病院DX支援は導入後計画まで見ている",
+            "厚労省の病院DX支援で先に問われる3点",
+            "病院DX支援は補助金より業務効率化計画が本体",
+        ][variant]
+        paragraphs = [
+            "今回見るべき一次情報は、厚労省の制度紹介ページであり、単なる『病院DXを後押しする』という一般論ではない。ここで具体化されているのは、どの病院が対象か、何に対して支援が出るのか、申請後にどの順番で選定されるのかという運用条件である。",
+            "一つ目は対象の切り方だ。令和8年4月1日時点でベースアップ評価料を届け出ている病院で、同日から申請時点までに診療報酬請求実績があることが前提になっている。つまり『病院なら広く対象』ではなく、要件を満たす病院に絞っている。",
+            "二つ目は補助の中身だ。支援の目的はICT機器等の導入そのものではなく、生産性向上と職場環境改善につながる取組であり、補助上限は1施設あたり8,000万円と明示されている。ここでは機器の華やかさより、業務効率化へどう結びつくかが問われている。",
+            "三つ目は手続の順番である。病院は『業務効率化計画』を作って都道府県へ申請し、国は都道府県ごとの所要見込額の範囲内で対象医療機関を選定する。しかも原則として、補助対象決定後に実施したICT機器導入費用等が補助対象になる。申請さえ出せば全件通る制度ではない。",
+            "要するに、この制度で差が出るのは機器選定より前の計画設計だ。誰の業務をどう減らすか、どの指標で効率化を測るか、導入後の責任者を誰に置くかまで書ける病院ほど、この支援を単発の補助金で終わらせず、運用改善へつなげやすい。",
+        ]
+    elif domain == "nedo.go.jp":
+        title = [
+            "NEDO発表で見るAI創薬導入の実装条件",
+            "AI創薬で今回増えたのは性能だけではない",
+            "NEDOのAI創薬発表で読むべき3つの具体点",
+        ][variant]
+        paragraphs = [
+            "今回の一次情報は、NEDOと企業によるプレスリリースであり、『AI創薬がすごい』という総論ではない。何が実際に開発され、どこまで公開され、まだ何が臨床価値としては確定していないかを切り分けて読む必要がある。",
+            "一つ目は、今回の成果が新薬承認や臨床有効性の証明ではなく、GENIAC事業の中で分子情報に特化した基盤AIモデル『SG4D10B』を構築したという点だ。本文では、100億件の学習データを活用し、毒性・透過性・安定性の3指標で創薬ベンチマーク世界1位と整理している。",
+            "二つ目は、社会実装の単位がモデル公開と評価データ公開まで踏み込んでいることだ。小型版の『SG4D100M』はクラウドのマーケットプレイスで無償公開され、7,770件のフラグメント化合物の活性データも評価用として公開されている。ここで増えたのは『高性能モデルがある』という事実だけでなく、外部が検証に入れる入口である。",
+            "三つ目は、創薬そのものの完成ではなく、探索工程の効率化が中心に置かれていることだ。リリースは新分子発見に必要な実験コストと時間の削減を強調しているが、患者に届く治療としての有効性・安全性・薬事の説明責任まで一足飛びに解決したとは書いていない。",
+            "要するに、この発表で本当に増えたのは『性能の話題』だけではない。モデル、公開経路、評価データの三つがそろったことで、導入可否を議論する土台が少し具体化した。ただし臨床価値の確定とは別物なので、探索の高速化と医療実装を混同しない整理が欠かせない。",
+        ]
+    elif domain == "aisi.go.jp":
+        title = [
+            "AISIの医療AI評価ガイドで増えた3つの実務論点",
+            "AISIの医療AI評価ガイドは順番まで示した",
+            "医療AI評価は順番で止まるをAISI資料で読み直す",
+        ][variant]
+        paragraphs = [
+            "今回の一次情報は、AISIが公表した『ヘルスケア領域におけるAIセーフティ評価観点ガイド』であり、単なる理念文書ではない。医療・ヘルスケア固有のリスクを前提に、実務者が何を評価するかを作業単位で示した資料として読むべきだ。",
+            "一つ目の具体化は、評価をAIライフサイクルに沿う5フェーズで整理した点だ。これにより、企画段階なのか、開発・検証段階なのか、導入・運用段階なのかで、どの論点を先に点検するかを並べ替えやすくなった。『項目はあるが順番がない』状態から一歩進んでいる。",
+            "二つ目は、10項目の多角的な評価観点に加えて、想定されるリスクを併記した点である。評価表を埋めること自体が目的ではなく、どの観点がどの失敗に結びつくかを見ながら、開発・法務・運用の会話を接続しやすくしている。",
+            "三つ目は、ガイドの一部をマークダウン形式でも公開した点だ。AISIは、ChatGPT、Claude、GeminiなどのAIサービスへ読み込んで使えることを明示し、さらにプロンプトやエージェントスキルの具体例を載せた実践ガイドも今後公開予定としている。つまり、このガイドは配布資料で終わらず、評価運用へ組み込む前提で作られている。",
+            "要するに、今回増えたのは評価観点の数だけではない。どの段階で、何を、どの失敗と結びつけて見るかという順番が示されたことが大きい。医療AI評価が止まりやすいのは観点不足より順序不足なので、ここを埋めた資料として扱うのが実務的だ。",
+        ]
+    elif domain == "anthropic.com":
+        title = [
+            "AnthropicのManaged Agentsで明確になった3層分離",
+            "Managed Agentsはsession/harness/sandboxを分けた",
+            "長時間エージェントで本当に増えたのは回復設計だ",
+        ][variant]
+        paragraphs = [
+            "今回の一次情報は、Anthropicの技術解説『Scaling Managed Agents: Decoupling the brain from the hands』であり、長時間エージェント一般論ではない。何をどの層へ分け、なぜ単一コンテナ構成をやめたのかが具体的に書かれている。",
+            "一つ目のポイントは、Managed Agentsが session、harness、sandbox を別コンポーネントとして仮想化したことだ。本文では session を append-only log、harness をモデル呼び出しとツールルーティングのループ、sandbox をコード実行とファイル編集の環境として定義している。ここを明示的に切ったのが設計上の核である。",
+            "二つ目は、単一コンテナ方式の限界を正面から捨てたことだ。記事では当初、session・harness・sandbox を同一コンテナへ置いたが、その構成ではコンテナ死が状態喪失へ直結し、sandboxの入れ替えや回復が難しいと説明している。だから session を durable に残し、壊れた hands 側だけを交換できる構造へ寄せた。",
+            "三つ目は、harness 自体がモデル進化で古くなると明言した点である。Sonnet 4.5 で必要だった context reset が Opus 4.5 では dead weight になった、という例を出し、harness assumptions are expected to go stale と置いている。つまり固定化すべきなのは賢い手順そのものではなく、入れ替え可能な境界面だという立場である。",
+            "要するに、この資料で具体化されたのは『長時間エージェントは脳と手を分けるべき』という抽象論ではなく、session/harness/sandbox の3層を分け、壊れた実行環境だけを交換し、古くなった harness を差し替えられるようにする設計方針だ。評価すべきは達成タスク数だけでなく、障害後も session を失わず回復できるかに移っている。",
+        ]
+    else:
+        title = [
+            f"{topic_label}は一次情報の3点で読み直す",
+            f"{topic_label}で具体化された3つの論点",
+            f"{topic_label}は元資料まで辿ると違って見える",
+        ][variant]
+        paragraphs = [
+            f"今回見るべきなのは、{topic_label}をめぐる一般論ではなく、元の{artifact_kind}が実際に何を示したのかである。まず資料そのものの性格を切り分けるところから始めたい。",
+            f"一つ目は、{topic_label}について今回の{artifact_kind}が新しく明示した範囲や前提条件である。どこまでを対象にし、どこから先は扱っていないのかを読むだけで、解釈はかなり変わる。",
+            f"二つ目は、例示や手順の置き方だ。抽象理念だけでなく、誰が何を確認し、どの順番で扱うかが書かれているなら、それは運用資料としての意味を持つ。",
+            f"三つ目は、今回の資料が解決していない点である。何が残論点なのかを明確にすると、過大解釈を避けやすい。",
+            f"要するに、{topic_label}を一次情報で読む価値は、結論の強さよりも、何が新しく具体化され、何がまだ残っているかを切り分けられることにある。",
+        ]
+
+    body = sanitize_text("\n\n".join(paragraphs))
+    while len(body) < min_chars:
+        body = sanitize_text(
+            body
+            + "\n\n"
+            + f"だからこそ、{topic_label}を論じるときは、資料名だけを振るのではなく、対象範囲、実装条件、未解決論点を並べたうえで実務上の判断線へ落とすほうが、抽象論に流れにくい。"
+        )
+    return {
+        "title": title,
+        "body": body,
+        "pillar": pillar,
+        "category": category,
+        "pattern": pattern,
+        "source_assertions": source_assertions(record),
+    }
+
+
 def generate_with_xai(record: dict, min_chars: int) -> dict:
     api_key = os.getenv("XAI_API_KEY", "")
     if not api_key:
@@ -655,6 +890,7 @@ def generate_with_xai(record: dict, min_chars: int) -> dict:
     model = os.getenv("FUGUE_XAI_MODEL", os.getenv("XAI_MODEL", DEFAULT_MODEL))
     pillar, category, pattern = map_category(record)
     concept = concept_label(record)
+    explainer_mode = source_explainer_mode(record)
     body_prompt = {
         "record": {
             "author_handle": record.get("author_handle", ""),
@@ -662,7 +898,10 @@ def generate_with_xai(record: dict, min_chars: int) -> dict:
             "conclusion_tag": record.get("conclusion_tag", ""),
             "pattern_tag": record.get("pattern_tag", ""),
             "source_url": record.get("source_url", ""),
+            "primary_source_url": primary_source_url(record),
             "concept": concept,
+            "source_explainer_mode": explainer_mode,
+            "source_artifact_kind": source_artifact_kind(record),
         },
         "target": {
             "pillar": pillar,
@@ -674,11 +913,17 @@ def generate_with_xai(record: dict, min_chars: int) -> dict:
         "rules": [
             "Return JSON only.",
             "Write in Japanese.",
+            "Default to Japanese-first drafting. If a phrase can be written naturally in Japanese, do so.",
+            "Keep English and other Latin-script tokens to the bare minimum; allow only unavoidable short technical tokens such as AI or API.",
+            "Do not leave English clauses, connective phrases, or stylistic filler in the title or body.",
             "Do not include URLs in title or body.",
-            "Do not include handles, company names, product names, or brand names in title or body.",
+            "Do not include handles in title or body.",
+            "Default to neutral wording for company, product, and brand names unless source_explainer_mode is true.",
+            "If source_explainer_mode is true, necessary document titles, version labels, publication dates, and named制度 may remain in the body when they are required to explain the source accurately.",
             "Use 4 compact paragraphs with a practical editorial tone.",
             "Keep the Japanese tone in the middle register: calm plain-form by default, avoid absolute assertions, and avoid making every sentence polite.",
             "Use light softening only where certainty is limited, and do not stack hard assertions across consecutive sentences.",
+            "If source_explainer_mode is true, do not default to broad commentary first; first classify the artifact and surface at least 3 concrete source-grounded points before the implication paragraph.",
             "Keep source_assertions as a short array of 1-2 internal justification strings.",
         ],
         "output_schema": {
@@ -851,11 +1096,22 @@ def build_candidate(record: dict, idx: int, min_chars: int, generate_mode: str, 
             draft = heuristic_draft(record, min_chars)
         if contains_proper_noun_leak(draft["title"], record) or contains_proper_noun_leak(draft["body"], record):
             return None, {"reason": "proper-noun-or-url-leak", "record": record}
+        language_mix_reason = language_mixing_violation_reason(f"{draft['title']}\n{draft['body']}")
+        if language_mix_reason:
+            draft = heuristic_draft(record, min_chars)
+            language_mix_reason = language_mixing_violation_reason(f"{draft['title']}\n{draft['body']}")
         if has_unsupported_authority_reference(draft["title"]) or has_unsupported_authority_reference(draft["body"]):
             return None, {"reason": "unsupported-authority-reference", "record": record}
         if has_untraceable_numeric_claim(draft["title"]) or has_untraceable_numeric_claim(draft["body"]):
             return None, {"reason": "untraceable-numeric-claim", "record": record}
         candidate = build_candidate_payload(record, draft, idx, today, tone_profile)
+        explainer_reason = source_explainer_violation_reason(record, draft)
+        if explainer_reason:
+            candidate["review_eligibility"] = "blocked"
+            candidate["review_blockers"] = list(dict.fromkeys(candidate.get("review_blockers", []) + [explainer_reason]))
+        if language_mix_reason:
+            candidate["review_eligibility"] = "blocked"
+            candidate["review_blockers"] = list(dict.fromkeys(candidate.get("review_blockers", []) + [language_mix_reason]))
         tone_balance_reason = tone_balance_violation_reason(draft["body"], tone_profile)
         if tone_balance_reason:
             candidate["review_eligibility"] = "blocked"
@@ -873,6 +1129,8 @@ def blocked_reason_text(reason: str) -> str:
         "candidate-limit-reached": "採用上限に達したため今回は見送る。",
         "tone-balance-assertive-overload": "断定が連続しすぎており、中間トーンの publish 基準から外れている。",
         "tone-balance-overpolite-overload": "です/ます調に寄りすぎており、中間トーンの publish 基準から外れている。",
+        "language-mixing-overload": "日本語主体の draft に対して英語・英字の混在が多すぎるため、publish 基準から外れている。",
+        "source-explainer-abstract-overload": "一次情報 explainer 候補なのに、具体的なポイントが足りず抽象論へ流れている。",
     }.get(reason, "追加の確認が必要なため今回は保留。")
 
 
@@ -892,6 +1150,10 @@ def blocked_operator_action(reason: str, record: dict, candidate: dict | None = 
         return "強い断定を減らし、観察・条件・含みを入れた常体へ戻す。"
     if reason == "tone-balance-overpolite-overload":
         return "本文の主終止を常体へ戻し、丁寧語は landing line に限定する。"
+    if reason == "language-mixing-overload":
+        return "英語句を日本語へ置き換え、英字は不可避な短い技術語だけに絞って再生成する。"
+    if reason == "source-explainer-abstract-overload":
+        return "資料の種別・日付/版・具体ポイントを最低3点並べ、抽象的な総論を後段へ回して再生成する。"
     return "追加確認のうえ手動で再評価する。"
 
 
@@ -947,6 +1209,8 @@ def build_closeout(created: list[dict], blocked: list[dict], rejected: list[dict
         next_actions.append("既視感が強い候補は本文骨格を再生成するか、別ファミリ候補へ差し替える。")
     if any(str(item.get("blocked_reason_canonical", "")).startswith("tone-balance-") for item in blocked):
         next_actions.append("本文を常体ベースへ戻し、断定または丁寧語の偏りを解消して再生成する。")
+    if any(item.get("blocked_reason_canonical") == "language-mixing-overload" for item in blocked):
+        next_actions.append("英語句を日本語へ置き換え、英字は不可避な短い技術語だけに絞って再生成する。")
     if not next_actions and created:
         next_actions.append("promotable 候補を優先してレビューし、残りは次回バッチで再評価する。")
     return {

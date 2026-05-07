@@ -16,6 +16,10 @@ It does not override quote-post or reply-url flows; those are governed by `docs/
 2. For bilingual queue rows, the same rule applies to both `Body` and `Body JA`.
 3. `Source URLs` stores the canonical article URL used as the source reference.
 4. A separate reply or thread URL is not assumed by default.
+5. For rows targeting Monday or Thursday `06:50 JST`, treat the entry as a reserved-slot note lead:
+   - keep the body in short teaser form
+   - do not allow long-form article recap in the main body
+   - reject the row as scheduler-safe if it exceeds the reserved-slot teaser cap (`< 500字`) or reads like a substitute for the article
 
 ## Verification Boundary
 

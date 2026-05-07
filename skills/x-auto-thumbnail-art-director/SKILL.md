@@ -1,6 +1,6 @@
 ---
 name: x-auto-thumbnail-art-director
-description: High-freedom art direction skill for x-auto thumbnails. Use when a post image feels generic, repetitive, over-constrained, or needs a stronger visual identity. Optimized for Manus-first generation plus local compositing, cropping, and finish work.
+description: High-freedom art direction adapter for x-auto thumbnails. Use when a post image feels generic, repetitive, over-constrained, or needs a stronger visual identity. Keep shared thumbnail-gen doctrine authoritative, then add x-auto-specific variation, delivery, and finish work.
 ---
 
 # x-auto Thumbnail Art Director
@@ -19,25 +19,41 @@ Use it together with `x-auto-post-guard` when:
 - the text is being prepared for eventual scheduling or approval
 - Notion sync and publication safety must stay aligned with the image work
 
-Shared policy lives in `docs/agents/x-auto-contract.md`.
-This skill should stay focused on the image-specific delta.
+Authority:
+
+- shared generation doctrine:
+  `$HOME/Dev/claude-config/assets/skills/thumbnail-gen/policy.md`
+- shared content-marketing ad patterns:
+  `$HOME/Dev/claude-config/assets/skills/thumbnail-gen/prompt-library.json` key `contentMarketingAdGuidance`
+- x-auto operational integrity:
+  `docs/agents/x-auto-contract.md`
+
+This skill is a specialized x-auto adapter layered on top of the shared thumbnail-gen doctrine.
+It should stay focused on the image-specific delta, not become a second prompt-design authority.
+
+When using pasted content-marketing ad prompt examples, extract only the abstract pattern and never replay external prompt prose. Keep x-auto's no-CTA article-thumbnail default unless the row is explicitly an ad, LP, email, signage, or campaign creative.
 
 ## Goal
 
 Produce the best final image for the x-auto row, not the purest prompt.
 
-This skill is not advisory-only. When an x-auto request includes thumbnail creation, replacement, quality uplift, or complaints about repetition, use a Manus-first generation path for x-auto rather than defaulting to ad-hoc local redraws.
+For still-image prompt design, `thumbnail-gen/policy.md` is authoritative and newer than this adapter.
+Use the same ChatGPT Images 2.0-first editorial precision rules as note thumbnails, then widen exploration only where x-auto genuinely benefits from extra variation.
+Apply the project `DESIGN.md` gate in the x-auto thumbnail generator by default; use `XAUTO_THUMBNAIL_DESIGN_MD` or `CURSORVERS_DESIGN_MD` only when a task-local design contract should override the Cursorvers project default.
+In interactive/manual Codex sessions, that first line may be Codex built-in `gpt-image-2`. In scripted/backend x-auto flows, keep the existing API-driven runtime chain.
+
+This skill is not advisory-only. When an x-auto request includes thumbnail creation, replacement, quality uplift, or complaints about repetition, use a ChatGPT Images 2.0-first generation path for x-auto rather than defaulting to ad-hoc local redraws.
 
 The image may come from:
 
-- a single strong Manus generation
-- multiple Manus generations with selection
-- Manus generation plus local crop / composite / cleanup
+- a single strong ChatGPT Images 2.0 or Manus generation
+- multiple ChatGPT Images 2.0 / Manus generations with selection
+- ChatGPT Images 2.0 or Manus generation plus local crop / composite / cleanup
 - a hybrid where local post-processing improves a near-miss render
 
 ## Freedom Defaults
 
-Default to high freedom.
+Default to high freedom after satisfying the shared editorial baseline.
 
 - abstract and symbolic directions are allowed
 - logo-led or emblem-led composition is allowed if it raises recognizability
@@ -47,6 +63,7 @@ Default to high freedom.
 - use post-processing when the generator gets 80 percent of the way there
 
 Do not overfit to a fixed house format unless the user explicitly asks for consistency.
+Do not override the shared GPT Image 2 prompt structure for composition zones, overlay architecture, typography intent, and edit-first behavior.
 
 ## Kawaii Systems Principle
 
@@ -83,11 +100,12 @@ Bad signals:
 
 1. Identify what feels weak in the current thumbnail.
 2. Choose at least 3 visual directions with genuinely different composition logic.
-3. Generate with Manus first using `scripts/local/integrations/xauto-thumbnail-gen.js` or an equivalent Manus-backed x-auto flow.
-4. Inspect the actual image, not the prompt.
-5. If a render is close but flawed, fix it locally instead of throwing it away immediately.
-6. Compare candidates at feed size and reject the one that feels closest to the previous few x-auto rows.
-7. Sync only the strongest final image to the x-auto row.
+3. For interactive/manual Codex work, you may ideate or edit with Codex built-in `gpt-image-2` first. For scripted/backend x-auto flow, generate with ChatGPT Images 2.0 via API first, then Manus, then NB2 using `scripts/local/integrations/xauto-thumbnail-gen.js` or an equivalent supported x-auto flow.
+4. Start from the shared thumbnail-gen editorial prompt structure, then add x-auto-specific differentiation such as stronger asymmetry, feed novelty, or brand cue emphasis.
+5. Inspect the actual image, not the prompt.
+6. If a render is close but flawed, prefer local edits or targeted regeneration over a full prompt reset.
+7. Compare candidates at feed size and reject the one that feels closest to the previous few x-auto rows.
+8. Sync only the strongest final image to the x-auto row.
 
 When overlay text is present:
 
@@ -169,5 +187,5 @@ When the user says thumbnails feel repetitive, generic, low quality, or wants mo
 
 - do not stop at a single render
 - produce at least 3 candidates from different composition families
-- prefer Manus-backed generation over local-only redraws
+- prefer Codex built-in `gpt-image-2` first in interactive/manual Codex runs, or ChatGPT Images 2.0 API first in scripted/backend x-auto runs, then Manus, before falling back to Gemini or local-only redraws
 - treat local compositing as finish work, not the primary creativity path
