@@ -15,6 +15,18 @@ must stay thin and point here for shared policy.
 2. `docs/x-auto-note-linking-rule.md` for the specialized lead-post note-link case.
 3. The active x-auto runtime implementation and tests when a task explicitly audits or changes live posting behavior.
 
+## Thumbnail Doctrine Authority
+
+- Still-image thumbnail doctrine authority is `thumbnail-gen/policy.md` plus `prompt-library.json`
+  under the shared `claude-config` thumbnail skill.
+- Content-marketing ad image patterns live only as abstract guidance in
+  `prompt-library.json` key `contentMarketingAdGuidance`.
+  Do not copy external prompt prose, paid-article text, or prompt catalogs into x-auto contracts, skills, queue rows, or runtime prompts.
+- Adapters and runtimes such as `xauto-thumbnail-gen.js` may keep x-auto specific local text composition,
+  delivery derivatives, and profile handling, but they must not redefine the shared still-image prompt doctrine or provider-order doctrine.
+- Channel consumers such as `note-thumbnail-gen.js` may keep output-specific behavior, but they inherit
+  the shared doctrine rather than forking it.
+
 ## Scope Matrix
 
 ### Lead-post note link
@@ -30,13 +42,16 @@ Use this mode when the queue row is the main post that introduces a `note.com` a
 - Under the current runtime, schedulable note leads still need to satisfy the active approval gates.
   That means operators should write the shortest viable approved teaser, not a maximally complete thread-length summary.
 
-### Quote-post or reply-url flow
+### Quote-post body-embed flow
 
-Use this mode when the queue row refers to an external post that should be reply-posted rather than embedded in the main body.
+Use this mode when the queue row refers to an X/Twitter status that should render as an embedded quote/card in the main post.
 
-- The main body must not contain `x.com/` or `twitter.com/` URLs.
-- The reference URL belongs in `Source URLs`.
-- The scheduler or manual posting flow may publish that URL as a reply.
+- `PARITY::X_QUOTE_URL_BODY_EMBED=true`.
+- The X/Twitter status URL belongs in the main public body, normally as the final standalone URL.
+- The same URL may remain in `Source URLs` as metadata and provenance.
+- `Reply URLs` are reserved for non-X primary sources or supplemental citations and must not duplicate the X/Twitter status URL.
+- The scheduler or manual posting flow must not move a body-embedded X/Twitter URL into the reply chain.
+- Quote-style posts may still attach a compliant thumbnail image; body embedding the X/Twitter URL is not a reason to drop the image.
 - Do not apply the lead-post note-link rule to this mode.
 
 ## Shared Invariants
@@ -87,6 +102,8 @@ Use this mode when the queue row refers to an external post that should be reply
 - Any manual Notion edit to `Body`, `Body JA`, `Source URLs`, `Reply URLs`, `Image`, or `Scheduled` after approval invalidates that approval.
   Reapproval is required before scheduling or publishing again.
 - Default to non-commercial language and visuals; do not include person names, company names, product names, handles, or brand slogans in `Body`, `Body JA`, or image text unless the user explicitly requests them.
+- If a user provides content-marketing ad prompt examples for seminar, exhibition, white paper, school, community, corporate training, advisory, or similar assets, extract only the abstract pattern: offer, audience, conversion goal, value promise, canvas/channel, layout zones, visible copy, hero visual, proof cue, tone, and negative constraints.
+  Keep x-auto article thumbnails no-CTA by default; allow CTA-like image text only when the row is explicitly an ad, LP, email, signage, or campaign creative.
 - If the user asks for abstraction or generalization, rewrite source-derived proper nouns, product labels, slogans, and branded UI text into neutral category language across `Body`, `Body JA`, live queue `text`, and visible thumbnail overlays.
 - If a proper noun is needed only for evidence, keep it in `Source URLs` or internal notes, not in publish-facing body text or thumbnail overlays.
 - When the source itself is a company site, note page, or branded announcement, keep the body conceptual and move entity-specific evidence to `Source URLs` rather than mirroring the branded headline into publish-facing copy.

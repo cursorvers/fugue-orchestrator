@@ -111,12 +111,12 @@ If that mode is not explicit, do not publish.
 
 For quote posts:
 
-- body must not contain `x.com/` or `twitter.com/` URLs
-- the reference URL must go to `source_url` / Notion `Source URLs`
-- the scheduler or manual flow posts that URL as a reply
-- never use X API `quote_tweet_id`; x-auto quote delivery is main post plus reply-chain citation
-- if `source_url` or body contains an X/Twitter status URL, `publish_core.py` must keep `quote_tweet_id=None` and move the URL into `reply_lines`
-- if the body contains a quote URL, stop and fix it before posting
+- `PARITY::X_QUOTE_URL_BODY_EMBED=true`
+- body must contain the X/Twitter status URL, normally as the final standalone URL
+- the same reference URL may remain in `source_url` / Notion `Source URLs` as metadata
+- `Reply URLs` are for non-X primary sources or supplemental citations and must not duplicate the X/Twitter status URL
+- never use X API `quote_tweet_id`; x-auto quote delivery is main post body embed, optionally with a compliant thumbnail image
+- if `source_url`, `quote_url`, or `Reply URLs` contains an X/Twitter status URL, `publish_core.py` must keep `quote_tweet_id=None`, append the URL to `post_text` when absent, and avoid adding it to `reply_lines`
 - when the user asks to create a quote-based post from an account that is not already watched, ask one short follow-up: whether that account should also be added to the future quote watchlist
 - treat watchlist addition as a separate config choice from the current draft request; do not silently add unrelated accounts
 - if the user explicitly says `引用投稿者リストに入れておいて` or equivalent, update `trend_scanner.py` `WATCH_ACCOUNTS` in the same task and do not ask again
@@ -349,8 +349,8 @@ Quality checks:
 - keep the reader as the subject; do not make the post a claim about being advanced at AI
 - avoid benchmark, release-note, and feature-list framing
 - include at least one directly reusable prompt sentence when the post teaches first-step AI use
-- if the post embeds a live X quote URL for card rendering, that is a user-direct X posting choice, not a scheduler-safe x-auto body
-- if turning this into an x-auto row later, preserve the quote URL in `Source URLs` unless the user explicitly wants to manually post through X for embedded-link behavior again
+- if the post embeds a live X quote URL for card rendering, that is the current x-auto quote-body rule (`PARITY::X_QUOTE_URL_BODY_EMBED=true`)
+- if turning this into an x-auto row later, keep the X/Twitter status URL in `Body` / `Body JA` as the final standalone URL and keep `Reply URLs` for non-X citations only
 
 For `note.com` lead posts specifically:
 
@@ -433,7 +433,7 @@ Before any publish action, verify all of the following and state any mismatch:
 1. Posting mode: `draft`, `approved`, or `manual immediate`
 2. Schedule: if a slot like `22:00` was mentioned, confirm whether it should still be preserved
 3. Body language: publish-facing `Body` / `Body JA` are Japanese-only. Fail if there is any English sentence, English CTA, English-first hashtag, or bilingual paragraph pair. Allow only unavoidable proper nouns, product names, source titles, URLs, API paths, and short technical tokens with Japanese context.
-4. Quote handling: if this is a quote post, body has no X URL and `Source URLs` is present
+4. Quote handling: if this is a quote post, the X/Twitter status URL is in the body, `Source URLs` may preserve it as metadata, and `Reply URLs` does not duplicate it
    For note leads, also verify that the public `note.com` URL is in the body while `Reply URLs` is empty.
 5. Thumbnail policy: whether the post should have an image, and whether the image already matches the final text
 6. Notion target: existing row update vs creating a new row
@@ -500,6 +500,8 @@ Apply this gate before presenting, syncing, approving, or posting x-auto copy.
 
 If the request includes creating or replacing a thumbnail, or if the draft is being prepared as a complete x-auto candidate with image expectations, use `x-auto-thumbnail-art-director` alongside this skill.
 
+If the thumbnail request uses content-marketing ad prompt examples, do not persist or replay the external prompt prose. Use only the shared thumbnail `contentMarketingAdGuidance` abstraction and keep x-auto article thumbnails no-CTA unless the row is explicitly an ad, LP, email, signage, or campaign creative.
+
 Do not treat thumbnail-art-direction skill use as optional when:
 
 - the user asks for more variety, better quality, or a new visual direction
@@ -521,7 +523,8 @@ When replacing a thumbnail for an x-auto row:
 - keep generation bounded: default budget is one 3-candidate pass plus at most one targeted retry batch
 - if overlay text changed, regenerate and sync Notion before any post or repost
 - if a posted tweet is later deleted manually, the thumbnail fix still must be reflected in the Notion row that owns the asset
-- prefer `scripts/local/integrations/xauto-thumbnail-gen.js` as the Manus-first generator entrypoint for x-auto assets
+- prefer `scripts/local/integrations/xauto-thumbnail-gen.js` as the ChatGPT Images 2.0-first generator entrypoint for x-auto assets
+- require the project `DESIGN.md` gate for generation and replacement. Cursorvers defaults to `/Users/masayuki/Dev/cursorvers-inc/DESIGN.md`; override only with `XAUTO_THUMBNAIL_DESIGN_MD` or `CURSORVERS_DESIGN_MD` for a task-local contract.
 
 This guard does not prescribe thumbnail style.
 
@@ -593,14 +596,14 @@ Do not assume new article sources or newly discussed accounts are automatically 
 - if the user wants a new account monitored for future quote posts, that is an explicit config change, not a side effect of drafting
 - for future quote-post requests, ask whether the quoted poster should be promoted into `WATCH_ACCOUNTS` unless the user already made that intent explicit
 - if the user already made that intent explicit, update the watchlist immediately and mention the handle you added
-- if the user intentionally posts directly in X to embed a quote/link card, record the rhetorical pattern if useful, but do not retrofit that as a scheduler-safe quote-body rule
+- if the user intentionally embeds a quote/link card, record the rhetorical pattern if useful and keep the row aligned with `PARITY::X_QUOTE_URL_BODY_EMBED=true`
 
 ## Session Failure That Triggered This Skill
 
 This skill exists to prevent these exact mistakes:
 
 - treating a scheduled `22:00` post as an immediate publish
-- placing quote URLs in body text
+- moving quote URLs out of body text into reply-only citation flow
 - trusting a stale or conflicting instruction source over runtime behavior
 - posting before confirming whether the previously deleted tweet was the canonical one
 - changing a thumbnail after publication without first verifying visual layout
