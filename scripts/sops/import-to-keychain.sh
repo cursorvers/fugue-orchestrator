@@ -69,6 +69,8 @@ map_to_acct() {
     LINE_HARNESS_API_KEY) echo "line-harness-api-key" ;;
     ESTAT_API_ID)       echo "estat-app-id" ;;
     ESTAT_APP_ID)       echo "estat-app-id" ;;
+    OPENCODE_API_KEY)   echo "opencode-api-key" ;;
+    FRAMER_API_KEY)     echo "framer-api-key" ;;
     *)                  echo "" ;;
   esac
 }
