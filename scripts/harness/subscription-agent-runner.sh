@@ -325,6 +325,14 @@ Recursive Delegation Mode:
 
 execute_claude_model() {
   local model="$1"
+  # Anthropic 2026-06-15: `claude --print` consumes the programmatic credit pool
+  # (Max 20x = $200/mo, separate from chat quota). Default-deny; opt in per run
+  # by exporting CLAUDE_PROGRAMMATIC_OK=1 in the CI/workflow env.
+  if [[ "${CLAUDE_PROGRAMMATIC_OK:-}" != "1" ]]; then
+    echo "[subscription-agent-runner] Claude lane gated: headless 'claude --print' is opt-in. Set CLAUDE_PROGRAMMATIC_OK=1 to permit (programmatic credit pool, separate from chat from 2026-06-15)." >&2
+    append_attempt "claude" "${model}" "gated"
+    return 1
+  fi
   local out_file="${tmp_dir}/claude-${model}-out.json"
   local err_file="${tmp_dir}/claude-${model}-stderr.log"
   local configured_session_id
